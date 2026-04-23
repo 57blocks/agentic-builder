@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CSSProperties } from "react";
 
 function SparklesIcon({ className }: { className?: string }) {
   return (
@@ -29,12 +30,16 @@ function SparklesIcon({ className }: { className?: string }) {
 export default function AppNav() {
   const pathname = usePathname();
 
+  const dragStyle: any = { WebkitAppRegion: 'drag' };
+  const noDragStyle: any = { WebkitAppRegion: 'no-drag' };
+
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-white/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-white/95 backdrop-blur-sm" style={dragStyle}>
       <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between px-6 lg:px-14">
         <Link
           href="/"
           className="flex items-center gap-2 text-[var(--foreground)] transition-opacity hover:opacity-80"
+          style={noDragStyle}
         >
           <SparklesIcon className="shrink-0 text-[var(--accent)]" />
           <span className="text-[17px] font-semibold tracking-tight">
@@ -42,7 +47,7 @@ export default function AppNav() {
           </span>
         </Link>
 
-        <div className="flex items-center gap-7">
+        <div className="flex items-center gap-7" style={noDragStyle}>
           <Link
             href="/pipeline"
             className={`text-sm font-medium transition-colors ${
