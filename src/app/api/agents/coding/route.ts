@@ -20,13 +20,24 @@ import {
 import {
   formatGeneratedCodeDotEnv,
   resolveBlueprintGeneratedDatabaseUrl,
+  upsertDatabaseUrlEnv,
+  upsertJwtEnvVars,
 } from "@/lib/pipeline/generated-code-env";
+import {
+  readResourceRequirements,
+  upsertResourceEnvVars,
+  type ResourceRequirement,
+} from "@/lib/pipeline/resource-requirements";
 import type {
   KickoffWorkItem,
   CodingTask,
   RalphConfig,
 } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
+import {
+  readDesignReferencesFromOutput,
+  formatDesignReferencesPromptBlock,
+} from "@/lib/pipeline/design-references";
 import { DEFAULT_RALPH_CONFIG } from "@/lib/pipeline/types";
 import {
   buildFrontendDesignContextForCodegen,
@@ -51,7 +62,12 @@ import type { ApiContract, GeneratedFile } from "@/lib/langgraph/state";
 import {
   writeCodingSessionReport,
   clearCodingSessionLlmUsage,
+  getCodingSessionLlmUsage,
 } from "@/lib/pipeline/coding-session-report";
+import {
+  runModelScoringStage,
+  type GateResultsSnapshot,
+} from "@/lib/pipeline/model-scoring";
 
 const execFileAsync = promisify(execFile);
 
@@ -262,6 +278,23 @@ interface SupervisorGateSnapshot {
   integrationErrors: string;
   runtimeVerifyErrors: string;
   e2eVerifyErrors: string;
+  /**
+   * Highest observed `scaffoldFixAttempts` across all phase-verify runs.
+   * Surfaced in the session report so the user can tell whether scaffold
+   * fix phases converged quickly or bumped the iteration ceiling.
+   */
+  scaffoldFixAttempts: number;
+  /** Same for `integrationFixAttempts` from integration verify/fix. */
+  integrationFixAttempts: number;
+  /**
+   * Tracks which gate actually ran — used by the report to render
+   * SKIPPED vs PASS/FAIL instead of treating "no error string" as a pass.
+   */
+  gatesExecuted: {
+    integrationVerify: boolean;
+    runtimeVerify: boolean;
+    e2eVerify: boolean;
+  };
 }
 
 function collectSupervisorGateStateFromChunk(
@@ -273,12 +306,27 @@ function collectSupervisorGateStateFromChunk(
     const rec = payload as Record<string, unknown>;
     if (typeof rec.integrationErrors === "string") {
       snapshot.integrationErrors = rec.integrationErrors;
+      snapshot.gatesExecuted.integrationVerify = true;
     }
     if (typeof rec.runtimeVerifyErrors === "string") {
       snapshot.runtimeVerifyErrors = rec.runtimeVerifyErrors;
+      snapshot.gatesExecuted.runtimeVerify = true;
     }
     if (typeof rec.e2eVerifyErrors === "string") {
       snapshot.e2eVerifyErrors = rec.e2eVerifyErrors;
+      snapshot.gatesExecuted.e2eVerify = true;
+    }
+    if (typeof rec.scaffoldFixAttempts === "number") {
+      snapshot.scaffoldFixAttempts = Math.max(
+        snapshot.scaffoldFixAttempts,
+        rec.scaffoldFixAttempts,
+      );
+    }
+    if (typeof rec.integrationFixAttempts === "number") {
+      snapshot.integrationFixAttempts = Math.max(
+        snapshot.integrationFixAttempts,
+        rec.integrationFixAttempts,
+      );
     }
   }
 }
@@ -310,6 +358,59 @@ function summarizeBlockingGateErrors(snapshot: SupervisorGateSnapshot): string[]
     );
   }
   return failures;
+}
+
+/**
+ * Build a markdown block describing user-provided third-party credentials so
+ * coding agents know exactly which env vars are wired up and what each is for.
+ * Filled vs. unfilled values are surfaced separately so workers don't pretend
+ * a missing key exists. The actual secret values are NEVER shown to the LLM —
+ * only the env var names + descriptions.
+ */
+function formatResourceRequirementsPromptBlock(
+  items: ResourceRequirement[],
+): string {
+  if (items.length === 0) return "";
+  const filled = items.filter((r) => (r.value ?? "").trim().length > 0);
+  const unfilled = items.filter((r) => !(r.value ?? "").trim());
+
+  const lines: string[] = [];
+  lines.push("## External resources & credentials (env vars)");
+  lines.push("");
+  lines.push(
+    "The user provided the following third-party credentials at kickoff. " +
+      "Use these EXACT env var names when reading from `process.env` or `import.meta.env`. " +
+      "Do NOT invent alternative names. Secret values themselves are never exposed here — they live in `backend/.env` / `frontend/.env`.",
+  );
+  lines.push("");
+
+  if (filled.length > 0) {
+    lines.push("### Configured (values present in .env, ready to use)");
+    lines.push("");
+    for (const r of filled) {
+      const reqMark = r.required ? " — required" : " — optional";
+      lines.push(`- **\`${r.envKey}\`** (${r.category}${reqMark}): ${r.description}`);
+    }
+    lines.push("");
+  }
+
+  if (unfilled.length > 0) {
+    lines.push("### Declared but NOT yet configured (treat the corresponding feature as disabled / stubbed)");
+    lines.push("");
+    for (const r of unfilled) {
+      const reqMark = r.required ? " — required" : " — optional";
+      lines.push(`- \`${r.envKey}\` (${r.category}${reqMark}): ${r.description}`);
+    }
+    lines.push("");
+    lines.push(
+      "For unfilled keys: write code that reads the env var defensively " +
+        "(check `process.env.X` for truthy value before calling the integration); " +
+        "if absent, log a clear warning and gracefully degrade. Do NOT hardcode placeholder values.",
+    );
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
 
 export async function POST(request: NextRequest) {
@@ -445,15 +546,66 @@ export async function POST(request: NextRequest) {
   const resolvedDbUrl = resolveBlueprintGeneratedDatabaseUrl(databaseUrlBody);
   if (resolvedDbUrl) {
     try {
-      await fs.writeFile(
-        path.join(outputRoot, ".env"),
-        formatGeneratedCodeDotEnv(resolvedDbUrl),
-        "utf-8",
-      );
+      await fs.writeFile(path.join(outputRoot, ".env"), formatGeneratedCodeDotEnv(resolvedDbUrl), "utf-8");
       console.log("[CodingAPI] Wrote generated-code .env with DATABASE_URL.");
     } catch (e) {
       console.warn(
         `[CodingAPI] Failed to write .env: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  // Read user-provided resource requirements (API keys, OAuth secrets, etc.)
+  // collected during the kickoff phase. These are merged into backend/.env so
+  // generated code has the credentials it needs at runtime.
+  const resourceRequirements = await readResourceRequirements(process.cwd());
+  const filledResources = resourceRequirements.filter(
+    (r) => (r.value ?? "").trim().length > 0,
+  );
+  const frontendResources = filledResources.filter((r) =>
+    /^(VITE_|NEXT_PUBLIC_)/.test(r.envKey),
+  );
+  const backendResources = filledResources.filter(
+    (r) => !/^(VITE_|NEXT_PUBLIC_)/.test(r.envKey),
+  );
+
+  // Always ensure backend/.env has JWT_SECRET (and DATABASE_URL if available).
+  const backendEnvPath = path.join(outputRoot, "backend", ".env");
+  try {
+    const existingBackendEnv = await fs.readFile(backendEnvPath, "utf-8").catch(() => "");
+    const withDbUrl = resolvedDbUrl
+      ? upsertDatabaseUrlEnv(existingBackendEnv, resolvedDbUrl)
+      : existingBackendEnv;
+    const withJwt = upsertJwtEnvVars(withDbUrl);
+    const withResources = upsertResourceEnvVars(withJwt, backendResources);
+    await fs.writeFile(backendEnvPath, withResources, "utf-8");
+    console.log(
+      `[CodingAPI] Synced backend/.env (DATABASE_URL + JWT vars + ${backendResources.length} user resource(s)).`,
+    );
+  } catch (e) {
+    console.warn(
+      `[CodingAPI] Failed to sync backend/.env: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // Frontend env vars (VITE_* / NEXT_PUBLIC_*) need to land in frontend/.env.
+  if (frontendResources.length > 0) {
+    const frontendEnvPath = path.join(outputRoot, "frontend", ".env");
+    try {
+      const existingFrontendEnv = await fs
+        .readFile(frontendEnvPath, "utf-8")
+        .catch(() => "");
+      const merged = upsertResourceEnvVars(
+        existingFrontendEnv,
+        frontendResources,
+      );
+      await fs.writeFile(frontendEnvPath, merged, "utf-8");
+      console.log(
+        `[CodingAPI] Synced frontend/.env with ${frontendResources.length} user resource(s).`,
+      );
+    } catch (e) {
+      console.warn(
+        `[CodingAPI] Failed to sync frontend/.env: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
@@ -570,6 +722,28 @@ export async function POST(request: NextRequest) {
   if (implGuideDoc)
     baseContextParts.push(`## Implementation Guide\n\n${implGuideDoc}`);
 
+  const designReferenceEntries =
+    await readDesignReferencesFromOutput(outputRoot);
+  const designReferencesBlock = formatDesignReferencesPromptBlock(
+    designReferenceEntries,
+  );
+  if (designReferencesBlock) {
+    baseContextParts.push(designReferencesBlock);
+    console.log(
+      `[CodingAPI] Injected ${designReferenceEntries.length} design reference(s) into projectContext.`,
+    );
+  }
+
+  const resourcesContextBlock = formatResourceRequirementsPromptBlock(
+    resourceRequirements,
+  );
+  if (resourcesContextBlock) {
+    baseContextParts.push(resourcesContextBlock);
+    console.log(
+      `[CodingAPI] Injected ${resourceRequirements.length} resource requirement(s) into projectContext (${filledResources.length} configured).`,
+    );
+  }
+
   const scaffoldContextBlock = [
     "## Scaffold specification",
     "",
@@ -655,10 +829,28 @@ export async function POST(request: NextRequest) {
       const sseRepairSink: RepairEmitter = (event) => {
         send(mapper.buildRepairEvent(event as RepairEvent));
       };
+      // In-memory counter sink — feeds the model-scoring stage in the
+      // finally block. Non-blocking; pure counter, no I/O.
+      const repairCounters = {
+        truncation: 0,
+        stagnation: 0,
+        fallback: 0,
+      };
+      const counterRepairSink: RepairEmitter = (event) => {
+        const name = event.event;
+        if (name === "truncation_detected" || name === "doc_truncated") {
+          repairCounters.truncation += 1;
+        } else if (name === "stagnation_warning") {
+          repairCounters.stagnation += 1;
+        } else if (name.includes("fallback")) {
+          repairCounters.fallback += 1;
+        }
+      };
       const repairEmitter = createRepairEmitter([
         sseRepairSink,
         createJsonlRepairSink(outputRoot),
         consoleRepairSink,
+        counterRepairSink,
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
@@ -668,6 +860,13 @@ export async function POST(request: NextRequest) {
         integrationErrors: "",
         runtimeVerifyErrors: "",
         e2eVerifyErrors: "",
+        scaffoldFixAttempts: 0,
+        integrationFixAttempts: 0,
+        gatesExecuted: {
+          integrationVerify: false,
+          runtimeVerify: false,
+          e2eVerify: false,
+        },
       };
       let reportTaskResults: AuditTaskSummary[] = [];
       let finalAuditResult: FeatureChecklistAuditResult | null = null;
@@ -884,6 +1083,10 @@ export async function POST(request: NextRequest) {
             integrationErrors: collectedGateSnapshot.integrationErrors,
             runtimeVerifyErrors: collectedGateSnapshot.runtimeVerifyErrors,
             e2eVerifyErrors: collectedGateSnapshot.e2eVerifyErrors,
+            scaffoldFixAttempts: collectedGateSnapshot.scaffoldFixAttempts,
+            integrationFixAttempts:
+              collectedGateSnapshot.integrationFixAttempts,
+            gatesExecuted: collectedGateSnapshot.gatesExecuted,
             finalAudit: finalAuditResult,
             taskResults:
               reportTaskResults.length > 0
@@ -906,6 +1109,96 @@ export async function POST(request: NextRequest) {
             reportErr instanceof Error ? reportErr.message : reportErr,
           );
         }
+
+        // ── Model scoring stage ────────────────────────────────────────────
+        // Build per-session scorecard, append to project leaderboard, diff
+        // MODEL_CONFIG vs previous run. Never throws; errors are logged.
+        // See src/lib/pipeline/model-scoring/.
+        try {
+          const sessionLlmUsage = getCodingSessionLlmUsage(sessionId);
+          const sessionTaskResults =
+            reportTaskResults.length > 0
+              ? reportTaskResults
+              : codingTasks.map((task) => ({
+                  id: task.id,
+                  title: task.title,
+                  coversRequirementIds: task.coversRequirementIds ?? [],
+                  generatedFiles:
+                    collectedTaskResults.get(task.id)?.generatedFiles ?? [],
+                  status:
+                    collectedTaskResults.get(task.id)?.status ?? "unknown",
+                }));
+
+          const tasksTotal = sessionTaskResults.length;
+          const tasksCompleted = sessionTaskResults.filter(
+            (t) => t.status === "completed",
+          ).length;
+          const tasksCompletedWithWarnings = sessionTaskResults.filter(
+            (t) => t.status === "completed_with_warnings",
+          ).length;
+          const tasksFailed = sessionTaskResults.filter(
+            (t) => t.status === "failed",
+          ).length;
+
+          const gateResults: GateResultsSnapshot = {
+            integrationExecuted:
+              collectedGateSnapshot.gatesExecuted.integrationVerify,
+            integrationPassed:
+              collectedGateSnapshot.gatesExecuted.integrationVerify &&
+              !collectedGateSnapshot.integrationErrors.trim(),
+            runtimeExecuted:
+              collectedGateSnapshot.gatesExecuted.runtimeVerify,
+            runtimePassed:
+              collectedGateSnapshot.gatesExecuted.runtimeVerify &&
+              !collectedGateSnapshot.runtimeVerifyErrors.trim(),
+            e2eExecuted: collectedGateSnapshot.gatesExecuted.e2eVerify,
+            e2ePassed:
+              collectedGateSnapshot.gatesExecuted.e2eVerify &&
+              !collectedGateSnapshot.e2eVerifyErrors.trim(),
+            auditPassed: finalAuditResult?.passed ?? true,
+            uncoveredRequirementCount:
+              finalAuditResult?.uncovered.length ?? 0,
+            tasksTotal,
+            tasksCompleted,
+            tasksCompletedWithWarnings,
+            tasksFailed,
+            truncationEventCount: repairCounters.truncation,
+            stagnationEventCount: repairCounters.stagnation,
+            fallbackTriggerCount: repairCounters.fallback,
+            integrationFixAttempts:
+              collectedGateSnapshot.integrationFixAttempts,
+            scaffoldFixAttempts: collectedGateSnapshot.scaffoldFixAttempts,
+          };
+
+          const scoringResult = await runModelScoringStage({
+            sessionId,
+            projectPath: outputRoot,
+            outputDir: outputRoot,
+            endedAt: new Date().toISOString(),
+            llmUsage: sessionLlmUsage,
+            taskResults: sessionTaskResults,
+            gateResults,
+          });
+          console.log(
+            `[CodingAPI] Model scoring done: session=${scoringResult.scorecard.sessionComposite.score}(${scoringResult.scorecard.sessionComposite.grade}), ` +
+              `rows=${scoringResult.scorecard.rows.length}, ` +
+              `modelChange=${scoringResult.hasModelChange ? "YES" : "no"}` +
+              (scoringResult.errors.length > 0
+                ? ` (${scoringResult.errors.length} warning(s))`
+                : ""),
+          );
+          if (scoringResult.errors.length > 0) {
+            for (const err of scoringResult.errors) {
+              console.warn(`[CodingAPI] model-scoring warning: ${err}`);
+            }
+          }
+        } catch (scoringErr) {
+          console.warn(
+            `[CodingAPI] Model scoring stage failed (ignored):`,
+            scoringErr instanceof Error ? scoringErr.message : scoringErr,
+          );
+        }
+
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
         controller.close();

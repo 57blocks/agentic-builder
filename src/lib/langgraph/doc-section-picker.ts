@@ -38,6 +38,28 @@ export interface PickOptions {
   emitter?: RepairEmitter;
   /** Which consumer is asking — included in telemetry for debugging. */
   stage?: string;
+  /**
+   * Sections whose heading matches this pattern are ALWAYS kept, regardless
+   * of score. Used for "shared" content (glossary, conventions, data formats,
+   * error handling, environment/env vars) that every task needs but that
+   * rarely scores high on keyword-based relevance.
+   *
+   * The scoring pass still runs on the remaining sections; always-kept
+   * sections just pre-consume part of the budget.
+   */
+  alwaysKeepHeadingPattern?: RegExp;
+  /**
+   * Requirement IDs (FR-*, AC-*, PAGE-*, CMP-*, …) that MUST end up in the
+   * output. Any section whose heading or body contains one of these ids is
+   * force-included, even if it would be dropped by score-based packing.
+   *
+   * This is the "task self-check": the caller's `hint.requirementIds` say
+   * "this task cares about these IDs"; `forceIncludeIds` is the stronger
+   * "and the IDs absolutely MUST survive trimming". In practice the worker
+   * codegen passes the same list to both to guarantee task-owned AC/FR
+   * sections never silently disappear.
+   */
+  forceIncludeIds?: string[];
 }
 
 interface Section {
@@ -75,22 +97,55 @@ export function pickRelevantSections(
   const keywords = normaliseHaystack(hint.keywords ?? []);
   const files = normaliseHaystack(hint.files ?? []);
   const reqIds = normaliseHaystack(hint.requirementIds ?? []);
+  const forceIds = normaliseHaystack(options.forceIncludeIds ?? []);
+  const alwaysKeepRe = options.alwaysKeepHeadingPattern;
 
-  const scored = sections.map((s, idx) => ({
-    section: s,
-    originalIdx: idx,
-    score: scoreSection(s, keywords, files, reqIds),
-  }));
-  scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    // Tie-break on original order so output stays intuitive.
-    return a.originalIdx - b.originalIdx;
+  const scored = sections.map((s, idx) => {
+    const headingLower = s.heading.toLowerCase();
+    const bodyLower = s.body.toLowerCase();
+    const isAlwaysKeep = Boolean(alwaysKeepRe && alwaysKeepRe.test(s.heading));
+    const isForceKeep =
+      forceIds.length > 0 &&
+      forceIds.some(
+        (id) => headingLower.includes(id) || bodyLower.includes(id),
+      );
+    return {
+      section: s,
+      originalIdx: idx,
+      score: scoreSection(s, keywords, files, reqIds),
+      isAlwaysKeep,
+      isForceKeep,
+    };
   });
 
+  // Phase 1 — ALWAYS-KEEP + FORCE-KEEP: pre-reserve budget for sections that
+  // must survive trimming regardless of their relevance score. These can
+  // overflow the budget (safety net); we log telemetry if that happens.
   const kept: Array<(typeof scored)[number]> = [];
   let used = 0;
   const sep = "\n\n";
+  const alwaysKeptHeadings: string[] = [];
+  const forceKeptHeadings: string[] = [];
   for (const s of scored) {
+    if (!s.isAlwaysKeep && !s.isForceKeep) continue;
+    kept.push(s);
+    used += s.section.length + sep.length;
+    if (s.isAlwaysKeep) alwaysKeptHeadings.push(s.section.heading || "(no heading)");
+    if (s.isForceKeep && !s.isAlwaysKeep) {
+      forceKeptHeadings.push(s.section.heading || "(no heading)");
+    }
+  }
+
+  // Phase 2 — SCORE-BASED PACKING on the remaining sections, within the
+  // budget left after Phase 1. Sort by score (desc).
+  const remaining = scored
+    .filter((s) => !s.isAlwaysKeep && !s.isForceKeep)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // Tie-break on original order so output stays intuitive.
+      return a.originalIdx - b.originalIdx;
+    });
+  for (const s of remaining) {
     const cost = s.section.length + sep.length;
     if (used + cost > budget) continue;
     kept.push(s);
@@ -136,11 +191,24 @@ export function pickRelevantSections(
         droppedSections: scored.length - kept.length,
         budgetChars: budget,
         usedChars: output.length,
+        alwaysKeptSections: alwaysKeptHeadings.length,
+        forceKeptSections: forceKeptHeadings.length,
+        overBudget: used > budget ? used - budget : 0,
       },
     });
   }
 
   return output;
+}
+
+/**
+ * Split a document into H2/H3 sections and return their headings.
+ * Exposed so callers can report what's available for debugging / telemetry
+ * without duplicating the splitter. Preamble (body before the first heading)
+ * is reported as `(preamble)`.
+ */
+export function listSectionHeadings(doc: string): string[] {
+  return splitByHeadings(doc).map((s) => s.heading || "(preamble)");
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────

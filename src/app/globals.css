@@ -3,35 +3,31 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Theme: Pipeline — purple/indigo design system */
-  --background: #f8f9ff;
-  --foreground: #0b1c30;
+  /* Theme: LAB(55.0481 -49.9246 15.93) — sRGB fallback first for older engines */
+  --background: #f4f4f5;
+  --foreground: #171717;
   --card: #ffffff;
   --card-hover: #fafafa;
-  --border: #e2e8f0;
-  --border-muted: #cbd5e1;
+  --border: #e5e5e5;
+  --border-muted: #d4d4d4;
 
-  --sidebar-bg: #f8fafc;
-  --sidebar-border: #e2e8f0;
+  --accent: #009867;
+  --accent: lab(55.0481% -49.9246 15.93);
 
-  --accent: #712ae2;
-  --accent-hover: #5b22b8;
-  --accent-on-muted: #5b22b8;
-  --accent-muted: rgba(113, 42, 226, 0.1);
+  --accent-hover: #007a52;
+  --accent-hover: lab(46% -49.9246 15.93);
 
-  --indigo: #4f46e5;
-  --indigo-hover: #4338ca;
+  --accent-on-muted: #006b52;
+  --accent-on-muted: lab(40% -49.9246 15.93);
 
-  --muted: #7c839b;
-  --muted-secondary: #64748b;
-  --muted-tertiary: #94a3b8;
-  --muted-footer: #94a3b8;
-  --icon-muted: #475569;
+  --accent-muted: #ecf5f2;
+  --accent-muted: color-mix(in lab, lab(55.0481% -49.9246 15.93) 12%, white);
+  --muted: #5c5c5c;
+  --muted-secondary: #6b6b6b;
+  --muted-tertiary: #737373;
+  --muted-footer: #a3a3a3;
+  --icon-muted: #404040;
   --destructive: #dc2626;
-
-  --nav-dark: #131b2e;
-  --navy: #0b1c30;
-  --slate-dark: #0f172a;
 }
 
 * {
@@ -60,9 +56,4 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', sans-serif;
-}
-
-.font-space-grotesk {
-  font-family: 'Space Grotesk', sans-serif;
 }

@@ -11,26 +11,15 @@
     "lint": "next lint",
     "electron:dev": "concurrently --kill-others --prefix \"[{time}]\" --timestamp-format \"yyyy-MM-dd HH:mm:ss\" \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron-builder",
-    "electron:pack": "npm run build && electron-builder --dir",
-    "report:gen": "tsx --env-file=.env worklogs/lib/index.ts",
-    "report:gen:daily": "tsx --env-file=.env worklogs/lib/index.ts daily",
-    "report:gen:weekly": "tsx --env-file=.env worklogs/lib/index.ts weekly",
-    "report:send": "tsx --env-file=.env worklogs/lib/send.ts",
-    "report:send:daily": "tsx --env-file=.env worklogs/lib/send.ts daily",
-    "report:send:weekly": "tsx --env-file=.env worklogs/lib/send.ts weekly",
-    "report:weekly": "tsx --env-file=.env worklogs/lib/index.ts weekly",
-    "report:daily": "tsx --env-file=.env worklogs/lib/index.ts daily",
-    "report:dry": "tsx --env-file=.env worklogs/lib/index.ts --dry-run"
+    "electron:pack": "npm run build && electron-builder --dir"
   },
   "dependencies": {
     "@langchain/core": "^1.1.38",
     "@langchain/langgraph": "^1.2.6",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "dotenv": "^17.4.2",
     "langfuse": "^3.38.6",
     "motion": "^12.38.0",
     "next": "^16.2.1",
-    "nodemailer": "^8.0.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
@@ -42,7 +31,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.0",
-    "@types/nodemailer": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "concurrently": "^9.2.1",
@@ -52,7 +40,6 @@
     "eslint-config-next": "^16.2.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
-    "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "wait-on": "^9.0.4"
   }

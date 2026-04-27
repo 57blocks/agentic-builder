@@ -58,6 +58,9 @@ const ALLOWED_COMMANDS = [
   "find",
   "wc",
   "node -e",
+  // tsx: used for backend smoke test (npx tsx --eval)
+  "npx tsx",
+  "tsx",
   // RALPH: git operations for per-task commits
   "git init",
   "git add",
@@ -288,6 +291,16 @@ export async function detectPackageManager(
   outputDir: string,
 ): Promise<"pnpm" | "yarn" | "npm"> {
   const abs = path.resolve(outputDir);
+  try {
+    const raw = await fs.readFile(path.join(abs, "package.json"), "utf-8");
+    const pkg = JSON.parse(raw) as { packageManager?: string };
+    const pm = (pkg.packageManager ?? "").toLowerCase();
+    if (pm.startsWith("pnpm@")) return "pnpm";
+    if (pm.startsWith("yarn@")) return "yarn";
+    if (pm.startsWith("npm@")) return "npm";
+  } catch {
+    // ignore malformed or missing package.json
+  }
   for (const lockFile of ["pnpm-workspace.yaml", "pnpm-lock.yaml"]) {
     try {
       await fs.access(path.join(abs, lockFile));

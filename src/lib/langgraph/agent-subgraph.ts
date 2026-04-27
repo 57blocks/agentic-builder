@@ -47,6 +47,7 @@ import {
 import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
+import { trimProjectContextForTask } from "./worker-context-trim";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -58,7 +59,7 @@ const MAX_OUTPUT_TOKENS = (() => {
 })();
 const MAX_TASK_GENERATION_RETRIES = 2;
 const MAX_WORKER_TOOL_ITERATIONS = 6;
-const MAX_WORKER_TOOL_OUTPUT_CHARS = 4000;
+const MAX_WORKER_TOOL_OUTPUT_CHARS = 12000;
 const WORKER_LLM_HEARTBEAT_MS = 10_000;
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
@@ -201,140 +202,95 @@ const WORKER_READONLY_TOOLS: OpenRouterToolDefinition[] = [
 
 const ROLE_PROMPTS: Record<CodingAgentRole, string> = {
   architect: `You are a Senior Software Architect Agent.
-Generate scaffolding/config/shared foundations for the assigned task.
+Generate scaffolding, config, and shared foundations for the assigned task.
 
-Rules:
-- Follow the scaffold and task scope; prefer extending existing files over creating duplicate structures.
-- Use valid JSON/TS syntax.
-- If the project includes a shared package, import it using the actual package name shown in context (never invent \`@shared/*\` aliases).
-- For Zod naming, use \`camelCaseSchema\` for runtime values and \`*Input\` / \`*Dto\` for inferred types.
-- If you create a brand new Vite project from scratch and choose to use the \`@\` alias, wire it consistently in both \`vite.config.ts\` and \`tsconfig.json\`.
+**Project-specific conventions (read the Project Convention Card in context for exact paths):**
+- Prefer extending existing files over creating duplicate structures.
+- If the project uses the \`@\` alias, wire it in both \`vite.config.ts\` and \`tsconfig.json\`.
+- API response DTOs must be narrow shapes — never alias \`type MeResponseDto = User\`.
+- Shared packages: import by package name from context, never invent \`@shared/*\`.
+
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
-For each file output: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
-Output ONLY code blocks with the file: prefix. No explanatory text outside code blocks.
 
-When you have successfully generated all required files, end your response with exactly:
-${RALPH_COMPLETE_TOKEN}
-If you cannot complete the task, end with: <promise>TASK_FAILED: <reason></promise>`,
+You may write a brief plan (≤10 lines) before outputting files.
+For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
+
+When done: ${RALPH_COMPLETE_TOKEN}
+On failure: <promise>TASK_FAILED: <reason></promise>`,
 
   frontend: `You are a Senior Frontend Engineer Agent.
 Generate React + TypeScript + Tailwind code for the assigned task.
 
-Rules:
-- Keep routing/page structure consistent with existing project layout.
-- **Directory convention (MANDATORY for M-tier / Vite+React projects)**:
-  - Page-level view components MUST be placed under \`frontend/src/views/\` (e.g. \`frontend/src/views/LoginPage.tsx\`, \`frontend/src/views/DashboardPage.tsx\`).
-  - NEVER place pages under \`frontend/src/pages/\` — that path is for Next.js projects only. This project uses Vite + React Router.
-  - Use a **flat** structure inside \`views/\`: one file per page, do NOT nest into subdirectories like \`views/auth/LoginPage.tsx\`. Instead use \`views/LoginPage.tsx\`, \`views/RegisterPage.tsx\`, etc.
-  - Route registration lives in \`frontend/src/router.tsx\`; import page components from \`./views/...\`.
-- If the project includes a shared package, import it using the actual package name shown in context (never invent \`@shared/*\` or \`@repo/shared/*\`).
-- **Design compliance (MANDATORY)**: The merged **Project Context** includes \`## Design Specification\`, \`## Pencil design (implementation summary)\`, and often an English \`## Codegen handoff\` block (per-screen colors, typography, layout, route hints, PNG mapping). Treat these as the source of truth above generic templates; **Codegen handoff** is the structured counterpart to exported PNGs.
-  - Match page structure, section order, and component hierarchy from Design Specification.
-  - Apply colors, typography, spacing, and radii stated in the Pencil summary or Design Specification using Tailwind (use exact values, e.g. arbitrary colors \`bg-[#0a0a0a]\` when specified).
-  - If **Design assets on disk** lists files under \`public/design/\`, reference them in JSX (e.g. \`<img src="/design/..." />\` or imports) where they correspond to screens in the spec.
-  - Do not replace the design-driven layout with a minimal placeholder UI when the spec is present.
-- Keep edits scoped to this task.
-- ALWAYS type every event handler and callback parameter explicitly:
-    ✅  (e: React.ChangeEvent<HTMLInputElement>) => ...
-    ✅  (e: React.FormEvent<HTMLFormElement>) => ...
-    ✅  (e: React.MouseEvent<HTMLButtonElement>) => ...
-    ❌  (e) => ...   // implicit any — forbidden
-- ALWAYS type every function parameter and return value; never rely on implicit \`any\`.
-- Only import from files that are listed in "Already generated files" or in this task's file hints.
-  If a dependency file does not exist yet, create a minimal stub for it in this same response.
+**Project-specific conventions (always read the Project Convention Card in context first):**
+- Page views → \`frontend/src/views/\` (flat, e.g. \`LoginPage.tsx\`). NEVER use \`src/pages/\` — this is Vite+React Router, not Next.js.
+- Route registration → \`frontend/src/router.tsx\`, import from \`./views/...\`.
+- API client → ONE canonical file at \`frontend/src/api/client.ts\`. Never create a parallel HTTP wrapper.
+- **API paths: the client base URL already includes \`/api\`. Pass paths WITHOUT that prefix** — use \`"/users/me"\` not \`"/api/users/me"\`. Read the client file before coding if unsure.
+- Design spec: when "Design Specification", "Pencil design", or "Codegen handoff" is in context, treat it as source of truth. Match colors, layout, and component hierarchy exactly using Tailwind arbitrary values (\`bg-[#0a0a0a]\`).
 
-## MANDATORY: No Mock / Hardcoded Data — Real API Calls Only
-These rules are NON-NEGOTIABLE and override any other consideration:
-- ❌ FORBIDDEN: \`const mockData = [...]\`, \`const fakeItems = [...]\`, \`useState([{ id: 1, ... }])\` initialized with hardcoded objects, any inline array literal used as substitute for API data.
-- ❌ FORBIDDEN: \`// TODO: replace with real API\`, \`// temporary mock\`, placeholder data of any kind.
-- ❌ FORBIDDEN: Creating ANY mock/fake API interceptor file (e.g. \`mockApi.ts\`, \`mock-server.ts\`, \`msw/handlers.ts\`, \`__mocks__/*\`). NEVER import or create such files. NEVER add \`import "./lib/mockApi"\` or similar side-effect imports that intercept \`fetch\`/\`XMLHttpRequest\`.
-- ✅ REQUIRED: Every list, table, card grid, or detail view that displays data from the backend MUST use \`useEffect\` + the existing API client (\`frontend/src/api/client.ts\` or equivalent) to fetch from the real endpoint.
-- ✅ REQUIRED: Before coding, use the \`read_file\` tool to read \`frontend/src/api/client.ts\` and any relevant backend route files to know exactly which endpoints exist and what they return.
-- ✅ REQUIRED: Show a loading state while data is being fetched (e.g. \`isLoading\` flag) and an error state if the fetch fails. Render the real response data, not static arrays.
-- ✅ REQUIRED: All mutations (create, update, delete) MUST call the corresponding API endpoint via the API client, not update local state only.
-- If an endpoint is listed in the task description, use that exact path. If not listed, use the \`grep\` tool to find the backend route files and determine the correct endpoint path before coding.
+**Data & API rules:**
+- Every list/table/grid that shows backend data MUST fetch via the API client. No hardcoded arrays, no mock data, no \`useState([{ id: 1, ... }])\` placeholder initialization.
+- Use \`useEffect\` + loading/error state for all data fetching. Read \`frontend/src/api/client.ts\` first to confirm method signatures.
+- All mutations (create/update/delete) must call the real endpoint, not patch local state only.
+- Wrap awaited calls driving loading state with a min-duration helper (~400 ms) so spinners stay visible long enough for E2E assertions.
 
-## MANDATORY: AuthContext / AuthProvider must be functional
-- If the task creates or modifies \`AuthContext\` or \`AuthProvider\`, it MUST implement real auth state management:
-  - Read \`token\` / \`user\` from \`localStorage\` on mount.
-  - Expose \`login(token, user)\`, \`logout()\` functions that update both state and \`localStorage\`.
-  - Set \`isAuthenticated\` based on whether a valid token exists.
-  - NEVER ship a no-op provider that always returns \`{ isAuthenticated: false, user: null }\`.
-
-## MANDATORY: Observable loading / disabled transitions
-Any transient UI state that the PRD or E2E test observes (loading spinner, disabled submit button, "Loading" / "Submitting" text, skeleton placeholder) MUST remain visible for **at least 300–500 ms** after the state enters. A local backend — or a Playwright \`route.fulfill\` mock — can resolve in under 50 ms, which is shorter than the poll interval of both human eyes and most E2E assertion frameworks. Without a minimum duration, assertions like \`expect(button).toBeDisabled()\` or \`expect(locator('text=Loading')).toBeVisible()\` will flake even though the feature works.
-
-- ✅ REQUIRED: Wrap awaited network calls that drive a loading state with a minimum-duration helper, e.g.
-  \`\`\`ts
-  const MIN_TRANSIENT_MS = 400;
-  const withMinDuration = <T,>(p: Promise<T>, ms: number) =>
-    Promise.all([p, new Promise(r => setTimeout(r, ms))]).then(([v]) => v as T);
-  await withMinDuration(apiClient.post("/records", payload), MIN_TRANSIENT_MS);
-  \`\`\`
-- ✅ REQUIRED: Keep \`isSubmitting\` / \`isLoading\` / \`disabled\` flags \`true\` for the full minimum window, even when the backend is fast.
-- ❌ FORBIDDEN: Relying on the backend latency alone to make a spinner visible. This is flaky in CI and fails against mocked responses.
+**Auth:**
+- If implementing \`AuthContext\`/\`AuthProvider\`: read token/user from localStorage on mount, expose \`login(token, user)\`/\`logout()\`, set \`isAuthenticated\` from token presence. Never ship a no-op stub.
 
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
-For each file output: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
-Output ONLY code blocks with the file: prefix. No explanatory text outside code blocks.
 
-When you have successfully generated all required files, end your response with exactly:
-${RALPH_COMPLETE_TOKEN}
-If you cannot complete the task, end with: <promise>TASK_FAILED: <reason></promise>`,
+You may write a brief plan (≤10 lines) before outputting files.
+For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
+
+When done: ${RALPH_COMPLETE_TOKEN}
+On failure: <promise>TASK_FAILED: <reason></promise>`,
 
   backend: `You are a Senior Backend Engineer Agent.
-Generate backend code (routes/services/domain logic) for the assigned task.
+Generate backend code (routes, services, domain logic) for the assigned task.
 
-Rules:
-- Keep exports/imports consistent with existing modules and contracts.
-- **Skeleton override rule**: If a file listed in this task already exists on disk with only placeholder stubs (e.g. \`throw new Error("Not implemented")\`), you MUST **replace the entire file** with a complete, working implementation. Read the existing file first, then output the full replacement via \`\`\`file:<path>\`. Do NOT leave any \`throw new Error("Not implemented")\` stubs in your output.
-- If the project includes a shared package, import it using the actual package name shown in context (never invent \`@shared/*\` or \`@repo/shared/*\`).
-- Use \`camelCaseSchema\` values and \`*Input\` / \`*Dto\` inferred types.
-- Backend code does NOT use Vite aliases. Use relative imports or backend-specific path aliases only if the project config explicitly defines them.
-- Keep edits scoped to this task.
-- **Sequelize / persistence consistency rule (MANDATORY)**:
-  - Treat \`id\`, \`createdAt\`, \`updatedAt\`, \`deletedAt\`, timestamps, slugs, and similar lifecycle/generated fields as **system fields** unless the PRD explicitly says the user submits them.
-  - For every create/update flow, keep these four layers consistent: request DTO/types, request validation schema, service/controller payload, and ORM model definition.
-  - If a model field is \`allowNull: false\`, then exactly one of the following must be true:
-    1. the create/update payload explicitly provides it;
-    2. the model defines a \`defaultValue\`;
-    3. the ORM/database lifecycle automatically fills it and the model configuration fully supports that behavior.
-  - If a model uses Sequelize \`timestamps: true\`, do NOT require services/controllers to manually pass \`createdAt\` / \`updatedAt\` unless the project already follows that convention consistently.
-  - Create DTOs / validation schemas MUST NOT require system-generated fields.
-  - Before finalizing backend code, cross-check: the fields accepted by validation, the fields in the DTO/type, the fields passed into \`Model.create\` / \`Model.update\`, and the model's required/defaulted fields must agree.
-- Stick to the framework already in the project. Read \`package.json\`, \`app.ts\`, and route entry files in context first. If the project uses **Koa**, keep Koa. If it uses **Express**, keep Express. If it uses **Fastify**, keep Fastify. Do not switch frameworks.
-- When the project uses Express, these typing rules are mandatory:
-    - \`req.params\` is \`Record<string, string>\` — access as \`req.params.id\` (string, safe).
-    - \`req.headers\` values are \`string | string[] | undefined\` — always narrow:
-        const auth = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
-    - NEVER pass \`req.params.x\` or \`req.headers.x\` directly to a function expecting only \`string\` without narrowing.
-- Guard \`req.user\` before use — it is \`Express.User | undefined\`:
-    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-- ALWAYS type every function parameter explicitly; never use implicit \`any\`.
-- Only import types/interfaces that actually exist in the shared package context provided.
-  If a shared type is missing, define a local interface instead of importing a non-existent path.
+**Project-specific conventions (always read the Project Convention Card in context first):**
+- Framework: read \`package.json\` + \`app.ts\` first and stick to whatever is already there (Koa/Express/Fastify).
+- Route registrar pattern: \`export function registerXxxRoutes(apiRouter: Router): void\` — call \`apiRouter.<verb>(...)\` directly so the route audit can detect bindings. ONE registrar per domain.
+- Middleware canonical path: \`backend/src/middlewares/\` (with the **s**). Do NOT create \`backend/src/middleware/\` (without).
+- Skeleton files: if a file already exists with \`throw new Error("Not implemented")\` stubs, read it and output a full replacement. Leave no stubs.
+- Shared packages: import by package name, never invent paths.
+
+**Sequelize consistency (for every create/update flow):**
+- System fields (\`id\`, \`createdAt\`, \`updatedAt\`, slugs) must NOT appear in request DTOs or validation schemas unless the PRD says the user submits them.
+- Keep these four layers aligned: request DTO ↔ validation schema ↔ service payload ↔ ORM model required fields.
+- Model class field declarations MUST use \`declare\`: \`declare id: number;\` — otherwise Sequelize accessors are shadowed.
+
+**M-tier specifics (Koa + Sequelize):**
+- Body access: \`const body = ctx.request.body;\` (the scaffold's \`koa.d.ts\` augments \`body\` as \`unknown\`). Never cast to \`any\`.
+- Validate body with Joi before consuming. Typed context: import \`AppKoaContext\` from \`backend/src/types/koa.ts\`.
+- \`validateBody(schema)\` only on POST/PUT/PATCH/DELETE — NEVER on GET routes.
+- JWT helpers: \`signJwt\` / \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Never call \`jsonwebtoken\` directly in feature code.
+- Every endpoint in \`API_CONTRACTS.json\` for this domain must be implemented and registered.
+
 ${WORKER_READONLY_TOOLS_GUIDE}
 
-For each file output: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
-Output ONLY code blocks with the file: prefix. No explanatory text outside code blocks.
+You may write a brief plan (≤10 lines) before outputting files.
+For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
 
-When you have successfully generated all required files, end your response with exactly:
-${RALPH_COMPLETE_TOKEN}
-If you cannot complete the task, end with: <promise>TASK_FAILED: <reason></promise>`,
+When done: ${RALPH_COMPLETE_TOKEN}
+On failure: <promise>TASK_FAILED: <reason></promise>`,
 
   test: `You are a Senior QA / Test Engineer Agent.
 Generate comprehensive test suites: unit, integration, e2e.
 Frameworks: Vitest, @testing-library/react, Playwright, k6.
+
+Read the Project Convention Card in context for project-specific paths before writing any imports.
+
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
-For each file output: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
-Output ONLY code blocks with the file: prefix. No explanatory text outside code blocks.
 
-When you have successfully generated all required files, end your response with exactly:
-${RALPH_COMPLETE_TOKEN}
-If you cannot complete the task, end with: <promise>TASK_FAILED: <reason></promise>`,
+You may write a brief plan (≤10 lines) before outputting files.
+For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\`
+
+When done: ${RALPH_COMPLETE_TOKEN}
+On failure: <promise>TASK_FAILED: <reason></promise>`,
 };
 
 // ─── Version constraint injection (prevent LLM from using deprecated APIs) ───
@@ -470,6 +426,94 @@ function buildSearchMatcher(pattern: string): (line: string) => boolean {
     const lowered = pattern.toLowerCase();
     return (line: string) => line.toLowerCase().includes(lowered);
   }
+}
+
+/**
+ * Dynamically scan the generated project and produce a concise "Project Convention Card"
+ * that tells every worker the key architectural facts they need before writing any code.
+ * This prevents systematic errors like double /api prefix, wrong directory names, etc.
+ */
+export async function buildProjectConventionCard(
+  outputDir: string,
+): Promise<string> {
+  const lines: string[] = ["## Project Convention Card (read before writing any code)"];
+
+  // ── Detect frontend API client base URL ──────────────────────────────────
+  const clientContent = await fsRead("frontend/src/api/client.ts", outputDir);
+  if (!clientContent.startsWith("FILE_NOT_FOUND") && !clientContent.startsWith("REJECTED")) {
+    const baseMatch =
+      clientContent.match(/VITE_API_BASE_URL[^|]*\|\|\s*["'`]([^"'`]+)["'`]/) ??
+      clientContent.match(/API_BASE\s*=\s*["'`]([^"'`]+)["'`]/) ??
+      clientContent.match(/baseURL.*?["'`]([^"'`]+)["'`]/);
+    const base = baseMatch ? baseMatch[1] : "/api";
+    lines.push(
+      `- **Frontend API client base URL**: \`${base}\` — pass paths WITHOUT this prefix.`,
+      `  ✅ \`apiClient.get("/users/me")\`  ❌ \`apiClient.get("${base}/users/me")\``,
+    );
+  }
+
+  // ── Detect package manager ────────────────────────────────────────────────
+  const pmLock = await fsRead("pnpm-lock.yaml", outputDir);
+  const pm = !pmLock.startsWith("FILE_NOT_FOUND") ? "pnpm" : "npm";
+  lines.push(`- **Package manager**: \`${pm}\``);
+
+  // ── Detect frontend framework / router convention ─────────────────────────
+  const frontendPkg = await fsRead("frontend/package.json", outputDir);
+  const hasVite =
+    !frontendPkg.startsWith("FILE_NOT_FOUND") && frontendPkg.includes('"vite"');
+  if (hasVite) {
+    lines.push(
+      "- **Frontend framework**: Vite + React + React Router (NOT Next.js)",
+      "- **Page views**: `frontend/src/views/` (flat, one file per page). NEVER use `src/pages/`.",
+      "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
+    );
+  }
+
+  // ── Detect middleware directory ───────────────────────────────────────────
+  const mwsFiles = await fsRead("backend/src/middlewares/auth.ts", outputDir);
+  const mwFiles  = await fsRead("backend/src/middleware/auth.ts",  outputDir);
+  const mwDir =
+    !mwsFiles.startsWith("FILE_NOT_FOUND") ? "backend/src/middlewares/" :
+    !mwFiles.startsWith("FILE_NOT_FOUND")  ? "backend/src/middleware/"  :
+    "backend/src/middlewares/";
+  lines.push(`- **Backend middleware directory**: \`${mwDir}\` (canonical — do not create a parallel directory)`);
+
+  // ── Detect backend framework ──────────────────────────────────────────────
+  const backendPkg = await fsRead("backend/package.json", outputDir);
+  if (!backendPkg.startsWith("FILE_NOT_FOUND")) {
+    const hasKoa  = backendPkg.includes('"koa"');
+    const hasExpress = backendPkg.includes('"express"');
+    const hasSequelize = backendPkg.includes('"sequelize"');
+    if (hasKoa)  lines.push("- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation");
+    if (hasExpress) lines.push("- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`");
+    if (hasSequelize) lines.push("- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.");
+  }
+
+  // ── Route registrar convention ────────────────────────────────────────────
+  const indexContent = await fsRead("backend/src/api/modules/index.ts", outputDir);
+  if (!indexContent.startsWith("FILE_NOT_FOUND")) {
+    lines.push(
+      "- **Route registrar pattern**: `export function registerXxxRoutes(apiRouter: Router): void` — one registrar per domain, call `apiRouter.<verb>(...)` directly",
+      "- **Module index**: `backend/src/api/modules/index.ts` — every registrar must be imported and called here",
+    );
+  }
+
+  // ── JWT helper ────────────────────────────────────────────────────────────
+  const jwtHelper = await fsRead("backend/src/utils/jwt.ts", outputDir);
+  if (!jwtHelper.startsWith("FILE_NOT_FOUND")) {
+    lines.push("- **JWT**: use `signJwt`/`verifyJwt` from `backend/src/utils/jwt.ts`. Never call `jsonwebtoken` directly in feature code.");
+  }
+
+  // ── Playwright webServer & health route (E2E infra contract) ──────────────
+  const playwrightCfg = await fsRead("frontend/playwright.config.ts", outputDir);
+  if (!playwrightCfg.startsWith("FILE_NOT_FOUND") && !backendPkg.startsWith("FILE_NOT_FOUND")) {
+    lines.push(
+      "- **Playwright `webServer` (CRITICAL)**: `frontend/playwright.config.ts` MUST keep `webServer` as an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/health`) AND the frontend (`pnpm dev` on :5173). Collapsing it to a single object causes every API-driven e2e test to fail with ECONNREFUSED — the supervisor will auto-rewrite it back. Do NOT remove the backend entry.",
+      "- **Backend `/api/health`**: `backend/src/api/modules/health/health.routes.ts` exposes `GET /health` and is registered in `backend/src/api/modules/index.ts` via `registerHealthRoutes(apiRouter)`. Do NOT delete this route — the Playwright `webServer` health probe depends on it.",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 async function executeWorkerReadonlyTool(
@@ -845,6 +889,28 @@ function normalizeTaskFileHints(taskFiles: unknown): string[] {
   return grouped;
 }
 
+function getTaskFilePlanBuckets(taskFiles: unknown): {
+  creates: string[];
+  modifies: string[];
+  reads: string[];
+} {
+  if (!taskFiles || typeof taskFiles !== "object" || Array.isArray(taskFiles)) {
+    return { creates: [], modifies: [], reads: [] };
+  }
+  const record = taskFiles as Record<string, unknown>;
+  const readBucket = (key: "creates" | "modifies" | "reads"): string[] =>
+    Array.isArray(record[key])
+      ? (record[key] as unknown[]).filter(
+          (f): f is string => typeof f === "string",
+        )
+      : [];
+  return {
+    creates: readBucket("creates"),
+    modifies: readBucket("modifies"),
+    reads: readBucket("reads"),
+  };
+}
+
 function formatTaskFileHints(taskFiles: unknown): string {
   if (!taskFiles) return "";
   if (Array.isArray(taskFiles)) {
@@ -877,6 +943,17 @@ function formatTaskFileHints(taskFiles: unknown): string {
   if (reads.length > 0)
     lines.push(`Reads:\n${reads.map((f) => `- ${f}`).join("\n")}`);
   return lines.length > 0 ? `\nTask file plan:\n${lines.join("\n")}` : "";
+}
+
+function getRemainingPlannedCreates(
+  task: CodingTask,
+  writtenFiles: string[],
+): string[] {
+  const { creates } = getTaskFilePlanBuckets(task.files);
+  const writtenSet = new Set(
+    writtenFiles.map((file) => file.replace(/\\/g, "/")),
+  );
+  return creates.filter((file) => !writtenSet.has(file.replace(/\\/g, "/")));
 }
 
 function scoreGeneratedFileForTask(
@@ -1210,6 +1287,24 @@ function parseCodegenRoundStatus(content: string): "done" | "continue" | null {
   return m[1].toUpperCase() === "DONE" ? "done" : "continue";
 }
 
+function parseTaskFilePlanFailureDetails(verifyErrors: string): {
+  missingCreates: string[];
+  unmodified: string[];
+} {
+  const parseList = (label: "missingCreates" | "unmodified"): string[] => {
+    const match = new RegExp(`${label}=\\[([^\\]]*)\\]`).exec(verifyErrors);
+    if (!match) return [];
+    return match[1]
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+  return {
+    missingCreates: parseList("missingCreates"),
+    unmodified: parseList("unmodified"),
+  };
+}
+
 // ─── RALPH helpers ───
 
 /**
@@ -1330,8 +1425,35 @@ async function generateCode(state: WorkerState) {
     );
 
     const contextParts: string[] = [];
+
+    // Always inject the convention card first so every worker has a concise
+    // cheat-sheet of project-specific architectural facts before reading anything else.
+    try {
+      const conventionCard = await buildProjectConventionCard(state.outputDir);
+      if (conventionCard) contextParts.push(conventionCard);
+    } catch {
+      // Non-fatal — missing card just means workers rely on context files alone.
+    }
+
     if (state.projectContext) {
-      contextParts.push(state.projectContext);
+      // Trim the (potentially huge) projectContext down to a task-relevant
+      // subset. Protections against info loss:
+      //   1. Always-keep whitelist (shared/common/conventions/…)
+      //   2. Force-include sections that mention task's FR/AC IDs
+      //   3. Trim-marker at the bottom telling the worker to use
+      //      read_file / grep if it needs details it doesn't see
+      // See: src/lib/langgraph/worker-context-trim.ts
+      const trimmed = trimProjectContextForTask(state.projectContext, {
+        task,
+        sessionId: state.sessionId,
+        label: state.workerLabel,
+      });
+      contextParts.push(trimmed.content);
+      if (trimmed.trimmed) {
+        console.log(
+          `[Worker:${state.workerLabel}] projectContext trimmed: ${trimmed.originalChars.toLocaleString()} -> ${trimmed.usedChars.toLocaleString()} chars (task=${task.id} "${task.title}")`,
+        );
+      }
     }
     // PrdSpec (PAGE-*/CMP-*) entries for this task — only useful for
     // frontend/test workers, but cheap to include for others too when the
@@ -1494,9 +1616,19 @@ async function generateCode(state: WorkerState) {
         `[Worker:${state.workerLabel}] codegen round ${rounds}/${CODEGEN_MULTI_ROUND_MAX_ROUNDS}: wrote ${roundWrites} file(s), status=${roundStatus ?? "implicit_done"}, model=${response.model}`,
       );
 
+      const remainingCreates = getRemainingPlannedCreates(task, writtenFiles);
+      const forcedContinue =
+        CODEGEN_MULTI_ROUND_ENABLED &&
+        remainingCreates.length > 0 &&
+        rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
+      if (forcedContinue && roundStatus !== "continue") {
+        console.warn(
+          `[Worker:${state.workerLabel}] codegen round ${rounds}: file plan still missing ${remainingCreates.length} create(s); overriding ${roundStatus ?? "implicit_done"} -> continue.`,
+        );
+      }
       const shouldContinue =
         CODEGEN_MULTI_ROUND_ENABLED &&
-        roundStatus === "continue" &&
+        (roundStatus === "continue" || forcedContinue) &&
         rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
       if (!shouldContinue) break;
 
@@ -1512,6 +1644,9 @@ async function generateCode(state: WorkerState) {
           "Prefer files not yet generated in this task.",
           "If any previously generated file is incomplete, inconsistent, miswired, or needs correction, rewrite it in this round.",
           "Do not preserve an incorrect earlier version just to avoid rewriting.",
+          remainingCreates.length > 0
+            ? `You still MUST create these planned file(s) before finishing:\n${remainingCreates.map((file) => `- ${file}`).join("\n")}`
+            : "",
           "End with STATUS: CONTINUE or STATUS: DONE.",
           "",
           knownFiles ? `Already generated files:\n${knownFiles}` : "",
@@ -1974,7 +2109,20 @@ async function taskFix(state: WorkerState) {
     );
   }
 
-  const taskFiles = state.currentTaskGeneratedFiles;
+  const filePlanDetails = isFilePlanFix
+    ? parseTaskFilePlanFailureDetails(state.verifyErrors)
+    : { missingCreates: [], unmodified: [] };
+  const planBuckets = getTaskFilePlanBuckets(task.files);
+  const taskFiles = isFilePlanFix
+    ? [
+        ...new Set([
+          ...state.currentTaskGeneratedFiles,
+          ...filePlanDetails.unmodified,
+          ...planBuckets.modifies,
+          ...planBuckets.reads,
+        ]),
+      ]
+    : state.currentTaskGeneratedFiles;
   // For file-plan fixes, we explicitly handle the case of "no generated files
   // yet" — the fix is literally to produce them. Only short-circuit when we
   // have neither files nor a task plan to satisfy.
@@ -1988,6 +2136,11 @@ async function taskFix(state: WorkerState) {
   console.log(
     `[Worker:${state.workerLabel}] codeFix: task files in scope (${taskFiles.length}): ${taskFiles.slice(0, 12).join(", ")}${taskFiles.length > 12 ? " …" : ""}`,
   );
+  if (isFilePlanFix) {
+    console.log(
+      `[Worker:${state.workerLabel}] codeFix: missing creates (${filePlanDetails.missingCreates.length}): ${filePlanDetails.missingCreates.slice(0, 12).join(", ")}${filePlanDetails.missingCreates.length > 12 ? " …" : ""}`,
+    );
+  }
 
   const alreadyRead = new Set<string>();
   const fileContents: string[] = [];
@@ -2104,6 +2257,12 @@ async function taskFix(state: WorkerState) {
         `- id: ${task.id}`,
         `- title: ${task.title}`,
         task.description ? `- description: ${task.description}` : "",
+        filePlanDetails.missingCreates.length > 0
+          ? `- missingCreates:\n${filePlanDetails.missingCreates.map((file) => `  - ${file}`).join("\n")}`
+          : "",
+        filePlanDetails.unmodified.length > 0
+          ? `- unmodified:\n${filePlanDetails.unmodified.map((file) => `  - ${file}`).join("\n")}`
+          : "",
         formatTaskFileHints(task.files),
       ]
         .filter(Boolean)
