@@ -5,6 +5,20 @@ import { usePipelineStore } from "@/store/pipeline-store";
 import { useStageStore } from "@/store/stage-store";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 
+// ── Conversation message types ─────────────────────────────────────────────
+
+type UserConvMsg = { role: "user"; text: string; id: string };
+type AiConvMsg = {
+  role: "ai";
+  content: string;
+  classification?: Classification;
+  model?: string;
+  costUsd?: number;
+  durationMs?: number;
+  id: string;
+};
+type ConvMsg = UserConvMsg | AiConvMsg;
+
 // ── Icons ──────────────────────────────────────────────────────────────────
 
 function AgentIcon() {
@@ -90,27 +104,83 @@ function UserMessage({ text }: { text: string }) {
   );
 }
 
-function AIMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+function AIMessage({
+  content,
+  isStreaming,
+  classification,
+}: {
+  content: string;
+  isStreaming?: boolean;
+  classification?: Classification;
+}) {
   return (
     <div className="flex gap-4 items-start">
       <div className="shrink-0 w-8 h-8 rounded-sm bg-[#712ae2] flex items-center justify-center">
         <AgentIcon />
       </div>
       <div className="flex-1 min-w-0 bg-[#f8fafc] border border-[#e2e8f0] rounded-tr-2xl rounded-br-2xl rounded-bl-2xl p-4 shadow-sm">
-        {isStreaming && !content ? (
+        {isStreaming ? (
           <div className="flex items-center gap-2 text-[#94a3b8] text-sm">
             <SpinnerIcon size={13} />
-            <span>Agent is thinking…</span>
+            <span>Analyzing project intent…</span>
           </div>
-        ) : (
+        ) : classification ? (
+          <ClassificationCard cls={classification} />
+        ) : content ? (
           <div className="prose prose-sm max-w-none text-[#0b1c30]">
             <MarkdownRenderer content={content} />
           </div>
-        )}
-        {isStreaming && content && (
-          <span className="inline-block w-0.5 h-4 bg-[#712ae2] animate-pulse ml-0.5 align-middle" />
+        ) : (
+          <div className="flex items-center gap-2 text-[#94a3b8] text-sm">
+            <SpinnerIcon size={13} />
+            <span>Processing…</span>
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Classification card ──────────────────────────────────────────────────
+
+type Classification = {
+  tier: string;
+  type: string;
+  needsBackend: boolean;
+  needsDatabase: boolean;
+  reasoning: string;
+};
+
+const TIER_LABEL: Record<string, string> = { S: "Simple", M: "Standard", L: "Enterprise" };
+const TIER_COLOR: Record<string, string> = {
+  S: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  M: "bg-amber-50 text-amber-700 border-amber-200",
+  L: "bg-zinc-100 text-zinc-700 border-zinc-300",
+};
+
+function ClassificationCard({ cls }: { cls: Classification }) {
+  const tierStyle = TIER_COLOR[cls.tier] ?? TIER_COLOR.M;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[12px] font-semibold ${tierStyle}`}>
+          Tier {cls.tier} · {TIER_LABEL[cls.tier] ?? cls.tier}
+        </span>
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full border border-[#e2e8f0] bg-white text-[12px] text-[#475569]">
+          {cls.type}
+        </span>
+        {cls.needsBackend && (
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-[12px] text-blue-700">
+            Backend
+          </span>
+        )}
+        {cls.needsDatabase && (
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50 text-[12px] text-violet-700">
+            Database
+          </span>
+        )}
+      </div>
+      <p className="text-[14px] text-[#374151] leading-6">{cls.reasoning}</p>
     </div>
   );
 }
@@ -145,28 +215,87 @@ export default function IntentSubStage() {
   const currentStep      = usePipelineStore((s) => s.currentStep);
   const isRunning        = usePipelineStore((s) => s.isRunning);
   const featureBrief     = usePipelineStore((s) => s.featureBrief);
+  const startPipeline    = usePipelineStore((s) => s.startPipeline);
   const goToSubStage     = useStageStore((s) => s.goToSubStage);
 
   const [inputValue, setInputValue] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages]     = useState<ConvMsg[]>([]);
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const isDoneRef    = useRef(false);
+  const initialised  = useRef(false);
 
   const isThisRunning = isRunning && currentStep === "intent";
-  const aiContent     = isThisRunning ? streamingContent : (step?.content ?? "");
   const isDone        = step?.status === "completed";
-  const hasStarted    = Boolean(aiContent) || isThisRunning;
 
-  // Auto-scroll to bottom when content streams in
-  useEffect(() => {
-    if (isThisRunning) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [streamingContent, isThisRunning]);
+  const classification = (step?.metadata as Record<string, unknown> | undefined)
+    ?.classification as Classification | undefined;
 
+  // ── Initialise conversation from existing store state (e.g. after HMR / tab switch) ──
   useEffect(() => {
-    if (isDone) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (initialised.current) return;
+    initialised.current = true;
+    const init: ConvMsg[] = [];
+    if (featureBrief) {
+      init.push({ role: "user", text: featureBrief, id: "init-user" });
     }
+    if (step?.status === "completed" && step.content) {
+      const cls = (step.metadata as Record<string, unknown> | undefined)
+        ?.classification as Classification | undefined;
+      init.push({
+        role: "ai",
+        content: step.content,
+        classification: cls,
+        model: step.model,
+        costUsd: step.costUsd,
+        durationMs: step.durationMs,
+        id: "init-ai",
+      });
+      isDoneRef.current = true;
+    }
+    if (init.length) setMessages(init);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Append AI message when intent step completes ──
+  useEffect(() => {
+    if (isDone && !isDoneRef.current) {
+      isDoneRef.current = true;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          content: step?.content ?? "",
+          classification,
+          model: step?.model,
+          costUsd: step?.costUsd,
+          durationMs: step?.durationMs,
+          id: `ai-${Date.now()}`,
+        } satisfies AiConvMsg,
+      ]);
+    }
+    if (!isDone) {
+      isDoneRef.current = false;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone]);
+
+  // ── Auto-scroll ──
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamingContent, isThisRunning]);
+
+  function handleSend() {
+    const val = inputValue.trim();
+    if (!val || isThisRunning) return;
+    setInputValue("");
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: val, id: `user-${Date.now()}` } satisfies UserConvMsg,
+    ]);
+    startPipeline(val);
+  }
+
+  const isEmpty = messages.length === 0 && !isThisRunning;
 
   return (
     <div className="flex flex-col w-full flex-1 min-h-0 bg-white border border-[#e2e8f0] rounded-lg p-5 shadow-sm overflow-hidden">
@@ -200,25 +329,38 @@ export default function IntentSubStage() {
 
       {/* ── Chat History ── */}
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
+
         {/* Empty state */}
-        {!hasStarted && !featureBrief && (
+        {isEmpty && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-[#94a3b8]">
             <div className="w-12 h-12 rounded-full bg-[#f8fafc] border border-[#e2e8f0] flex items-center justify-center">
               <AgentIcon />
             </div>
-            <p className="text-[13px]">Waiting for pipeline to start…</p>
+            <p className="text-[13px]">Describe your project idea to get started…</p>
           </div>
         )}
 
-        {/* User's feature brief */}
-        {featureBrief && <UserMessage text={featureBrief} />}
+        {/* Conversation history */}
+        {messages.map((msg) =>
+          msg.role === "user" ? (
+            <UserMessage key={msg.id} text={msg.text} />
+          ) : (
+            <div key={msg.id} className="space-y-1">
+              <AIMessage
+                content={msg.content}
+                classification={(msg as AiConvMsg).classification}
+              />
+              <MetaBadge step={msg as AiConvMsg} />
+            </div>
+          )
+        )}
 
-        {/* AI response */}
-        {hasStarted && (
-          <>
-            <AIMessage content={aiContent} isStreaming={isThisRunning} />
-            {isDone && step && <MetaBadge step={step} />}
-          </>
+        {/* Streaming AI message (while intent step runs) */}
+        {isThisRunning && (
+          <AIMessage
+            content={streamingContent}
+            isStreaming={!streamingContent}
+          />
         )}
 
         <div ref={bottomRef} />
@@ -237,20 +379,22 @@ export default function IntentSubStage() {
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Respond to the agent or ask for suggestions..."
+            placeholder={isThisRunning ? "Analyzing intent…" : "Describe or refine your project idea…"}
             className="flex-1 bg-transparent text-[16px] text-[#0b1c30] placeholder:text-[#6b7280] outline-none min-w-0 px-3 py-2"
+            disabled={isThisRunning}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                // future: send message to agent
+                handleSend();
               }
             }}
           />
 
           {/* Send button */}
           <button
+            onClick={handleSend}
             className="flex items-center gap-2 px-4 py-2 bg-[#07c160] text-white text-[16px] font-semibold rounded shrink-0 hover:bg-[#06a050] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || isThisRunning}
           >
             <span>Send</span>
             <SendIcon />

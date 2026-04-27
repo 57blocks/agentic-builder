@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useProjects } from "@/hooks/useProjects";
+import { useStageStore } from "@/store/stage-store";
 
 function FolderIcon() {
   return (
@@ -54,8 +55,10 @@ export default function AppNav() {
   const router = useRouter();
   const [projectsOpen, setProjectsOpen] = useState(true);
   const { projects, loading, addLocalProject } = useProjects();
+  const resetStage = useStageStore((s) => s.resetStage);
 
   function handleNewProject() {
+    resetStage();
     const project = addLocalProject("New Project");
     router.push(`/project/${project.slug}`);
   }

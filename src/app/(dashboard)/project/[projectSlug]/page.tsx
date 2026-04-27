@@ -52,15 +52,15 @@ export default function ProjectPage() {
 
   return (
     <div
-      className="flex flex-col min-h-screen relative"
+      className="flex flex-col min-h-screen h-screen! relative"
       style={{ background: "linear-gradient(90deg, rgb(248,249,255) 0%, rgb(248,249,255) 100%)" }}
     >
       {/* Decorative blurs */}
-      <div className="pointer-events-none absolute right-[-100px] top-[-200px] w-[600px] h-[600px] rounded-[300px] bg-[#dbeafe] blur-[40px] opacity-40" />
-      <div className="pointer-events-none absolute bottom-[-100px] left-[-100px] w-[500px] h-[500px] rounded-[250px] bg-[#faf5ff] blur-[40px] opacity-40" />
+      {/* <div className="pointer-events-none absolute right-[-100px] top-[-200px] w-[600px] h-[600px] rounded-[300px] bg-[#dbeafe] blur-[40px] opacity-40" />
+      <div className="pointer-events-none absolute bottom-[-100px] left-[-100px] w-[500px] h-[500px] rounded-[250px] bg-[#faf5ff] blur-[40px] opacity-40" /> */}
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#e2e8f0] bg-white/80 backdrop-blur-[6px] px-8">
+      <header className="flex h-16 items-center justify-between border-b border-[#e2e8f0] bg-white/80 backdrop-blur-[6px] px-8 relative z-10">
         <div className="flex items-center gap-8">
           <span className="text-[18px] font-black text-[#0f172a] leading-7">Pipeline</span>
           <PipelineNav />

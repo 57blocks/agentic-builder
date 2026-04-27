@@ -126,10 +126,15 @@ export default function InitialSubStage() {
   const [mode, setMode] = useState<"Quick" | "Advanced">("Quick");
   const [prompt, setPrompt] = useState("");
 
-  const startPipeline = usePipelineStore((s) => s.startPipeline);
-  const isRunning = usePipelineStore((s) => s.isRunning);
-  const advanceStage = useStageStore((s) => s.advanceStage);
-  const goToSubStage = useStageStore((s) => s.goToSubStage);
+  const startPipeline  = usePipelineStore((s) => s.startPipeline);
+  const setFastFromPrd = usePipelineStore((s) => s.setFastFromPrd);
+  const isRunning      = usePipelineStore((s) => s.isRunning);
+  const goToSubStage   = useStageStore((s) => s.goToSubStage);
+
+  function handleModeChange(m: "Quick" | "Advanced") {
+    setMode(m);
+    setFastFromPrd(m === "Quick");
+  }
 
   function handleInitialize() {
     if (!prompt.trim() || isRunning) return;
@@ -175,7 +180,7 @@ export default function InitialSubStage() {
               {(["Quick", "Advanced"] as const).map((m) => (
                 <button
                   key={m}
-                  onClick={() => setMode(m)}
+                  onClick={() => handleModeChange(m)}
                   className={`px-3.5 py-1.5 text-[11px] font-semibold rounded-sm transition-all ${
                     mode === m
                       ? "bg-white text-[#0f172a] shadow-sm"

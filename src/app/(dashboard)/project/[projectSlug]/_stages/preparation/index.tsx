@@ -33,7 +33,7 @@ export default function PreparationStage() {
   const SubView         = SUB_VIEWS[activeSubStage] ?? InitialSubStage;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+    <div className="flex flex-col h-full w-full">
       <SubView />
     </div>
   );
