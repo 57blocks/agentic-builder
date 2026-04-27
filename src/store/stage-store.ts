@@ -127,6 +127,11 @@ interface StageStoreState {
   /** The active sub-stage for each stage (persisted independently) */
   activeSubStages: Record<StageId, SubStageId>;
 
+  /** Current project slug — persisted so sidebar can restore the active project on refresh */
+  projectSlug: string;
+  /** AI-generated (or user-supplied) project name — persisted for sidebar display on refresh */
+  projectName: string;
+
   // ── Stage navigation ──────────────────────────────────────────────────────
 
   /** Navigate directly to a stage. Set force=true to bypass any guards. */
@@ -155,6 +160,11 @@ interface StageStoreState {
 
   /** Reset all navigation back to the beginning. */
   resetStage: () => void;
+
+  /** Update the display name for the current project (called after AI generates a name). */
+  setProjectName: (name: string) => void;
+  /** Update the current project slug (called when navigating to a project). */
+  setProjectSlug: (slug: string) => void;
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -164,6 +174,8 @@ export const useStageStore = create<StageStoreState>()(
     (set, get) => ({
       activeStage: "preparation",
       activeSubStages: { ...DEFAULT_SUB_STAGES },
+      projectSlug: "",
+      projectName: "New Project",
 
       // ── Stage navigation ────────────────────────────────────────────────
 
@@ -241,20 +253,26 @@ export const useStageStore = create<StageStoreState>()(
         return activeSubStages[stage ?? activeStage];
       },
 
+      setProjectName: (name) => set({ projectName: name }),
+
+      setProjectSlug: (slug) => set({ projectSlug: slug }),
+
       resetStage: () =>
         set({
           activeStage: "preparation",
           activeSubStages: { ...DEFAULT_SUB_STAGES },
+          projectName: "New Project",
+          projectSlug: "",
         }),
     }),
     {
       name: "agentic-stage-v1",
-      storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? sessionStorage : localStorage,
-      ),
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         activeStage: state.activeStage,
         activeSubStages: state.activeSubStages,
+        projectSlug: state.projectSlug,
+        projectName: state.projectName,
       }),
     },
   ),

@@ -85,6 +85,8 @@ interface PipelineState {
 
   setCodeOutputDir: (value: string) => void;
   setFastFromPrd: (value: boolean) => void;
+  /** Save the brief without starting the pipeline — used by the initial stage before intent Q&A. */
+  setPendingBrief: (brief: string) => void;
   startPipeline: (featureBrief: string) => void;
   setActiveTab: (tab: PipelineStepId) => void;
   /** Batch-update step results (e.g. from parallel generation). */
@@ -146,6 +148,8 @@ export const usePipelineStore = create<PipelineState>()(
         });
       },
       setFastFromPrd: (value) => set({ fastFromPrd: value }),
+
+      setPendingBrief: (brief) => set({ featureBrief: brief.trim() }),
 
       setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -721,6 +725,22 @@ function handleEvent(
     };
     const cost = get().totalCostUsd + (stepData.costUsd ?? 0);
     set({ steps, totalCostUsd: cost });
+
+    // When the intent step completes, extract AI-generated project_name and
+    // update the stage store so the sidebar immediately reflects the name.
+    if (stepId === "intent" && stepData.content) {
+      try {
+        const parsed = JSON.parse(stepData.content) as { project_name?: string };
+        if (parsed.project_name && parsed.project_name.trim()) {
+          // Lazy-import to avoid circular dependency
+          import("@/store/stage-store").then(({ useStageStore }) => {
+            useStageStore.getState().setProjectName(parsed.project_name!.trim());
+          }).catch(() => {/* ignore */});
+        }
+      } catch {
+        /* content may not be JSON during error scenarios */
+      }
+    }
   }
 
   if (payload.type === "step_error") {

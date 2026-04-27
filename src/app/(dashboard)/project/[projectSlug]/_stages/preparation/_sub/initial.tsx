@@ -126,10 +126,10 @@ export default function InitialSubStage() {
   const [mode, setMode] = useState<"Quick" | "Advanced">("Quick");
   const [prompt, setPrompt] = useState("");
 
-  const startPipeline  = usePipelineStore((s) => s.startPipeline);
-  const setFastFromPrd = usePipelineStore((s) => s.setFastFromPrd);
-  const isRunning      = usePipelineStore((s) => s.isRunning);
-  const goToSubStage   = useStageStore((s) => s.goToSubStage);
+  const setPendingBrief = usePipelineStore((s) => s.setPendingBrief);
+  const setFastFromPrd  = usePipelineStore((s) => s.setFastFromPrd);
+  const isRunning       = usePipelineStore((s) => s.isRunning);
+  const goToSubStage    = useStageStore((s) => s.goToSubStage);
 
   function handleModeChange(m: "Quick" | "Advanced") {
     setMode(m);
@@ -138,7 +138,9 @@ export default function InitialSubStage() {
 
   function handleInitialize() {
     if (!prompt.trim() || isRunning) return;
-    startPipeline(prompt.trim());
+    // Save the brief without starting the full pipeline yet.
+    // Intent Q&A runs first; "Start Generation" in intent.tsx fires startPipeline.
+    setPendingBrief(prompt.trim());
     goToSubStage("intent", "preparation");
   }
 

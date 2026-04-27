@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useProjects } from "@/hooks/useProjects";
+import { useStageStore } from "@/store/stage-store";
+import { usePipelineStore } from "@/store/pipeline-store";
 
 function FolderIcon() {
   return (
@@ -54,9 +56,20 @@ export default function AppNav() {
   const router = useRouter();
   const [projectsOpen, setProjectsOpen] = useState(true);
   const { projects, loading, addLocalProject } = useProjects();
+  const resetStage = useStageStore((s) => s.resetStage);
+  const setProjectSlug = useStageStore((s) => s.setProjectSlug);
+  const setProjectName = useStageStore((s) => s.setProjectName);
+  const stageProjectSlug = useStageStore((s) => s.projectSlug);
+  const stageProjectName = useStageStore((s) => s.projectName);
+  const resetPipeline = usePipelineStore((s) => s.reset);
 
   function handleNewProject() {
+    // Reset both stage and pipeline stores before creating a new project
+    resetStage();
+    resetPipeline();
     const project = addLocalProject("New Project");
+    setProjectSlug(project.slug);
+    setProjectName("New Project");
     router.push(`/project/${project.slug}`);
   }
 
@@ -116,6 +129,11 @@ export default function AppNav() {
               {projects.map((project) => {
                 const href = `/project/${project.slug}`;
                 const isActive = pathname?.startsWith(href);
+                // Use AI-generated name from stage store for the current active project
+                const displayName =
+                  isActive && stageProjectSlug === project.slug && stageProjectName
+                    ? stageProjectName
+                    : project.name;
                 return (
                   <div
                     key={project.slug}
@@ -136,7 +154,7 @@ export default function AppNav() {
                             isActive ? "text-[#4f46e5]" : "text-[#475569]"
                           }`}
                         >
-                          {project.name}
+                          {displayName}
                         </span>
                       </Link>
                     </div>

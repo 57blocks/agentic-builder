@@ -7,16 +7,35 @@ import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 // ── Conversation message types ─────────────────────────────────────────────
 
-type UserConvMsg = { role: "user"; text: string; id: string };
-type AiConvMsg = {
-  role: "ai";
-  content: string;
-  classification?: Classification;
-  model?: string;
-  costUsd?: number;
-  durationMs?: number;
+type IntentQuestion = {
   id: string;
+  type: "radio" | "checkbox" | "text";
+  label: string;
+  options?: string[];
 };
+
+type IntentFormData = {
+  project_name?: string;
+  all_clear?: boolean;
+  summary: string;
+  gathered?: string[];
+  questions: IntentQuestion[];
+};
+
+function parseIntentForm(content: string): IntentFormData | undefined {
+  try {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return undefined;
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.summary || !Array.isArray(parsed.questions)) return undefined;
+    return parsed as IntentFormData;
+  } catch {
+    return undefined;
+  }
+}
+
+type UserConvMsg = { role: "user"; text: string; id: string };
+type AiConvMsg = { role: "ai"; content: string; intentForm?: IntentFormData; id: string };
 type ConvMsg = UserConvMsg | AiConvMsg;
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -89,6 +108,22 @@ function AttachIcon() {
   );
 }
 
+function CheckSmallIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+      <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckGatheredIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className="shrink-0 mt-0.5">
+      <path d="M2 6l3 3 5-5" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function UserMessage({ text }: { text: string }) {
@@ -104,32 +139,187 @@ function UserMessage({ text }: { text: string }) {
   );
 }
 
-function AIMessage({
-  content,
-  isStreaming,
-  classification,
+// ── Intent Form Card ─────────────────────────────────────────────────────
+
+function TypingDots() {
+  return (
+    <span className="inline-flex items-end gap-0.75 h-4 ml-1">
+      <span className="w-1 h-1 rounded-full bg-[#712ae2] animate-bounce [animation-delay:0ms]" />
+      <span className="w-1 h-1 rounded-full bg-[#712ae2] animate-bounce [animation-delay:150ms]" />
+      <span className="w-1 h-1 rounded-full bg-[#712ae2] animate-bounce [animation-delay:300ms]" />
+    </span>
+  );
+}
+
+function IntentFormCard({
+  form,
+  onSubmit,
+  disabled,
+  isRechecking,
 }: {
-  content: string;
-  isStreaming?: boolean;
-  classification?: Classification;
+  form: IntentFormData;
+  onSubmit: (questions: IntentQuestion[], answers: Record<string, string | string[]>) => void;
+  disabled?: boolean;
+  isRechecking?: boolean;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+
+  function toggleRadio(id: string, value: string) {
+    setAnswers((a) => ({ ...a, [id]: value }));
+  }
+  function toggleCheckbox(id: string, value: string) {
+    setAnswers((a) => {
+      const prev = (a[id] as string[]) ?? [];
+      const next = prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value];
+      return { ...a, [id]: next };
+    });
+  }
+
+  const allAnswered = form.questions.every((q) => {
+    const a = answers[q.id];
+    if (q.type === "checkbox") return Array.isArray(a) && a.length > 0;
+    if (q.type === "text") return typeof a === "string" && a.trim().length > 0;
+    return typeof a === "string" && a.length > 0;
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* All-clear banner */}
+      {(form.all_clear || form.questions.length === 0) && form.gathered && form.gathered.length > 0 && (
+        <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" className="shrink-0 mt-0.5">
+            <circle cx="10" cy="10" r="9" stroke="#10b981" strokeWidth="1.5" />
+            <path d="M6 10l3 3 5-5" stroke="#10b981" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div>
+            <p className="text-[12px] font-bold text-emerald-700 uppercase tracking-wide">All information gathered</p>
+            <p className="text-[13px] text-emerald-800 mt-0.5">You can now start generation.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="prose prose-sm max-w-none text-[#0b1c30]">
+        <MarkdownRenderer content={form.summary} />
+      </div>
+
+      {/* Already gathered */}
+      {form.gathered && form.gathered.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 space-y-1.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Already gathered</p>
+          {form.gathered.map((item, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <CheckGatheredIcon />
+              <span className="text-[13px] text-emerald-800 leading-5">{item}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Questions */}
+      {form.questions.length > 0 && (
+        <div className="space-y-5 border-t border-[#f1f5f9] pt-4">
+          <p className="text-[12px] font-semibold text-[#94a3b8] uppercase tracking-wide">Please clarify</p>
+          {form.questions.map((q) => (
+            <div key={q.id} className="space-y-2.5">
+              <p className="text-[13px] font-semibold text-[#0b1c30] leading-5">{q.label}</p>
+
+              {q.type === "radio" && q.options?.map((opt) => {
+                const selected = answers[q.id] === opt;
+                return (
+                  <label
+                    key={opt}
+                    onClick={() => !disabled && toggleRadio(q.id, opt)}
+                    className="flex items-center gap-2.5 cursor-pointer group"
+                  >
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      selected ? "border-[#712ae2] bg-[#712ae2]" : "border-[#cbd5e1] group-hover:border-[#a78bfa]"
+                    }`}>
+                      {selected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <span className="text-[13px] text-[#374151] select-none">{opt}</span>
+                  </label>
+                );
+              })}
+
+              {q.type === "checkbox" && q.options?.map((opt) => {
+                const checked = ((answers[q.id] as string[]) ?? []).includes(opt);
+                return (
+                  <label
+                    key={opt}
+                    onClick={() => !disabled && toggleCheckbox(q.id, opt)}
+                    className="flex items-center gap-2.5 cursor-pointer group"
+                  >
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                      checked ? "border-[#712ae2] bg-[#712ae2]" : "border-[#cbd5e1] group-hover:border-[#a78bfa]"
+                    }`}>
+                      {checked && <CheckSmallIcon />}
+                    </div>
+                    <span className="text-[13px] text-[#374151] select-none">{opt}</span>
+                  </label>
+                );
+              })}
+
+              {q.type === "text" && (
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={(answers[q.id] as string) ?? ""}
+                  onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  className="w-full px-3 py-2 text-[13px] border border-[#e2e8f0] rounded-md bg-white text-[#0b1c30] outline-none focus:ring-2 focus:ring-[#712ae2]/20 focus:border-[#712ae2] disabled:opacity-50"
+                  placeholder="Type your answer…"
+                />
+              )}
+            </div>
+          ))}
+
+          <button
+            onClick={() => onSubmit(form.questions, answers)}
+            disabled={!allAnswered || disabled || isRechecking}
+            className="flex items-center gap-2 px-4 py-2 bg-[#712ae2] text-white text-[13px] font-semibold rounded-md hover:bg-[#5f22c7] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isRechecking ? (
+              <>
+                <SpinnerIcon size={13} />
+                Checking…
+              </>
+            ) : (
+              <>
+                Confirm &amp; Check
+                <ArrowRightIcon />
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AIMessage({
+  intentForm,
+  onFormSubmit,
+  isRechecking,
+  isLastMessage,
+}: {
+  intentForm?: IntentFormData;
+  onFormSubmit?: (questions: IntentQuestion[], answers: Record<string, string | string[]>) => void;
+  isRechecking?: boolean;
+  isLastMessage?: boolean;
 }) {
   return (
     <div className="flex gap-4 items-start">
-      <div className="shrink-0 w-8 h-8 rounded-sm bg-[#712ae2] flex items-center justify-center">
+      <div className={`shrink-0 w-8 h-8 rounded-sm bg-[#712ae2] flex items-center justify-center ${isRechecking && isLastMessage ? "animate-pulse" : ""}`}>
         <AgentIcon />
       </div>
       <div className="flex-1 min-w-0 bg-[#f8fafc] border border-[#e2e8f0] rounded-tr-2xl rounded-br-2xl rounded-bl-2xl p-4 shadow-sm">
-        {isStreaming ? (
-          <div className="flex items-center gap-2 text-[#94a3b8] text-sm">
-            <SpinnerIcon size={13} />
-            <span>Analyzing project intent…</span>
-          </div>
-        ) : classification ? (
-          <ClassificationCard cls={classification} />
-        ) : content ? (
-          <div className="prose prose-sm max-w-none text-[#0b1c30]">
-            <MarkdownRenderer content={content} />
-          </div>
+        {intentForm ? (
+          <IntentFormCard
+            form={intentForm}
+            onSubmit={onFormSubmit ?? (() => {})}
+            disabled={isRechecking}
+            isRechecking={isRechecking && isLastMessage}
+          />
         ) : (
           <div className="flex items-center gap-2 text-[#94a3b8] text-sm">
             <SpinnerIcon size={13} />
@@ -210,127 +400,312 @@ function MetaBadge({ step }: { step: { model?: string; costUsd?: number; duratio
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function IntentSubStage() {
-  const step             = usePipelineStore((s) => s.steps.intent);
-  const streamingContent = usePipelineStore((s) => s.streamingContent);
-  const currentStep      = usePipelineStore((s) => s.currentStep);
-  const isRunning        = usePipelineStore((s) => s.isRunning);
-  const featureBrief     = usePipelineStore((s) => s.featureBrief);
-  const startPipeline    = usePipelineStore((s) => s.startPipeline);
-  const goToSubStage     = useStageStore((s) => s.goToSubStage);
+  const isRunning      = usePipelineStore((s) => s.isRunning);
+  const startPipeline  = usePipelineStore((s) => s.startPipeline);
+  const featureBrief   = usePipelineStore((s) => s.featureBrief);
+  const goToSubStage   = useStageStore((s) => s.goToSubStage);
+  const setProjectName = useStageStore((s) => s.setProjectName);
 
-  const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages]     = useState<ConvMsg[]>([]);
-  const bottomRef    = useRef<HTMLDivElement>(null);
-  const isDoneRef    = useRef(false);
-  const initialised  = useRef(false);
+  const [inputValue, setInputValue]         = useState("");
+  const [messages, setMessages]             = useState<ConvMsg[]>([]);
+  const [isRechecking, setIsRechecking]     = useState(false);
+  const [streamingText, setStreamingText]   = useState("");
+  const [intentAllClear, setIntentAllClear] = useState(false);
 
-  const isThisRunning = isRunning && currentStep === "intent";
-  const isDone        = step?.status === "completed";
+  const qaHistoryRef     = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const enrichedBriefRef = useRef("");
+  const bottomRef        = useRef<HTMLDivElement>(null);
 
-  const classification = (step?.metadata as Record<string, unknown> | undefined)
-    ?.classification as Classification | undefined;
+  // Intent stage runs BEFORE the full pipeline — only block on isRechecking here.
+  // isRunning reflects the main pipeline which hasn't started yet.
+  const isAgentActive = isRechecking;
 
-  // ── Initialise conversation from existing store state (e.g. after HMR / tab switch) ──
+  // Auto-start: if a brief was set in the initial stage, immediately begin intent analysis.
   useEffect(() => {
-    if (initialised.current) return;
-    initialised.current = true;
-    const init: ConvMsg[] = [];
-    if (featureBrief) {
-      init.push({ role: "user", text: featureBrief, id: "init-user" });
-    }
-    if (step?.status === "completed" && step.content) {
-      const cls = (step.metadata as Record<string, unknown> | undefined)
-        ?.classification as Classification | undefined;
-      init.push({
-        role: "ai",
-        content: step.content,
-        classification: cls,
-        model: step.model,
-        costUsd: step.costUsd,
-        durationMs: step.durationMs,
-        id: "init-ai",
-      });
-      isDoneRef.current = true;
-    }
-    if (init.length) setMessages(init);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Append AI message when intent step completes ──
-  useEffect(() => {
-    if (isDone && !isDoneRef.current) {
-      isDoneRef.current = true;
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          content: step?.content ?? "",
-          classification,
-          model: step?.model,
-          costUsd: step?.costUsd,
-          durationMs: step?.durationMs,
-          id: `ai-${Date.now()}`,
-        } satisfies AiConvMsg,
+    console.log("[intent] mounted — featureBrief:", featureBrief.slice(0, 60), "isRunning:", isRunning);
+    if (featureBrief.trim() && messages.length === 0 && !isRechecking) {
+      console.log("[intent] auto-starting with featureBrief from store");
+      enrichedBriefRef.current = featureBrief.trim();
+      qaHistoryRef.current = [];
+      setMessages([
+        { role: "user", text: featureBrief.trim(), id: `user-auto-${Date.now()}` } satisfies UserConvMsg,
       ]);
-    }
-    if (!isDone) {
-      isDoneRef.current = false;
+      setIsRechecking(true);
+      callRecheckStream(featureBrief.trim(), [])
+        .then((result) => {
+          console.log("[intent] auto-start result:", result ? "ok" : "null");
+          if (!result) {
+            setMessages((prev) => [...prev, {
+              role: "ai",
+              content: "Error analyzing brief.",
+              intentForm: { summary: "Error analyzing brief. Please try again.", questions: [] },
+              id: `ai-err-auto-${Date.now()}`,
+            } satisfies AiConvMsg]);
+            return;
+          }
+          if (result.project_name?.trim()) setProjectName(result.project_name.trim());
+          if (result.all_clear || result.questions.length === 0) setIntentAllClear(true);
+          setMessages((prev) => [...prev, {
+            role: "ai",
+            content: JSON.stringify(result),
+            intentForm: result,
+            id: `ai-auto-${Date.now()}`,
+          } satisfies AiConvMsg]);
+        })
+        .catch((err) => {
+          console.error("[intent] auto-start error:", err);
+          setMessages((prev) => [...prev, {
+            role: "ai",
+            content: `Error: ${err instanceof Error ? err.message : "Unknown error"}.`,
+            intentForm: { summary: "Network error — please try again.", questions: [] },
+            id: `ai-err-auto-${Date.now()}`,
+          } satisfies AiConvMsg]);
+        })
+        .finally(() => setIsRechecking(false));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDone]);
+  }, []);
 
-  // ── Auto-scroll ──
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent, isThisRunning]);
+  // ── Shared SSE streaming helper ────────────────────────────────────────
+  // Consumes pipeline-style SSE events from /api/agents/intent-recheck.
+  // step_stream events accumulate into streamingText for a typing animation;
+  // step_complete carries the final parsed IntentFormData as JSON in data.content.
+  async function callRecheckStream(
+    brief: string,
+    history: { role: "user" | "assistant"; content: string }[],
+  ): Promise<IntentFormData | null> {
+    console.log("[intent] callRecheckStream called, brief length:", brief.length, "history:", history.length);
+    setStreamingText("");
+    const resp = await fetch("/api/agents/intent-recheck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brief, conversationHistory: history }),
+    });
+    console.log("[intent] fetch response status:", resp.status, "ok:", resp.ok, "body:", !!resp.body);
+    if (!resp.ok || !resp.body) {
+      console.error("[intent] fetch failed or no body");
+      return null;
+    }
 
-  function handleSend() {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let result: IntentFormData | null = null;
+    // SSE frames are delimited by \n\n
+    let buf = "";
+    let frameCount = 0;
+    let streamCount = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          console.log("[intent] stream done. frames processed:", frameCount, "stream events:", streamCount, "result:", result ? "✓" : "null");
+          break;
+        }
+        buf += decoder.decode(value, { stream: true });
+        // Split on double-newline — each SSE frame ends with \n\n
+        const frames = buf.split("\n\n");
+        buf = frames.pop() ?? "";
+        for (const frame of frames) {
+          if (!frame.trim()) continue;
+          frameCount++;
+          const line = frame.startsWith("data: ") ? frame : frame.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) {
+            console.warn("[intent] frame with no data: line →", JSON.stringify(frame.slice(0, 80)));
+            continue;
+          }
+          try {
+            const event = JSON.parse(line.slice(6)) as {
+              type: string;
+              stepId?: string;
+              data?: Record<string, unknown>;
+            };
+            console.log("[intent] SSE event type:", event.type, "stepId:", event.stepId);
+            if (event.type === "step_stream") {
+              const chunk = (event.data?.chunk as string) ?? "";
+              if (chunk) {
+                streamCount++;
+                setStreamingText((t) => t + chunk);
+              }
+            } else if (event.type === "step_complete") {
+              const content = (event.data?.content as string) ?? "";
+              console.log("[intent] step_complete content length:", content.length, "preview:", content.slice(0, 120));
+              if (content) {
+                try {
+                  result = JSON.parse(content) as IntentFormData;
+                  console.log("[intent] parsed IntentFormData — project_name:", result.project_name, "questions:", result.questions?.length);
+                } catch (e) {
+                  console.error("[intent] failed to parse step_complete content as JSON:", e, content.slice(0, 200));
+                }
+              }
+            } else if (event.type === "step_error") {
+              console.error("[intent] step_error:", event.data?.error);
+            }
+          } catch (e) {
+            console.error("[intent] failed to parse SSE frame:", e, JSON.stringify(frame.slice(0, 120)));
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+      setStreamingText("");
+    }
+    console.log("[intent] callRecheckStream returning:", result ? JSON.stringify(result).slice(0, 120) : "null");
+    return result;
+  }
+
+  // ── Handle form submission: call recheck API ──
+  async function handleFormSubmit(
+    questions: IntentQuestion[],
+    answers: Record<string, string | string[]>,
+  ) {
+    const parts = Object.entries(answers)
+      .map(([id, val]) => {
+        const q = questions.find((q) => q.id === id);
+        const label = q?.label ?? id;
+        const value = Array.isArray(val) ? val.join(", ") : val;
+        return `- ${label}: ${value}`;
+      })
+      .join("\n");
+
+    const userMsgText = parts;
+    enrichedBriefRef.current = `${enrichedBriefRef.current}\n\nUser clarifications:\n${parts}`;
+
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: userMsgText, id: `user-${Date.now()}` } satisfies UserConvMsg,
+    ]);
+
+    qaHistoryRef.current = [
+      ...qaHistoryRef.current,
+      { role: "assistant", content: `Questions asked: ${questions.map((q) => q.label).join("; ")}` },
+      { role: "user", content: userMsgText },
+    ];
+
+    setIsRechecking(true);
+    try {
+      const result = await callRecheckStream(enrichedBriefRef.current, qaHistoryRef.current);
+      console.log("[handleFormSubmit] callRecheckStream result:", result ? "ok" : "null");
+
+      if (!result) {
+        console.warn("[handleFormSubmit] result is null — appending error AI message");
+        setMessages((prev) => [...prev, { role: "ai", content: "Error: could not parse response.", intentForm: { summary: "Error — please try again.", questions: [] }, id: `ai-err-${Date.now()}` } satisfies AiConvMsg]);
+        return;
+      }
+
+      if (result.project_name?.trim()) setProjectName(result.project_name.trim());
+      if (result.all_clear || result.questions.length === 0) setIntentAllClear(true);
+
+      console.log("[handleFormSubmit] appending AI message, questions:", result.questions?.length);
+      setMessages((prev) => [...prev, {
+        role: "ai",
+        content: JSON.stringify(result),
+        intentForm: { ...result, questions: result.all_clear ? [] : result.questions },
+        id: `ai-${Date.now()}`,
+      } satisfies AiConvMsg]);
+    } catch (err) {
+      console.error("[handleFormSubmit] caught error:", err);
+      setMessages((prev) => [...prev, { role: "ai", content: `Error: ${err instanceof Error ? err.message : "Network error"}.`, intentForm: { summary: `Network error — please try again.`, questions: [] }, id: `ai-err-${Date.now()}` } satisfies AiConvMsg]);
+    } finally {
+      setIsRechecking(false);
+    }
+  }
+
+  function handleStartGeneration() {
+    startPipeline(enrichedBriefRef.current);
+    goToSubStage("prd", "preparation");
+  }
+
+  // ── Handle initial brief send: call recheck API to get first set of questions ──
+  async function handleSend() {
     const val = inputValue.trim();
-    if (!val || isThisRunning) return;
+    if (!val || isAgentActive) return;
     setInputValue("");
+    enrichedBriefRef.current = val;
+    qaHistoryRef.current = [];
+    setIntentAllClear(false);
+
     setMessages((prev) => [
       ...prev,
       { role: "user", text: val, id: `user-${Date.now()}` } satisfies UserConvMsg,
     ]);
-    startPipeline(val);
+
+    setIsRechecking(true);
+    try {
+      const result = await callRecheckStream(val, []);
+      console.log("[handleSend] callRecheckStream result:", result ? "ok" : "null");
+
+      if (!result) {
+        console.warn("[handleSend] result is null — appending error AI message");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "ai",
+            content: "Sorry, there was an error analyzing your brief. Please try again.",
+            intentForm: { summary: "Sorry, there was an error analyzing your brief. Please try again.", questions: [] },
+            id: `ai-err-${Date.now()}`,
+          } satisfies AiConvMsg,
+        ]);
+        return;
+      }
+
+      if (result.project_name?.trim()) {
+        setProjectName(result.project_name.trim());
+      }
+
+      if (result.all_clear || result.questions.length === 0) {
+        setIntentAllClear(true);
+      }
+
+      console.log("[handleSend] appending AI message with intentForm, questions:", result.questions?.length);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          content: JSON.stringify(result),
+          intentForm: result,
+          id: `ai-${Date.now()}`,
+        } satisfies AiConvMsg,
+      ]);
+    } catch (err) {
+      console.error("[handleSend] caught error:", err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          content: `Network error: ${err instanceof Error ? err.message : "Unknown error"}. Please try again.`,
+          id: `ai-err-${Date.now()}`,
+        } satisfies AiConvMsg,
+      ]);
+    } finally {
+      setIsRechecking(false);
+    }
   }
 
-  const isEmpty = messages.length === 0 && !isThisRunning;
+  const isEmpty = messages.length === 0 && !isAgentActive;
 
   return (
     <div className="flex flex-col w-full flex-1 min-h-0 bg-white border border-[#e2e8f0] rounded-lg p-5 shadow-sm overflow-hidden">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[#f1f5f9] bg-white/80 backdrop-blur-sm">
         <div>
           <h2 className="text-[16px] font-semibold text-[#0b1c30] leading-6">Intent Refinement</h2>
           <div className="flex items-center gap-2 mt-0.5">
-            <span
-              className={`w-2 h-2 rounded-full ${isThisRunning ? "bg-[#f59e0b] animate-pulse" : isDone ? "bg-[#10b981]" : "bg-[#cbd5e1]"}`}
-            />
+            <span className={`w-2 h-2 rounded-full ${isRechecking ? "bg-[#f59e0b] animate-pulse" : intentAllClear ? "bg-[#10b981]" : "bg-[#cbd5e1]"}`} />
             <span className="text-[14px] text-[#45464d]">
-              {isThisRunning
-                ? "Agent active: analyzing intent…"
-                : isDone
-                ? "Agent active: Project Architect v2.4"
-                : "Waiting to start"}
+              {isRechecking ? "Agent active: analyzing intent…" : intentAllClear ? "Intent confirmed — ready to generate" : "Waiting for project brief"}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-0.5">
-          <button className="p-2 rounded hover:bg-[#f1f5f9] text-[#64748b] transition-colors" title="Refresh">
-            <RefreshIcon />
-          </button>
-          <button className="p-2 rounded hover:bg-[#f1f5f9] text-[#64748b] transition-colors" title="More">
-            <MoreIcon />
-          </button>
+          <button className="p-2 rounded hover:bg-[#f1f5f9] text-[#64748b] transition-colors" title="Refresh"><RefreshIcon /></button>
+          <button className="p-2 rounded hover:bg-[#f1f5f9] text-[#64748b] transition-colors" title="More"><MoreIcon /></button>
         </div>
       </div>
 
-      {/* ── Chat History ── */}
+      {/* Chat History */}
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
-
-        {/* Empty state */}
         {isEmpty && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-[#94a3b8]">
             <div className="w-12 h-12 rounded-full bg-[#f8fafc] border border-[#e2e8f0] flex items-center justify-center">
@@ -340,73 +715,79 @@ export default function IntentSubStage() {
           </div>
         )}
 
-        {/* Conversation history */}
-        {messages.map((msg) =>
+        {messages.map((msg, idx) =>
           msg.role === "user" ? (
             <UserMessage key={msg.id} text={msg.text} />
           ) : (
-            <div key={msg.id} className="space-y-1">
-              <AIMessage
-                content={msg.content}
-                classification={(msg as AiConvMsg).classification}
-              />
-              <MetaBadge step={msg as AiConvMsg} />
-            </div>
+            <AIMessage
+              key={msg.id}
+              intentForm={(msg as AiConvMsg).intentForm}
+              onFormSubmit={handleFormSubmit}
+              isRechecking={isRechecking}
+              isLastMessage={idx === messages.length - 1}
+            />
           )
         )}
 
-        {/* Streaming AI message (while intent step runs) */}
-        {isThisRunning && (
-          <AIMessage
-            content={streamingContent}
-            isStreaming={!streamingContent}
-          />
+        {isRechecking && (
+          <div className="flex gap-4 items-start">
+            <div className="shrink-0 w-8 h-8 rounded-sm bg-[#712ae2] flex items-center justify-center animate-pulse">
+              <AgentIcon />
+            </div>
+            <div className="flex-1 min-w-0 bg-[#f8fafc] border border-[#e2e8f0] rounded-tr-2xl rounded-br-2xl rounded-bl-2xl p-4 shadow-sm">
+              {streamingText ? (
+                <div className="prose prose-sm max-w-none text-[#0b1c30]">
+                  <MarkdownRenderer content={streamingText} />
+                  <TypingDots />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-[#94a3b8] text-sm">
+                  <SpinnerIcon size={13} />
+                  <span>Analyzing your brief</span>
+                  <TypingDots />
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Input Area ── */}
+      {/* Input Area */}
       <div className="shrink-0 border-t border-[#f1f5f9] bg-white px-6 py-5">
         <div className="flex items-center gap-4 border border-[#e2e8f0] rounded-lg bg-[#f8fafc] px-2.5 py-2.5">
-          {/* Attach button */}
           <button className="p-2 rounded text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-colors shrink-0">
             <AttachIcon />
           </button>
-
-          {/* Text input */}
           <input
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder={isThisRunning ? "Analyzing intent…" : "Describe or refine your project idea…"}
+            placeholder={isAgentActive ? "Agent is thinking…" : "Describe or refine your project idea…"}
             className="flex-1 bg-transparent text-[16px] text-[#0b1c30] placeholder:text-[#6b7280] outline-none min-w-0 px-3 py-2"
-            disabled={isThisRunning}
+            disabled={isAgentActive}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                void handleSend();
               }
             }}
           />
-
-          {/* Send button */}
           <button
-            onClick={handleSend}
+            onClick={() => { console.log("[intent] Send clicked, inputValue:", inputValue.trim(), "isAgentActive:", isAgentActive); void handleSend(); }}
+            disabled={!inputValue.trim() || isAgentActive}
             className="flex items-center gap-2 px-4 py-2 bg-[#07c160] text-white text-[16px] font-semibold rounded shrink-0 hover:bg-[#06a050] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!inputValue.trim() || isThisRunning}
           >
             <span>Send</span>
             <SendIcon />
           </button>
-
-          {/* Next Step button */}
           <button
-            onClick={() => goToSubStage("prd", "preparation")}
-            disabled={!isDone}
+            onClick={handleStartGeneration}
+            disabled={!intentAllClear || isAgentActive}
             className="flex items-center gap-2 px-4 py-2 bg-[#4f46e5] text-white text-[16px] font-semibold rounded shrink-0 shadow-sm hover:bg-[#4338ca] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <span>Next Step</span>
+            <span>Start Generation</span>
             <ArrowRightIcon />
           </button>
         </div>
