@@ -47,6 +47,7 @@ import {
 import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
+import { trimProjectContextForTask } from "./worker-context-trim";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -1435,7 +1436,24 @@ async function generateCode(state: WorkerState) {
     }
 
     if (state.projectContext) {
-      contextParts.push(state.projectContext);
+      // Trim the (potentially huge) projectContext down to a task-relevant
+      // subset. Protections against info loss:
+      //   1. Always-keep whitelist (shared/common/conventions/…)
+      //   2. Force-include sections that mention task's FR/AC IDs
+      //   3. Trim-marker at the bottom telling the worker to use
+      //      read_file / grep if it needs details it doesn't see
+      // See: src/lib/langgraph/worker-context-trim.ts
+      const trimmed = trimProjectContextForTask(state.projectContext, {
+        task,
+        sessionId: state.sessionId,
+        label: state.workerLabel,
+      });
+      contextParts.push(trimmed.content);
+      if (trimmed.trimmed) {
+        console.log(
+          `[Worker:${state.workerLabel}] projectContext trimmed: ${trimmed.originalChars.toLocaleString()} -> ${trimmed.usedChars.toLocaleString()} chars (task=${task.id} "${task.title}")`,
+        );
+      }
     }
     // PrdSpec (PAGE-*/CMP-*) entries for this task — only useful for
     // frontend/test workers, but cheap to include for others too when the

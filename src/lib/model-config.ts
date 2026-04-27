@@ -43,6 +43,7 @@ export const MODEL_CONFIG = {
 
   /** Code generation: try primary, fall back to secondary on failure. */
   codeGen: [
+    "deepseek/deepseek-v4-pro",
     "openai/gpt-5.3-codex",
     "qwen/qwen3.6-plus",
     "deepseek/deepseek-v3.2",

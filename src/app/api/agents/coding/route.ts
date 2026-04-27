@@ -62,7 +62,12 @@ import type { ApiContract, GeneratedFile } from "@/lib/langgraph/state";
 import {
   writeCodingSessionReport,
   clearCodingSessionLlmUsage,
+  getCodingSessionLlmUsage,
 } from "@/lib/pipeline/coding-session-report";
+import {
+  runModelScoringStage,
+  type GateResultsSnapshot,
+} from "@/lib/pipeline/model-scoring";
 
 const execFileAsync = promisify(execFile);
 
@@ -824,10 +829,28 @@ export async function POST(request: NextRequest) {
       const sseRepairSink: RepairEmitter = (event) => {
         send(mapper.buildRepairEvent(event as RepairEvent));
       };
+      // In-memory counter sink — feeds the model-scoring stage in the
+      // finally block. Non-blocking; pure counter, no I/O.
+      const repairCounters = {
+        truncation: 0,
+        stagnation: 0,
+        fallback: 0,
+      };
+      const counterRepairSink: RepairEmitter = (event) => {
+        const name = event.event;
+        if (name === "truncation_detected" || name === "doc_truncated") {
+          repairCounters.truncation += 1;
+        } else if (name === "stagnation_warning") {
+          repairCounters.stagnation += 1;
+        } else if (name.includes("fallback")) {
+          repairCounters.fallback += 1;
+        }
+      };
       const repairEmitter = createRepairEmitter([
         sseRepairSink,
         createJsonlRepairSink(outputRoot),
         consoleRepairSink,
+        counterRepairSink,
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
@@ -1086,6 +1109,96 @@ export async function POST(request: NextRequest) {
             reportErr instanceof Error ? reportErr.message : reportErr,
           );
         }
+
+        // ── Model scoring stage ────────────────────────────────────────────
+        // Build per-session scorecard, append to project leaderboard, diff
+        // MODEL_CONFIG vs previous run. Never throws; errors are logged.
+        // See src/lib/pipeline/model-scoring/.
+        try {
+          const sessionLlmUsage = getCodingSessionLlmUsage(sessionId);
+          const sessionTaskResults =
+            reportTaskResults.length > 0
+              ? reportTaskResults
+              : codingTasks.map((task) => ({
+                  id: task.id,
+                  title: task.title,
+                  coversRequirementIds: task.coversRequirementIds ?? [],
+                  generatedFiles:
+                    collectedTaskResults.get(task.id)?.generatedFiles ?? [],
+                  status:
+                    collectedTaskResults.get(task.id)?.status ?? "unknown",
+                }));
+
+          const tasksTotal = sessionTaskResults.length;
+          const tasksCompleted = sessionTaskResults.filter(
+            (t) => t.status === "completed",
+          ).length;
+          const tasksCompletedWithWarnings = sessionTaskResults.filter(
+            (t) => t.status === "completed_with_warnings",
+          ).length;
+          const tasksFailed = sessionTaskResults.filter(
+            (t) => t.status === "failed",
+          ).length;
+
+          const gateResults: GateResultsSnapshot = {
+            integrationExecuted:
+              collectedGateSnapshot.gatesExecuted.integrationVerify,
+            integrationPassed:
+              collectedGateSnapshot.gatesExecuted.integrationVerify &&
+              !collectedGateSnapshot.integrationErrors.trim(),
+            runtimeExecuted:
+              collectedGateSnapshot.gatesExecuted.runtimeVerify,
+            runtimePassed:
+              collectedGateSnapshot.gatesExecuted.runtimeVerify &&
+              !collectedGateSnapshot.runtimeVerifyErrors.trim(),
+            e2eExecuted: collectedGateSnapshot.gatesExecuted.e2eVerify,
+            e2ePassed:
+              collectedGateSnapshot.gatesExecuted.e2eVerify &&
+              !collectedGateSnapshot.e2eVerifyErrors.trim(),
+            auditPassed: finalAuditResult?.passed ?? true,
+            uncoveredRequirementCount:
+              finalAuditResult?.uncovered.length ?? 0,
+            tasksTotal,
+            tasksCompleted,
+            tasksCompletedWithWarnings,
+            tasksFailed,
+            truncationEventCount: repairCounters.truncation,
+            stagnationEventCount: repairCounters.stagnation,
+            fallbackTriggerCount: repairCounters.fallback,
+            integrationFixAttempts:
+              collectedGateSnapshot.integrationFixAttempts,
+            scaffoldFixAttempts: collectedGateSnapshot.scaffoldFixAttempts,
+          };
+
+          const scoringResult = await runModelScoringStage({
+            sessionId,
+            projectPath: outputRoot,
+            outputDir: outputRoot,
+            endedAt: new Date().toISOString(),
+            llmUsage: sessionLlmUsage,
+            taskResults: sessionTaskResults,
+            gateResults,
+          });
+          console.log(
+            `[CodingAPI] Model scoring done: session=${scoringResult.scorecard.sessionComposite.score}(${scoringResult.scorecard.sessionComposite.grade}), ` +
+              `rows=${scoringResult.scorecard.rows.length}, ` +
+              `modelChange=${scoringResult.hasModelChange ? "YES" : "no"}` +
+              (scoringResult.errors.length > 0
+                ? ` (${scoringResult.errors.length} warning(s))`
+                : ""),
+          );
+          if (scoringResult.errors.length > 0) {
+            for (const err of scoringResult.errors) {
+              console.warn(`[CodingAPI] model-scoring warning: ${err}`);
+            }
+          }
+        } catch (scoringErr) {
+          console.warn(
+            `[CodingAPI] Model scoring stage failed (ignored):`,
+            scoringErr instanceof Error ? scoringErr.message : scoringErr,
+          );
+        }
+
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
         controller.close();
