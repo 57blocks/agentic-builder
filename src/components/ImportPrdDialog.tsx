@@ -10,12 +10,42 @@ interface ImportPrdDialogProps {
   onClose: () => void;
 }
 
-const ACCEPTED_EXTS = [".md", ".markdown", ".txt"];
+const ACCEPTED_EXTS = [".md", ".markdown", ".txt", ".pdf"];
 const MAX_BYTES = 500_000;
+const PDF_MAX_BYTES = 20_000_000; // 20 MB for PDFs
 
 function isAcceptedFile(file: File): boolean {
   const lower = file.name.toLowerCase();
   return ACCEPTED_EXTS.some((ext) => lower.endsWith(ext));
+}
+
+function isPdfFile(file: File): boolean {
+  return file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+}
+
+async function parsePdfToText(file: File): Promise<string> {
+  const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist");
+  // 使用内置 worker，避免跨域问题
+  GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.mjs",
+    import.meta.url,
+  ).toString();
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+  const pageTexts: string[] = [];
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item) => ("str" in item ? item.str : ""))
+      .join(" ");
+    pageTexts.push(pageText);
+  }
+
+  return pageTexts.join("\n\n");
 }
 
 function formatBytes(bytes: number): string {
@@ -40,6 +70,7 @@ export default function ImportPrdDialog({
   const [draft, setDraft] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [pdfParsing, setPdfParsing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -49,15 +80,45 @@ export default function ImportPrdDialog({
     setDraft("");
   }, [isOpen, refreshImportedPrdStatus]);
 
-  const isBusy = loading === "saving" || loading === "clearing";
+  const isBusy = loading === "saving" || loading === "clearing" || pdfParsing;
 
   const readFile = useCallback(async (file: File) => {
     if (!isAcceptedFile(file)) {
       setLocalError(
-        `Only .md / .markdown / .txt files are supported (got "${file.name}").`,
+        `Only .md / .markdown / .txt / .pdf files are supported (got "${file.name}").`,
       );
       return;
     }
+
+    if (isPdfFile(file)) {
+      if (file.size > PDF_MAX_BYTES) {
+        setLocalError(
+          `PDF is ${formatBytes(file.size)} — larger than the ${formatBytes(PDF_MAX_BYTES)} import limit.`,
+        );
+        return;
+      }
+      try {
+        setPdfParsing(true);
+        setLocalError(null);
+        const text = await parsePdfToText(file);
+        if (!text.trim()) {
+          setLocalError("Could not extract any text from the PDF. It may be scanned or image-based.");
+          return;
+        }
+        setDraft(text);
+        requestAnimationFrame(() => {
+          textareaRef.current?.focus();
+        });
+      } catch (err) {
+        setLocalError(
+          err instanceof Error ? `PDF parse error: ${err.message}` : "Failed to parse the PDF.",
+        );
+      } finally {
+        setPdfParsing(false);
+      }
+      return;
+    }
+
     if (file.size > MAX_BYTES) {
       setLocalError(
         `File is ${formatBytes(file.size)} — larger than the ${formatBytes(
@@ -228,19 +289,23 @@ export default function ImportPrdDialog({
                     <polyline points="17 8 12 3 7 8" />
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
-                  <span>
-                    Drop a{" "}
-                    <span className="font-mono text-[11px]">
-                      .md / .markdown / .txt
-                    </span>{" "}
-                    file here or
-                  </span>
+                  {pdfParsing ? (
+                    <span className="text-indigo-600">Parsing PDF…</span>
+                  ) : (
+                    <span>
+                      Drop a{" "}
+                      <span className="font-mono text-[11px]">
+                        .md / .markdown / .txt / .pdf
+                      </span>{" "}
+                      file here or
+                    </span>
+                  )}
                 </div>
                 <label className="cursor-pointer rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100">
                   Choose file
                   <input
                     type="file"
-                    accept=".md,.markdown,.txt,text/markdown,text/plain"
+                    accept=".md,.markdown,.txt,.pdf,text/markdown,text/plain,application/pdf"
                     onChange={handleFileInput}
                     className="hidden"
                   />
@@ -267,8 +332,9 @@ export default function ImportPrdDialog({
                   className="min-h-[260px] resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[12px] leading-relaxed text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-300"
                 />
                 <p className="text-[10.5px] text-zinc-400">
-                  Max {formatBytes(MAX_BYTES)}. Next pipeline run will reuse
-                  this PRD verbatim and skip PM generation.
+                  Max {formatBytes(MAX_BYTES)} for text files, {formatBytes(PDF_MAX_BYTES)} for PDF.
+                  PDF text will be extracted automatically. Next pipeline run
+                  will reuse this PRD verbatim and skip PM generation.
                 </p>
               </div>
 
