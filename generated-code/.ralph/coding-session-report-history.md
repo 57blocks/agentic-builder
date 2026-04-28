@@ -1,12 +1,15 @@
 # Coding Session Report History
 
-- Total archived reports: 8
+- Total archived reports: 11
 
 ## Sessions
 ## Compare Table
 
 | Ended At | Status | Score | Duration | Calls | Tokens | Cost | Primary Model | Model Score | Report |
 | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| 2026-04-28T12:45:11.101Z | FAIL | 58/100 (F) | 138m 5s | 351 | 11994558 | $4.0887 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-28T12-45-11-101Z.52851b86-63eb-4e90-a9c2-5f99fe94a9bd.md) |
+| 2026-04-27T10:34:58.772Z | FAIL | 29/100 (F) | 81m 15s | 221 | 6884233 | $1.2405 | deepseek-v4-pro | 88/100 (B) | [view](./report-history/coding-session-report.2026-04-27T10-34-58-772Z.2c0034f3-ad9f-41e1-8558-dd1071123ad7.md) |
+| 2026-04-27T06:35:46.637Z | FAIL | 29/100 (F) | 156m 5s | 193 | 3913112 | $4.5467 | openai/gpt-5.3-codex-20260224 | 88.8/100 (B) | [view](./report-history/coding-session-report.2026-04-27T06-35-46-637Z.a5c1d064-9745-45b0-8224-f983d0bb8371.md) |
 | 2026-04-24T00:41:23.684Z | FAIL | 56/100 (F) | 14m 21s | 121 | 1751797 | $1.6542 | anthropic/claude-4-sonnet-20250522 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-24T00-41-23-684Z.0524f962-5ea4-45f1-90ce-c47061eabbc2.md) |
 | 2026-04-23T16:21:07.469Z | FAIL | 50/100 (F) | 49m 15s | 262 | 6412315 | $5.7360 | anthropic/claude-4-sonnet-20250522 | 79.1/100 (C) | [view](./report-history/coding-session-report.2026-04-23T16-21-07-469Z.0d99a553-8917-4f4d-aa79-099574b2a21f.md) |
 | 2026-04-23T08:57:08.691Z | FAIL | 46/100 (F) | 106m 29s | 186 | 5351976 | $13.1156 | openai/gpt-5.3-codex-20260224 | 96.9/100 (A) | [view](./report-history/coding-session-report.2026-04-23T08-57-08-691Z.840ed1f7-158d-422f-b4ca-d4a7e674fa68.md) |
@@ -16,6 +19,12 @@
 | 2026-04-22T07:56:34.466Z | ABORTED | 56/100 (F) | 12m 40s | 9 | 171427 | $0.0564 | moonshotai/kimi-k2.6-20260420 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-22T07-56-34-466Z.a1243654-aed0-45be-b668-f6e5ba8c5a64.md) |
 | 2026-04-21T13:21:19.776Z | FAIL | 19/100 (F) | 42m 57s | 120 | 1886257 | $0.0000 | openai/gpt-5.3-codex-20260224 | 0/100 (N/A) | [view](./report-history/coding-session-report.2026-04-21T13-21-19-776Z.05231d7c-b20a-4b93-a052-abb96e447c80.md) |
 
+- [2026-04-28T12:45:11.101Z | FAIL | 58/100 (F)](./report-history/coding-session-report.2026-04-28T12-45-11-101Z.52851b86-63eb-4e90-a9c2-5f99fe94a9bd.md)
+  duration=138m 5s, calls=351, tokens=11994558, cost=$4.0887, primaryModel=deepseek-v4-pro 100/100 (A), session=`52851b86-63eb-4e90-a9c2-5f99fe94a9bd`
+- [2026-04-27T10:34:58.772Z | FAIL | 29/100 (F)](./report-history/coding-session-report.2026-04-27T10-34-58-772Z.2c0034f3-ad9f-41e1-8558-dd1071123ad7.md)
+  duration=81m 15s, calls=221, tokens=6884233, cost=$1.2405, primaryModel=deepseek-v4-pro 88/100 (B), session=`2c0034f3-ad9f-41e1-8558-dd1071123ad7`
+- [2026-04-27T06:35:46.637Z | FAIL | 29/100 (F)](./report-history/coding-session-report.2026-04-27T06-35-46-637Z.a5c1d064-9745-45b0-8224-f983d0bb8371.md)
+  duration=156m 5s, calls=193, tokens=3913112, cost=$4.5467, primaryModel=openai/gpt-5.3-codex-20260224 88.8/100 (B), session=`a5c1d064-9745-45b0-8224-f983d0bb8371`
 - [2026-04-24T00:41:23.684Z | FAIL | 56/100 (F)](./report-history/coding-session-report.2026-04-24T00-41-23-684Z.0524f962-5ea4-45f1-90ce-c47061eabbc2.md)
   duration=14m 21s, calls=121, tokens=1751797, cost=$1.6542, primaryModel=anthropic/claude-4-sonnet-20250522 100/100 (A), session=`0524f962-5ea4-45f1-90ce-c47061eabbc2`
 - [2026-04-23T16:21:07.469Z | FAIL | 50/100 (F)](./report-history/coding-session-report.2026-04-23T16-21-07-469Z.0d99a553-8917-4f4d-aa79-099574b2a21f.md)

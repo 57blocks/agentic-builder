@@ -1,0 +1,260 @@
+{
+  "sessionId": "52851b86-63eb-4e90-a9c2-5f99fe94a9bd",
+  "savedAt": "2026-04-28T12:45:11.140Z",
+  "completedTaskIds": [
+    "T-001",
+    "T-003",
+    "T-002",
+    "T-E2E-001",
+    "T-004",
+    "T-E2E-002",
+    "T-005",
+    "T-006",
+    "T-007",
+    "T-008",
+    "T-009",
+    "T-010",
+    "T-011",
+    "T-012",
+    "T-013",
+    "T-014",
+    "T-015",
+    "T-016",
+    "T-017",
+    "T-018"
+  ],
+  "failedTaskIds": [],
+  "taskResults": {
+    "T-001": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/models/User.ts",
+        "backend/src/models/UserInterest.ts",
+        "backend/src/models/StyleAssessmentAnswer.ts",
+        "backend/src/models/TrendingTopic.ts",
+        "backend/src/models/CachedMarket.ts",
+        "backend/src/models/TopicMarketMatch.ts",
+        "backend/src/models/FeedItem.ts",
+        "backend/src/models/FeedAggregationRun.ts",
+        "backend/src/models/index.ts",
+        "backend/src/database/migrations/001-create-users.ts",
+        "backend/src/database/migrations/002-create-user-interests.ts",
+        "backend/src/database/migrations/003-create-style-assessment-answers.ts",
+        "backend/src/database/migrations/004-create-trending-topics.ts",
+        "backend/src/database/migrations/005-create-cached-markets.ts",
+        "backend/src/database/migrations/006-create-topic-market-matches.ts",
+        "backend/src/db.ts",
+        "backend/src/database/migrations/007-create-feed-items.ts",
+        "backend/src/database/migrations/008-create-feed-aggregation-runs.ts"
+      ]
+    },
+    "T-003": {
+      "status": "completed",
+      "generatedFiles": [
+        "docker-compose.yml",
+        "backend/.env.example",
+        "frontend/.env.example",
+        "backend/.env",
+        "frontend/.env"
+      ]
+    },
+    "T-002": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/types/user.ts",
+        "frontend/src/types/api.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/users.ts",
+        "frontend/src/api/client.ts"
+      ]
+    },
+    "T-E2E-001": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/playwright.config.ts",
+        "frontend/e2e/fixtures.ts",
+        "frontend/e2e/utils.ts",
+        "frontend/tests/e2e/fixtures.ts",
+        "frontend/tests/e2e/utils.ts",
+        "frontend/package.json"
+      ]
+    },
+    "T-004": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/hackerNewsApi.ts",
+        "backend/src/services/googleNewsApi.ts",
+        "backend/src/services/jinaApi.ts",
+        "backend/src/services/twitterApi.ts",
+        "backend/src/services/polymarketApi.ts",
+        "backend/src/services/quotientApi.ts",
+        "backend/src/services/hyperliquidApi.ts",
+        "backend/src/services/deribitApi.ts",
+        "backend/src/services/externalApis.ts"
+      ]
+    },
+    "T-E2E-002": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/tests/e2e/generated/e2e-001-landing-page-and-privy-modal-happy-error.spec.ts",
+        "frontend/tests/e2e/generated/e2e-002-post-auth-routing-sends-new-user-to-inte.spec.ts",
+        "frontend/tests/e2e/generated/e2e-003-interests-onboarding-enforces-minimum-3-.spec.ts",
+        "frontend/tests/e2e/generated/e2e-004-style-assessment-question-flow-back-pres.spec.ts",
+        "frontend/tests/e2e/generated/e2e-005-feed-populated-state-renders-card-anatom.spec.ts",
+        "frontend/tests/e2e/generated/e2e-006-feed-refresh-enters-aggregating-log-rate.spec.ts"
+      ]
+    },
+    "T-005": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/llmService.ts",
+        "backend/src/utils/queue.ts",
+        "backend/src/services/marketMatcher.ts",
+        "backend/src/services/feedAggregator.ts",
+        "backend/src/workers/feedAggregationWorker.ts"
+      ]
+    },
+    "T-006": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/api/modules/feed/feed.service.ts",
+        "backend/src/api/modules/feed/feed.controller.ts",
+        "backend/src/api/modules/feed/feed.routes.ts",
+        "backend/src/api/modules/index.ts"
+      ]
+    },
+    "T-007": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/marketScanner.ts",
+        "backend/src/api/modules/scan/scan.service.ts",
+        "backend/src/api/modules/scan/scan.controller.ts",
+        "backend/src/api/modules/scan/scan.routes.ts",
+        "backend/src/api/modules/index.ts"
+      ]
+    },
+    "T-008": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/utils/styleAssessment.ts",
+        "backend/src/api/modules/auth/auth.service.ts",
+        "backend/src/api/modules/auth/auth.controller.ts",
+        "backend/src/api/modules/users/users.service.ts",
+        "backend/src/api/modules/users/users.controller.ts",
+        "backend/src/api/modules/users/users.routes.ts",
+        "backend/src/api/modules/index.ts",
+        "backend/src/api/modules/auth/auth.routes.ts"
+      ]
+    },
+    "T-009": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/components/layout/AppShell.tsx",
+        "frontend/src/App.tsx",
+        "frontend/src/router.tsx",
+        "frontend/src/main.tsx",
+        "frontend/src/providers/AppProviders.tsx",
+        "frontend/src/views/LandingPage.tsx",
+        "frontend/src/views/InterestsPage.tsx",
+        "frontend/src/views/StylePage.tsx",
+        "frontend/src/views/StyleResultPage.tsx",
+        "frontend/src/views/FeedPage.tsx",
+        "frontend/src/views/MarketsPage.tsx",
+        "frontend/src/views/ProfilePage.tsx",
+        "frontend/src/views/SettingsPage.tsx",
+        "frontend/src/views/AlertsPage.tsx",
+        "frontend/src/utils/constants.ts",
+        "frontend/src/components/auth/PrivyProvider.tsx",
+        "frontend/src/hooks/useAuth.ts",
+        "frontend/src/components/auth/AuthGuard.tsx",
+        "frontend/src/components/layout/TopBar.tsx",
+        "frontend/src/components/layout/Sidebar.tsx"
+      ]
+    },
+    "T-010": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/views/LandingPage.tsx",
+        "frontend/src/components/auth/LoginModal.tsx"
+      ]
+    },
+    "T-011": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/utils/interestClusters.ts",
+        "frontend/src/components/onboarding/InterestCard.tsx",
+        "frontend/src/views/OnboardingInterestsPage.tsx",
+        "frontend/src/router.tsx"
+      ]
+    },
+    "T-012": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/utils/styleQuestions.ts",
+        "frontend/src/utils/styleTags.ts",
+        "frontend/src/components/onboarding/QuestionCard.tsx",
+        "frontend/src/views/StylePage.tsx",
+        "frontend/src/views/StyleResultPage.tsx",
+        "frontend/src/views/OnboardingStylePage.tsx",
+        "frontend/src/views/OnboardingStyleResultPage.tsx"
+      ]
+    },
+    "T-013": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/types/api.ts",
+        "frontend/src/api/feed.ts",
+        "frontend/src/hooks/useSSE.ts",
+        "frontend/src/hooks/useFeed.ts",
+        "frontend/src/components/feed/StatusStrip.tsx",
+        "frontend/src/components/feed/AgentLogPanel.tsx",
+        "frontend/src/components/feed/MarketCard.tsx",
+        "frontend/src/components/feed/FeedCard.tsx",
+        "frontend/src/views/FeedPage.tsx"
+      ]
+    },
+    "T-014": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/api/markets.ts",
+        "frontend/src/hooks/useMarketScanner.ts",
+        "frontend/src/components/markets/ScanInput.tsx",
+        "frontend/src/components/markets/ScanLogPanel.tsx",
+        "frontend/src/components/markets/MarketTypePanel.tsx",
+        "frontend/src/components/markets/ScanResults.tsx",
+        "frontend/src/views/MarketsPage.tsx"
+      ]
+    },
+    "T-015": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/components/profile/IdentitySection.tsx",
+        "frontend/src/components/profile/InterestsSection.tsx",
+        "frontend/src/components/profile/StyleSection.tsx",
+        "frontend/src/views/ProfilePage.tsx"
+      ]
+    },
+    "T-016": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useUnsavedChanges.ts",
+        "frontend/src/views/SettingsPage.tsx"
+      ]
+    },
+    "T-017": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/views/MarketsPage.tsx",
+        "frontend/src/components/markets/ScanInput.tsx"
+      ]
+    },
+    "T-018": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/components/MarketDataDisclaimer.tsx",
+        "frontend/src/views/FeedPage.tsx",
+        "frontend/src/views/MarketsPage.tsx"
+      ]
+    }
+  }
+}

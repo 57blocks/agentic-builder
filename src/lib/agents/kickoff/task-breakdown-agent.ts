@@ -82,6 +82,7 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
   - For M-tier Sequelize projects, use exactly one canonical DB entry file: \`backend/src/db.ts\`. Do not plan a second database bootstrap file such as \`backend/src/config/database.ts\` or \`backend/src/database/connection.ts\` unless you are MODIFYING the existing canonical file.
   - HARD SPLIT RULE: Do **NOT** combine backend model/bootstrap work with frontend API client generation in the same task. If both are needed, emit separate tasks.
 - **Backend Services** — **REQUIRED for full-stack.** Prefer **one** broad task for \`backend/src\` (Koa routes, controllers, services, domain logic), unless the API surface is unusually large. This task implements the actual feature code — the scaffold only ships a starter Koa app.
+  - **EXCEPTION (HARD)**: If a backend feature is a **multi-step pipeline that integrates more than 3 external HTTP APIs / third-party services** (e.g. news aggregator hitting HackerNews + Google News + Jina + OpenAI + multiple market venues; a scanner combining Twitter API + Jina + OpenAI + Polymarket + HyperLiquid + Deribit), it MUST NOT be a single task. Split it into at least 3 tasks: (a) external-API client layer, (b) pipeline orchestration / business logic, (c) HTTP routes + SSE/queue wiring. See "External API complexity split (HARD RULE)" below for the full specification.
 - **Integration (contracts/client)** — Add an **early** task that defines/aligns API contracts + frontend API client in \`frontend/src/api\` with PRD IDs before page implementation.
   - HARD SPLIT RULE: If the task would create files in both \`backend/src\` and \`frontend/src\`, keep it limited to shared contract/type alignment plus client bindings. Do not also bundle root infra files like \`.env\` or \`docker-compose.yml\` into that same task.
 - **Frontend** — First create **one** app shell/layout task, then split into **page-level** tasks (one task per page/flow, not per tiny component).
@@ -91,8 +92,13 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
 - **Integration** — **Optional** single task: Vite proxy assumptions, Koa CORS/auth headers, frontend API client error handling, and env/config alignment between frontend and backend.
 - **Testing** — **Do not** add tasks with phase "Testing" (automated test tasks are disabled in the pipeline).
 
-**Bad for M:** separate tasks per endpoint or per tiny UI component, or \"create frontend/package.json from scratch\".
-**Good for M:** one contracts/client task, one app-shell/layout task, one broad backend services task, then page-level tasks like "Implement Dashboard view" and "Implement Project detail flow".
+**Bad for M:**
+- separate tasks per endpoint or per tiny UI component, or \"create frontend/package.json from scratch\";
+- bundling a multi-venue / multi-API pipeline (e.g. \"Implement feed aggregation pipeline and APIs\" doing HackerNews + Google News + Jina + OpenAI + Polymarket + HyperLiquid + Deribit + BullMQ + SSE + REST routes all in one task — this MUST be split, see External API complexity split rule).
+
+**Good for M:**
+- one contracts/client task, one app-shell/layout task, one broad backend services task, then page-level tasks like "Implement Dashboard view" and "Implement Project detail flow";
+- when a multi-API pipeline exists, split it into 3 tasks like "Build external API clients for {services}", "Implement {pipeline-name} orchestration", "Add {pipeline-name} HTTP routes + SSE streaming".
 
 ## Tier M — scaffold utilities are CANONICAL (do not re-plan)
 The M-tier scaffold already provides the following files. NEVER plan a task whose subSteps create or "redesign" these — feature tasks must \`reads\` / \`modifies\` them only.
@@ -148,6 +154,26 @@ Before generating tasks, analyze the PRD to determine the project type:
 ## CRITICAL: Mandatory phases for full-stack projects
 For any full-stack project (types 2 or 3 above), the output MUST contain:
 - At least **one task with phase "Backend Services"** — implementing the actual API routes, controllers, and domain logic in the backend source tree (\`backend/src\`, \`apps/api/src\`, or equivalent for the selected tier). The scaffold ships starter shells; your task adds the feature code.
+
+## CRITICAL: External API pipeline must be split (overrides "prefer one broad task")
+This rule **takes priority over** any "prefer one broad task" guidance below.
+
+If the PRD describes a backend pipeline that integrates **more than 3 distinct external HTTP APIs or third-party services** in one logical flow (typical examples: news/feed aggregators, market scanners, content-extraction pipelines, data ingestion pipelines), you MUST NOT emit it as a single task. The required split is:
+
+1. **External API client layer task** — wrappers/helpers for each external service (HTTP clients, auth headers, retry/timeout, typed responses). Files like \`backend/src/services/externalApis.ts\`, \`backend/src/services/twitterApi.ts\`, \`backend/src/services/jinaClient.ts\`, etc.
+2. **Pipeline orchestration task** — the multi-step business logic that calls those clients (e.g. \`backend/src/services/feedAggregator.ts\`, \`backend/src/services/marketScanner.ts\`). Reads the client files; does NOT recreate them.
+3. **HTTP / streaming layer task** — Koa controller, routes, SSE / BullMQ wiring (e.g. \`feed.controller.ts\`, \`feed.routes.ts\`, \`feedAggregationWorker.ts\`).
+
+Each split task should typically create **2–4 files**. Use \`dependencies\` to express order: orchestration depends on the client layer; the routes/streaming task depends on orchestration. \`coversRequirementIds\` should be distributed across the three tasks so coverage is preserved.
+
+**Concrete example — Capacitr-style PRD (do not literally output, but follow this shape):**
+- BAD: one task \"Implement feed aggregation pipeline and APIs\" creating \`feedAggregator.ts\` + \`externalApis.ts\` + \`feedAggregationWorker.ts\` + \`feed.controller.ts\` + \`feed.routes.ts\` + \`feed.service.ts\` + \`queue.ts\`.
+- GOOD:
+  - T-x \"Build external API clients for HackerNews / Google News / Jina / Polymarket / HyperLiquid / Deribit\" → creates \`externalApis.ts\` (or a small folder of one file per service).
+  - T-y \"Implement Feed aggregation 10-step orchestration\" → creates \`feedAggregator.ts\`, \`feedAggregationWorker.ts\`, \`queue.ts\`. Reads the client files from T-x.
+  - T-z \"Add Feed REST + SSE streaming routes\" → creates \`feed.controller.ts\`, \`feed.routes.ts\`, \`feed.service.ts\`. Reads orchestration files from T-y.
+
+The same split applies to the Markets scanner pipeline (Twitter API + Jina + OpenAI + 3 venues). If both Feed and Markets pipelines exist in the PRD, the **client layer task can be shared** between them (one task creates the clients, both pipeline tasks read them).
 
 **The scaffold does NOT implement your features.** The scaffold only provides the project skeleton (package.json, tsconfig, app shell). Every endpoint, every business rule, every page must be coded in Backend Services or Frontend tasks. Do not omit Backend Services because the scaffold already has \`backend/\`, \`frontend/\`, \`apps/api\`, or \`apps/web\` — those are starter shells, not implemented features.
 
