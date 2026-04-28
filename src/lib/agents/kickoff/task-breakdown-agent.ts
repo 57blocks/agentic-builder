@@ -313,6 +313,14 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
   - If a task would create more than **8 files**, split it into multiple tasks unless the extra files are tiny same-scope siblings (e.g. one controller/routes/service trio).
   - If a task would create files across **root infra** (\`.env\`, \`docker-compose.yml\`), **backend/src**, and **frontend/src**, it MUST be split into at least two tasks.
   - For M-tier full-stack projects, prefer this early sequence: **(1) backend data/model task**, **(2) contracts/frontend API client task**, **(3) infra/env task if needed** rather than one mega bootstrap task.
+- **External API complexity split (HARD RULE)**:
+  - If a single task would integrate **more than 3 distinct external HTTP APIs or third-party services** within the same pipeline (e.g. HackerNews + Google News + Jina + OpenAI + Polymarket + HyperLiquid + Deribit all in one task), it MUST be split into at least two tasks. This includes background job pipelines, scanner pipelines, and aggregation pipelines. Suggested split strategy for such pipeline tasks:
+    - **Task A — External API client layer**: wrappers/helpers for each external service (HTTP clients, auth headers, timeout handling, typed response shapes). These files are reused by all pipeline tasks.
+    - **Task B — Pipeline orchestration**: step-by-step coordination logic, error classification (fatal vs. non-fatal), deduplication, and ranking.
+    - **Task C — API endpoint + streaming layer**: SSE/polling controller, routes, BullMQ job wiring, and queue setup.
+  - The rule applies regardless of how many files the task creates — integration complexity alone is sufficient grounds for a split.
+- **Single-task file creates cap (SOFT RULE)**:
+  - Prefer tasks that create **≤ 4 files** in \`files.creates\`. Tasks with 5–8 creates are acceptable only if all files belong to the same narrow domain (e.g. a controller + routes + service + validation quartet for one module). If a task would create 5+ files spanning multiple domains (e.g. a job worker + external API clients + an SSE controller + a DB model), split it.
 - Frontend task granularity:
   - Create one **app shell/layout** frontend task first (app shell, navigation/layout wiring).
   - Do not assign final edits to shared route registries (\`frontend/src/router.tsx\`, \`apps/web/src/App.tsx\`, or \`src/routes.tsx\`) to Coding tasks; \`integrationVerifyAndFix\` handles final registration closure.

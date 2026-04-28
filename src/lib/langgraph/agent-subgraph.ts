@@ -59,9 +59,20 @@ const MAX_OUTPUT_TOKENS = (() => {
   return Math.min(Math.max(Math.floor(raw), 1024), 131_072);
 })();
 const MAX_TASK_GENERATION_RETRIES = 2;
-const MAX_WORKER_TOOL_ITERATIONS = 6;
+const MAX_WORKER_TOOL_ITERATIONS = 10;
 const MAX_WORKER_TOOL_OUTPUT_CHARS = 12000;
 const WORKER_LLM_HEARTBEAT_MS = 10_000;
+// Raise the iteration ceiling so complex tasks have enough read rounds.
+// 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
+// enough budget while still bounding the worst case.
+// Anti read-only spiral: inject a nudge when the model has read for too long.
+// Set relative to MAX_WORKER_TOOL_ITERATIONS so the nudge happens near the end,
+// not in the middle — we don't want to cut short legitimate reads.
+const READ_STALL_NUDGE_AFTER = 5;        // nudge at round 5/10
+// Force tool_choice:"none" only when very close to the limit, as a last resort.
+// At this point the model has had ample reads; we'd rather get imperfect code
+// than throw an iteration-exceeded error.
+const READ_STALL_FORCE_WRITE_AFTER = 8;  // force-write at round 8/10
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -601,8 +612,32 @@ async function runCodegenWorkerLoop(
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
+  let consecutiveReadRounds = 0;
 
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
+    // Anti-spiral: inject a nudge message after too many consecutive read rounds.
+    if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
+      console.log(
+        `[Worker] Read-stall nudge after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+      );
+      messages.push({
+        role: "user",
+        content:
+          `You have spent ${consecutiveReadRounds} rounds reading files. ` +
+          `You now have enough context. STOP calling read tools. ` +
+          `Output your implementation NOW using \`\`\`file:path\`\`\` blocks. ` +
+          `Do not read any more files — write the code directly.`,
+      });
+    }
+
+    // Anti-spiral: after even more stall, force the model to output text (no tool calls).
+    const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    if (forceWrite) {
+      console.log(
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+      );
+    }
+
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
@@ -614,8 +649,9 @@ async function runCodegenWorkerLoop(
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
       openRouterVariant: "codeGen",
-      tools: WORKER_READONLY_TOOLS,
-      tool_choice: "auto",
+      // When forcing write, omit tools entirely so the model cannot call them.
+      tools: forceWrite ? undefined : WORKER_READONLY_TOOLS,
+      tool_choice: forceWrite ? "none" : "auto",
     }).finally(() => {
       clearInterval(heartbeat);
     });
@@ -669,6 +705,9 @@ async function runCodegenWorkerLoop(
         totalTokens,
       };
     }
+
+    // All tool calls in this round were read-only — increment the stall counter.
+    consecutiveReadRounds++;
 
     for (const toolCall of toolCalls) {
       let args: Record<string, unknown>;

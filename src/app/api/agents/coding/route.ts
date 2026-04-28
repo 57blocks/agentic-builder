@@ -68,6 +68,11 @@ import {
   runModelScoringStage,
   type GateResultsSnapshot,
 } from "@/lib/pipeline/model-scoring";
+import {
+  writeSessionCheckpoint,
+  clearSessionCheckpoint,
+  type TaskCheckpointEntry,
+} from "@/lib/pipeline/session-checkpoint";
 
 const execFileAsync = promisify(execFile);
 
@@ -423,6 +428,7 @@ export async function POST(request: NextRequest) {
     ralph: ralphOverride,
     databaseUrl: databaseUrlBody,
     prd: prdBody,
+    retryFailedTaskIds,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -433,6 +439,12 @@ export async function POST(request: NextRequest) {
     databaseUrl?: string;
     /** PRD content passed from the UI to guarantee the correct project PRD is used. */
     prd?: string;
+    /**
+     * When set, ONLY tasks whose IDs are in this list will be executed.
+     * All other tasks are considered already-completed and skipped.
+     * Used for "retry failed tasks only" workflows.
+     */
+    retryFailedTaskIds?: string[];
   };
 
   const ralphConfig: RalphConfig = {
@@ -451,6 +463,27 @@ export async function POST(request: NextRequest) {
   if (tasksAfterStrip.length === 0) {
     return Response.json(
       { error: "No tasks to run after task normalization" },
+      { status: 400 },
+    );
+  }
+
+  // When retryFailedTaskIds is provided, only run those tasks.
+  // All other tasks are considered already-completed and pre-populated
+  // into collectedTaskResults as "completed_with_warnings" so the rest of
+  // the pipeline (audit, scoring, reports) still sees them.
+  const retrySet = retryFailedTaskIds && retryFailedTaskIds.length > 0
+    ? new Set(retryFailedTaskIds)
+    : null;
+  const tasksToRun = retrySet
+    ? tasksAfterStrip.filter((t) => retrySet.has(t.id))
+    : tasksAfterStrip;
+  const tasksSkipped = retrySet
+    ? tasksAfterStrip.filter((t) => !retrySet.has(t.id))
+    : [];
+
+  if (retrySet && tasksToRun.length === 0) {
+    return Response.json(
+      { error: "None of the retryFailedTaskIds matched any known task" },
       { status: 400 },
     );
   }
@@ -790,7 +823,7 @@ export async function POST(request: NextRequest) {
     pencilDesignDoc,
   );
 
-  const normalizedTasks = [...tasksAfterStrip, ...preparedE2e.extraTasks];
+  const normalizedTasks = [...tasksToRun, ...preparedE2e.extraTasks];
   const codingTasks: CodingTask[] = normalizedTasks.map((t) => ({
     ...t,
     assignedAgentId: null,
@@ -854,6 +887,24 @@ export async function POST(request: NextRequest) {
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
+      // Pre-populate skipped tasks (from previous session) as completed_with_warnings
+      // so they appear in audit and scoring reports without being re-generated.
+      for (const t of tasksSkipped) {
+        collectedTaskResults.set(t.id, {
+          id: t.id,
+          title: t.title,
+          coversRequirementIds: t.coversRequirementIds ?? [],
+          generatedFiles: [],
+          status: "completed_with_warnings",
+        });
+      }
+      if (retrySet) {
+        console.log(
+          `[CodingAPI] Retry mode: running ${tasksToRun.length} task(s), skipping ${tasksSkipped.length} previously-completed task(s).`,
+        );
+        // Clear the checkpoint since we're retrying — will be re-written on completion.
+        await clearSessionCheckpoint(process.cwd());
+      }
       const collectedFileRegistry = new Map<string, GeneratedFile>();
       const collectedApiContracts = new Map<string, ApiContract>();
       const collectedGateSnapshot: SupervisorGateSnapshot = {
@@ -1197,6 +1248,25 @@ export async function POST(request: NextRequest) {
           console.warn(
             `[CodingAPI] Model scoring stage failed (ignored):`,
             scoringErr instanceof Error ? scoringErr.message : scoringErr,
+          );
+        }
+
+        // ── Session checkpoint ─────────────────────────────────────────────
+        // Persist task results so the next run can skip already-completed
+        // tasks via `retryFailedTaskIds`.
+        try {
+          const checkpointMap = new Map<string, TaskCheckpointEntry>();
+          for (const [id, result] of collectedTaskResults) {
+            checkpointMap.set(id, {
+              status: result.status,
+              generatedFiles: result.generatedFiles,
+            });
+          }
+          await writeSessionCheckpoint(process.cwd(), sessionId, checkpointMap);
+        } catch (cpErr) {
+          console.warn(
+            `[CodingAPI] Checkpoint write failed (ignored):`,
+            cpErr instanceof Error ? cpErr.message : cpErr,
           );
         }
 
