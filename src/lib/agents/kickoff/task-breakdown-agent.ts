@@ -155,6 +155,54 @@ Before generating tasks, analyze the PRD to determine the project type:
 For any full-stack project (types 2 or 3 above), the output MUST contain:
 - At least **one task with phase "Backend Services"** — implementing the actual API routes, controllers, and domain logic in the backend source tree (\`backend/src\`, \`apps/api/src\`, or equivalent for the selected tier). The scaffold ships starter shells; your task adds the feature code.
 
+## CRITICAL: OAuth / social-login wiring (scaffold ships SDK; you wire it)
+The scaffold's optional-feature layer (\`scaffolds/<tier>/_optional/auth-*\`) is automatically copied into the project when the kickoff resource detector declares a matching trigger env (e.g. \`VITE_PRIVY_APP_ID\` → \`auth-privy\`). When applied, the scaffold has ALREADY shipped:
+
+- \`frontend/src/providers/PrivyProvider.tsx\` (or \`ClerkProvider\` etc.) — real SDK wrapper reading \`import.meta.env.VITE_PRIVY_APP_ID\`.
+- \`frontend/src/providers/AppProviders.tsx\` — overwrites base; mounts \`<PrivyAuthProvider>\` around \`<AuthProvider>\` so \`main.tsx\` is unchanged.
+- \`frontend/src/components/auth/LoginModal.tsx\` — overwrites base; uses \`usePrivy().login()\` and forwards Privy access token via \`onLogin?.(privyToken)\`.
+- \`frontend/src/hooks/usePrivyAuthBridge.ts\` — optional helper that auto-syncs Privy token into AuthContext.
+- \`backend/src/middlewares/privyAuth.ts\` + \`backend/src/privy/client.ts\` + \`backend/src/api/modules/auth/auth.routes.ts\` — token-verification middleware and a \`/auth/me\` route.
+- \`@privy-io/react-auth\` (frontend) and \`@privy-io/node\` (backend) added to \`dependencies\` automatically.
+
+You do NOT need to plan tasks that re-create any of those files. The auth-related task list MUST instead:
+
+1. **App-shell / layout task**: list whatever top-level component renders the router (e.g. \`frontend/src/App.tsx\` or the layout) in \`files.modifies\` with a subStep \"call \`usePrivyAuthBridge()\` once near the root so apiClient gets the Bearer token automatically\". DO NOT plan to modify \`AppProviders.tsx\` — it is already overwritten.
+2. **Landing / login page task**: list the landing page (e.g. \`frontend/src/views/LandingPage.tsx\`) in \`files.modifies\` with a subStep \"render \`<LoginModal>\` and pass \`onLogin={(privyToken) => useAuth().login(privyToken)}\`; do not re-implement the modal\". The token is then automatically attached as \`Authorization: Bearer <privyToken>\` by \`apiClient\`, and the backend \`privyAuthMiddleware\` (already shipped) verifies it on every request.
+3. **Backend user lookup**: any controller/service that consumes \`ctx.state.user.id\` MUST resolve the Privy DID to the internal DB UUID first (see the External Identity vs DB PK rule in the backend role prompt). This usually shows up as a 1-line subStep in EACH backend task that reads the current user.
+4. **DO NOT** plan a task whose subStep is \"install \`@privy-io/react-auth\`\" or \"replace placeholder LoginModal\" — both are already done by the optional scaffold.
+
+If the PRD describes a different OAuth provider that is NOT yet a registered \`_optional/auth-*\` feature (e.g. custom Auth0 setup), then you MAY plan a task that creates the SDK Provider + LoginModal — but flag it in the task description as \"scaffold optional feature missing for this provider; falling back to in-task implementation\".
+
+**Acceptance criterion** for any OAuth task: \"the LandingPage wires \`onLogin\` to \`useAuth().login(privyToken)\`; some top-level component calls \`usePrivyAuthBridge()\`; backend controllers do NOT call \`findByPk(ctx.state.user.id)\` directly — they resolve via \`privy_id\` first.\"
+
+This rule is **independent** of the External API split rule and the Background-job lifecycle rule below.
+
+## CRITICAL: Background-job task must include lifecycle deliverables
+Whenever a feature is implemented as a background job (queue, scheduler, worker, ingestion pipeline, anything that runs outside a user request), the SAME task description MUST include ALL of the following deliverables (do NOT split them across tasks — they are tightly coupled and break in surprising ways when shipped piecemeal):
+
+- explicit \`run_id\` produced by the enqueue function and threaded through worker → DB row → SSE / polling endpoint (the worker MUST NOT call \`randomUUID()\` to overwrite it);
+- in-process fallback that runs the job synchronously when the queue backend (Redis/BullMQ) is unavailable — controlled by an env flag like \`USE_REDIS_QUEUE\`. Default = in-process so the demo works without Redis;
+- a \`clearActiveRunsForUser(userId)\` helper invoked by the public refresh endpoint BEFORE starting a new run, so a crashed previous run never blocks the user with \`ALREADY_RUNNING\`;
+- structured file logging at every step (start, external-call, success, fail, complete) at \`<backend>/logs/<feature>.log\`;
+- the public SSE / status endpoint MUST accept BOTH UUID run-ids (DB-backed) and \`inproc:<scope>:<ts>\` run-ids (memory-backed) without 5xx — typically via an \`isUuid(runId)\` branch;
+- when the pipeline returns zero rows from all upstream sources, the run completes with \`status="completed"\` + \`item_count=0\` (NOT \`status="failed"\`); the frontend treats this as an empty state, not an error.
+
+**Concrete subStep example for a feed/aggregation task:**
+- \"Implement \`enqueueFeedAggregation(userId)\` in \`backend/src/utils/queue.ts\` returning \`run_id\`. Default branch: in-process Promise that calls the worker on next tick. Behind \`USE_REDIS_QUEUE=1\` flag: route through BullMQ.\"
+- \"Implement \`clearActiveRunsForUser\` in \`feed.service.ts\` and call it at the top of \`POST /api/feed/refresh\` (in \`feed.controller.ts\`).\"
+- \"Implement \`runFeedAggregation\` in \`feedAggregator.ts\` with structured logging to \`backend/logs/feed-aggregation.log\` at every step.\"
+- \"Empty feed = success: when both HN and Google News return 0 stories, mark run \`completed\` with \`story_count=0\` and clear user feed; do NOT throw \`NO_SOURCES\`.\"
+- \"In \`/api/feed/stream\`: detect \`inproc:\` prefix and subscribe to the in-memory event emitter; for UUID run-ids, query \`FeedAggregationRun.findByPk\`. NEVER call \`findByPk\` on an \`inproc:\` id — Postgres will throw \`invalid input syntax for type uuid\`.\"
+
+This rule is **independent** of the External API split rule (which governs splitting upstream-API client code from the orchestration code). A typical feed-aggregator task list ends up looking like:
+
+- T-x \"Build external API clients for HN / Google News / ...\" (External API split rule)
+- T-y \"Implement Feed aggregation pipeline + lifecycle (enqueue + worker + clear-stale + logging + empty-feed handling)\" (this rule — note all 6 deliverables in one task)
+- T-z \"Add Feed REST + SSE streaming routes (UUID + inproc: run-id branches)\" (External API split rule + this rule's SSE branch)
+
+Tasks T-y and T-z share the lifecycle contract. T-y owns the queue impl; T-z owns the HTTP surface.
+
 ## CRITICAL: External API pipeline must be split (overrides "prefer one broad task")
 This rule **takes priority over** any "prefer one broad task" guidance below.
 
