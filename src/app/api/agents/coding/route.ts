@@ -22,6 +22,9 @@ import {
   resolveBlueprintGeneratedDatabaseUrl,
   upsertDatabaseUrlEnv,
   upsertJwtEnvVars,
+  upsertBackendPortEnv,
+  upsertFrontendApiBaseUrlEnv,
+  resolveBackendPort,
 } from "@/lib/pipeline/generated-code-env";
 import {
   readResourceRequirements,
@@ -852,10 +855,11 @@ export async function POST(request: NextRequest) {
       ? upsertDatabaseUrlEnv(existingBackendEnv, resolvedDbUrl)
       : existingBackendEnv;
     const withJwt = upsertJwtEnvVars(withDbUrl);
-    const withResources = upsertResourceEnvVars(withJwt, backendResources);
+    const withPort = upsertBackendPortEnv(withJwt);
+    const withResources = upsertResourceEnvVars(withPort, backendResources);
     await fs.writeFile(backendEnvPath, withResources, "utf-8");
     console.log(
-      `[CodingAPI] Synced backend/.env (DATABASE_URL + JWT vars + ${backendResources.length} user resource(s)).`,
+      `[CodingAPI] Synced backend/.env (PORT + DATABASE_URL + JWT vars + ${backendResources.length} user resource(s)).`,
     );
   } catch (e) {
     console.warn(
@@ -864,19 +868,22 @@ export async function POST(request: NextRequest) {
   }
 
   // Frontend env vars (VITE_* / NEXT_PUBLIC_*) need to land in frontend/.env.
-  if (frontendResources.length > 0) {
+  // We always overwrite VITE_API_BASE_URL to keep it in sync with backend PORT
+  // (single source of truth = BLUEPRINT_BACKEND_PORT, defaults to 4000).
+  {
     const frontendEnvPath = path.join(outputRoot, "frontend", ".env");
     try {
       const existingFrontendEnv = await fs
         .readFile(frontendEnvPath, "utf-8")
         .catch(() => "");
-      const merged = upsertResourceEnvVars(
+      const withApiBase = upsertFrontendApiBaseUrlEnv(
         existingFrontendEnv,
-        frontendResources,
+        resolveBackendPort(),
       );
+      const merged = upsertResourceEnvVars(withApiBase, frontendResources);
       await fs.writeFile(frontendEnvPath, merged, "utf-8");
       console.log(
-        `[CodingAPI] Synced frontend/.env with ${frontendResources.length} user resource(s).`,
+        `[CodingAPI] Synced frontend/.env (VITE_API_BASE_URL + ${frontendResources.length} user resource(s)).`,
       );
     } catch (e) {
       console.warn(

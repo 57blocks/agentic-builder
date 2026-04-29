@@ -25,6 +25,9 @@
  * | bg-job-worker-startup           | backend  | warn | §4.4 — backend has start*Worker but server.ts never calls it |
  * | llm-client-abstraction          | backend  | err  | §4.5 — direct vendor SDK import (`from "openai"` etc.) outside `services/llmService.ts` |
  * | empty-results-not-failure       | backend  | warn | §4.7 — aggregation throws on zero upstream rows (NO_SOURCES / "Zero stories" patterns) |
+ * | auth-guard-as-middleware        | backend  | err  | §4.x — `requireXxxAuth` (assertion guard) used as Koa middleware without next() — silent 404 |
+ * | dbuser-not-found-as-404         | backend  | err  | §4.x — `User.findOne(privy_id) + ctx.throw(404)` instead of `resolveOrCreateDbUser` upsert |
+ * | controller-handler-not-routed   | backend  | err  | §4.x — `*Handler` exported from controller but the sibling `*.routes.ts` never registers it |
  *
  * Output (in addition to the in-memory result):
  *   `<outputDir>/.ralph/runtime-integration-audit.json` — full findings list
@@ -43,7 +46,10 @@ export type RuntimeAuditRuleId =
   | "bg-job-inproc-branch"
   | "bg-job-worker-startup"
   | "llm-client-abstraction"
-  | "empty-results-not-failure";
+  | "empty-results-not-failure"
+  | "auth-guard-as-middleware"
+  | "dbuser-not-found-as-404"
+  | "controller-handler-not-routed";
 
 export type RuntimeAuditSeverity = "error" | "warn" | "info";
 
@@ -564,6 +570,186 @@ async function ruleEmptyResultsNotFailure(
   return findings;
 }
 
+/**
+ * §4.x-A: `requirePrivyAuth` (and similar `requireXxxAuth`) is a guard
+ * function — it returns the verified claims and throws 401 internally,
+ * but does NOT call `next()`. Mounting it directly in a Koa router as
+ * middleware (`router.get(path, requirePrivyAuth, handler)`) stalls the
+ * chain and Koa surfaces it as a misleading 404 to the client. Callers
+ * MUST use the `*Middleware` wrapper.
+ *
+ * Heuristic: match `router.<verb>(<path>, requirePrivy(?!AuthMiddleware))`
+ * where the second positional argument is the bare guard. Allows handlers
+ * that pass it via `requirePrivyAuthMiddleware` or call it inside the
+ * handler body (`const claims = requirePrivyAuth(ctx)` is fine).
+ */
+async function ruleAuthGuardAsMiddleware(
+  outputDir: string,
+  beFiles: string[],
+): Promise<RuntimeAuditFinding[]> {
+  const findings: RuntimeAuditFinding[] = [];
+  // Capture the offender on either the parent apiRouter or a sub-router var.
+  const OFFENDER_RE =
+    /\b(?:router|apiRouter|[A-Za-z_$][\w$]*Router)\.(?:get|post|put|patch|delete|all|options|head)\s*\(\s*["'`][^"'`]+["'`]\s*,\s*(require[A-Z]\w*Auth)(?!Middleware)\b/g;
+  for (const file of beFiles) {
+    if (!/\.routes\.ts$/.test(file)) continue;
+    const content = await readSafe(file, outputDir);
+    if (!content) continue;
+    OFFENDER_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = OFFENDER_RE.exec(content))) {
+      const guardName = m[1];
+      const idx = m.index;
+      const line = content.slice(0, idx).split("\n").length;
+      findings.push({
+        id: makeId("auth-guard-as-middleware", file, line),
+        ruleId: "auth-guard-as-middleware",
+        scope: "backend",
+        severity: "error",
+        file,
+        line,
+        snippet: clampSnippet(content.slice(Math.max(0, idx - 40), idx + 160)),
+        reason:
+          `\`${guardName}\` is an assertion guard that returns claims but does NOT call next(). Mounting it as a Koa middleware leaves the chain stalled and the request surfaces as a misleading 404 to the client. This was the #1 cause of "OAuth succeeds but every authenticated /api/* call returns 404" in the previous run.`,
+        directive:
+          `Replace \`${guardName}\` with \`${guardName}Middleware\` in this route definition (the auth-privy / auth-clerk scaffolds export both). If the *Middleware version doesn't exist yet, add it to the same middleware file: \`export const ${guardName}Middleware: Middleware = async (ctx, next) => { ${guardName}(ctx); await next(); };\`. To assert auth from inside a handler body, calling \`${guardName}(ctx)\` directly remains correct.`,
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * §4.x-B: When a Privy/Clerk auth feature is applied, handlers MUST NOT
+ * use `User.findOne({ where: { privy_id } }) + ctx.throw(404, "User
+ * not found")` for the CURRENT session. Reason: a freshly-authenticated
+ * user may not have a DB row yet (the explicit `/auth/verify` upsert may
+ * not have run), so a legitimate Bearer token gets a misleading 404. The
+ * scaffold-provided `resolveOrCreateDbUser(ctx)` upserts on the fly.
+ *
+ * Heuristic: scan backend files for the pattern of resolving the current
+ * Privy id to a row + throwing 404, and emit unless the file already
+ * imports `resolveOrCreateDbUser`.
+ */
+async function ruleDbUserNotFoundAs404(
+  outputDir: string,
+  beFiles: string[],
+  applied: string[],
+): Promise<RuntimeAuditFinding[]> {
+  if (!applied.some((f) => PRIVY_FEATURES.has(f))) return [];
+
+  const findings: RuntimeAuditFinding[] = [];
+  // Match `User.findOne({ where: { privy_id: ctx.state.user.id } })` followed
+  // (within ~300 chars / one logical block) by `ctx.throw(404, ...)`.
+  const COMBINED_RE =
+    /(User\.findOne\s*\(\s*\{\s*where\s*:\s*\{\s*privy_id\s*:\s*ctx\.state\.user(?:\.id|\?\.id)[^)]*\)[\s\S]{0,400}?ctx\.throw\s*\(\s*404)/g;
+  for (const file of beFiles) {
+    if (!/\.(controller|routes|service)\.ts$/.test(file)) continue;
+    const content = await readSafe(file, outputDir);
+    if (!content) continue;
+    if (/\bresolveOrCreateDbUser\b/.test(content)) continue;
+    COMBINED_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = COMBINED_RE.exec(content))) {
+      const idx = m.index;
+      const line = content.slice(0, idx).split("\n").length;
+      findings.push({
+        id: makeId("dbuser-not-found-as-404", file, line),
+        ruleId: "dbuser-not-found-as-404",
+        scope: "backend",
+        severity: "error",
+        file,
+        line,
+        snippet: clampSnippet(content.slice(Math.max(0, idx - 40), idx + 220)),
+        reason:
+          "Resolving the current Privy session to a DB row and throwing 404 when missing creates a hard-to-diagnose error — a legitimately authenticated user gets a misleading 404 just because the upsert hasn't run yet. Browsers and the verify-fix worker can't distinguish this from a route registration bug.",
+        directive:
+          "Replace the `User.findOne(...) + ctx.throw(404, \"User not found\")` block with `const user = await resolveOrCreateDbUser(ctx);` (imported from `../middlewares/privyAuth`). The helper auto-upserts on first hit and returns a `User` instance — use `user.id` (UUID) for FK queries below. If you genuinely need the 404 (e.g. an admin route looking up someone ELSE's row by a path param), keep the explicit findOne but DO NOT use `ctx.state.user.id` as the lookup key.",
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * §4.x-C: every `*Handler` exported from a `*.controller.ts` MUST be
+ * registered by the sibling `*.routes.ts`. The pattern of "controller
+ * exports a handler but the routes file forgot to mount it" is the
+ * second-most-common cause of "I implemented this endpoint but the
+ * client gets 404" in earlier runs (see `POST /auth/verify` which lived
+ * in the controller for a whole session before being noticed).
+ *
+ * Heuristic: in each module folder under `backend/src/api/modules/<name>`,
+ * list `<name>.controller.ts` exports matching `\w+Handler` and confirm
+ * the sibling `<name>.routes.ts` references each name at least once.
+ */
+async function ruleControllerHandlerNotRouted(
+  outputDir: string,
+  beFiles: string[],
+): Promise<RuntimeAuditFinding[]> {
+  const findings: RuntimeAuditFinding[] = [];
+
+  // Group controller files with their sibling routes file.
+  const controllerFiles = beFiles.filter((f) =>
+    /backend\/src\/api\/modules\/[^/]+\/[^/]+\.controller\.ts$/.test(
+      f.split(path.sep).join("/"),
+    ),
+  );
+  for (const ctrlFile of controllerFiles) {
+    const norm = ctrlFile.split(path.sep).join("/");
+    const dir = norm.replace(/\/[^/]+\.controller\.ts$/, "");
+    const moduleStem = dir.split("/").pop()!;
+    const routesFile = `${dir}/${moduleStem}.routes.ts`;
+    const ctrlContent = await readSafe(ctrlFile, outputDir);
+    if (!ctrlContent) continue;
+    const routesContent = await readSafe(routesFile, outputDir);
+    if (!routesContent) {
+      // Routes file missing entirely — that's a separate issue we let
+      // route-registration audit catch.
+      continue;
+    }
+
+    const exportRe =
+      /export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*Handler)\s*\(/g;
+    const exported: Array<{ name: string; line: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = exportRe.exec(ctrlContent))) {
+      const idx = m.index;
+      const line = ctrlContent.slice(0, idx).split("\n").length;
+      exported.push({ name: m[1], line });
+    }
+    if (exported.length === 0) continue;
+
+    for (const { name, line } of exported) {
+      // Look for the handler name appearing in the routes file. We accept
+      // any reference (import, direct call, alias re-export) — the goal
+      // is just to prove the routes file is aware of it.
+      const ref = new RegExp(`\\b${name}\\b`).test(routesContent);
+      if (ref) continue;
+
+      findings.push({
+        id: makeId("controller-handler-not-routed", ctrlFile, line),
+        ruleId: "controller-handler-not-routed",
+        scope: "backend",
+        severity: "error",
+        file: ctrlFile,
+        line,
+        snippet: clampSnippet(
+          ctrlContent.slice(
+            Math.max(0, ctrlContent.indexOf(name) - 40),
+            ctrlContent.indexOf(name) + 80,
+          ),
+        ),
+        reason:
+          `Controller exports \`${name}\` but \`${moduleStem}.routes.ts\` never references it. The handler is dead code — clients hitting the corresponding endpoint will get 404 because no \`router.<verb>(...)\` registers it.`,
+        directive:
+          `Open \`${routesFile}\` and add a \`router.<method>(\"<path>\", ${name})\` registration that matches the intended endpoint (consult API_CONTRACTS.json for the canonical method+path). If the handler is genuinely unused, delete its export from \`${moduleStem}.controller.ts\` instead — but never let an exported \`*Handler\` exist without a corresponding route.`,
+      });
+    }
+  }
+  return findings;
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────
 
 export async function runRuntimeIntegrationAudit(
@@ -621,6 +807,11 @@ export async function runRuntimeIntegrationAudit(
     ...(await ruleLlmClientAbstraction(outputDir, beFiles, declaredEnvKeys)),
   );
   findings.push(...(await ruleEmptyResultsNotFailure(outputDir, beFiles)));
+  findings.push(...(await ruleAuthGuardAsMiddleware(outputDir, beFiles)));
+  findings.push(
+    ...(await ruleDbUserNotFoundAs404(outputDir, beFiles, appliedOptionalFeatures)),
+  );
+  findings.push(...(await ruleControllerHandlerNotRouted(outputDir, beFiles)));
 
   // Dedupe by id (file+line+rule) defensively.
   const seen = new Set<string>();

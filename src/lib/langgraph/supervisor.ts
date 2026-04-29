@@ -60,6 +60,8 @@ import {
   runContractUsageCoverage,
   runRuntimeIntegrationAudit,
   formatRuntimeAuditBlock,
+  runRuntimeSmokeGate,
+  runTscDiagnosticsAsTasks,
 } from "@/lib/pipeline/self-heal";
 import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
@@ -6906,6 +6908,9 @@ async function auditApiRouteRegistration(
     const contractKeys = new Set<string>();
     for (const c of contracts) {
       if (!c.method || !c.endpoint) continue;
+      // Defensive: contributors sometimes accidentally include /api/health in
+      // API_CONTRACTS — strip it so it can't double-count.
+      if (isContractAuditExempt(c.method, c.endpoint)) continue;
       const key = `${c.method.toUpperCase()} ${normaliseApiPath(c.endpoint)}`;
       contractKeys.add(key);
       if (!routeMatches(key, implementedPaths)) {
@@ -6919,6 +6924,11 @@ async function auditApiRouteRegistration(
     for (const key of implementedPaths) {
       if (!routeMatches(key, contractKeys)) {
         const [method, endpoint] = key.split(" ");
+        // The scaffold-provided `/api/health` probe is intentionally NOT in
+        // API_CONTRACTS.json (it's infra, not a PRD-driven endpoint). Don't
+        // ding it as "undeclared" — that just creates noisy findings the
+        // worker can't resolve. See CODEGEN_HARDENING_PLAN.md §4.x.
+        if (isContractAuditExempt(method, endpoint)) continue;
         undeclaredEndpoints.push({ method, endpoint });
       }
     }
@@ -6960,6 +6970,30 @@ async function auditApiRouteRegistration(
 function normaliseApiPath(p: string): string {
   const withLeading = p.startsWith("/") ? p : `/${p}`;
   return withLeading.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+}
+
+/**
+ * Endpoints that are infrastructure-provided by the scaffold and intentionally
+ * absent from API_CONTRACTS.json. They MUST be skipped from both the
+ * "undeclared endpoint" finding (in `auditApiRouteRegistration`) and the
+ * runtime smoke gate's auth-required-route assertions.
+ *
+ * Currently exempt:
+ *   - `GET /api/health` and `GET /health` (Playwright webServer probe).
+ */
+const CONTRACT_AUDIT_EXEMPT_ENDPOINTS: ReadonlyArray<{
+  method: string;
+  pathRe: RegExp;
+}> = [
+  { method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ },
+];
+
+export function isContractAuditExempt(method: string, endpoint: string): boolean {
+  const m = method.toUpperCase();
+  const p = normaliseApiPath(endpoint);
+  return CONTRACT_AUDIT_EXEMPT_ENDPOINTS.some(
+    (rule) => rule.method === m && rule.pathRe.test(p),
+  );
 }
 
 function joinApiPath(prefix: string, mount: string, route: string): string {
@@ -7532,6 +7566,33 @@ async function integrationVerifyAndFix(
     console.warn(
       `${label}: runtime-integration-audit skipped — ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+
+  // ── tsc diagnostics → pendingRepairTasks (P5) ──────────────────────────
+  // Run `tsc --noEmit` for both backend and frontend, translate every
+  // diagnostic line into a deterministic repair task, and persist to
+  // `.ralph/tsc-diagnostics.json`. The verify-fix worker reads that file
+  // directly — no need to re-derive errors from raw stderr.
+  if (process.env.BLUEPRINT_DISABLE_TSC_DIAGNOSTICS !== "1") {
+    try {
+      const tscResult = await runTscDiagnosticsAsTasks({
+        outputDir: state.outputDir,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+      });
+      if (tscResult.tasks.length > 0) {
+        console.log(
+          `${label}: tsc-diagnostics queued ${tscResult.tasks.length} repair task(s) (${tscResult.workspaces
+            .filter((w) => !w.skipped)
+            .map((w) => `${w.workspace}=${w.diagnosticCount}`)
+            .join(", ")}).`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `${label}: tsc-diagnostics skipped — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   const routeAudit = await auditApiRouteRegistration(state.outputDir);
@@ -8929,6 +8990,49 @@ async function integrationVerifyAndFix(
       parallelClients: finalApiClientUniqueness.parallelClients,
     },
   });
+
+  // ─── Runtime smoke gate (P0) ─────────────────────────────────────────
+  // Boot the backend and prove every contract endpoint returns something
+  // OTHER than 404. The whole goal is to pre-empt the "OAuth succeeds but
+  // every authenticated request returns 404" failure mode that has been
+  // the #1 cause of post-codegen regressions. Emits a snapshot to
+  // `.ralph/runtime-smoke.json` so the verify-fix worker can read it as
+  // pendingRepairTasks on the next loop.
+  if (process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1") {
+    try {
+      const smoke = await runRuntimeSmokeGate({
+        outputDir: state.outputDir,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+      });
+      if (!smoke.pass) {
+        finalStatus = "fail";
+        const top = smoke.failures.slice(0, 6).map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
+        finalSummary = [
+          finalSummary,
+          "Runtime smoke gate failed:",
+          smoke.bootFailed
+            ? "Backend did not start — see .ralph/runtime-smoke.json `evidence` field."
+            : `${smoke.failures.length} endpoint failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+          .slice(0, 4000);
+      }
+    } catch (err) {
+      // Smoke gate must NEVER hard-fail the pipeline — surface as a warning.
+      console.warn(
+        `[supervisor] runtime smoke gate threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      getRepairEmitter(state.sessionId)({
+        stage: "integration-gate",
+        event: "runtime_smoke_threw",
+        details: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
   if (finalApiClientUniquenessHardFail) {
     finalStatus = "fail";
     finalSummary = [

@@ -421,6 +421,150 @@ export async function copyOptionalScaffolds(
 
 ---
 
+### 4.11 Auth middleware vs guard（A6 — 新增, 2026-04-29 复盘）
+
+**问题**：本轮人工修复中观察到，generator 经常把"返回 claims 的 assertion guard"（如 `requirePrivyAuth(ctx)`）直接挂在 Koa router 的 middleware 位上：
+
+```ts
+// ❌ 错误：guard 不调 next()，请求挂在中间件链上，最终被 Koa 兜底为 404
+router.get("/users/me", requirePrivyAuth, getUsersMeHandler);
+```
+
+`requirePrivyAuth` 内部只做 `if (!ctx.state.user) ctx.throw(401)` 然后 `return claims`，没有 `await next()`。这种用法**不会报 401**——koa-router 静默地停在该 middleware 上，最终客户端拿到 **404**，与"路由根本没注册"长得一模一样。这是上一轮"OAuth 成功但 `/api/feed/refresh` 返回 404"的根因。
+
+**改造**：
+
+- **L1（scaffold）**：`scaffolds/m-tier/_optional/auth-privy/backend/src/middlewares/privyAuth.ts` 默认导出三件套：
+  - `requirePrivyAuth(ctx)` — 仅作为**handler 内部 assertion**使用（返回 claims）；
+  - `requirePrivyAuthMiddleware: Middleware` — 包装上者并 `await next()`，**这是路由位**应该用的；
+  - `resolveOrCreateDbUser(ctx)` — 见 §4.12。
+- **L3（worker prompt）**：在 `formatResourceRequirementsPromptBlock` 的 OAuth 段补上：
+
+  ```text
+  **Auth middleware vs guard (HARD RULE):**
+  - `requirePrivyAuth` (and any `requireXxxAuth`) is a GUARD, not middleware.
+    It returns claims and throws 401 internally — but does NOT call next().
+  - To protect a route, use the *Middleware form:
+        router.get("/foo", requirePrivyAuthMiddleware, fooHandler);
+  - To assert from inside a handler/service body:
+        const claims = requirePrivyAuth(ctx);
+  - NEVER pass the bare guard as a positional middleware argument; it
+    silently surfaces as 404 to the client.
+  ```
+
+- **L4（audit）**：`runtime-integration-audit.ts` 的新规则 `auth-guard-as-middleware`，正则匹配 `router.<verb>(<path>, requirePrivyAuth(?!Middleware))` 直接 emit error。
+
+**验收**：
+- audit 在 PRD 含 OAuth 时，对 `*.routes.ts` 的扫描必须 0 finding。
+- runtime-smoke-gate（§4.13）不再因 401-vs-404 区分失败。
+
+---
+
+### 4.12 OAuth + DB user 必须 upsert，不允许 404（B3 — 新增, 2026-04-29 复盘）
+
+**问题**：handler 中典型出现的：
+
+```ts
+// ❌ 错误：合法 token + 第一次访问，DB 还没插行 → 客户端拿到 404
+const dbUser = await User.findOne({ where: { privy_id: ctx.state.user.id } });
+if (!dbUser) ctx.throw(404, "User not found");
+```
+
+这把"鉴权失败"包装成"路由不存在"，混淆了两个完全不同的语义层。前端/E2E/runtime-verify 都无法把它和"路由 typo"区分开。
+
+**改造**：
+
+- **L1（scaffold）**：`auth-privy` 中默认导出 `resolveOrCreateDbUser(ctx)` —— 找不到行就用 `User.create({ privy_id })` 自动 upsert，永远返回 `User` 实例。
+- **L1（scaffold）**：`auth.routes.ts` 默认注册 `POST /auth/verify`（也走 `resolveOrCreateDbUser`），让前端在 OAuth 完成后立即调一次以拿到 `is_new_user`，但**即使前端忘了调**，后续任何受保护路由也都走 upsert 路径，不会 404。
+- **L3（worker prompt）**：
+
+  ```text
+  **OAuth + DB user lookup (HARD RULE):**
+  - Any handler whose only auth dependency is "I need the DB user row" MUST
+    call `resolveOrCreateDbUser(ctx)` instead of `User.findOne + ctx.throw(404)`.
+  - The 404 path is reserved for "the path-param resource doesn't exist"
+    (e.g. GET /api/users/:id where :id is someone else's profile). It is
+    NEVER correct for the CURRENT session.
+  ```
+
+- **L4（audit）**：`runtime-integration-audit.ts` 新规则 `dbuser-not-found-as-404`，匹配同一文件出现 `User.findOne(... privy_id ...)` 后 ~300 字符内出现 `ctx.throw(404)` 的组合，且文件未导入 `resolveOrCreateDbUser` → emit error。
+
+**验收**：
+- 含 OAuth 的项目，audit 在 backend 文件上 `dbuser-not-found-as-404` 计数 = 0。
+- runtime-smoke-gate 跑 backend 后，对每个 contract endpoint 的无 token probe **必须** 返回 401 / 403 / 422 / 200，**绝不**返回 404。
+
+---
+
+### 4.13 Controller export 必须有 routes 注册（A7 — 新增, 2026-04-29 复盘）
+
+**问题**：worker 经常先写 `auth.controller.ts` 的 `authVerifyHandler`，再去写 `auth.routes.ts`，但忘了把后者补上 `router.post("/auth/verify", authVerifyHandler)`。结果代码里有个"很完整"的 handler 但路由表里找不到，前端调用直接 404。本轮 `POST /api/auth/verify` 就是这样在控制器里躺了一整个 session。
+
+**改造**：
+
+- **L4（audit）**：`runtime-integration-audit.ts` 新规则 `controller-handler-not-routed`：扫描 `backend/src/api/modules/<name>/<name>.controller.ts` 中所有 `export ... function (\w+Handler)`，对照同模块 `<name>.routes.ts` 里是否至少有一次该名字的字符串引用；缺则 emit error，directive 直接给出 `router.<method>("<path>", <name>)` 的填空模板。
+- **L4（runtime smoke）**：`.ralph/runtime-smoke.json` 中 `endpoint_404` 类型本身已经覆盖了这种情况——但 audit 在 preflight 阶段就能定位到具体文件，比 runtime probe 更早一拍。
+- **L3（worker prompt）**：
+
+  ```text
+  **Controller / route registration coverage (HARD RULE):**
+  - For every `*Handler` you export from `*.controller.ts`, the sibling
+    `*.routes.ts` MUST register it via `router.<method>(path, handler)`
+    in the SAME edit. Never leave an exported handler without a matching
+    `router.…` line — clients hitting the corresponding endpoint get 404
+    even though grep says "the handler is implemented".
+  - When implementing `POST /auth/verify`, REMEMBER it lives in
+    `auth.routes.ts`, not in `auth.controller.ts` alone.
+  ```
+
+**验收**：
+- audit 输出 `controller-handler-not-routed` 计数 = 0。
+- runtime-smoke-gate 的 `endpoint_404` 失败数 = 0。
+
+---
+
+### 4.14 Runtime smoke gate（P0 — 新增, 2026-04-29 复盘）
+
+**问题**：之前 pipeline 末尾只有 `tsc` + `e2e` 两道关——但 e2e 通常在 dev sandbox 里即便后端宕机也只表现为 ECONNREFUSED，没有针对每条 contract endpoint 的 401/404 区分；`tsc` 过了不代表服务能起来。
+
+**改造（落点：L4 + supervisor wiring）**：
+
+- 新增 `src/lib/pipeline/self-heal/runtime-smoke-gate.ts`：
+  1. `pnpm dev` 起后端，等 `listening on…` 日志。
+  2. `curl /api/health` → 必须 < 400。
+  3. 对 `API_CONTRACTS.json`（fallback：解析 `*.routes.ts`）里每条端点发不带 token 的探针请求：
+     - **401/403/422/200/204/400** → 通过；
+     - **404** → 失败（`endpoint_404`，directive 指向 §4.11 / §4.12 / §4.13）；
+     - **5xx** → 失败（`endpoint_5xx`）；
+     - 网络不可达 → 失败（`endpoint_unreachable`）。
+  4. `/api/health` 与 §4.15 列入 `EXEMPT_ENDPOINTS`，不参与 contract 一致性扣分。
+- 在 `supervisor.ts` 的 final integration gate 末尾调用一次 `runRuntimeSmokeGate`，结果落到 `.ralph/runtime-smoke.json`。失败则 `finalStatus = "fail"` 并把 top-6 失败 directive 进 finalSummary，verify-fix worker 下一轮直接读取。
+- 通过 `BLUEPRINT_DISABLE_RUNTIME_SMOKE=1` 关闭（CI / 没有 docker postgres 时）。
+
+**验收**：
+- 成功跑通：所有 contract endpoints 返回 401/200。
+- 失败跑通：runtime-smoke.json `failures` 不为空时，`finalStatus === "fail"`。
+
+---
+
+### 4.15 Health endpoint 不计入 contract 打分（G3 — 新增, 2026-04-29 复盘）
+
+**问题**：`backend/src/api/modules/health/health.routes.ts` 是 scaffold 默认提供（Playwright `webServer` 健康探针依赖它），但它**不属于** PRD 驱动的 API contract，也不应该出现在 `API_CONTRACTS.json` 里。但如果不显式排除，`auditApiRouteRegistration` 就会把它算作 "implemented but undeclared" 而在 score 里扣分。
+
+**改造**：
+
+- 在 `supervisor.ts` 加 `CONTRACT_AUDIT_EXEMPT_ENDPOINTS`：
+  ```ts
+  [{ method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ }]
+  ```
+- `auditApiRouteRegistration` 在生成 `undeclaredEndpoints` 时跳过命中。同时在 missing 一侧防御性跳过（防止有人误把 /health 写进 contracts）。
+- `runtime-smoke-gate.ts` 的 `EXEMPT_ENDPOINTS` 与上面**保持同步**——/api/health 由 step 1 单独验证，不参与 endpoint 探针循环。
+
+**验收**：
+- 后端只有 `/api/health` + `/api/users/me` 时，audit 报告里 `undeclaredEndpoints` = 0（而不是 1）。
+- runtime-smoke-gate 的 `probedEndpoints` 不包含 `GET /api/health`。
+
+---
+
 ## 5. 落地任务拆分（按文件）
 
 按依赖顺序排，便于一次性 PR：
@@ -442,11 +586,21 @@ export async function copyOptionalScaffolds(
 | 13 | ✅ | `src/lib/pipeline/self-heal/index.ts` + `src/lib/langgraph/supervisor.ts` | barrel 导出 + supervisor `integrationVerifyAndFix` 在 contract-usage-coverage 之后调用 audit，把 `runtimeAuditBlock` 拼进 verify-fix worker 的 opening user message；`coding-session-report.ts` 的 Pipeline Anomalies 表新增 `runtime_integration_audit*` 三行 | 12 |
 | 14 | ✅ | `src/lib/pipeline/resource-requirements.ts` | `ResourceRequirement.category` 增加 `"queue" | "logging"`，并允许 detector 输出 `LLM_PROVIDER` 这种"非 secret"声明 | 4.5 |
 | 15 | ✅ | `src/lib/agents/kickoff/resource-detector-agent.ts` | 让 detector 在 PRD 提 LLM ranking 时强制声明 `LLM_PROVIDER` + `LLM_API_KEY` 这一组 | 4.5 |
+| 16 | ✅ | `scaffolds/m-tier/_optional/auth-privy/backend/src/middlewares/privyAuth.ts` | 在 `requirePrivyAuth` 旁补出 `requirePrivyAuthMiddleware` 与 `resolveOrCreateDbUser`；写入文件级 README hard rules | 4.11, 4.12 |
+| 17 | ✅ | `scaffolds/m-tier/_optional/auth-privy/backend/src/api/modules/auth/auth.routes.ts` | 默认注册 `GET /auth/me` + `POST /auth/verify`，全走 `requirePrivyAuthMiddleware` | 4.11, 4.12 |
+| 18 | ✅ | `src/lib/pipeline/self-heal/runtime-integration-audit.ts` | 追加规则 `auth-guard-as-middleware` / `dbuser-not-found-as-404` / `controller-handler-not-routed`（共 11 条规则） | 4.11, 4.12, 4.13 |
+| 19 | ✅ | `src/lib/pipeline/self-heal/runtime-smoke-gate.ts` | **新建** — 启动后端 + curl 探针 + 落地 `.ralph/runtime-smoke.json`；`/api/health` 走单独 health 检查不进 endpoint 探针循环 | 4.14, 4.15 |
+| 20 | ✅ | `src/lib/pipeline/self-heal/tsc-diagnostics-as-tasks.ts` | **新建** — `tsc --noEmit` 输出 → `pendingRepairTasks`；按 TS 错误码（TS2305/TS2322/TS2345/TS2354/...）给指令；落地 `.ralph/tsc-diagnostics.json` | P5 (FIX_PLAN) |
+| 21 | ✅ | `src/lib/langgraph/supervisor.ts` `auditApiRouteRegistration` | 加 `CONTRACT_AUDIT_EXEMPT_ENDPOINTS`（`GET /api/health`），`undeclaredEndpoints` / `missingContractEndpoints` 双向跳过 | 4.15 |
+| 22 | ✅ | `src/lib/langgraph/supervisor.ts` integrationVerifyAndFix | 在 final integration gate 末尾调 `runRuntimeSmokeGate`；preflight 阶段调 `runTscDiagnosticsAsTasks` 把诊断打成 repair tasks | 4.14, P5 |
+| 23 | ✅ | `src/lib/pipeline/generated-code-env.ts` + `src/app/api/agents/coding/route.ts` | 后端 PORT 与前端 `VITE_API_BASE_URL` 单一来源（`BLUEPRINT_BACKEND_PORT` 默认 4000）；frontend `.env` 每次都被同步刷新 | P3 (FIX_PLAN) |
+| 24 | ✅ | `scaffolds/m-tier/{frontend,backend}/.env` | 默认 frontend `.env` 改为 `http://localhost:4000/api`、backend 加 `PORT=4000` | P3 (FIX_PLAN) |
 
 > **PR 拆分（已全部落地）**：
 > - PR1：1–7（脚手架重构 + 条件拷贝） ✅
 > - PR2：8–11, 14–15（prompt + detector 改造） ✅
 > - PR3：12–13（静态审计 + self-heal 接入） ✅
+> - PR4 (本轮)：16–24（auth scaffold zero-freedom + runtime smoke gate + tsc-diagnostics + env SSOT） ✅
 
 ---
 

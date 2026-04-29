@@ -64,3 +64,17 @@ export type {
   RuntimeAuditScope,
   RuntimeAuditSeverity,
 } from "./runtime-integration-audit";
+export { runRuntimeSmokeGate } from "./runtime-smoke-gate";
+export type {
+  RuntimeSmokeFailure,
+  RuntimeSmokeFailureCode,
+  RuntimeSmokeGateInput,
+  RuntimeSmokeGateResult,
+  RuntimeSmokeSuccess,
+} from "./runtime-smoke-gate";
+export { runTscDiagnosticsAsTasks } from "./tsc-diagnostics-as-tasks";
+export type {
+  TscDiagnosticTask,
+  TscDiagnosticsInput,
+  TscDiagnosticsResult,
+} from "./tsc-diagnostics-as-tasks";
