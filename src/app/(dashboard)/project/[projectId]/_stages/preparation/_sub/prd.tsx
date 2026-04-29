@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStageStore } from "@/store/stage-store";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
@@ -85,11 +85,31 @@ export default function PrdSubStage() {
   const streamingContent = usePipelineStore((s) => s.streamingContent);
   const currentStep      = usePipelineStore((s) => s.currentStep);
   const isRunning        = usePipelineStore((s) => s.isRunning);
+  const featureBrief     = usePipelineStore((s) => s.featureBrief);
+  const startPipeline    = usePipelineStore((s) => s.startPipeline);
   const goToSubStage     = useStageStore((s) => s.goToSubStage);
   const goToStage        = useStageStore((s) => s.goToStage);
+  const isStageHydrated  = useStageStore((s) => s.isStageHydrated);
 
   const [editInput, setEditInput] = useState("");
   const [isPrinting, setIsPrinting] = useState(false);
+
+  // Auto-start the pipeline when there is no snapshot (prd step is empty) and
+  // the pipeline is not already running.  We wait for both stage hydration AND
+  // featureBrief to be available (the two loadFromServer calls run in parallel,
+  // so featureBrief may arrive after isStageHydrated becomes true).
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!isStageHydrated) return;
+    if (autoStartedRef.current) return;
+    if (isRunning) return;
+    if (step?.content) return; // already have content — nothing to do
+    if (!featureBrief.trim()) return; // brief not yet loaded, wait for next tick
+    autoStartedRef.current = true;
+    startPipeline(featureBrief);
+  // Re-run whenever featureBrief arrives or hydration completes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStageHydrated, featureBrief]);
 
   const isThisRunning = isRunning && currentStep === "prd";
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
