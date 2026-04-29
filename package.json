@@ -6,11 +6,12 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:b": "PORT=${PORT:-3001} NEXT_DIST_DIR=${NEXT_DIST_DIR:-.next-b} next dev --turbopack --port ${PORT:-3001}",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "electron:dev": "concurrently --kill-others-on-fail --prefix \"[{time}]\" --timestamp-format \"yyyy-MM-dd HH:mm:ss\" \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:dev:b": "concurrently --kill-others-on-fail --prefix \"[{time}]\" --timestamp-format \"yyyy-MM-dd HH:mm:ss\" \"npm run dev\" \"wait-on http://localhost:${PORT:-3001} && BUILDER_DEV_URL=http://localhost:${PORT:-3001} BUILDER_INSTANCE_LABEL=B electron . --user-data-dir=$HOME/.agentic-builder-electron-b\"",
+    "electron:dev:b": "PORT=${PORT:-3001} NEXT_DIST_DIR=${NEXT_DIST_DIR:-.next-b} concurrently --kill-others-on-fail --prefix \"[{time}]\" --timestamp-format \"yyyy-MM-dd HH:mm:ss\" \"npm run dev:b\" \"wait-on http://localhost:${PORT:-3001} && BUILDER_DEV_URL=http://localhost:${PORT:-3001} BUILDER_INSTANCE_LABEL=B electron . --user-data-dir=$HOME/.agentic-builder-electron-b\"",
     "electron:build": "npm run build && electron-builder",
     "electron:pack": "npm run build && electron-builder --dir",
     "test": "vitest run",

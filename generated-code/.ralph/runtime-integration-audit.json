@@ -1,0 +1,66 @@
+{
+  "generatedAt": "2026-04-29T06:38:46.719Z",
+  "sessionId": "dfdf2753-a3eb-428e-9e78-d08982d8163f",
+  "appliedOptionalFeatures": [
+    "auth-privy"
+  ],
+  "declaredEnvKeys": [
+    "VITE_PRIVY_APP_ID",
+    "PRIVY_APP_SECRET",
+    "OPENAI_API_KEY",
+    "X_BEARER_TOKEN",
+    "JINA_API_KEY",
+    "QUOTIENT_API_KEY"
+  ],
+  "findings": [
+    {
+      "id": "bg-job-clear-stale-runs|backend/src/api/modules/feed/feed.routes.ts|26",
+      "ruleId": "bg-job-clear-stale-runs",
+      "scope": "backend",
+      "severity": "warn",
+      "file": "backend/src/api/modules/feed/feed.routes.ts",
+      "line": 26,
+      "snippet": "getFeedHandler);\n  router.post(\"/feed/refresh\", authGate, refreshFeedHandler);\n  router.get(\"/feed/stream\", authGate, feedStreamHandler);\n  router.get(\"/feed/status\", authGate, fe",
+      "reason": "This route kicks off a background aggregation but never clears stale `running` rows. A crashed previous run leaves the user with `ALREADY_RUNNING` errors forever.",
+      "directive": "Implement a `clearActiveRunsForUser(userId)` helper in the matching service file that updates every `status='running'` row for the user to `failed` (with `completed_at = new Date()`), and call it as the FIRST line of this refresh handler — before `enqueueXxx`."
+    },
+    {
+      "id": "bg-job-inproc-branch|backend/src/api/modules/feed/feed.service.ts|296",
+      "ruleId": "bg-job-inproc-branch",
+      "scope": "backend",
+      "severity": "error",
+      "file": "backend/src/api/modules/feed/feed.service.ts",
+      "line": 296,
+      "snippet": "const run = await FeedAggregationRun.findByPk(runId, {\n    attributes: [\"id\", \"status\", \"step_log\", \"story_count\"],\n  });\n\n  if (!run) {\n    return {\n      run_id: runId,\n      s",
+      "reason": "This file queries the *Run table by id but does not branch on `inproc:` run-ids. In-process runs use ids like `inproc:<userId>:<ts>` that are NOT UUIDs — Postgres throws `invalid input syntax for type uuid`, the SSE / status endpoint 5xxs, and the user sees an indefinite spinner.",
+      "directive": "Wrap the lookup in a discriminator: `if (runId.startsWith(\"inproc:\")) { /* subscribe to in-memory event emitter; do NOT touch DB */ } else if (isUuid(runId)) { const run = await XxxRun.findByPk(runId); ... } else { ctx.throw(400, \"Invalid run_id\"); }`. Apply to every status / stream handler in this file."
+    },
+    {
+      "id": "bg-job-inproc-branch|backend/src/services/feedAggregationService.ts|76",
+      "ruleId": "bg-job-inproc-branch",
+      "scope": "backend",
+      "severity": "error",
+      "file": "backend/src/services/feedAggregationService.ts",
+      "line": 76,
+      "snippet": "const run = await FeedAggregationRun.findByPk(runId, {\n    attributes: [\"id\", \"step_log\"],\n  });\n  if (!run) return;\n\n  const currentLog: StepLogEntry[] = Array.isArray(run.step_",
+      "reason": "This file queries the *Run table by id but does not branch on `inproc:` run-ids. In-process runs use ids like `inproc:<userId>:<ts>` that are NOT UUIDs — Postgres throws `invalid input syntax for type uuid`, the SSE / status endpoint 5xxs, and the user sees an indefinite spinner.",
+      "directive": "Wrap the lookup in a discriminator: `if (runId.startsWith(\"inproc:\")) { /* subscribe to in-memory event emitter; do NOT touch DB */ } else if (isUuid(runId)) { const run = await XxxRun.findByPk(runId); ... } else { ctx.throw(400, \"Invalid run_id\"); }`. Apply to every status / stream handler in this file."
+    }
+  ],
+  "byRule": {
+    "bg-job-clear-stale-runs": 1,
+    "bg-job-inproc-branch": 2
+  },
+  "bySeverity": {
+    "warn": 1,
+    "error": 2
+  },
+  "hasError": true,
+  "clean": false,
+  "disabledRules": [
+    {
+      "ruleId": "llm-client-abstraction",
+      "reason": "no LLM_* bundle declared on resource requirements — abstraction rule N/A."
+    }
+  ]
+}

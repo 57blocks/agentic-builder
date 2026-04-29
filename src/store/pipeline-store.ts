@@ -38,6 +38,12 @@ export interface DesignReferenceSummary {
   storedFileName: string;
   mime: string;
   bytes: number;
+  /**
+   * `"image"` for png/jpg/webp/gif screenshots, `"html"` for self-contained
+   * page references. Older persisted manifests may omit this — the server
+   * back-fills `"image"` when serving the manifest.
+   */
+  kind: "image" | "html";
   label: string;
   pageHint: string;
   uploadedAt: string;

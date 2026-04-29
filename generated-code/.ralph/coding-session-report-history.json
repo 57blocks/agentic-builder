@@ -1,5 +1,26 @@
 [
   {
+    "sessionId": "dfdf2753-a3eb-428e-9e78-d08982d8163f",
+    "startedAt": "2026-04-29T03:43:30.189Z",
+    "endedAt": "2026-04-29T06:50:35.667Z",
+    "status": "fail",
+    "score": 38,
+    "grade": "F",
+    "durationMs": 11225478,
+    "totalCalls": 386,
+    "totalTokens": 13269261,
+    "totalCostUsd": 4.278268750000001,
+    "primaryModel": "deepseek-v4-pro",
+    "primaryModelScore": 100,
+    "primaryModelGrade": "A",
+    "archiveJsonFile": "coding-session-report.2026-04-29T06-50-35-667Z.dfdf2753-a3eb-428e-9e78-d08982d8163f.json",
+    "archiveMdFile": "coding-session-report.2026-04-29T06-50-35-667Z.dfdf2753-a3eb-428e-9e78-d08982d8163f.md",
+    "runtimeReadinessFindings": 3,
+    "runtimeReadinessErrors": 2,
+    "runtimeReadinessWarnings": 1,
+    "runtimeReadinessHasError": true
+  },
+  {
     "sessionId": "52851b86-63eb-4e90-a9c2-5f99fe94a9bd",
     "startedAt": "2026-04-28T10:27:05.680Z",
     "endedAt": "2026-04-28T12:45:11.101Z",

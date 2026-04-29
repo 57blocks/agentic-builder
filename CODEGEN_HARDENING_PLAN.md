@@ -883,3 +883,18 @@ cd generated-code-b/frontend && pnpm dev -- --port 5174
 - **不要**两个 dev server 共用同一个 `CODE_OUTPUT_DIR` —— coding session 启动时会做强清理（保留 `.git/.ralph/` + 8 个 markdown，删除其它）；两个 session 同时清同一目录会互删。
 - **不要**把 `.env.parallel` 提交（已加到 `.gitignore`）。
 - **MEMORY 写入**有锁（`.memory/.lock-target`），两个 session 同时触发 memory 注入会自动串行等待，安全但会有额外延迟。
+
+### 已知坑：Next.js 16 的 dev-server lock
+
+Next.js 16 在 `<distDir>/lock` 上加了文件锁，**只看 distDir 不看 port**。同一项目目录里跑两个 `next dev`，即使端口不同也会被第二个进程报错：
+
+> ⨯ Another next dev server is already running.
+
+解决方式（已落地）：
+
+1. `next.config.ts` 读 `NEXT_DIST_DIR` env，B 实例用 `.next-b/` 写 lock，跟 A 的 `.next/lock` 完全隔离。
+2. `.env.parallel.example` 默认带 `NEXT_DIST_DIR=.next-b`。
+3. `package.json` 新增 `dev:b` 脚本，把 `PORT` / `NEXT_DIST_DIR` 直接注入 `next dev` 进程（之前写在 `concurrently` 第二个命令里，第一个 `npm run dev` 子进程吃不到）。
+4. `electron:dev:b` 改用 `npm run dev:b` 启 Next，且整段命令前加 `PORT=... NEXT_DIST_DIR=...`，确保 `concurrently` 子进程也继承到。
+
+如果手动起 B 而不走脚本，记得 `PORT` 和 `NEXT_DIST_DIR` 两个 env 必须同时设置，缺一会回退到 A 的端口或 distDir。

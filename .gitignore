@@ -26,7 +26,11 @@ example
 
 # next.js
 /.next/
+/.next-*/
 /out/
+
+# parallel-instance generated-code roots (kept untracked alongside generated-code/)
+/generated-code-*/
 
 # electron
 /dist/

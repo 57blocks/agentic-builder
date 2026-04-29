@@ -1,5 +1,5 @@
 ---
-{"id":"FP-mined-integration-gate-stagnation-warning","layer":"L1","kind":"failure-pattern","title":"integration-gate · stagnation_warning","tags":["mined","stage:integration-gate","event:stagnation_warning","category:real-failure"],"source":"distill","refs":{},"createdAt":1777369541193,"updatedAt":1777369541193,"schemaVersion":1}
+{"id":"FP-mined-integration-gate-stagnation-warning","layer":"L1","kind":"failure-pattern","title":"integration-gate · stagnation_warning","tags":["mined","stage:integration-gate","event:stagnation_warning","category:real-failure"],"source":"distill","refs":{},"createdAt":1777369541193,"updatedAt":1777444135243,"schemaVersion":1}
 ---
 
 # integration-gate — stagnation_warning

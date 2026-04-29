@@ -40,9 +40,11 @@ set +a
 
 : "${PORT:=3001}"
 : "${CODE_OUTPUT_DIR:=generated-code-b}"
+: "${NEXT_DIST_DIR:=.next-b}"
 
 echo "── Parallel Agentic Builder (mode=$MODE) ──"
 echo "  PORT                              = $PORT"
+echo "  NEXT_DIST_DIR                     = $NEXT_DIST_DIR"
 echo "  CODE_OUTPUT_DIR                   = $CODE_OUTPUT_DIR"
 echo "  BLUEPRINT_GENERATED_DATABASE_URL  = ${BLUEPRINT_GENERATED_DATABASE_URL:-(unset; falls back to .env.local)}"
 echo ""
