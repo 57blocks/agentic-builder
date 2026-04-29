@@ -3,6 +3,7 @@ import bodyParser from "koa-bodyparser";
 import { createApiRouter } from "./api/modules";
 import { corsMiddleware } from "./middlewares/cors";
 import { errorHandlerMiddleware } from "./middlewares/errorHandler";
+import { privyAuthMiddleware } from "./middlewares/privyAuth";
 
 export function createApp(): Koa {
   const app = new Koa();
@@ -11,12 +12,9 @@ export function createApp(): Koa {
   app.use(errorHandlerMiddleware);
   app.use(corsMiddleware);
   app.use(bodyParser());
-  // Auth middleware:
-  //   - default base scaffold: no auth middleware (email+password handled
-  //     per-route by feature workers based on PRD).
-  //   - When the `_optional/auth-privy` feature is applied, this file is
-  //     overwritten with a version that registers `privyAuthMiddleware`.
-  //   - When `_optional/auth-clerk` is applied, similar overwrite for Clerk.
+  // Privy OAuth: parses Bearer / cookie token, populates ctx.state.user
+  // when valid. Routes that require auth must call `requirePrivyAuth(ctx)`.
+  app.use(privyAuthMiddleware);
   app.use(apiRouter.routes()).use(apiRouter.allowedMethods());
 
   return app;

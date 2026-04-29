@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+/.pnpm-store/
 # scaffold templates must stay source-only; local installs break copyScaffold
 scaffolds/**/node_modules
 # generated-code: ignore bulk of output; allow pipeline/session dirs to be tracked
