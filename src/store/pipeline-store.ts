@@ -175,6 +175,8 @@ interface PipelineState {
   /** Save the brief without starting the pipeline — used by the initial stage before intent Q&A. */
   setPendingBrief: (brief: string) => void;
   startPipeline: (featureBrief: string) => void;
+  /** Re-run the PRD step only, applying the given edit instruction to the current PRD content. */
+  rerunPrd: (editInstruction: string) => void;
   setActiveTab: (tab: PipelineStepId) => void;
   /** Batch-update step results (e.g. from parallel generation). */
   updateSteps: (updates: Partial<Record<PipelineStepId, StepResult>>) => void;
@@ -332,6 +334,98 @@ export const usePipelineStore = create<PipelineState>()(
             if (buffer.startsWith("data: ")) {
               try {
                 handleEvent(JSON.parse(buffer.slice(6)), set, get);
+              } catch { /* skip */ }
+            }
+
+            if (get().isRunning) set({ isRunning: false });
+          })
+          .catch((err) => {
+            set({
+              isRunning: false,
+              error: err instanceof Error ? err.message : "Unknown error",
+            });
+          });
+      },
+
+      rerunPrd: (editInstruction: string) => {
+        const { steps, featureBrief, codeOutputDir } = get();
+        const existingPrd = steps.prd?.content ?? "";
+        const updatedSteps = { ...steps, prd: { stepId: "prd" as PipelineStepId, status: "running" as const, timestamp: new Date().toISOString() } };
+        set({
+          isRunning: true,
+          error: null,
+          currentStep: "prd",
+          streamingContent: "",
+          streamingThinking: "",
+          steps: updatedSteps,
+        });
+        scheduleSync(get);
+
+        fetch("/api/agents/pipeline", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            featureBrief,
+            codeOutputDir,
+            prdEditInstruction: editInstruction,
+            existingPrd,
+          }),
+        })
+          .then(async (resp) => {
+            if (!resp.ok) {
+              const errData = await resp.json().catch(() => ({}));
+              set({
+                isRunning: false,
+                error:
+                  (errData as { error?: string }).error ||
+                  "PRD edit request failed",
+              });
+              return;
+            }
+
+            const reader = resp.body?.getReader();
+            if (!reader) {
+              set({ isRunning: false, error: "No response body" });
+              return;
+            }
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            // For rerunPrd we intentionally skip the generic `done` handler.
+            // The edit-only pipeline run only contains {intent, prd} in run.steps —
+            // applying the full `done` replacement would wipe trd/sysdesign/design/etc.
+            // that were completed in the original full pipeline run.
+            // steps.prd is already up-to-date via step_complete events.
+            const handleRerunEvent = (raw: unknown) => {
+              const payload = raw as { type?: string };
+              if (payload.type === "done") {
+                set({ isRunning: false });
+                scheduleSync(get);
+                return;
+              }
+              handleEvent(payload as Parameters<typeof handleEvent>[0], set, get);
+            };
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split("\n\n");
+              buffer = lines.pop() ?? "";
+
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                try {
+                  handleRerunEvent(JSON.parse(line.slice(6)));
+                } catch { /* skip */ }
+              }
+            }
+
+            if (buffer.startsWith("data: ")) {
+              try {
+                handleRerunEvent(JSON.parse(buffer.slice(6)));
               } catch { /* skip */ }
             }
 
@@ -830,6 +924,10 @@ export const usePipelineStore = create<PipelineState>()(
 
       loadSubStageSnapshot: async (stageId: string, subStageId: string) => {
         if (!_currentProjectSlug) return;
+        // If the pipeline is actively running, do not clobber in-flight state
+        // with a stale DB snapshot (e.g. user just called startPipeline and
+        // immediately navigated to the next sub-stage).
+        if (get().isRunning) return;
         try {
           const url = `/api/projects/${_currentProjectSlug}/substage-snapshot?stage=${encodeURIComponent(stageId)}&subStage=${encodeURIComponent(subStageId)}`;
           const resp = await fetch(url, { cache: "no-store" });

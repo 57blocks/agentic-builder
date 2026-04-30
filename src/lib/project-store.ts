@@ -11,52 +11,64 @@ import { db } from "@/lib/db/client";
 import type { Project } from "@/types/project";
 
 // ─── Auto-init tables (runs lazily on first query) ────────────────────────────
-const _g = globalThis as typeof globalThis & { __dbInitPromise_v2?: Promise<void> };
+const _g = globalThis as typeof globalThis & {
+  __dbInitPromise_v2?: Promise<void>;
+  __dbInitDone_v2?: boolean;
+};
 
 async function ensureTablesExist(): Promise<void> {
-  if (_g.__dbInitPromise_v2) return _g.__dbInitPromise_v2;
-  _g.__dbInitPromise_v2 = db.query(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id         TEXT        PRIMARY KEY,
-      slug       TEXT        NOT NULL UNIQUE,
-      name       TEXT        NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS project_pipeline_state (
-      project_id      TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-      feature_brief   TEXT        NOT NULL DEFAULT '',
-      current_step    TEXT,
-      active_tab      TEXT        NOT NULL DEFAULT 'intent',
-      total_cost_usd  FLOAT8      NOT NULL DEFAULT 0,
-      is_running      BOOLEAN     NOT NULL DEFAULT FALSE,
-      fast_from_prd   BOOLEAN     NOT NULL DEFAULT TRUE,
-      code_output_dir TEXT        NOT NULL DEFAULT 'generated-code',
-      steps_json      JSONB       NOT NULL DEFAULT '{}',
-      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS project_stage_state (
-      project_id        TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-      active_stage      TEXT        NOT NULL DEFAULT 'preparation',
-      active_sub_stages JSONB       NOT NULL DEFAULT '{}',
-      project_name      TEXT        NOT NULL DEFAULT 'New Project',
-      updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    ALTER TABLE project_stage_state
-      ADD COLUMN IF NOT EXISTS intent_messages_json  JSONB NOT NULL DEFAULT '[]',
-      ADD COLUMN IF NOT EXISTS intent_enriched_brief TEXT  NOT NULL DEFAULT '';
-    CREATE TABLE IF NOT EXISTS project_substage_snapshot (
-      project_id   TEXT        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      stage_id     TEXT        NOT NULL,
-      sub_stage_id TEXT        NOT NULL,
-      snapshot     JSONB       NOT NULL DEFAULT '{}',
-      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (project_id, stage_id, sub_stage_id)
-    );
-  `).then(() => undefined).catch((err) => {
-    // Reset so next request retries init.
-    _g.__dbInitPromise_v2 = undefined;
-    throw err;
-  });
+  // Fast path: already initialised in this process lifetime.
+  if (_g.__dbInitDone_v2) return;
+
+  // Coalesce concurrent calls into a single in-flight promise.
+  if (!_g.__dbInitPromise_v2) {
+    _g.__dbInitPromise_v2 = db.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id         TEXT        PRIMARY KEY,
+        slug       TEXT        NOT NULL UNIQUE,
+        name       TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS project_pipeline_state (
+        project_id      TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        feature_brief   TEXT        NOT NULL DEFAULT '',
+        current_step    TEXT,
+        active_tab      TEXT        NOT NULL DEFAULT 'intent',
+        total_cost_usd  FLOAT8      NOT NULL DEFAULT 0,
+        is_running      BOOLEAN     NOT NULL DEFAULT FALSE,
+        fast_from_prd   BOOLEAN     NOT NULL DEFAULT TRUE,
+        code_output_dir TEXT        NOT NULL DEFAULT 'generated-code',
+        steps_json      JSONB       NOT NULL DEFAULT '{}',
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS project_stage_state (
+        project_id        TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        active_stage      TEXT        NOT NULL DEFAULT 'preparation',
+        active_sub_stages JSONB       NOT NULL DEFAULT '{}',
+        project_name      TEXT        NOT NULL DEFAULT 'New Project',
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE project_stage_state
+        ADD COLUMN IF NOT EXISTS intent_messages_json  JSONB NOT NULL DEFAULT '[]',
+        ADD COLUMN IF NOT EXISTS intent_enriched_brief TEXT  NOT NULL DEFAULT '';
+      CREATE TABLE IF NOT EXISTS project_substage_snapshot (
+        project_id   TEXT        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        stage_id     TEXT        NOT NULL,
+        sub_stage_id TEXT        NOT NULL,
+        snapshot     JSONB       NOT NULL DEFAULT '{}',
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (project_id, stage_id, sub_stage_id)
+      );
+    `).then(() => {
+      _g.__dbInitDone_v2 = true;
+    }).catch((err) => {
+      // Reset so the next request retries, but don't leave a rejected promise
+      // cached — that would cause all subsequent awaits to throw immediately.
+      _g.__dbInitPromise_v2 = undefined;
+      throw err;
+    });
+  }
+
   return _g.__dbInitPromise_v2;
 }
 

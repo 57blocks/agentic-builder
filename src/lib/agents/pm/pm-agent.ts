@@ -453,4 +453,26 @@ export class PMAgent extends BaseAgent {
     );
     return result;
   }
+
+  /**
+   * Edit an existing PRD based on a user instruction.
+   * Streams the updated PRD using the same format as generatePRDStreaming.
+   */
+  async generatePRDEditStreaming(
+    existingPrd: string,
+    editInstruction: string,
+    onChunk: (chunk: string, type: "thinking" | "content") => void,
+    sessionId?: string,
+  ) {
+    const userMsg = `You are editing an existing PRD based on the user's instruction. **Output the COMPLETE updated PRD as valid Markdown** — preserve all sections not affected by the edit, and apply the requested changes precisely.\n\n## Existing PRD\n\n${existingPrd}\n\n## Edit Instruction\n\n${editInstruction}\n\nRespond with the full updated PRD only. No preamble or explanation.`;
+
+    const result = await this.streamRun(
+      userMsg,
+      onChunk,
+      undefined,
+      "step-prd",
+      sessionId,
+    );
+    return result;
+  }
 }
