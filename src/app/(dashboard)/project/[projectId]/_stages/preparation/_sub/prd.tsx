@@ -1,11 +1,304 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStageStore } from "@/store/stage-store";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import StageInputBar from "@/components/StageInputBar";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, History, X, ChevronLeft, ChevronRight } from "lucide-react";
+
+// ─── In-memory PRD history (never persisted to DB) ───────────────────────────
+export interface PrdSnapshot {
+  content: string;
+  savedAt: Date;
+  /** Human-readable label, e.g. "v1 · Initial", "v2 · After edit" */
+  label: string;
+}
+
+// Module-level store so history survives hot-reload but resets on page reload.
+const _prdHistoryStore: PrdSnapshot[] = [];
+
+// ─── Word-level inline diff ──────────────────────────────────────────────────
+type WordDiff =
+  | { type: "equal" | "added" | "removed"; text: string };
+
+function diffWords(oldLine: string, newLine: string): { old: WordDiff[]; new: WordDiff[] } {
+  const a = oldLine.split(/(\s+)/);
+  const b = newLine.split(/(\s+)/);
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const oldTokens: WordDiff[] = [], newTokens: WordDiff[] = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && a[i] === b[j]) {
+      oldTokens.push({ type: "equal", text: a[i] });
+      newTokens.push({ type: "equal", text: b[j] });
+      i++; j++;
+    } else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) {
+      newTokens.push({ type: "added", text: b[j] });
+      j++;
+    } else {
+      oldTokens.push({ type: "removed", text: a[i] });
+      i++;
+    }
+  }
+  return { old: oldTokens, new: newTokens };
+}
+
+function InlineDiffLine({ tokens }: { tokens: WordDiff[] }) {
+  return (
+    <span>
+      {tokens.map((t, i) => {
+        if (t.type === "equal") return <span key={i}>{t.text}</span>;
+        if (t.type === "added")
+          return <span key={i} className="bg-[#abf2bc] text-[#1a7f37] rounded-[2px]">{t.text}</span>;
+        return <span key={i} className="bg-[#ff818266] text-[#cf222e] rounded-[2px] line-through">{t.text}</span>;
+      })}
+    </span>
+  );
+}
+
+
+type DiffLine =
+  | { type: "equal";   text: string }
+  | { type: "added";   text: string }
+  | { type: "removed"; text: string };
+
+function diffLines(oldText: string, newText: string): DiffLine[] {
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  const m = a.length, n = b.length;
+
+  // Build LCS table
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (a[i] === b[j]) dp[i][j] = 1 + dp[i + 1][j + 1];
+      else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const result: DiffLine[] = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && a[i] === b[j]) {
+      result.push({ type: "equal", text: a[i] });
+      i++; j++;
+    } else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) {
+      result.push({ type: "added", text: b[j] });
+      j++;
+    } else {
+      result.push({ type: "removed", text: a[i] });
+      i++;
+    }
+  }
+  return result;
+}
+
+// ─── DiffPanel component ─────────────────────────────────────────────────────
+function DiffPanel({
+  history,
+  currentContent,
+  onClose,
+}: {
+  history: PrdSnapshot[];
+  currentContent: string;
+  onClose: () => void;
+}) {
+  // All versions: history (oldest→newest) + current as the latest
+  const allVersions: PrdSnapshot[] = [
+    ...history,
+    { content: currentContent, savedAt: new Date(), label: `v${history.length + 1} · Current` },
+  ];
+
+  const [leftIdx, setLeftIdx]   = useState(Math.max(0, allVersions.length - 2));
+  const [rightIdx, setRightIdx] = useState(allVersions.length - 1);
+
+  const leftContent  = allVersions[leftIdx]?.content  ?? "";
+  const rightContent = allVersions[rightIdx]?.content ?? "";
+
+  const diffResult = diffLines(leftContent, rightContent);
+
+  // Stats
+  const added   = diffResult.filter((l) => l.type === "added").length;
+  const removed = diffResult.filter((l) => l.type === "removed").length;
+
+  return (
+    <div className="flex flex-col w-full h-full bg-white border border-[#e2e8f0] rounded-[4px] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+          <div className="flex items-center gap-3">
+            <History size={16} className="text-[#712ae2]" />
+            <span className="font-semibold text-slate-900 text-sm">PRD Version Diff</span>
+            <span className="text-xs text-slate-500">{allVersions.length} versions</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100 transition-colors">
+            <X size={16} className="text-slate-500" />
+          </button>
+        </div>
+
+        {/* Version selectors + stats */}
+        <div className="flex items-center gap-6 px-6 py-3 border-b border-slate-100 bg-slate-50 shrink-0 text-xs">
+          {/* Left version picker */}
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
+            <span className="text-slate-500 mr-1">Base:</span>
+            <button
+              disabled={leftIdx === 0}
+              onClick={() => setLeftIdx((v) => Math.max(0, v - 1))}
+              className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 rounded font-medium min-w-28 text-center">
+              {allVersions[leftIdx]?.label}
+            </span>
+            <button
+              disabled={leftIdx >= rightIdx - 1}
+              onClick={() => setLeftIdx((v) => Math.min(rightIdx - 1, v + 1))}
+              className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          <ChevronRight size={14} className="text-slate-400" />
+
+          {/* Right version picker */}
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
+            <span className="text-slate-500 mr-1">Compare:</span>
+            <button
+              disabled={rightIdx <= leftIdx + 1}
+              onClick={() => setRightIdx((v) => Math.max(leftIdx + 1, v - 1))}
+              className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded font-medium min-w-28 text-center">
+              {allVersions[rightIdx]?.label}
+            </span>
+            <button
+              disabled={rightIdx >= allVersions.length - 1}
+              onClick={() => setRightIdx((v) => Math.min(allVersions.length - 1, v + 1))}
+              className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          {/* Diff stats */}
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-green-600 font-medium">+{added}</span>
+            <span className="text-red-500 font-medium">−{removed}</span>
+          </div>
+        </div>
+
+        {/* Unified diff view */}
+        <div className="flex-1 overflow-auto bg-white">
+          {/* File header — GitHub style */}
+          <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-[#f6f8fa] border-b border-[#d0d7de] text-xs font-mono text-[#57606a]">
+            <span className="font-semibold text-[#24292f]">PRD.md</span>
+            <span className="ml-auto text-green-600">+{added}</span>
+            <span className="text-red-500">−{removed}</span>
+            {/* mini bar chart */}
+            <div className="flex h-2 w-20 rounded-sm overflow-hidden bg-slate-200">
+              {added + removed > 0 && (
+                <>
+                  <div
+                    className="bg-green-500 h-full"
+                    style={{ width: `${Math.round((added / (added + removed)) * 100)}%` }}
+                  />
+                  <div
+                    className="bg-red-400 h-full"
+                    style={{ width: `${Math.round((removed / (added + removed)) * 100)}%` }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Diff lines */}
+          <div className="font-mono text-[12.5px] leading-5">
+            {diffResult.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-slate-400 text-sm font-sans">
+                No differences between these versions.
+              </div>
+            ) : (() => {
+              // Group consecutive removed/added pairs for word-level diffing
+              const rows: React.ReactNode[] = [];
+              let idx = 0;
+              while (idx < diffResult.length) {
+                const cur = diffResult[idx];
+                const next = diffResult[idx + 1];
+                if (cur.type === "removed" && next?.type === "added") {
+                  // Paired change: show word-level diff in both lines
+                  const wordDiff = diffWords(cur.text, next.text);
+                  rows.push(
+                    <div key={`r${idx}`} className="flex min-w-0 bg-[#ffebe9]">
+                      <span className="select-none shrink-0 w-8 text-center border-r text-red-500 bg-[#ffd7d5] border-[#ffb3af]">−</span>
+                      <span className="flex-1 pl-4 pr-4 whitespace-pre-wrap break-words text-[#cf222e]">
+                        <InlineDiffLine tokens={wordDiff.old} />
+                      </span>
+                    </div>,
+                    <div key={`a${idx}`} className="flex min-w-0 bg-[#e6ffec]">
+                      <span className="select-none shrink-0 w-8 text-center border-r text-green-600 bg-[#ccffd8] border-[#b0efbc]">+</span>
+                      <span className="flex-1 pl-4 pr-4 whitespace-pre-wrap break-words text-[#1a7f37]">
+                        <InlineDiffLine tokens={wordDiff.new} />
+                      </span>
+                    </div>,
+                  );
+                  idx += 2;
+                } else {
+                  const isAdded   = cur.type === "added";
+                  const isRemoved = cur.type === "removed";
+                  rows.push(
+                    <div
+                      key={idx}
+                      className={[
+                        "flex min-w-0",
+                        isAdded   ? "bg-[#e6ffec]" : "",
+                        isRemoved ? "bg-[#ffebe9]" : "",
+                      ].join(" ")}
+                    >
+                      <span
+                        className={[
+                          "select-none shrink-0 w-8 text-center border-r",
+                          isAdded   ? "text-green-600 bg-[#ccffd8] border-[#b0efbc]" : "",
+                          isRemoved ? "text-red-500  bg-[#ffd7d5] border-[#ffb3af]" : "",
+                          !isAdded && !isRemoved ? "text-slate-300 bg-[#f6f8fa] border-[#d0d7de]" : "",
+                        ].join(" ")}
+                      >
+                        {isAdded ? "+" : isRemoved ? "−" : " "}
+                      </span>
+                      <span
+                        className={[
+                          "flex-1 pl-4 pr-4 whitespace-pre-wrap break-words",
+                          isAdded   ? "text-[#1a7f37]" : "",
+                          isRemoved ? "text-[#cf222e]" : "",
+                          !isAdded && !isRemoved ? "text-[#24292f]" : "",
+                        ].join(" ")}
+                      >
+                        {cur.text || "\u00a0"}
+                      </span>
+                    </div>,
+                  );
+                  idx++;
+                }
+              }
+              return rows;
+            })()}
+          </div>
+        </div>
+
+    </div>
+  );
+}
 
 function SpinnerIcon() {
   return (
@@ -89,12 +382,19 @@ export default function PrdSubStage() {
   const isRunning        = usePipelineStore((s) => s.isRunning);
   const featureBrief     = usePipelineStore((s) => s.featureBrief);
   const startPipeline    = usePipelineStore((s) => s.startPipeline);
+  const rerunPrd         = usePipelineStore((s) => s.rerunPrd);
   const goToSubStage     = useStageStore((s) => s.goToSubStage);
   const goToStage        = useStageStore((s) => s.goToStage);
   const isStageHydrated  = useStageStore((s) => s.isStageHydrated);
 
   const [editInput, setEditInput] = useState("");
   const [isPrinting, setIsPrinting] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+
+  // In-memory PRD history — not persisted to DB, only for diff within this session
+  // We capture a snapshot every time the prd step transitions to "completed".
+  const prdHistoryRef = useRef<PrdSnapshot[]>(_prdHistoryStore);
+  const prevIsDoneRef = useRef(false);
 
   // Auto-start the pipeline when there is no snapshot (prd step is empty) and
   // the pipeline is not already running.  We wait for both stage hydration AND
@@ -116,6 +416,30 @@ export default function PrdSubStage() {
   const isThisRunning = isRunning && currentStep === "prd";
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
   const isDone  = step?.status === "completed";
+
+  // Capture PRD snapshot exactly once: when isDone transitions false → true,
+  // i.e. the moment the SSE stream finishes and step_complete has been applied.
+  // We deliberately do NOT depend on `content` here so we never fire mid-stream.
+  useEffect(() => {
+    const justCompleted = isDone && !prevIsDoneRef.current;
+    if (justCompleted) {
+      // Read the final content directly from the step (not from streaming state).
+      const finalContent = step?.content ?? "";
+      if (finalContent) {
+        const versionNum = prdHistoryRef.current.length + 1;
+        prdHistoryRef.current = [
+          ...prdHistoryRef.current,
+          {
+            content: finalContent,
+            savedAt: new Date(),
+            label: versionNum === 1 ? `v${versionNum} · Initial` : `v${versionNum} · Edited`,
+          },
+        ];
+      }
+    }
+    prevIsDoneRef.current = isDone;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDone]);
   const handleDownloadPdf = () => {
     if (!content || isPrinting) return;
     setIsPrinting(true);
@@ -217,7 +541,6 @@ export default function PrdSubStage() {
 
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
-
       {/* ── Secondary Document Tab Bar ── */}
       <div className="shrink-0 bg-white border-b border-[#e2e8f0] flex items-center justify-between px-8">
         {/* Tabs */}
@@ -257,7 +580,14 @@ export default function PrdSubStage() {
 
       {/* ── PRD Content Canvas ── */}
       <div className="flex-1 overflow-auto px-8 py-8">
-        <div className="w-full">
+        <div className="w-full h-full">
+          {showDiff ? (
+            <DiffPanel
+              history={prdHistoryRef.current.slice(0, -1)}
+              currentContent={prdHistoryRef.current[prdHistoryRef.current.length - 1]?.content ?? content}
+              onClose={() => setShowDiff(false)}
+            />
+          ) : (
           <div className="bg-white border border-[#e2e8f0] rounded-[4px] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] overflow-hidden">
 
             {/* Document Header */}
@@ -299,6 +629,16 @@ export default function PrdSubStage() {
               </div>
               {/* Action buttons */}
               <div className="flex items-center gap-1 shrink-0">
+                {prdHistoryRef.current.length > 1 && (
+                  <button
+                    onClick={() => setShowDiff(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1"
+                    title="View version history & diff"
+                  >
+                    <History size={13} />
+                    {prdHistoryRef.current.length} versions
+                  </button>
+                )}
                 <button className="p-2 rounded hover:bg-[#f1f5f9] transition-colors" title="Share">
                   <ShareIcon />
                 </button>
@@ -324,6 +664,7 @@ export default function PrdSubStage() {
             </div>
 
           </div>
+          )}
         </div>
       </div>
 
@@ -331,7 +672,13 @@ export default function PrdSubStage() {
       <StageInputBar
         value={editInput}
         onChange={setEditInput}
-        onSubmit={() => { /* AI edit — TODO */ }}
+        onSubmit={() => {
+          const instruction = editInput.trim();
+          if (!instruction || isThisRunning) return;
+          setEditInput("");
+          setShowDiff(false);
+          rerunPrd(instruction);
+        }}
         placeholder="Ask AgenticBuilder to edit this PRD…"
         disabled={isThisRunning}
         actions={

@@ -13,11 +13,15 @@ export async function POST(request: NextRequest) {
     codeOutputDir,
     fastFromPrd,
     pauseAfterPrd,
+    prdEditInstruction,
+    existingPrd,
   } = body as {
     featureBrief?: string;
     codeOutputDir?: string;
     fastFromPrd?: boolean;
     pauseAfterPrd?: boolean;
+    prdEditInstruction?: string;
+    existingPrd?: string;
   };
 
   const featureBrief =
@@ -43,6 +47,14 @@ export async function POST(request: NextRequest) {
             typeof codeOutputDir === "string" ? codeOutputDir : undefined,
           fastFromPrd: fastFromPrd === true,
           pauseAfterPrd: pauseAfterPrd === true,
+          prdEditInstruction:
+            typeof prdEditInstruction === "string" && prdEditInstruction.trim()
+              ? prdEditInstruction.trim()
+              : undefined,
+          existingPrd:
+            typeof existingPrd === "string" && existingPrd.trim()
+              ? existingPrd.trim()
+              : undefined,
         });
 
         // Auto-save pipeline snapshot for debug reuse

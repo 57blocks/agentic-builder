@@ -51,14 +51,16 @@ function getPool(): Pool {
       ...poolOpts,
       // Allow up to 20 connections in the pool.
       max: 20,
-      // Minimum idle connections kept alive.
-      min: 2,
-      // Fail fast if a connection cannot be acquired within 15 s.
-      connectionTimeoutMillis: 15_000,
+      // Do NOT eagerly open connections — only create when actually needed.
+      // min: 0 avoids blocking pool creation if the DB is temporarily unavailable.
+      min: 0,
+      // Fail fast: 5 s is enough to surface a real connectivity problem without
+      // making the UI hang for 15 s on every request.
+      connectionTimeoutMillis: 5_000,
       // Kill runaway queries after 30 s so the pool slot is freed.
       statement_timeout: 30_000,
-      // Reap idle connections after 60 s (rather than 30 s default).
-      idleTimeoutMillis: 60_000,
+      // Reap idle connections after 30 s.
+      idleTimeoutMillis: 30_000,
       // Keep-alive to prevent NAT/firewall from silently dropping idle connections.
       keepAlive: true,
       keepAliveInitialDelayMillis: 10_000,
