@@ -17,6 +17,14 @@ import {
   type SubStageSnapshot,
 } from "@/lib/project-store";
 
+/** Substage order — mirrors stage-store, used for fallback walk. */
+const SUB_STAGE_ORDER: Record<string, string[]> = {
+  preparation: ["initial", "intent", "prd", "trd", "sysdesign", "implguide", "design", "pencil", "mockup", "qa"],
+  kickoff:     ["env-setup", "task-breakdown"],
+  coding:      ["architect", "backend", "frontend", "test", "verify"],
+  preview:     ["serve", "e2e"],
+};
+
 type RouteContext = { params: Promise<{ projectId: string }> };
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
@@ -27,11 +35,22 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const subStage = url.searchParams.get("subStage");
 
     if (stage && subStage) {
+      // Try exact match first.
       const snapshot = await getSubStageSnapshot(projectId, stage, subStage);
-      return NextResponse.json({ stageId: stage, subStageId: subStage, snapshot });
+      if (snapshot) return NextResponse.json({ stageId: stage, subStageId: subStage, snapshot });
+
+      // No exact snapshot — walk backwards to find the nearest available one.
+      const order = SUB_STAGE_ORDER[stage] ?? [];
+      const idx   = order.indexOf(subStage);
+      for (let i = idx - 1; i >= 0; i--) {
+        const prev = await getSubStageSnapshot(projectId, stage, order[i]);
+        if (prev) return NextResponse.json({ stageId: stage, subStageId: subStage, snapshot: prev });
+      }
+
+      return NextResponse.json({ stageId: stage, subStageId: subStage, snapshot: null });
     }
 
-    // No params — return the currently-active sub-stage snapshot
+    // No params — return the currently-active sub-stage snapshot (with built-in fallback).
     const result = await getActiveSubStageSnapshot(projectId);
     return NextResponse.json(result);
   } catch (err) {
