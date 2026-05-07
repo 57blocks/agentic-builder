@@ -1,107 +1,63 @@
 /**
- * PostgreSQL-backed project store.
- * Replaces the previous in-memory store.
+ * PostgreSQL-backed project store — powered by Drizzle ORM.
  *
  * NOTE: This module is Node.js-only (runs in API routes / server actions).
  * Configure DATABASE_URL in .env.local, e.g.:
  *   DATABASE_URL=postgresql://localhost:5432/agentic_builder
  */
 
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
+import {
+  projectPipelineState,
+  projects,
+  projectStageState,
+  projectSubstageSnapshot,
+  projectSubstageStatus,
+} from "@/lib/db/schema";
 import type { Project } from "@/types/project";
-
-// ─── Auto-init tables (runs lazily on first query) ────────────────────────────
-const _g = globalThis as typeof globalThis & {
-  __dbInitPromise_v2?: Promise<void>;
-  __dbInitDone_v2?: boolean;
-};
-
-async function ensureTablesExist(): Promise<void> {
-  // Fast path: already initialised in this process lifetime.
-  if (_g.__dbInitDone_v2) return;
-
-  // Coalesce concurrent calls into a single in-flight promise.
-  if (!_g.__dbInitPromise_v2) {
-    _g.__dbInitPromise_v2 = db.query(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id         TEXT        PRIMARY KEY,
-        slug       TEXT        NOT NULL UNIQUE,
-        name       TEXT        NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS project_pipeline_state (
-        project_id      TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-        feature_brief   TEXT        NOT NULL DEFAULT '',
-        current_step    TEXT,
-        active_tab      TEXT        NOT NULL DEFAULT 'intent',
-        total_cost_usd  FLOAT8      NOT NULL DEFAULT 0,
-        is_running      BOOLEAN     NOT NULL DEFAULT FALSE,
-        fast_from_prd   BOOLEAN     NOT NULL DEFAULT TRUE,
-        code_output_dir TEXT        NOT NULL DEFAULT 'generated-code',
-        steps_json      JSONB       NOT NULL DEFAULT '{}',
-        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS project_stage_state (
-        project_id        TEXT        PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-        active_stage      TEXT        NOT NULL DEFAULT 'preparation',
-        active_sub_stages JSONB       NOT NULL DEFAULT '{}',
-        project_name      TEXT        NOT NULL DEFAULT 'New Project',
-        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      ALTER TABLE project_stage_state
-        ADD COLUMN IF NOT EXISTS intent_messages_json  JSONB NOT NULL DEFAULT '[]',
-        ADD COLUMN IF NOT EXISTS intent_enriched_brief TEXT  NOT NULL DEFAULT '';
-      CREATE TABLE IF NOT EXISTS project_substage_snapshot (
-        project_id   TEXT        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        stage_id     TEXT        NOT NULL,
-        sub_stage_id TEXT        NOT NULL,
-        snapshot     JSONB       NOT NULL DEFAULT '{}',
-        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (project_id, stage_id, sub_stage_id)
-      );
-    `).then(() => {
-      _g.__dbInitDone_v2 = true;
-    }).catch((err) => {
-      // Reset so the next request retries, but don't leave a rejected promise
-      // cached — that would cause all subsequent awaits to throw immediately.
-      _g.__dbInitPromise_v2 = undefined;
-      throw err;
-    });
-  }
-
-  return _g.__dbInitPromise_v2;
-}
 
 // ─── Projects CRUD ────────────────────────────────────────────────────────────
 
 export async function getProjects(): Promise<Project[]> {
-  await ensureTablesExist();
-  const { rows } = await db.query<{ id: string; slug: string; name: string; createdAt: string }>(
-    `SELECT id, slug, name, created_at AS "createdAt" FROM projects ORDER BY created_at DESC`,
-  );
-  return rows;
+  const rows = await db
+    .select({
+      id:        projects.id,
+      slug:      projects.slug,
+      name:      projects.name,
+      createdAt: projects.createdAt,
+    })
+    .from(projects)
+    .orderBy(desc(projects.createdAt));
+
+  return rows as Project[];
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
-  await ensureTablesExist();
-  const { rows } = await db.query<{ id: string; slug: string; name: string; createdAt: string }>(
-    `SELECT id, slug, name, created_at AS "createdAt" FROM projects WHERE slug = $1`,
-    [slug],
-  );
-  return rows[0] ?? null;
+  const rows = await db
+    .select({
+      id:        projects.id,
+      slug:      projects.slug,
+      name:      projects.name,
+      createdAt: projects.createdAt,
+    })
+    .from(projects)
+    .where(eq(projects.slug, slug))
+    .limit(1);
+
+  return (rows[0] as Project) ?? null;
 }
 
 export async function createProject(name: string): Promise<Project> {
-  await ensureTablesExist();
   const baseSlug =
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
     `project-${Date.now()}`;
 
-  // Ensure slug uniqueness
-  const { rows: existing } = await db.query<{ slug: string }>(
-    "SELECT slug FROM projects WHERE slug LIKE $1",
-    [`${baseSlug}%`],
-  );
+  const existing = await db
+    .select({ slug: projects.slug })
+    .from(projects)
+    .where(like(projects.slug, `${baseSlug}%`));
+
   const taken = new Set(existing.map((r) => r.slug));
   let finalSlug = baseSlug;
   let counter = 2;
@@ -110,21 +66,24 @@ export async function createProject(name: string): Promise<Project> {
   }
 
   const id = crypto.randomUUID();
-  const { rows } = await db.query<{ id: string; slug: string; name: string; createdAt: string }>(
-    `INSERT INTO projects (id, slug, name)
-     VALUES ($1, $2, $3)
-     RETURNING id, slug, name, created_at AS "createdAt"`,
-    [id, finalSlug, name.trim()],
-  );
-  return rows[0];
+  const rows = await db
+    .insert(projects)
+    .values({ id, slug: finalSlug, name: name.trim() })
+    .returning({
+      id:        projects.id,
+      slug:      projects.slug,
+      name:      projects.name,
+      createdAt: projects.createdAt,
+    });
+
+  return rows[0] as Project;
 }
 
 export async function updateProjectName(projectId: string, name: string): Promise<void> {
-  await ensureTablesExist();
-  await db.query(
-    `UPDATE projects SET name = $1 WHERE id = $2`,
-    [name.trim(), projectId],
-  );
+  await db
+    .update(projects)
+    .set({ name: name.trim() })
+    .where(eq(projects.id, projectId));
 }
 
 // ─── Pipeline State ───────────────────────────────────────────────────────────
@@ -141,56 +100,59 @@ export interface PipelineStateRow {
 }
 
 export async function getPipelineState(projectId: string): Promise<PipelineStateRow | null> {
-  await ensureTablesExist();
-  const { rows } = await db.query(
-    `SELECT
-       feature_brief   AS "featureBrief",
-       current_step    AS "currentStep",
-       active_tab      AS "activeTab",
-       total_cost_usd  AS "totalCostUsd",
-       is_running      AS "isRunning",
-       fast_from_prd   AS "fastFromPrd",
-       code_output_dir AS "codeOutputDir",
-       steps_json      AS "stepsJson"
-     FROM project_pipeline_state
-     WHERE project_id = $1`,
-    [projectId],
-  );
-  return rows[0] ?? null;
+  const rows = await db
+    .select({
+      featureBrief:  projectPipelineState.featureBrief,
+      currentStep:   projectPipelineState.currentStep,
+      activeTab:     projectPipelineState.activeTab,
+      totalCostUsd:  projectPipelineState.totalCostUsd,
+      isRunning:     projectPipelineState.isRunning,
+      fastFromPrd:   projectPipelineState.fastFromPrd,
+      codeOutputDir: projectPipelineState.codeOutputDir,
+      stepsJson:     projectPipelineState.stepsJson,
+    })
+    .from(projectPipelineState)
+    .where(eq(projectPipelineState.projectId, projectId))
+    .limit(1);
+
+  if (!rows[0]) return null;
+  return rows[0] as PipelineStateRow;
 }
 
 export async function upsertPipelineState(
   projectId: string,
   state: Partial<PipelineStateRow>,
 ): Promise<void> {
-  await ensureTablesExist();
-  await db.query(
-    `INSERT INTO project_pipeline_state
-       (project_id, feature_brief, current_step, active_tab, total_cost_usd,
-        is_running, fast_from_prd, code_output_dir, steps_json, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-     ON CONFLICT (project_id) DO UPDATE SET
-       feature_brief   = EXCLUDED.feature_brief,
-       current_step    = EXCLUDED.current_step,
-       active_tab      = EXCLUDED.active_tab,
-       total_cost_usd  = EXCLUDED.total_cost_usd,
-       is_running      = EXCLUDED.is_running,
-       fast_from_prd   = EXCLUDED.fast_from_prd,
-       code_output_dir = EXCLUDED.code_output_dir,
-       steps_json      = EXCLUDED.steps_json,
-       updated_at      = NOW()`,
-    [
-      projectId,
-      state.featureBrief  ?? "",
-      state.currentStep   ?? null,
-      state.activeTab     ?? "intent",
-      state.totalCostUsd  ?? 0,
-      state.isRunning     ?? false,
-      state.fastFromPrd   ?? true,
-      state.codeOutputDir ?? "generated-code",
-      JSON.stringify(state.stepsJson ?? {}),
-    ],
-  );
+  const values = {
+    projectId,
+    featureBrief:  state.featureBrief  ?? "",
+    currentStep:   state.currentStep   ?? null,
+    activeTab:     state.activeTab     ?? "intent",
+    totalCostUsd:  state.totalCostUsd  ?? 0,
+    isRunning:     state.isRunning     ?? false,
+    fastFromPrd:   state.fastFromPrd   ?? true,
+    codeOutputDir: state.codeOutputDir ?? "generated-code",
+    stepsJson:     (state.stepsJson    ?? {}) as Record<string, unknown>,
+    updatedAt:     new Date(),
+  };
+
+  await db
+    .insert(projectPipelineState)
+    .values(values)
+    .onConflictDoUpdate({
+      target: projectPipelineState.projectId,
+      set: {
+        featureBrief:  values.featureBrief,
+        currentStep:   values.currentStep,
+        activeTab:     values.activeTab,
+        totalCostUsd:  values.totalCostUsd,
+        isRunning:     values.isRunning,
+        fastFromPrd:   values.fastFromPrd,
+        codeOutputDir: values.codeOutputDir,
+        stepsJson:     values.stepsJson,
+        updatedAt:     sql`NOW()`,
+      },
+    });
 }
 
 // ─── Stage State ──────────────────────────────────────────────────────────────
@@ -204,47 +166,50 @@ export interface StageStateRow {
 }
 
 export async function getStageState(projectId: string): Promise<StageStateRow | null> {
-  await ensureTablesExist();
-  const { rows } = await db.query(
-    `SELECT
-       active_stage            AS "activeStage",
-       active_sub_stages       AS "activeSubStages",
-       project_name            AS "projectName",
-       intent_messages_json    AS "intentMessages",
-       intent_enriched_brief   AS "intentEnrichedBrief"
-     FROM project_stage_state
-     WHERE project_id = $1`,
-    [projectId],
-  );
-  return rows[0] ?? null;
+  const rows = await db
+    .select({
+      activeStage:         projectStageState.activeStage,
+      activeSubStages:     projectStageState.activeSubStages,
+      projectName:         projectStageState.projectName,
+      intentMessages:      projectStageState.intentMessagesJson,
+      intentEnrichedBrief: projectStageState.intentEnrichedBrief,
+    })
+    .from(projectStageState)
+    .where(eq(projectStageState.projectId, projectId))
+    .limit(1);
+
+  if (!rows[0]) return null;
+  return rows[0] as StageStateRow;
 }
 
 export async function upsertStageState(
   projectId: string,
   state: Partial<StageStateRow>,
 ): Promise<void> {
-  await ensureTablesExist();
-  await db.query(
-    `INSERT INTO project_stage_state
-       (project_id, active_stage, active_sub_stages, project_name,
-        intent_messages_json, intent_enriched_brief, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
-     ON CONFLICT (project_id) DO UPDATE SET
-       active_stage          = EXCLUDED.active_stage,
-       active_sub_stages     = EXCLUDED.active_sub_stages,
-       project_name          = EXCLUDED.project_name,
-       intent_messages_json  = EXCLUDED.intent_messages_json,
-       intent_enriched_brief = EXCLUDED.intent_enriched_brief,
-       updated_at            = NOW()`,
-    [
-      projectId,
-      state.activeStage          ?? "preparation",
-      JSON.stringify(state.activeSubStages  ?? {}),
-      state.projectName          ?? "New Project",
-      JSON.stringify(state.intentMessages   ?? []),
-      state.intentEnrichedBrief  ?? "",
-    ],
-  );
+  const values = {
+    projectId,
+    activeStage:         state.activeStage          ?? "preparation",
+    activeSubStages:     (state.activeSubStages      ?? {}) as Record<string, string>,
+    projectName:         state.projectName          ?? "New Project",
+    intentMessagesJson:  (state.intentMessages       ?? []) as unknown[],
+    intentEnrichedBrief: state.intentEnrichedBrief  ?? "",
+    updatedAt:           new Date(),
+  };
+
+  await db
+    .insert(projectStageState)
+    .values(values)
+    .onConflictDoUpdate({
+      target: projectStageState.projectId,
+      set: {
+        activeStage:         values.activeStage,
+        activeSubStages:     values.activeSubStages,
+        projectName:         values.projectName,
+        intentMessagesJson:  values.intentMessagesJson,
+        intentEnrichedBrief: values.intentEnrichedBrief,
+        updatedAt:           sql`NOW()`,
+      },
+    });
 }
 
 // ─── Sub-Stage Snapshots ──────────────────────────────────────────────────────
@@ -258,8 +223,28 @@ export interface SubStageSnapshot {
   isRunning:     boolean;
   fastFromPrd:   boolean;
   codeOutputDir: string;
-  /** All pipeline step results at the time this snapshot was taken. */
   steps:         Record<string, unknown>;
+  designStyles?:           Record<string, unknown>[] | null;
+  designStylesLoading?:    boolean;
+  designStylesError?:      string | null;
+  selectedDesignStyleId?:  string | null;
+  intentMessages?:         unknown[];
+  intentEnrichedBrief?:    string;
+}
+
+// ─── Sub-Stage Status ─────────────────────────────────────────────────────────
+
+export type SubStageStatusValue = "idle" | "running" | "completed" | "error";
+
+export interface SubStageStatusRow {
+  stageId:      string;
+  subStageId:   string;
+  status:       SubStageStatusValue;
+  startedAt:    string | null;
+  completedAt:  string | null;
+  contextRefs:  Record<string, unknown>;
+  stepIds:      string[];
+  updatedAt:    string;
 }
 
 export async function upsertSubStageSnapshot(
@@ -268,15 +253,26 @@ export async function upsertSubStageSnapshot(
   subStageId: string,
   snapshot: SubStageSnapshot,
 ): Promise<void> {
-  await ensureTablesExist();
-  await db.query(
-    `INSERT INTO project_substage_snapshot (project_id, stage_id, sub_stage_id, snapshot, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (project_id, stage_id, sub_stage_id) DO UPDATE SET
-       snapshot   = EXCLUDED.snapshot,
-       updated_at = NOW()`,
-    [projectId, stageId, subStageId, JSON.stringify(snapshot)],
-  );
+  await db
+    .insert(projectSubstageSnapshot)
+    .values({
+      projectId,
+      stageId,
+      subStageId,
+      snapshot: snapshot as Record<string, unknown>,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [
+        projectSubstageSnapshot.projectId,
+        projectSubstageSnapshot.stageId,
+        projectSubstageSnapshot.subStageId,
+      ],
+      set: {
+        snapshot:  snapshot as Record<string, unknown>,
+        updatedAt: sql`NOW()`,
+      },
+    });
 }
 
 export async function getSubStageSnapshot(
@@ -284,26 +280,158 @@ export async function getSubStageSnapshot(
   stageId: string,
   subStageId: string,
 ): Promise<SubStageSnapshot | null> {
-  await ensureTablesExist();
-  const { rows } = await db.query(
-    `SELECT snapshot FROM project_substage_snapshot
-     WHERE project_id = $1 AND stage_id = $2 AND sub_stage_id = $3`,
-    [projectId, stageId, subStageId],
-  );
+  const rows = await db
+    .select({ snapshot: projectSubstageSnapshot.snapshot })
+    .from(projectSubstageSnapshot)
+    .where(
+      and(
+        eq(projectSubstageSnapshot.projectId,  projectId),
+        eq(projectSubstageSnapshot.stageId,    stageId),
+        eq(projectSubstageSnapshot.subStageId, subStageId),
+      ),
+    )
+    .limit(1);
+
   return (rows[0]?.snapshot as SubStageSnapshot) ?? null;
 }
 
-/**
- * Returns the snapshot for the project's currently-active stage+sub-stage.
- * Returns null when no snapshot has been saved yet.
- */
+export async function upsertSubStageStatus(
+  projectId: string,
+  stageId: string,
+  subStageId: string,
+  status: SubStageStatusValue,
+  opts?: {
+    contextRefs?: Record<string, unknown>;
+    stepIds?: string[];
+  },
+): Promise<void> {
+  const now = new Date();
+
+  await db
+    .insert(projectSubstageStatus)
+    .values({
+      projectId,
+      stageId,
+      subStageId,
+      status,
+      contextRefs: (opts?.contextRefs ?? {}) as Record<string, unknown>,
+      stepIds:     opts?.stepIds ?? [],
+      updatedAt:   now,
+      startedAt:   status === "running"   ? now : null,
+      completedAt: status === "completed" ? now : null,
+    })
+    .onConflictDoUpdate({
+      target: [
+        projectSubstageStatus.projectId,
+        projectSubstageStatus.stageId,
+        projectSubstageStatus.subStageId,
+      ],
+      set: {
+        status:      status,
+        contextRefs: (opts?.contextRefs ?? {}) as Record<string, unknown>,
+        stepIds:     opts?.stepIds ?? [],
+        updatedAt:   sql`NOW()`,
+        ...(status === "running"   ? { startedAt:   sql`NOW()` } : {}),
+        ...(status === "completed" ? { completedAt: sql`NOW()` } : {}),
+      },
+    });
+}
+
+export async function getSubStageStatus(
+  projectId: string,
+  stageId: string,
+  subStageId: string,
+): Promise<SubStageStatusRow | null> {
+  const rows = await db
+    .select({
+      stageId:     projectSubstageStatus.stageId,
+      subStageId:  projectSubstageStatus.subStageId,
+      status:      projectSubstageStatus.status,
+      startedAt:   projectSubstageStatus.startedAt,
+      completedAt: projectSubstageStatus.completedAt,
+      contextRefs: projectSubstageStatus.contextRefs,
+      stepIds:     projectSubstageStatus.stepIds,
+      updatedAt:   projectSubstageStatus.updatedAt,
+    })
+    .from(projectSubstageStatus)
+    .where(
+      and(
+        eq(projectSubstageStatus.projectId,  projectId),
+        eq(projectSubstageStatus.stageId,    stageId),
+        eq(projectSubstageStatus.subStageId, subStageId),
+      ),
+    )
+    .limit(1);
+
+  if (!rows[0]) return null;
+  const r = rows[0];
+  return {
+    stageId:     r.stageId,
+    subStageId:  r.subStageId,
+    status:      r.status as SubStageStatusValue,
+    startedAt:   r.startedAt?.toISOString() ?? null,
+    completedAt: r.completedAt?.toISOString() ?? null,
+    contextRefs: r.contextRefs as Record<string, unknown>,
+    stepIds:     r.stepIds ?? [],
+    updatedAt:   r.updatedAt.toISOString(),
+  };
+}
+
+export async function listSubStageStatuses(
+  projectId: string,
+): Promise<SubStageStatusRow[]> {
+  const rows = await db
+    .select({
+      stageId:     projectSubstageStatus.stageId,
+      subStageId:  projectSubstageStatus.subStageId,
+      status:      projectSubstageStatus.status,
+      startedAt:   projectSubstageStatus.startedAt,
+      completedAt: projectSubstageStatus.completedAt,
+      contextRefs: projectSubstageStatus.contextRefs,
+      stepIds:     projectSubstageStatus.stepIds,
+      updatedAt:   projectSubstageStatus.updatedAt,
+    })
+    .from(projectSubstageStatus)
+    .where(eq(projectSubstageStatus.projectId, projectId))
+    .orderBy(projectSubstageStatus.updatedAt);
+
+  return rows.map((r) => ({
+    stageId:     r.stageId,
+    subStageId:  r.subStageId,
+    status:      r.status as SubStageStatusValue,
+    startedAt:   r.startedAt?.toISOString() ?? null,
+    completedAt: r.completedAt?.toISOString() ?? null,
+    contextRefs: r.contextRefs as Record<string, unknown>,
+    stepIds:     r.stepIds ?? [],
+    updatedAt:   r.updatedAt.toISOString(),
+  }));
+}
+
+const SUB_STAGE_ORDER_BY_STAGE: Record<string, string[]> = {
+  preparation: ["initial", "intent", "prd", "trd", "sysdesign", "implguide", "design", "pencil", "mockup", "qa"],
+  kickoff:     ["env-setup", "task-breakdown"],
+  coding:      ["architect", "backend", "frontend", "test", "verify"],
+  preview:     ["serve", "e2e"],
+};
+
 export async function getActiveSubStageSnapshot(
   projectId: string,
 ): Promise<{ stageId: string; subStageId: string; snapshot: SubStageSnapshot | null }> {
-  await ensureTablesExist();
   const stageRow = await getStageState(projectId);
   const stageId    = stageRow?.activeStage ?? "preparation";
   const subStageId = (stageRow?.activeSubStages?.[stageId] as string | undefined) ?? "initial";
-  const snapshot   = await getSubStageSnapshot(projectId, stageId, subStageId);
-  return { stageId, subStageId, snapshot };
+
+  const exactSnapshot = await getSubStageSnapshot(projectId, stageId, subStageId);
+  if (exactSnapshot) return { stageId, subStageId, snapshot: exactSnapshot };
+
+  const order = SUB_STAGE_ORDER_BY_STAGE[stageId] ?? [];
+  const currentIdx = order.indexOf(subStageId);
+  for (let i = currentIdx - 1; i >= 0; i--) {
+    const prevSnapshot = await getSubStageSnapshot(projectId, stageId, order[i]);
+    if (prevSnapshot) {
+      return { stageId, subStageId, snapshot: prevSnapshot };
+    }
+  }
+
+  return { stageId, subStageId, snapshot: null };
 }

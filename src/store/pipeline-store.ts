@@ -14,27 +14,10 @@ let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 let _currentProjectSlug = "";
 
 function scheduleSync(getState: () => PipelineState) {
-  if (!_currentProjectSlug) return;
-  if (_syncTimer) clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(() => {
-    _syncTimer = null;
-    const s = getState();
-    fetch(`/api/projects/${_currentProjectSlug}/state`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pipelineState: {
-          featureBrief:  s.featureBrief,
-          currentStep:   s.currentStep,
-          activeTab:     s.activeTab,
-          totalCostUsd:  s.totalCostUsd,
-          isRunning:     s.isRunning,
-          fastFromPrd:   s.fastFromPrd,
-          codeOutputDir: s.codeOutputDir,
-        },
-      }),
-    }).catch((err) => console.error("[pipeline-store] sync error:", err));
-  }, 600);
+  // NOTE: project_pipeline_state is deprecated. We no longer push to it here.
+  // All persistent state is captured via saveSubStageSnapshot / saveIntentSnapshot.
+  // This function is kept as a no-op stub so call-sites don't need updating.
+  void getState;
 }
 
 /**
@@ -55,13 +38,28 @@ const STEP_TO_STAGE_SUBSTAGE: Partial<Record<PipelineStepId, { stage: string; su
   verify:    { stage: "coding",      subStage: "verify" },
 };
 
+/** Fire-and-forget: save substage status (idle|running|completed|error) to DB. */
+function saveSubStageStatus(
+  slug: string,
+  stageId: string,
+  subStageId: string,
+  status: "idle" | "running" | "completed" | "error",
+  opts?: { contextRefs?: Record<string, unknown>; stepIds?: string[] },
+): void {
+  fetch(`/api/projects/${slug}/substage-status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stageId, subStageId, status, ...opts }),
+  }).catch((err) => console.error(`[pipeline-store] substage-status error (${stageId}/${subStageId}):`, err));
+}
+
 /** Saves a full pipeline snapshot for the given step's (stage, subStage). */
 function saveSubStageSnapshot(getState: () => PipelineState, stepId: PipelineStepId): void {
   if (!_currentProjectSlug) return;
   const mapping = STEP_TO_STAGE_SUBSTAGE[stepId];
   if (!mapping) return;
   const s = getState();
-  const snapshot = {
+  const snapshotBase = {
     featureBrief:  s.featureBrief,
     currentStep:   s.currentStep,
     activeTab:     s.activeTab,
@@ -70,14 +68,37 @@ function saveSubStageSnapshot(getState: () => PipelineState, stepId: PipelineSte
     fastFromPrd:   s.fastFromPrd,
     codeOutputDir: s.codeOutputDir,
     steps:         s.steps as Record<string, unknown>,
+    designStyles:  s.designStyles,
+    designStylesLoading: s.designStylesLoading,
+    designStylesError: s.designStylesError,
+    selectedDesignStyleId: s.selectedDesignStyleId,
   };
+
+  // For the intent substage, also persist the conversation from stage-store.
+  if (stepId === "intent") {
+    import("@/store/stage-store").then(({ useStageStore }) => {
+      const ss = useStageStore.getState();
+      const snapshot = {
+        ...snapshotBase,
+        intentMessages:      ss.intentMessages,
+        intentEnrichedBrief: ss.intentEnrichedBrief,
+      };
+      fetch(`/api/projects/${_currentProjectSlug}/substage-snapshot`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stageId: mapping.stage, subStageId: mapping.subStage, snapshot }),
+      }).catch((err) => console.error(`[pipeline-store] substage snapshot error (intent):`, err));
+    }).catch(() => {/* ignore */});
+    return;
+  }
+
   fetch(`/api/projects/${_currentProjectSlug}/substage-snapshot`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       stageId:    mapping.stage,
       subStageId: mapping.subStage,
-      snapshot,
+      snapshot:   snapshotBase,
     }),
   }).catch((err) => console.error(`[pipeline-store] substage snapshot error (${stepId}):`, err));
 }
@@ -169,6 +190,11 @@ interface PipelineState {
     | "updating"
     | "deleting";
   designReferencesError: string | null;
+  /** Design styles generated from PRD */
+  designStyles: Array<{ id: string; name: string; description: string; colors: { primary: string; secondary: string; tertiary: string; neutral: string }; typography: { headlineFont: string; bodyFont: string; labelFont: string }; fontSizes: { h1: number; h2: number; h3: number; body: number; label: number }; spacing: { xs: number; sm: number; md: number; lg: number; xl: number } }> | null;
+  designStylesLoading: boolean;
+  designStylesError: string | null;
+  selectedDesignStyleId: string | null;
 
   setCodeOutputDir: (value: string) => void;
   setFastFromPrd: (value: boolean) => void;
@@ -177,6 +203,10 @@ interface PipelineState {
   startPipeline: (featureBrief: string) => void;
   /** Re-run the PRD step only, applying the given edit instruction to the current PRD content. */
   rerunPrd: (editInstruction: string) => void;
+  /** Generate design styles from PRD content */
+  generateDesignStyles: () => Promise<void>;
+  /** Select a design style by ID */
+  selectDesignStyle: (styleId: string) => void;
   /** Generate (or re-generate) the Design Document. Pass editInstruction to revise an existing draft. */
   runDesignDoc: (editInstruction?: string) => void;
   /** Generate (or re-generate) the Pencil wireframe from the PRD + chosen design style. */
@@ -224,6 +254,18 @@ interface PipelineState {
    * Returns `true` if a snapshot was found and applied, `false` otherwise.
    */
   loadSubStageSnapshot: (stageId: string, subStageId: string) => Promise<boolean>;
+  /**
+   * Save the intent conversation to the (preparation/intent) substage snapshot.
+   * Called by stage-store whenever the intent conversation changes, so the
+   * snapshot is always up-to-date even before the full pipeline starts.
+   */
+  saveIntentSnapshot: (messages: unknown[], enrichedBrief: string) => void;
+  /**
+   * Eagerly save the current pipeline state as the snapshot for the given
+   * (stageId, subStageId). Useful when entering a substage before the
+   * corresponding pipeline step has completed (e.g. design substage on mount).
+   */
+  saveSubStageSnapshotForSubStage: (stageId: string, subStageId: string) => void;
 }
 
 export const usePipelineStore = create<PipelineState>()(
@@ -247,6 +289,10 @@ export const usePipelineStore = create<PipelineState>()(
       designReferences: [],
       designReferencesLoading: "idle",
       designReferencesError: null,
+      designStyles: null,
+      designStylesLoading: false,
+      designStylesError: null,
+      selectedDesignStyleId: null,
 
       setCodeOutputDir: (value) => {
         const next = value.trim();
@@ -442,6 +488,51 @@ export const usePipelineStore = create<PipelineState>()(
               error: err instanceof Error ? err.message : "Unknown error",
             });
           });
+      },
+
+      generateDesignStyles: async () => {
+        const { steps } = get();
+        const prdContent = steps.prd?.content ?? "";
+
+        if (!prdContent.trim()) {
+          set({ designStylesError: "PRD content is required" });
+          return;
+        }
+
+        set({ designStylesLoading: true, designStylesError: null });
+
+        try {
+          const response = await fetch("/api/agents/generate-design-styles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prdContent }),
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            set({
+              designStylesLoading: false,
+              designStylesError: (errData as { error?: string }).error || "Failed to generate design styles",
+            });
+            return;
+          }
+
+          const data = await response.json();
+          set({
+            designStyles: data.styles,
+            designStylesLoading: false,
+            designStylesError: null,
+          });
+        } catch (error) {
+          set({
+            designStylesLoading: false,
+            designStylesError: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      },
+
+      selectDesignStyle: (styleId: string) => {
+        set({ selectedDesignStyleId: styleId });
       },
 
       runDesignDoc: (editInstruction?: string) => {
@@ -738,6 +829,13 @@ export const usePipelineStore = create<PipelineState>()(
           kickoffSessionId: sessionId,
         });
         scheduleSync(get);
+
+        // Mark intent substage as running
+        if (_currentProjectSlug) {
+          saveSubStageStatus(_currentProjectSlug, "preparation", "intent", "running", {
+            stepIds: ["intent"],
+          });
+        }
 
         fetch("/api/agents/pipeline", {
           method: "POST",
@@ -1157,6 +1255,12 @@ export const usePipelineStore = create<PipelineState>()(
                 fastFromPrd?:   boolean;
                 codeOutputDir?: string;
                 steps?:         Record<string, unknown>;
+                designStyles?: Array<{ id: string; name: string; description: string; colors: { primary: string; secondary: string; tertiary: string; neutral: string }; typography: { headlineFont: string; bodyFont: string; labelFont: string }; fontSizes: { h1: number; h2: number; h3: number; body: number; label: number }; spacing: { xs: number; sm: number; md: number; lg: number; xl: number } }> | null;
+                designStylesLoading?: boolean;
+                designStylesError?: string | null;
+                selectedDesignStyleId?: string | null;
+                intentMessages?: unknown[];
+                intentEnrichedBrief?: string;
               } | null;
             };
             if (snapData.snapshot) {
@@ -1172,7 +1276,19 @@ export const usePipelineStore = create<PipelineState>()(
                 steps:         snap.steps
                   ? { ...EMPTY_STEPS, ...(snap.steps as Record<PipelineStepId, StepResult | null>) }
                   : { ...EMPTY_STEPS },
+                designStyles:         snap.designStyles ?? null,
+                designStylesLoading:  snap.designStylesLoading ?? false,
+                designStylesError:    snap.designStylesError ?? null,
+                selectedDesignStyleId: snap.selectedDesignStyleId ?? null,
               });
+              // Push intent messages to stage-store if present in snapshot
+              const intentMsgs  = snap.intentMessages;
+              const enrichedBrf = snap.intentEnrichedBrief ?? "";
+              if (intentMsgs?.length) {
+                import("@/store/stage-store").then(({ useStageStore }) => {
+                  useStageStore.getState().setIntentConversation(intentMsgs!, enrichedBrf);
+                }).catch(() => {/* ignore */});
+              }
               return;
             }
           }
@@ -1227,6 +1343,12 @@ export const usePipelineStore = create<PipelineState>()(
               fastFromPrd?:   boolean;
               codeOutputDir?: string;
               steps?:         Record<string, unknown>;
+              designStyles?: Array<{ id: string; name: string; description: string; colors: { primary: string; secondary: string; tertiary: string; neutral: string }; typography: { headlineFont: string; bodyFont: string; labelFont: string }; fontSizes: { h1: number; h2: number; h3: number; body: number; label: number }; spacing: { xs: number; sm: number; md: number; lg: number; xl: number } }> | null;
+              designStylesLoading?: boolean;
+              designStylesError?: string | null;
+              selectedDesignStyleId?: string | null;
+              intentMessages?: unknown[];
+              intentEnrichedBrief?: string;
             } | null;
           };
           if (!data.snapshot) return false;
@@ -1242,12 +1364,79 @@ export const usePipelineStore = create<PipelineState>()(
             steps:         snap.steps
               ? { ...EMPTY_STEPS, ...(snap.steps as Record<PipelineStepId, StepResult | null>) }
               : { ...EMPTY_STEPS },
+            designStyles: snap.designStyles ?? null,
+            designStylesLoading: snap.designStylesLoading ?? false,
+            designStylesError: snap.designStylesError ?? null,
+            selectedDesignStyleId: snap.selectedDesignStyleId ?? null,
           });
+          // Push intent fields back to stage-store if this is the intent substage
+          if (subStageId === "intent" && snap.intentMessages?.length) {
+            import("@/store/stage-store").then(({ useStageStore }) => {
+              useStageStore.getState().setIntentConversation(
+                snap.intentMessages!,
+                snap.intentEnrichedBrief ?? "",
+              );
+            }).catch(() => {/* ignore */});
+          }
           return true;
         } catch (err) {
           console.error(`[pipeline-store] loadSubStageSnapshot error (${stageId}/${subStageId}):`, err);
           return false;
         }
+      },
+
+      saveIntentSnapshot: (messages: unknown[], enrichedBrief: string) => {
+        if (!_currentProjectSlug) return;
+        const s = get();
+        const snapshot = {
+          featureBrief:         s.featureBrief,
+          currentStep:          s.currentStep,
+          activeTab:            s.activeTab,
+          totalCostUsd:         s.totalCostUsd,
+          isRunning:            false,
+          fastFromPrd:          s.fastFromPrd,
+          codeOutputDir:        s.codeOutputDir,
+          steps:                s.steps as Record<string, unknown>,
+          designStyles:         s.designStyles,
+          designStylesLoading:  s.designStylesLoading,
+          designStylesError:    s.designStylesError,
+          selectedDesignStyleId: s.selectedDesignStyleId,
+          intentMessages:       messages,
+          intentEnrichedBrief:  enrichedBrief,
+        };
+        fetch(`/api/projects/${_currentProjectSlug}/substage-snapshot`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stageId:    "preparation",
+            subStageId: "intent",
+            snapshot,
+          }),
+        }).catch((err) => console.error("[pipeline-store] intent snapshot error:", err));
+      },
+
+      saveSubStageSnapshotForSubStage: (stageId: string, subStageId: string) => {
+        if (!_currentProjectSlug) return;
+        const s = get();
+        const snapshot = {
+          featureBrief:         s.featureBrief,
+          currentStep:          s.currentStep,
+          activeTab:            s.activeTab,
+          totalCostUsd:         s.totalCostUsd,
+          isRunning:            false,
+          fastFromPrd:          s.fastFromPrd,
+          codeOutputDir:        s.codeOutputDir,
+          steps:                s.steps as Record<string, unknown>,
+          designStyles:         s.designStyles,
+          designStylesLoading:  false,
+          designStylesError:    s.designStylesError,
+          selectedDesignStyleId: s.selectedDesignStyleId,
+        };
+        fetch(`/api/projects/${_currentProjectSlug}/substage-snapshot`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stageId, subStageId, snapshot }),
+        }).catch((err) => console.error(`[pipeline-store] eager snapshot error (${stageId}/${subStageId}):`, err));
       },
     }),
     {
@@ -1345,6 +1534,14 @@ function handleEvent(
 
     // Persist a full substage snapshot so the user can revisit this sub-stage later.
     saveSubStageSnapshot(get, stepId);
+
+    // Mark substage as completed in status table
+    const statusMapping = STEP_TO_STAGE_SUBSTAGE[stepId];
+    if (statusMapping && _currentProjectSlug) {
+      saveSubStageStatus(_currentProjectSlug, statusMapping.stage, statusMapping.subStage, "completed", {
+        stepIds: [stepId],
+      });
+    }
 
     // When the intent step completes, extract AI-generated project_name and
     // update the stage store so the sidebar immediately reflects the name.

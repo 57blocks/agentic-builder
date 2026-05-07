@@ -307,6 +307,11 @@ export const useStageStore = create<StageStoreState>()(
       setIntentConversation: (messages, enrichedBrief) => {
         set({ intentMessages: messages, intentEnrichedBrief: enrichedBrief });
         scheduleStageSync(get);
+        // Also persist to (preparation/intent) substage snapshot so the snapshot
+        // is always up-to-date even before the full pipeline starts.
+        import("@/store/pipeline-store").then(({ usePipelineStore }) => {
+          usePipelineStore.getState().saveIntentSnapshot(messages, enrichedBrief);
+        }).catch(() => {/* ignore */});
       },
 
       setProjectSlugForSync: (id: string) => {

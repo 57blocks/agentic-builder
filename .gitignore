@@ -17,6 +17,7 @@ example
 /.pnp
 .pnp.*
 .yarn/*
+.memory/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
@@ -31,6 +32,7 @@ example
 
 # parallel-instance generated-code roots (kept untracked alongside generated-code/)
 /generated-code-*/
+/generated-code/*
 
 # electron
 /dist/

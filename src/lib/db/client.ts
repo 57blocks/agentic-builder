@@ -1,5 +1,6 @@
 /**
- * PostgreSQL connection pool — lazy singleton via globalThis.
+ * Database client — exports a Drizzle ORM instance backed by a lazy pg Pool.
+ *
  * The pool is created on first access so that Next.js has already injected
  * .env.local into process.env before the connection is established.
  *
@@ -7,7 +8,9 @@
  *   DATABASE_URL=postgresql://postgres@localhost/agentic_builder?host=/tmp
  */
 
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import * as schema from "./schema";
 
 const globalForPg = globalThis as typeof globalThis & {
   __pgPool?: Pool;
@@ -15,12 +18,11 @@ const globalForPg = globalThis as typeof globalThis & {
 };
 
 function getPool(): Pool {
-  // Read env every call so hot-reload always picks up the latest value.
   const connStr =
     process.env.DATABASE_URL ??
     "postgresql://postgres@localhost/agentic_builder?host=/tmp";
 
-  // Recreate pool if connection string changed.
+  // Recreate pool if connection string changed (hot-reload).
   if (globalForPg.__pgPool && globalForPg.__pgConnStr !== connStr) {
     void globalForPg.__pgPool.end().catch(() => {});
     globalForPg.__pgPool = undefined;
@@ -49,19 +51,11 @@ function getPool(): Pool {
     console.log("[db] Pool opts (host):", (poolOpts as Record<string, unknown>).host);
     globalForPg.__pgPool = new Pool({
       ...poolOpts,
-      // Allow up to 20 connections in the pool.
       max: 20,
-      // Do NOT eagerly open connections — only create when actually needed.
-      // min: 0 avoids blocking pool creation if the DB is temporarily unavailable.
       min: 0,
-      // Fail fast: 5 s is enough to surface a real connectivity problem without
-      // making the UI hang for 15 s on every request.
       connectionTimeoutMillis: 5_000,
-      // Kill runaway queries after 30 s so the pool slot is freed.
       statement_timeout: 30_000,
-      // Reap idle connections after 30 s.
       idleTimeoutMillis: 30_000,
-      // Keep-alive to prevent NAT/firewall from silently dropping idle connections.
       keepAlive: true,
       keepAliveInitialDelayMillis: 10_000,
     });
@@ -73,11 +67,20 @@ function getPool(): Pool {
 }
 
 /**
- * Lazy proxy — behaves exactly like a Pool but defers creation until first use.
- * Usage: `await db.query(...)` — identical to before.
+ * Lazy Pool proxy — kept for backward-compatibility with raw SQL usage.
+ * Prefer using the `db` Drizzle instance for new code.
  */
-export const db: Pool = new Proxy({} as Pool, {
+export const pool: Pool = new Proxy({} as Pool, {
   get(_target, prop) {
     return (getPool() as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
+
+/**
+ * Drizzle ORM instance — use this for all database operations.
+ * Usage: `await db.select().from(projects).where(eq(projects.id, id))`
+ */
+export const db = drizzle({ client: pool, schema });
+
+// Re-export schema for convenience
+export * from "./schema";
