@@ -223,6 +223,30 @@ export default function AppNav() {
         </div>
       </nav>
 
+      {/* Secondary Nav Links */}
+      <div className="px-6 pb-4 flex flex-col gap-2" style={noDragStyle}>
+        <Link
+          href="/reports"
+          className={`text-sm font-medium transition-colors ${
+            pathname === "/reports"
+              ? "text-slate-900"
+              : "text-slate-500 hover:text-slate-900"
+          }`}
+        >
+          Reports
+        </Link>
+        <Link
+          href="/memory"
+          className={`text-sm font-medium transition-colors ${
+            pathname === "/memory"
+              ? "text-slate-900"
+              : "text-slate-500 hover:text-slate-900"
+          }`}
+        >
+          Memory
+        </Link>
+      </div>
+
       {/* Bottom: New Project + User Profile */}
       <div className="flex flex-col gap-6 px-4" style={noDragStyle}>
         <button
