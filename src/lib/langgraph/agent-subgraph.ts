@@ -22,6 +22,7 @@ import {
 } from "@/lib/openrouter";
 import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
 import { recallAndPrepareInject } from "@/lib/memory/recall-context";
+import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
 import { resolveModel } from "@/lib/openrouter";
 import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
 import type {
@@ -1669,6 +1670,7 @@ async function generateCode(state: WorkerState) {
       projectRoot: state.outputDir,
       kickoffId: state.sessionId,
       layers: ["L1", "L2"],
+      tokenBudget: getInjectTokenBudgetForRole(state.role),
     });
     if (memoryRecall.block) {
       messages.push({ role: "system", content: memoryRecall.block });
