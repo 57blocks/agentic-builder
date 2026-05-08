@@ -19,6 +19,8 @@
 
 import type { TraceEvent } from "../trace";
 import type { MemoryRecord } from "../types";
+import { inferTaskKind } from "./task-kind";
+import { classifyFailureMode } from "./failure-mode";
 
 export interface AttributionInput {
   /** All inject trace events from the project's trace.jsonl. */
@@ -34,6 +36,13 @@ export interface AttributionInput {
   deltaSuccess: number;
   /** Score delta per failure outcome (default -0.10). */
   deltaFailure: number;
+  /**
+   * Optional resolver mapping a task-history record to a bucket label
+   * (e.g. "codegen|type-error"). When supplied, the result includes
+   * `attributionsByBucket` so callers can inspect per-bucket evidence
+   * separately from the global score change. Defaults to (taskKind|mode).
+   */
+  bucketResolver?: (taskHistory: MemoryRecord) => string;
 }
 
 export interface PatternAttribution {
@@ -50,8 +59,30 @@ export interface PatternAttribution {
   immune: boolean;
 }
 
+/**
+ * Per-pattern, per-bucket attribution. Same shape as PatternAttribution but
+ * scoped to a single bucket — used to detect "this pattern hurts compile-
+ * errors but helps api-errors" cases that the global score would average
+ * out into a flat null result.
+ *
+ * NOTE: bucket attributions are *analytical* only — they do not currently
+ * write per-bucket scores back to records. Callers can use them to surface
+ * conflicts in the dashboard or inform a future bucket-aware recall.
+ */
+export interface BucketPatternAttribution {
+  bucket: string;
+  patternId: string;
+  successes: number;
+  failures: number;
+  /** Net delta that *would* be applied if this bucket's evidence ran solo
+   *  (ignoring immunity for now — same rules as the global score). */
+  hypotheticalDelta: number;
+}
+
 export interface AttributionResult {
   attributions: PatternAttribution[];
+  /** Per-(bucket, pattern) breakdown. Empty when bucketResolver is omitted. */
+  attributionsByBucket: BucketPatternAttribution[];
   /** New (kickoffId, taskId) keys to add to the persisted cursor. */
   newlyAttributed: string[];
   /** Diagnostic counts. */
@@ -61,6 +92,7 @@ export interface AttributionResult {
     taskHistorySkippedAlreadyAttributed: number;
     injectEventsConsidered: number;
     patternsTouched: number;
+    bucketsTouched: number;
   };
 }
 
@@ -117,12 +149,38 @@ function buildInjectionIndex(
   return out;
 }
 
+function defaultBucketResolver(th: MemoryRecord): string {
+  let kind = "other";
+  let mode = "none";
+  try {
+    const body = JSON.parse(th.body) as {
+      taskKind?: string;
+      failureMode?: string;
+      status?: string;
+      errorMessage?: string;
+    };
+    kind = body.taskKind ?? inferTaskKind(th.refs.taskId);
+    if (body.status === "failed") {
+      mode = body.failureMode ?? classifyFailureMode(body.errorMessage);
+    }
+  } catch {
+    kind = inferTaskKind(th.refs.taskId);
+  }
+  return `${kind}|${mode}`;
+}
+
 export function computeAttributions(input: AttributionInput): AttributionResult {
   const injIndex = buildInjectionIndex(input.traceEvents);
   const accum = new Map<
     string,
     { successes: number; failures: number; immune: boolean }
   >();
+  /** (bucket, patternId) → counts. Same accumulator shape, partitioned. */
+  const bucketAccum = new Map<
+    string,
+    Map<string, { successes: number; failures: number }>
+  >();
+  const resolveBucket = input.bucketResolver ?? defaultBucketResolver;
   const newlyAttributed: string[] = [];
   const stats = {
     taskHistoryConsidered: 0,
@@ -130,6 +188,7 @@ export function computeAttributions(input: AttributionInput): AttributionResult 
     taskHistorySkippedAlreadyAttributed: 0,
     injectEventsConsidered: 0,
     patternsTouched: 0,
+    bucketsTouched: 0,
   };
 
   // Count inject events for stats
@@ -163,6 +222,13 @@ export function computeAttributions(input: AttributionInput): AttributionResult 
     newlyAttributed.push(key);
 
     const successful = status === "completed";
+    const bucket = resolveBucket(th);
+    let bucketMap = bucketAccum.get(bucket);
+    if (!bucketMap) {
+      bucketMap = new Map();
+      bucketAccum.set(bucket, bucketMap);
+    }
+
     for (const id of injectedIds) {
       const rec = input.patternsById.get(id);
       if (!rec) continue;
@@ -172,6 +238,11 @@ export function computeAttributions(input: AttributionInput): AttributionResult 
       else cur.failures += 1;
       cur.immune = isImmune;
       accum.set(id, cur);
+
+      const bcur = bucketMap.get(id) ?? { successes: 0, failures: 0 };
+      if (successful) bcur.successes += 1;
+      else bcur.failures += 1;
+      bucketMap.set(id, bcur);
     }
   }
 
@@ -196,7 +267,26 @@ export function computeAttributions(input: AttributionInput): AttributionResult 
   // Sort by absolute delta desc — biggest movers first.
   attributions.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
-  return { attributions, newlyAttributed, stats };
+  const attributionsByBucket: BucketPatternAttribution[] = [];
+  for (const [bucket, byPattern] of bucketAccum.entries()) {
+    for (const [patternId, c] of byPattern.entries()) {
+      attributionsByBucket.push({
+        bucket,
+        patternId,
+        successes: c.successes,
+        failures: c.failures,
+        hypotheticalDelta:
+          c.successes * input.deltaSuccess + c.failures * input.deltaFailure,
+      });
+    }
+  }
+  attributionsByBucket.sort((a, b) => {
+    if (a.bucket !== b.bucket) return a.bucket.localeCompare(b.bucket);
+    return Math.abs(b.hypotheticalDelta) - Math.abs(a.hypotheticalDelta);
+  });
+  stats.bucketsTouched = bucketAccum.size;
+
+  return { attributions, attributionsByBucket, newlyAttributed, stats };
 }
 
 export const DEFAULT_DELTA_SUCCESS = 0.05;
