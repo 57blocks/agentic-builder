@@ -55,7 +55,6 @@ export const MODEL_CONFIG = {
   codeFix: [
     "openai/gpt-5.3-codex",
     "claude-sonnet-4",
-    
     "qwen/qwen3.6-plus",
     "claude-sonnet",
     "deepseek/deepseek-v3.2",
@@ -68,7 +67,6 @@ export const MODEL_CONFIG = {
   phaseVerifyFix: [
     "openai/gpt-5.3-codex",
     "claude-sonnet-4",
-
     "qwen/qwen3.6-plus",
     "deepseek/deepseek-v3.2",
     "gpt-4o",

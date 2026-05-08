@@ -1,8 +1,8 @@
 # Model Scorecard — This Session
 
-- **Session**: `52851b86-63eb-4e90-a9c2-5f99fe94a9bd`
-- **Generated at**: 2026-04-28T12:45:11.134Z
-- **Session composite**: **68.4 (D)**
+- **Session**: `77db6cd6-d801-4b91-9526-4092d5c61532`
+- **Generated at**: 2026-05-07T08:18:05.977Z
+- **Session composite**: **56.7 (F)**
 - **Top model**: `openai/gpt-5.3-codex-20260224`
 - **Weakest model**: `openai/gpt-5.3-codex-20260224`
 
@@ -12,86 +12,86 @@
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | - | **74.8 (C)** | 70 | 100 | 35 | 50 | 100 | 100 | 1 | 8.9k | $0.0495 | 
+ | `openai/gpt-5.3-codex-20260224` | - | **63.8 (D)** | 45 | 100 | 20 | 50 | 100 | 100 | 1 | 9.4k | $0.0428 | 
 
 **`openai/gpt-5.3-codex-20260224` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Stage `generate_api_contracts`
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `anthropic/claude-4-sonnet-20250522` | - | **74.8 (C)** | 70 | 100 | 35 | 50 | 100 | 100 | 1 | 14.6k | $0.0000 | 
+ | `anthropic/claude-4-sonnet-20250522` | - | **63.8 (D)** | 45 | 100 | 20 | 50 | 100 | 100 | 1 | 8.9k | $0.0000 | 
 
 **`anthropic/claude-4-sonnet-20250522` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Stage `integration_verify_fix`
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | primary | **64.8 (D)** | 70 | 100 | 35 | 50 | 0 | 100 | 45 | 719.7k | $1.4047 | 
+ | `openai/gpt-5.3-codex-20260224` | primary | **53.8 (F)** | 45 | 100 | 20 | 50 | 0 | 100 | 34 | 485.0k | $0.9613 | 
 
 **`openai/gpt-5.3-codex-20260224` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Stage `phase_verify_fix`
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | primary | **59.8 (F)** | 70 | 100 | 35 | 50 | 0 | 0 | 100 | 1.3M | $2.4390 | 
+ | `openai/gpt-5.3-codex-20260224` | primary | **49.8 (F)** | 45 | 100 | 20 | 50 | 0 | 21 | 100 | 1.2M | $2.3390 | 
 
 **`openai/gpt-5.3-codex-20260224` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Stage `worker_codefix`
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | - | **59.8 (F)** | 70 | 100 | 35 | 50 | 0 | 0 | 6 | 33.9k | $0.1954 | 
+ | `openai/gpt-5.3-codex-20260224` | - | **56.6 (F)** | 45 | 100 | 20 | 50 | 78 | 0 | 3 | 15.4k | $0.0616 | 
 
 **`openai/gpt-5.3-codex-20260224` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Stage `worker_codegen`
 
 | Model | Role | Score | Correct | TaskSuc | Efficient | Robust | Cost | Speed | Calls | Tokens | $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
- | `deepseek-v4-pro` | primary | **69.8 (D)** | 70 | 100 | 35 | 50 | 100 | 0 | 198 | 9.9M | $0.0000 | 
+ | `deepseek-v4-pro` | primary | **58.8 (F)** | 45 | 100 | 20 | 50 | 100 | 0 | 135 | 4.7M | $0.0000 | 
 
 **`deepseek-v4-pro` reasons**:
 - Integration gate failed.
-- Integration fix loop burned 45 iteration(s).
+- E2E gate failed.
+- Integration fix loop burned 34 iteration(s).
 - Scaffold fix loop burned 50 iteration(s).
-- 2 truncation event(s) during this run.
-- 13 stagnation event(s) during this run.
+- Primary-model failures triggered 3 fallback(s).
 
 ## Session gate context
 
-- Tasks: 20/20 completed, 0 warnings, 0 failed
-- Gates: integration=fail, runtime=skipped, e2e=skipped
+- Tasks: 11/11 completed, 0 warnings, 0 failed
+- Gates: integration=fail, runtime=skipped, e2e=fail
 - Audit: passed (uncovered requirements: 0)
-- Fix loops: scaffold=50, integration=45; truncations=2, stagnations=13, fallbacks=0
+- Fix loops: scaffold=50, integration=34; truncations=2, stagnations=10, fallbacks=3
 
 ## Model Score History (cross-session)
 
@@ -101,36 +101,36 @@
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`openai/gpt-5.3-codex-20260224`** ← this session | 2 | **69.2** | 64 → 75 | ↑ | $0.0505 | 
+ | **`openai/gpt-5.3-codex-20260224`** ← this session | 5 | **68.0** | 64 → 75 → 64 → 74 → 64 | ↑ | $0.0465 | 
  | `anthropic/claude-4-sonnet-20250522` | 1 | **62.7** | 63 | — | $0.0000 | 
 
 ### Stage `generate_api_contracts`
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`anthropic/claude-4-sonnet-20250522`** ← this session | 3 | **67.0** | 64 → 63 → 75 | ↑ | $0.0000 | 
+ | **`anthropic/claude-4-sonnet-20250522`** ← this session | 6 | **67.1** | 64 → 63 → 75 → 64 → 74 → 64 | ↑ | $0.0000 | 
 
 ### Stage `integration_verify_fix`
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`openai/gpt-5.3-codex-20260224`** ← this session | 3 | **56.5** | 54 → 51 → 65 | ↑ | $0.9689 | 
+ | **`openai/gpt-5.3-codex-20260224`** ← this session | 5 | **55.5** | 54 → 51 → 65 → 54 → 54 | ↑ | $1.0927 | 
 
 ### Stage `phase_verify_fix`
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`openai/gpt-5.3-codex-20260224`** ← this session | 3 | **53.7** | 49 → 53 → 60 | ↑ | $1.6078 | 
+ | **`openai/gpt-5.3-codex-20260224`** ← this session | 6 | **53.9** | 49 → 53 → 60 → 49 → 64 → 50 | ↑ | $1.7757 | 
 
 ### Stage `worker_codefix`
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`openai/gpt-5.3-codex-20260224`** ← this session | 3 | **57.0** | 49 → 63 → 60 | ↑ | $0.1729 | 
+ | **`openai/gpt-5.3-codex-20260224`** ← this session | 6 | **55.9** | 49 → 63 → 60 → 49 → 59 → 57 | ↑ | $0.2072 | 
 
 ### Stage `worker_codegen`
 
 | Model | Runs | Avg score | Score history | Trend | Avg cost |
 |---|---|---|---|---|---|
- | **`deepseek-v4-pro`** ← this session | 2 | **63.8** | 58 → 70 | ↑ | $0.0000 | 
- | `openai/gpt-5.3-codex-20260224` | 2 | **48.1** | 49 → 48 | ↓ | $0.7632 | 
+ | **`deepseek-v4-pro`** ← this session | 5 | **64.1** | 58 → 70 → 59 → 75 → 59 | ↑ | $0.0000 | 
+ | `openai/gpt-5.3-codex-20260224` | 3 | **51.6** | 49 → 48 → 59 | ↑ | $0.5485 | 

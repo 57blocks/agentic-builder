@@ -1,17 +1,11 @@
 # dependencies
 /node_modules
+/.pnpm-store/
 # scaffold templates must stay source-only; local installs break copyScaffold
 scaffolds/**/node_modules
 # generated-code: ignore bulk of output; allow pipeline/session dirs to be tracked
 generated-code/*
-!generated-code/.ralph/
-!generated-code/.ralph/**
-!generated-code/.agentic-snapshot/
-!generated-code/.agentic-snapshot/**
-generated-code 2
-generated-code/node_modules/
-generated-code/dist/
-generated-code/public/design/*.png
+generated-code/.ralph
 example
 /.pnp
 .pnp.*
@@ -25,7 +19,11 @@ example
 
 # next.js
 /.next/
+/.next-*/
 /out/
+
+# parallel-instance generated-code roots (kept untracked alongside generated-code/)
+/generated-code-*/
 
 # electron
 /dist/
@@ -34,6 +32,7 @@ example
 .env
 .env.local
 .env*.local
+.env.parallel
 
 # testing
 /coverage

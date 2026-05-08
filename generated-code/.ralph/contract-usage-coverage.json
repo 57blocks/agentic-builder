@@ -1,0 +1,18 @@
+{
+  "policy": "prune",
+  "totals": {
+    "contractEntries": 9,
+    "frontendCalls": 9,
+    "consistent": 8,
+    "surplus": 0,
+    "frontendWiringMissing": 0,
+    "contractGap": 0,
+    "frontendRogue": 0,
+    "adminSkipped": 1
+  },
+  "notes": [
+    "Frontend contract calls are implemented in frontend/src/api/spriClient.ts via canonical apiClient.",
+    "Admin endpoint GET /api/ingestion/status remains intentionally audience=admin and is excluded from user-facing wiring requirements."
+  ],
+  "pendingRepairTasks": []
+}

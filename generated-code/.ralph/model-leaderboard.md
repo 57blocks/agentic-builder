@@ -1,7 +1,7 @@
 # Model Leaderboard (project)
 
-- Generated at: 2026-04-28T12:45:11.137Z
-- Rows aggregated: 9
+- Generated at: 2026-05-07T08:18:05.979Z
+- Rows aggregated: 12
 
 > Compares models that have been used across sessions. Scores are simple means; trend column shows the most recent runs in time order (newest last).
 
@@ -9,47 +9,60 @@
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | 2 | **69.2** | 57.5% | $0.0505 | $0.0505 | 0ms | 64 → 75 | 2026-04-28 | 
+ | `openai/gpt-5.3-codex-20260224` | 5 | **68.0** | 50.0% | $0.0465 | $0.0495 | 0ms | 64 → 75 → 64 → 74 → 64 | 2026-05-07 | 
  | `anthropic/claude-4-sonnet-20250522` | 1 | **62.7** | 45.0% | $0.0000 | $0.0000 | 0ms | 63 | 2026-04-27 | 
 
 **Head-to-head — `openai/gpt-5.3-codex-20260224` vs `anthropic/claude-4-sonnet-20250522`**:
-- Score: 69.2 vs 62.7 (Δ +6.5)
-- Cost:  $0.0505 vs $0.0000 (Δ +$0.0505)
+- Score: 68.0 vs 62.7 (Δ +5.3)
+- Cost:  $0.0465 vs $0.0000 (Δ +$0.0465)
 - Speed: 0ms vs 0ms/call (≈ equal)
 
 ## Stage `generate_api_contracts`
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `anthropic/claude-4-sonnet-20250522` | 3 | **67.0** | 53.3% | $0.0000 | $0.0000 | 0ms | 64 → 63 → 75 | 2026-04-28 | 
+ | `anthropic/claude-4-sonnet-20250522` | 6 | **67.1** | 49.2% | $0.0000 | $0.0000 | 0ms | 64 → 63 → 75 → 64 → 74 → 64 | 2026-05-07 | 
 
 ## Stage `integration_verify_fix`
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | 3 | **56.5** | 53.3% | $0.9689 | $0.7981 | 6868ms | 54 → 51 → 65 | 2026-04-28 | 
+ | `openai/gpt-5.3-codex-20260224` | 5 | **55.5** | 50.0% | $1.0927 | $0.9613 | 6981ms | 54 → 51 → 65 → 54 → 54 | 2026-05-07 | 
 
 ## Stage `phase_verify_fix`
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | 3 | **53.7** | 53.3% | $1.6078 | $2.2555 | 38439ms | 49 → 53 → 60 | 2026-04-28 | 
+ | `deepseek/deepseek-v3.2-20251201` | 1 | **70.4** | 45.0% | $0.0000 | $0.0000 | 15689ms | 70 | 2026-04-29 | 
+ | `openai/gpt-5.3-codex-20260224` | 6 | **53.9** | 49.2% | $1.7757 | $2.2849 | 33304ms | 49 → 53 → 60 → 49 → 64 → 50 | 2026-05-07 | 
+
+**Head-to-head — `deepseek/deepseek-v3.2-20251201` vs `openai/gpt-5.3-codex-20260224`**:
+- Score: 70.4 vs 53.9 (Δ +16.5)
+- Cost:  $0.0000 vs $1.7757 (Δ -$1.7757)
+- Speed: 15689ms vs 33304ms/call (Δ -17615ms)
 
 ## Stage `worker_codefix`
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `openai/gpt-5.3-codex-20260224` | 3 | **57.0** | 53.3% | $0.1729 | $0.1954 | 1002395ms | 49 → 63 → 60 | 2026-04-28 | 
+ | `deepseek/deepseek-v3.2-20251201` | 1 | **68.5** | 45.0% | $0.0000 | $0.0000 | 42492ms | 69 | 2026-04-29 | 
+ | `openai/gpt-5.3-codex-20260224` | 6 | **55.9** | 49.2% | $0.2072 | $0.2467 | 974278ms | 49 → 63 → 60 → 49 → 59 → 57 | 2026-05-07 | 
+
+**Head-to-head — `deepseek/deepseek-v3.2-20251201` vs `openai/gpt-5.3-codex-20260224`**:
+- Score: 68.5 vs 55.9 (Δ +12.6)
+- Cost:  $0.0000 vs $0.2072 (Δ -$0.2072)
+- Speed: 42492ms vs 974278ms/call (Δ -931786ms)
 
 ## Stage `worker_codegen`
 
 | Model | Runs | Avg Score | Success % | Avg Cost | Median Cost | Avg ms/call | Trend | Last seen |
 |---|---|---|---|---|---|---|---|---|
- | `deepseek-v4-pro` | 2 | **63.8** | 57.5% | $0.0000 | $0.0000 | 33311ms | 58 → 70 | 2026-04-28 | 
- | `deepseek/deepseek-v4-pro-20260423` | 1 | **58.5** | 45.0% | $0.0000 | $0.0000 | 143970ms | 59 | 2026-04-27 | 
- | `openai/gpt-5.3-codex-20260224` | 2 | **48.1** | 45.0% | $0.7632 | $0.7632 | 281134ms | 49 → 48 | 2026-04-27 | 
+ | `deepseek/deepseek-v3.2-20251201` | 1 | **68.5** | 45.0% | $0.0000 | $0.0000 | 100971ms | 69 | 2026-04-29 | 
+ | `deepseek-v4-pro` | 5 | **64.1** | 61.0% | $0.0000 | $0.0000 | 35167ms | 58 → 70 → 59 → 75 → 59 | 2026-05-07 | 
+ | `deepseek/deepseek-v4-pro-20260423` | 2 | **63.5** | 45.0% | $0.0000 | $0.0000 | 101429ms | 59 → 69 | 2026-04-29 | 
+ | `openai/gpt-5.3-codex-20260224` | 3 | **51.6** | 45.0% | $0.5485 | $0.3828 | 705100ms | 49 → 48 → 59 | 2026-04-29 | 
 
-**Head-to-head — `deepseek-v4-pro` vs `deepseek/deepseek-v4-pro-20260423`**:
-- Score: 63.8 vs 58.5 (Δ +5.3)
+**Head-to-head — `deepseek/deepseek-v3.2-20251201` vs `deepseek-v4-pro`**:
+- Score: 68.5 vs 64.1 (Δ +4.4)
 - Cost:  $0.0000 vs $0.0000 (≈ equal)
-- Speed: 33311ms vs 143970ms/call (Δ -110659ms)
+- Speed: 100971ms vs 35167ms/call (Δ +65804ms)
