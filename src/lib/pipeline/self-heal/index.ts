@@ -87,3 +87,12 @@ export type {
   MigrationCoverageResult,
   MigrationCoverageGap,
 } from "./migration-coverage";
+export {
+  runMigrationCoverageRepair,
+  formatMigrationCoverageBlock,
+} from "./migration-coverage-repair";
+export type {
+  MigrationRepairTask,
+  MigrationCoverageRepairInput,
+  MigrationCoverageRepairResult,
+} from "./migration-coverage-repair";
