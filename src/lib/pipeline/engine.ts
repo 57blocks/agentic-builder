@@ -26,6 +26,10 @@ import {
   classifyProject,
   normalizeProjectTier,
 } from "@/lib/agents";
+import {
+  extractTrdArtifacts,
+  type TrdArtifacts,
+} from "@/lib/agents/architect/trd-artifacts";
 import type { AgentResult } from "@/lib/agents";
 import type { ProjectTier, ProjectClassification } from "@/lib/agents";
 import type {
@@ -394,6 +398,7 @@ export class PipelineEngine {
           this.trdAgent.generateTRD(prdContent, undefined, run.sessionId),
         );
         if (run.status === "failed") return run;
+        await this.persistTrdArtifacts(run);
       } else {
         run = this.emitStubCompleted(
           run,
@@ -1055,6 +1060,58 @@ export class PipelineEngine {
    * LLM-based structured PRD extraction. Attaches `prdSpec` to `steps.prd.metadata`.
    * Non-blocking — errors are logged but never fail the pipeline.
    */
+  /**
+   * After TRD generation succeeds, parse the response for fenced code
+   * blocks emitted under §6 (`shared/schema.ts`) and write them to disk.
+   * Best-effort: a missing/malformed block degrades to "no shared schema"
+   * (downstream codegen falls back to per-worker types) rather than
+   * failing the step. The artifact paths and any malformed warnings are
+   * surfaced via step.metadata.artifacts so the UI can flag them.
+   */
+  private async persistTrdArtifacts(run: PipelineRun): Promise<void> {
+    const trd = run.steps.trd;
+    if (!trd?.content || trd.status !== "completed") return;
+    if (trd.metadata?.skipped) return;
+
+    let artifacts: TrdArtifacts;
+    try {
+      artifacts = extractTrdArtifacts(trd.content);
+    } catch (err) {
+      console.warn(
+        "[Pipeline] TRD artifact extraction failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return;
+    }
+
+    const blueprintDir = path.resolve(process.cwd(), ".blueprint");
+    await fs.mkdir(blueprintDir, { recursive: true });
+
+    const written: { schemaTs?: string; rulesYaml?: string } = {};
+    if (artifacts.schemaTs) {
+      const p = path.join(blueprintDir, "shared-schema.ts");
+      await fs.writeFile(p, artifacts.schemaTs, "utf8");
+      written.schemaTs = path.relative(process.cwd(), p);
+    }
+    if (artifacts.rulesYaml) {
+      const p = path.join(blueprintDir, "business-rules.dsl.yaml");
+      await fs.writeFile(p, artifacts.rulesYaml, "utf8");
+      written.rulesYaml = path.relative(process.cwd(), p);
+    }
+
+    run.steps.trd = {
+      ...trd,
+      metadata: {
+        ...trd.metadata,
+        artifacts: {
+          ...written,
+          unknownPaths: artifacts.unknown.map((u) => u.path),
+          malformed: artifacts.malformed,
+        },
+      },
+    };
+  }
+
   private async attachPrdStructuredSpec(
     run: PipelineRun,
   ): Promise<PipelineRun> {
