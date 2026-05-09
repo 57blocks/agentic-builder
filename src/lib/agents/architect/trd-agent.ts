@@ -140,14 +140,48 @@ rules:
   generic chat UI, etc.), **omit §7 entirely**. Do not emit an empty rules
   block, and do not include a heading without a body.
 
+## 8. Workflow DAG (CONDITIONAL)
+
+If — and only if — the system has any **multi-step deterministic pipeline**
+that chains two or more services in a fixed order (e.g. periodic scoring
+cycles, ETL aggregation, multi-stage data ingestion, batch jobs that read,
+transform, persist, then notify), output a YAML block:
+
+\`\`\`yaml file:pipeline-dag.yaml
+version: 1
+pipelines:
+  - id: scoring-cycle
+    description: "5-minute stablecoin scoring run"
+    schedule: { cron: "*/5 * * * *" }
+    failure: { strategy: abort, retries: 0, compensation: skip-cycle }
+    nodes:
+      - { id: collect,   service: DataCollectionService,   function: collectAllSources }
+      - { id: normalize, service: NormalizationService,    function: executeNormalization, dependsOn: [collect] }
+      - { id: score,     service: ScoringEngine,           function: calculateComposite,   dependsOn: [normalize] }
+      - { id: alert,     service: AlertService,            function: createAlerts,         dependsOn: [score] }
+\`\`\`
+
+### DAG rules
+- \`id\` must be unique within a pipeline.
+- \`service\` MUST match a service name listed in column 1 of §3.1 Services.
+  The validator will flag any drift.
+- \`dependsOn\` references must resolve to sibling \`id\`s in the same pipeline.
+  The graph must be acyclic.
+- \`failure.strategy\` is one of \`abort\`, \`continue\`, or \`retry-N\` (e.g.
+  \`retry-3\`). Other values are reserved for later phases.
+- A pipeline with a single node still belongs in §8 if its execution must be
+  deterministic / scheduled — it documents the contract.
+- If the system has **no** such pipelines (pure CRUD app, request/response
+  only, no jobs), **omit §8 entirely**.
+
 ## Rules
 - Be specific: name exact libraries, versions, rationale.
 - Every table row must have a clear "why".
 - Reference the PRD feature IDs (FR-xxx, US-xxx) where decisions stem from a requirement.
 - Include at least one architecture diagram as an ASCII box diagram.
 - Keep the human-readable Markdown (§1-5) in the 2000–5000 word range.
-- The §6 schema block and §7 DSL (when present) are **not** counted in that
-  word budget — emit them in full no matter how large.`;
+- The §6 schema block, §7 DSL, and §8 DAG (when present) are **not** counted
+  in that word budget — emit them in full no matter how large.`;
 
 export class TRDAgent extends BaseAgent {
   constructor() {

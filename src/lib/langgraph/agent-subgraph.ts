@@ -610,6 +610,24 @@ export async function buildProjectConventionCard(
     );
   }
 
+  // ── Workflow DAG (TRD §8 product) ────────────────────────────────────────
+  // When pipeline-dag.yaml exists, the project has multi-step deterministic
+  // service chains. Workers implementing those services MUST follow the
+  // declared order and failure strategy.
+  const dagContent = await fsRead(".blueprint/pipeline-dag.yaml", outputDir);
+  if (
+    !dagContent.startsWith("FILE_NOT_FOUND") &&
+    !dagContent.startsWith("REJECTED")
+  ) {
+    lines.push(
+      "- **Workflow DAG (CANONICAL)**: `.blueprint/pipeline-dag.yaml` defines " +
+        "ordered service chains. **Read it before implementing any service " +
+        "named in a node.** Call services in `dependsOn` order, honor the " +
+        "declared `failure.strategy` (abort / continue / retry-N), and do " +
+        "NOT invent a different chain. The file is scaffold-protected.",
+    );
+  }
+
   // ── Playwright webServer & health route (E2E infra contract) ──────────────
   const playwrightCfg = await fsRead("frontend/playwright.config.ts", outputDir);
   if (!playwrightCfg.startsWith("FILE_NOT_FOUND") && !backendPkg.startsWith("FILE_NOT_FOUND")) {

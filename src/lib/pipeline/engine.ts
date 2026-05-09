@@ -1086,18 +1086,36 @@ export class PipelineEngine {
       return;
     }
 
-    const writtenRel: { schemaTs?: string; rulesYaml?: string } = {};
+    const writtenRel: {
+      schemaTs?: string;
+      rulesYaml?: string;
+      pipelineDagYaml?: string;
+    } = {};
     if (result.written.schemaTs) {
       writtenRel.schemaTs = path.relative(process.cwd(), result.written.schemaTs);
     }
     if (result.written.rulesYaml) {
       writtenRel.rulesYaml = path.relative(process.cwd(), result.written.rulesYaml);
     }
+    if (result.written.pipelineDagYaml) {
+      writtenRel.pipelineDagYaml = path.relative(
+        process.cwd(),
+        result.written.pipelineDagYaml,
+      );
+    }
 
     if (result.rulesValidation && !result.rulesValidation.ok) {
       console.warn(
         `[Pipeline] business-rules.dsl.yaml has ${result.rulesValidation.warnings.length} warning(s):`,
         result.rulesValidation.warnings
+          .map((w) => `${w.code}: ${w.message}`)
+          .join("; "),
+      );
+    }
+    if (result.dagValidation && !result.dagValidation.ok) {
+      console.warn(
+        `[Pipeline] pipeline-dag.yaml has ${result.dagValidation.warnings.length} warning(s):`,
+        result.dagValidation.warnings
           .map((w) => `${w.code}: ${w.message}`)
           .join("; "),
       );
@@ -1113,6 +1131,9 @@ export class PipelineEngine {
           malformed: result.artifacts.malformed,
           ...(result.rulesValidation
             ? { rulesValidation: result.rulesValidation }
+            : {}),
+          ...(result.dagValidation
+            ? { dagValidation: result.dagValidation }
             : {}),
         },
       },

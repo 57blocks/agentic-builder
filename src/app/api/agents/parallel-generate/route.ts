@@ -280,7 +280,11 @@ export async function POST(request: NextRequest) {
           // workers. Mirrors PipelineEngine.persistTrdArtifacts but for
           // the parallel-generate flow used by pipeline-ui.
           let trdArtifactsSummary:
-            | { schemaTs?: string; rulesYaml?: string }
+            | {
+                schemaTs?: string;
+                rulesYaml?: string;
+                pipelineDagYaml?: string;
+              }
             | undefined;
           if (docId === "trd") {
             try {
@@ -302,6 +306,12 @@ export async function POST(request: NextRequest) {
                   persisted.written.rulesYaml,
                 );
               }
+              if (persisted.written.pipelineDagYaml) {
+                trdArtifactsSummary.pipelineDagYaml = path.relative(
+                  process.cwd(),
+                  persisted.written.pipelineDagYaml,
+                );
+              }
               if (
                 persisted.rulesValidation &&
                 !persisted.rulesValidation.ok
@@ -313,8 +323,16 @@ export async function POST(request: NextRequest) {
                     .join("; "),
                 );
               }
+              if (persisted.dagValidation && !persisted.dagValidation.ok) {
+                console.warn(
+                  `[parallel-generate] pipeline-dag.yaml has ${persisted.dagValidation.warnings.length} warning(s):`,
+                  persisted.dagValidation.warnings
+                    .map((w) => `${w.code}: ${w.message}`)
+                    .join("; "),
+                );
+              }
               console.log(
-                `[parallel-generate] TRD artifacts persisted: schema=${trdArtifactsSummary.schemaTs ?? "(none)"} rules=${trdArtifactsSummary.rulesYaml ?? "(none)"}`,
+                `[parallel-generate] TRD artifacts persisted: schema=${trdArtifactsSummary.schemaTs ?? "(none)"} rules=${trdArtifactsSummary.rulesYaml ?? "(none)"} dag=${trdArtifactsSummary.pipelineDagYaml ?? "(none)"}`,
               );
             } catch (e) {
               console.warn(
