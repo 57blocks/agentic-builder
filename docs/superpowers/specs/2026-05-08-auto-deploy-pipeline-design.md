@@ -177,7 +177,7 @@ Dokploy API call sequence per generated app:
 
 ## UI Integration
 
-The existing `PushGeneratedCodeSection` manual button is superseded by the new automated deploy flow. The pipeline-ui deploy stage replaces it.
+The existing `PushGeneratedCodeSection` manual button is **kept as-is** — it remains useful for pushing code without triggering a full deployment. The new automated deploy flow is a separate action alongside it.
 
 Frontend connects to SSE after receiving `jobId`:
 
