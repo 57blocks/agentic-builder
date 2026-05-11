@@ -1,7 +1,7 @@
 # Auto Deploy Pipeline Design
 
 **Date:** 2026-05-08
-**Status:** Approved (v2 — Docker Compose + shared PostgreSQL)
+**Status:** Approved (v3 — reuses existing GitHub/push infrastructure)
 
 ## Overview
 
@@ -9,10 +9,23 @@ After code generation completes, automatically push the generated application to
 
 Each generated app includes a `docker-compose.yml` that defines all its services. Dokploy deploys it as a Compose project. All generated apps share one PostgreSQL container on the Dokploy server; each app gets its own database within that instance.
 
+## Existing Infrastructure (reused)
+
+The codebase already has a partial GitHub push pipeline built during the kickoff phase:
+
+| File | What it does |
+|------|-------------|
+| `src/lib/pipeline/kickoff-integrations.ts` | Creates a GitHub repo via REST API during kickoff; saves metadata to `.blueprint/kickoff-repo.json` |
+| `src/lib/pipeline/push-kickoff-repo.ts` | Pushes generated code to the kickoff repo (clone → copy → commit → push) |
+| `src/app/api/agents/push-generated-code/route.ts` | API endpoint wrapping the above push logic |
+| `src/components/kickoff/PushGeneratedCodeSection.tsx` | Manual "Push" button UI in the coding stage |
+
+**Key implication:** The GitHub repo is created during kickoff, not at deploy time. The deploy pipeline reads `.blueprint/kickoff-repo.json` to get the repo URL and reuses `pushGeneratedCodeToKickoffRepo()` for the push step.
+
 ## Scope
 
 - Triggered after code generation finishes (no tier distinction at deploy time)
-- One GitHub repository per generated app (private)
+- GitHub repo already created during kickoff phase — deploy pipeline reuses it
 - One Dokploy Compose Project per generated app
 - Shared PostgreSQL container on Dokploy; one database per app
 - Builder itself is not deployed — only the generated output
@@ -20,11 +33,10 @@ Each generated app includes a `docker-compose.yml` that defines all its services
 ## Environment Variables
 
 ```
-GITHUB_TOKEN=...
-GITHUB_OWNER=...          # GitHub username or org
-DOKPLOY_URL=https://...   # Running Dokploy instance base URL
+GITHUB_TOKEN=...                   # also used as PROJECT_KICKOFF_GITHUB_TOKEN
+DOKPLOY_URL=https://...            # Running Dokploy instance base URL
 DOKPLOY_TOKEN=...
-SHARED_PG_SERVICE_ID=...  # Dokploy service ID of the shared PostgreSQL instance
+SHARED_PG_CONNECTION_STRING=...    # Admin connection to shared PostgreSQL instance
 ```
 
 ## Overall Flow
@@ -33,12 +45,12 @@ SHARED_PG_SERVICE_ID=...  # Dokploy service ID of the shared PostgreSQL instance
 User clicks "Deploy"
       │
       ▼
-POST /api/deploy            ← returns { jobId } immediately
+POST /api/deploy              ← returns { jobId } immediately
       │
       ▼
 Background Deploy Job
-  Step 1: Create GitHub repository
-  Step 2: git init + commit + push generated code
+  Step 1: Verify kickoff repo exists (.blueprint/kickoff-repo.json)
+  Step 2: Push generated code → reuse pushGeneratedCodeToKickoffRepo()
   Step 3: Create database in shared PostgreSQL (CREATE DATABASE <appName>)
   Step 4: Create Dokploy Compose Project, set GitHub repo as source
   Step 5: Inject DATABASE_URL env var into Dokploy project
@@ -66,25 +78,27 @@ GET   /api/deploy/[jobId]           # Query final status (polling fallback)
 
 ```ts
 {
-  appName: string            // used as GitHub repo name, Dokploy project name, and DB name
-  generatedCodePath: string  // absolute path to the generated app directory
+  appName: string            // used as Dokploy project name and DB name
+  generatedCodePath: string  // relative path to the generated app directory (e.g. "generated-code")
 }
 ```
+
+`appName` is derived from the project name; GitHub repo name comes from `.blueprint/kickoff-repo.json`.
 
 ### SSE Event Format
 
 ```json
-{ "step": "create-github-repo",  "status": "running", "message": "Creating GitHub repository..." }
-{ "step": "create-github-repo",  "status": "done",    "message": "Repository created: github.com/owner/app" }
-{ "step": "git-push",            "status": "running", "message": "Pushing code..." }
-{ "step": "git-push",            "status": "done",    "message": "Code pushed" }
-{ "step": "create-database",     "status": "running", "message": "Creating database..." }
-{ "step": "create-database",     "status": "done",    "message": "Database ready" }
-{ "step": "create-dokploy",      "status": "running", "message": "Creating Dokploy project..." }
-{ "step": "create-dokploy",      "status": "done",    "message": "Project created" }
-{ "step": "trigger-deploy",      "status": "running", "message": "Deploying..." }
-{ "step": "trigger-deploy",      "status": "done",    "message": "Deploy complete", "url": "https://app.example.com" }
-{ "step": "trigger-deploy",      "status": "error",   "message": "Deploy failed: ..." }
+{ "step": "verify-repo",     "status": "running", "message": "Verifying GitHub repository..." }
+{ "step": "verify-repo",     "status": "done",    "message": "Repository confirmed: github.com/owner/app" }
+{ "step": "git-push",        "status": "running", "message": "Pushing generated code..." }
+{ "step": "git-push",        "status": "done",    "message": "Code pushed" }
+{ "step": "create-database", "status": "running", "message": "Creating database..." }
+{ "step": "create-database", "status": "done",    "message": "Database ready" }
+{ "step": "create-dokploy",  "status": "running", "message": "Creating Dokploy project..." }
+{ "step": "create-dokploy",  "status": "done",    "message": "Project created" }
+{ "step": "trigger-deploy",  "status": "running", "message": "Deploying..." }
+{ "step": "trigger-deploy",  "status": "done",    "message": "Deploy complete", "url": "https://app.example.com" }
+{ "step": "trigger-deploy",  "status": "error",   "message": "Deploy failed: ..." }
 ```
 
 ### In-Memory Job Manager
@@ -126,31 +140,30 @@ services:
       - "3000:3000"
 ```
 
-`DATABASE_URL` is left as an env var placeholder — the builder injects the real value via Dokploy API before triggering deploy.
-
-For s-tier (frontend only), the compose file has a single service with no `DATABASE_URL`.
+`DATABASE_URL` is left as an env var placeholder — the builder injects the real value via Dokploy API before triggering deploy. For frontend-only apps, the compose file has a single service with no `DATABASE_URL`.
 
 ## GitHub Integration
 
-File: `src/lib/deploy/github.ts`
+**No new GitHub code needed.** The deploy pipeline calls existing functions:
 
-- **Create repo:** Octokit `repos.createForAuthenticatedUser` — private, no auto-init
-- **Push code:** `simple-git` — init, add, commit, set remote, push to `main`
-- **Auth:** Token embedded in remote URL (`https://TOKEN@github.com/owner/repo.git`) — no SSH keys needed
+- `readKickoffRepoMetadata(projectRoot)` — reads `.blueprint/kickoff-repo.json`
+- `pushGeneratedCodeToKickoffRepo({ projectRoot, codeOutputDir, token })` — handles clone/copy/commit/push
+
+Both are already exported from `src/lib/pipeline/push-kickoff-repo.ts`.
 
 ## Database Integration
 
-File: `src/lib/deploy/database.ts`
+File: `src/lib/deploy/database.ts` *(new)*
 
 - Connect to the shared PostgreSQL instance via `SHARED_PG_CONNECTION_STRING`
-- Run `CREATE DATABASE <appName>` (sanitized — lowercase, alphanumeric + hyphens only)
-- Return the connection string for that database to inject into Dokploy
+- Run `CREATE DATABASE "<appName>"` (sanitized — lowercase, alphanumeric + hyphens only)
+- Return the per-app connection string to inject into Dokploy
 
 The shared PostgreSQL container is created once manually in Dokploy and reused across all generated apps.
 
 ## Dokploy Integration
 
-File: `src/lib/deploy/dokploy.ts`
+File: `src/lib/deploy/dokploy.ts` *(new)*
 
 Dokploy API call sequence per generated app:
 
@@ -164,6 +177,8 @@ Dokploy API call sequence per generated app:
 
 ## UI Integration
 
+The existing `PushGeneratedCodeSection` manual button is superseded by the new automated deploy flow. The pipeline-ui deploy stage replaces it.
+
 Frontend connects to SSE after receiving `jobId`:
 
 ```ts
@@ -175,7 +190,7 @@ source.onmessage = (e) => updatePipelineStep(JSON.parse(e.data))
 
 ```
 ✓ Generate code           done
-⟳ Create GitHub repo      running...
+⟳ Verify GitHub repo      running...
 ○ Push code               pending
 ○ Create database         pending
 ○ Create Dokploy project  pending
@@ -205,9 +220,12 @@ src/
       stream/route.ts           # GET — SSE stream
   lib/deploy/
     job-manager.ts              # In-memory job state + SSE fanout
-    github.ts                   # Repo creation + git push
     database.ts                 # Create per-app database in shared PostgreSQL
-    dokploy.ts                  # Dokploy API client (Compose type)
-    pipeline.ts                 # Orchestrates steps, emits events
+    dokploy.ts                  # Dokploy Compose API client
+    pipeline.ts                 # Orchestrates steps, emits events; reuses push-kickoff-repo
     types.ts                    # Shared types (Step, StepStatus, DeployJob)
+
+# Reused (no changes needed):
+src/lib/pipeline/push-kickoff-repo.ts
+src/lib/pipeline/kickoff-integrations.ts
 ```
