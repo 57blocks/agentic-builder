@@ -256,22 +256,52 @@ export class PipelineEngine {
       return run;
     }
 
-    run = await this.executeStep(run, "prd", () =>
-      pmAgent.generatePRDStreaming(
-        run.featureBrief,
-        (chunk, chunkType) => {
-          this.emit({
-            type: "step_stream",
-            runId: run.id,
-            stepId: "prd",
-            data: { chunk, chunkType },
-          });
-        },
-        undefined,
-        run.sessionId,
-      ),
-    );
-    if (run.status === "failed") return run;
+    // ── Imported PRD shortcut ────────────────────────────────────────────
+    // The PRD-import API writes `.blueprint/PRD.md` directly. When that
+    // file exists with non-empty content, use it as the PRD step's output
+    // and skip the LLM call entirely — otherwise the PM agent would
+    // hallucinate a fresh PRD that overrides the user's upload. The
+    // structured spec extractor still runs against the imported content,
+    // so downstream domain.rules wiring keeps working.
+    const importedPrdContent = await this.readImportedPrd();
+    if (importedPrdContent) {
+      run = await this.executeStep(run, "prd", async () => ({
+        content: importedPrdContent,
+        model: "imported",
+        costUsd: 0,
+        durationMs: 0,
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      }));
+      if (run.status === "failed") return run;
+      const prdStep = run.steps.prd;
+      if (prdStep) {
+        run.steps.prd = {
+          ...prdStep,
+          metadata: {
+            ...(prdStep.metadata ?? {}),
+            source: "imported",
+            importedFrom: ".blueprint/PRD.md",
+          },
+        };
+      }
+    } else {
+      run = await this.executeStep(run, "prd", () =>
+        pmAgent.generatePRDStreaming(
+          run.featureBrief,
+          (chunk, chunkType) => {
+            this.emit({
+              type: "step_stream",
+              runId: run.id,
+              stepId: "prd",
+              data: { chunk, chunkType },
+            });
+          },
+          undefined,
+          run.sessionId,
+        ),
+      );
+      if (run.status === "failed") return run;
+    }
 
     run = this.attachPrdSpecGateToPrdStep(run);
     run = await this.attachPrdStructuredSpec(run);
@@ -1410,6 +1440,23 @@ export class PipelineEngine {
    * In fast mode, try to read existing document files from the code output directory.
    * Supports common filename variations.
    */
+  /**
+   * Read the user-uploaded PRD from `.blueprint/PRD.md` (written by
+   * `/api/agents/pipeline/prd-import`). Returns null when the file is
+   * absent or whitespace-only. Used to short-circuit the PM agent so
+   * uploaded PRDs are honored verbatim instead of overwritten by a
+   * fresh LLM generation.
+   */
+  private async readImportedPrd(): Promise<string | null> {
+    const filePath = path.join(this.projectRoot, ".blueprint", "PRD.md");
+    try {
+      const raw = await fs.readFile(filePath, "utf-8");
+      return raw.trim().length > 0 ? raw : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async readExistingDocsFromOutput(outputRoot: string): Promise<{
     prd: string | null;
     trd: string | null;
