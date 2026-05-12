@@ -65,6 +65,10 @@ import {
   runMigrationCoverageRepair,
   formatMigrationCoverageBlock,
 } from "@/lib/pipeline/self-heal";
+import {
+  requestHumanDecision,
+  INTEGRATION_DECISION_OPTIONS,
+} from "@/lib/pipeline/human-decision";
 import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { pickRelevantSections } from "./doc-section-picker";
@@ -8883,23 +8887,104 @@ async function integrationVerifyAndFix(
           },
         });
 
-        finalStatus = "fail";
-        finalSummary = [
-          "IntegrationVerifyFix stalled without making code changes.",
-          `No mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
-          `Dynamic stagnation threshold reached: abortAt=${abortAt}, progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}.`,
+        // ── Human-in-the-loop decision (§7.5) ─────────────────────────────
+        // Before aborting, emit a `human_decision_needed` event to the browser
+        // and wait up to 5 min for the human to pick one of the 4-quadrant
+        // options. This unblocks the case where the worker cannot decide
+        // because the problem requires architectural judgement (e.g. the
+        // contract says "wire frontend" but the app is a pure SPA).
+        const humanDecisionContext = [
+          "IntegrationVerifyFix stagnated and could not determine the right action.",
+          `No filesystem mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
+          repeatedAction ? `Most repeated action: ${repeatedAction}.` : "",
           `Last meaningful progress: iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason}).`,
-          repeatedAction ? `Most repeated action: ${repeatedAction}` : "",
-          stagnationFallbackUsed
-            ? "Pre-abort batch-classify fallback was injected and exhausted; no recovery."
-            : "Aborting instead of spending more iterations rereading the same files.",
+          "",
+          "Review the contract-usage-coverage block above and choose the correct action for the highest-priority unresolved mismatch.",
         ]
           .filter(Boolean)
           .join("\n");
+
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "human_decision_needed",
+          details: {
+            context: humanDecisionContext,
+            options: INTEGRATION_DECISION_OPTIONS,
+            triggeredAtIteration: iterations,
+            progressScore,
+            progressMax: MAX_INTEGRATION_PROGRESS_SCORE,
+            timeoutMs: 5 * 60 * 1000,
+          },
+        });
+
         console.warn(
-          `${label}: aborting due to stagnation${stagnationFallbackUsed ? " (after fallback exhausted)" : ""}.`,
+          `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
         );
-        break;
+
+        let humanDecision: string;
+        try {
+          humanDecision = await requestHumanDecision(
+            state.sessionId,
+            INTEGRATION_DECISION_OPTIONS,
+            humanDecisionContext,
+          );
+        } catch {
+          humanDecision = "abort";
+        }
+
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "human_decision_received",
+          details: { decisionId: humanDecision, triggeredAtIteration: iterations },
+        });
+
+        if (humanDecision === "abort" || humanDecision === "timeout") {
+          finalStatus = "fail";
+          finalSummary = [
+            humanDecision === "timeout"
+              ? "Human decision timed out (5 min); aborting integration fix."
+              : "Human chose to abort the integration fix stage.",
+            `No mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
+            `Dynamic stagnation threshold: abortAt=${abortAt}, progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}.`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+          console.warn(`${label}: aborting on human decision (${humanDecision}).`);
+          break;
+        }
+
+        // Human picked an actionable option — find its label/description and
+        // inject a targeted instruction so the worker acts in the next turn.
+        const chosenOption = INTEGRATION_DECISION_OPTIONS.find(
+          (o) => o.id === humanDecision,
+        );
+        const humanInstruction = chosenOption
+          ? `HUMAN DECISION: ${chosenOption.label} — ${chosenOption.description}`
+          : `HUMAN DECISION: ${humanDecision}`;
+
+        messages.push({
+          role: "user",
+          content: [
+            "SYSTEM CORRECTION — HUMAN OVERRIDE: A human reviewer has decided the correct action.",
+            humanInstruction,
+            "",
+            "Apply this decision immediately on your NEXT turn.",
+            "Do NOT re-read files or re-classify. Make the write_file call(s) that correspond to this decision, then re-run scoped validation.",
+            "After validation passes, call report_done(status='pass', summary=…).",
+          ].join("\n"),
+        });
+
+        // Reset stagnation counters to grant 2 more iterations for the human-
+        // directed fix.
+        consecutiveNoMutationIterations = 0;
+        stagnationWarningsWithoutProgress = 0;
+        stagnationFallbackUsed = false;
+        stagnationFallbackIterationsLeft = 0;
+        repeatedReadOnlyActionCounts.clear();
+        console.warn(
+          `${label}: human decision "${humanDecision}" injected — resuming with 2 extra iterations.`,
+        );
+        continue;
       }
     }
 

@@ -193,22 +193,27 @@ export class PipelineEngine {
       tier = normalizeProjectTier(classification.tier);
       run.totalCostUsd += classification.costUsd;
 
+      // Persist classification into the intent step metadata so it is
+      // accessible downstream (e.g. runKickoffStep → phase-requirement gate).
+      run.steps.intent = {
+        ...run.steps.intent,
+        metadata: {
+          ...(run.steps.intent?.metadata ?? {}),
+          classification: {
+            tier: classification.tier,
+            type: classification.type,
+            needsBackend: classification.needsBackend,
+            needsDatabase: classification.needsDatabase,
+            reasoning: classification.reasoning,
+          },
+        },
+      };
+
       this.emit({
         type: "step_complete",
         runId: run.id,
         stepId: "intent",
-        data: {
-          ...run.steps.intent,
-          metadata: {
-            classification: {
-              tier: classification.tier,
-              type: classification.type,
-              needsBackend: classification.needsBackend,
-              needsDatabase: classification.needsDatabase,
-              reasoning: classification.reasoning,
-            },
-          },
-        },
+        data: { ...run.steps.intent },
       });
     } catch {
       tier = normalizeProjectTier("M");
@@ -263,7 +268,7 @@ export class PipelineEngine {
     // hallucinate a fresh PRD that overrides the user's upload. The
     // structured spec extractor still runs against the imported content,
     // so downstream domain.rules wiring keeps working.
-    const importedPrdContent = await this.readImportedPrd();
+    const importedPrdContent = await this.readImportedPrd(outputRoot);
     if (importedPrdContent) {
       run = await this.executeStep(run, "prd", async () => ({
         content: importedPrdContent,
@@ -286,9 +291,8 @@ export class PipelineEngine {
       }
     } else {
       run = await this.executeStep(run, "prd", () =>
-        pmAgent.generatePRDEditStreaming(
-          existingPrd,
-          editInstruction,
+        pmAgent.generatePRDStreaming(
+          run.featureBrief,
           (chunk, chunkType) => {
             this.emit({
               type: "step_stream",
@@ -297,6 +301,7 @@ export class PipelineEngine {
               data: { chunk, chunkType },
             });
           },
+          undefined,
           run.sessionId,
         ),
       );
@@ -305,39 +310,7 @@ export class PipelineEngine {
       run = this.attachPrdSpecGateToPrdStep(run);
       run = await this.attachPrdStructuredSpec(run);
       this.emitPrdStepCompleteRefresh(run);
-
-      this.emit({
-        type: "pipeline_complete",
-        runId: run.id,
-        stepId: "prd",
-        data: { status: "completed", metadata: { pausedAfterPrd: true } },
-      });
-      run.status = "completed";
-      run.currentStep = null;
-      run.updatedAt = new Date().toISOString();
-      return run;
     }
-
-    run = await this.executeStep(run, "prd", () =>
-      pmAgent.generatePRDStreaming(
-        run.featureBrief,
-        (chunk, chunkType) => {
-          this.emit({
-            type: "step_stream",
-            runId: run.id,
-            stepId: "prd",
-            data: { chunk, chunkType },
-          });
-        },
-        undefined,
-        run.sessionId,
-      ),
-    );
-    if (run.status === "failed") return run;
-
-    run = this.attachPrdSpecGateToPrdStep(run);
-    run = await this.attachPrdStructuredSpec(run);
-    this.emitPrdStepCompleteRefresh(run);
 
     const prdContent = run.steps.prd?.content ?? "";
 
@@ -565,7 +538,17 @@ export class PipelineEngine {
     if (fast) {
       fileMap = this.buildPrdOnlyKickoffFileMap(prdContent);
     } else {
-      fileMap = { "PRD.md": prdContent };
+      fileMap = {};
+      if (prdContent) fileMap["PRD.md"] = prdContent;
+      if (run.steps.trd?.content && !run.steps.trd.metadata?.skipped)
+        fileMap["TRD.md"] = run.steps.trd.content;
+      if (run.steps.sysdesign?.content && !run.steps.sysdesign.metadata?.skipped)
+        fileMap["SystemDesign.md"] = run.steps.sysdesign.content;
+      if (run.steps.implguide?.content && !run.steps.implguide.metadata?.skipped)
+        fileMap["ImplementationGuide.md"] = run.steps.implguide.content;
+      if (run.steps.design?.content && !run.steps.design.metadata?.skipped)
+        fileMap["DesignSpec.md"] = run.steps.design.content;
+      if (Object.keys(fileMap).length === 0) fileMap["PRD.md"] = "(empty)";
     }
     run = this.emitStubCompleted(run, "mockup", "Mockup step disabled.", {
       skipped: true,
@@ -945,6 +928,11 @@ export class PipelineEngine {
       let phaseGateReport = runPhaseRequirementGate({
         tier,
         tasks: finalTaskBreakdown,
+        needsBackend: (
+          run.steps.intent?.metadata?.classification as
+            | { needsBackend?: boolean }
+            | undefined
+        )?.needsBackend,
       });
       let phaseRepairSummary: {
         addedByLlm: number;
@@ -969,6 +957,11 @@ export class PipelineEngine {
           phaseGateReport = runPhaseRequirementGate({
             tier,
             tasks: finalTaskBreakdown,
+            needsBackend: (
+              run.steps.intent?.metadata?.classification as
+                | { needsBackend?: boolean }
+                | undefined
+            )?.needsBackend,
           });
           phaseRepairSummary = {
             addedByLlm: phaseResult.addedByLlm.length,
@@ -1469,20 +1462,28 @@ export class PipelineEngine {
    * Supports common filename variations.
    */
   /**
-   * Read the user-uploaded PRD from `.blueprint/PRD.md` (written by
-   * `/api/agents/pipeline/prd-import`). Returns null when the file is
-   * absent or whitespace-only. Used to short-circuit the PM agent so
-   * uploaded PRDs are honored verbatim instead of overwritten by a
-   * fresh LLM generation.
+   * Read the user-uploaded PRD written by `/api/agents/pipeline/prd-import`.
+   * Checks the project-scoped path first (`<outputRoot>/.blueprint/PRD.md`),
+   * then falls back to the legacy global path (`<projectRoot>/.blueprint/PRD.md`)
+   * for backward compatibility.
+   * Returns null when absent or whitespace-only.
    */
-  private async readImportedPrd(): Promise<string | null> {
-    const filePath = path.join(this.projectRoot, ".blueprint", "PRD.md");
-    try {
-      const raw = await fs.readFile(filePath, "utf-8");
-      return raw.trim().length > 0 ? raw : null;
-    } catch {
-      return null;
+  private async readImportedPrd(outputRoot?: string): Promise<string | null> {
+    const candidates: string[] = [];
+    if (outputRoot) {
+      candidates.push(path.join(outputRoot, ".blueprint", "PRD.md"));
     }
+    candidates.push(path.join(this.projectRoot, ".blueprint", "PRD.md"));
+
+    for (const filePath of candidates) {
+      try {
+        const raw = await fs.readFile(filePath, "utf-8");
+        if (raw.trim().length > 0) return raw;
+      } catch {
+        /* try next candidate */
+      }
+    }
+    return null;
   }
 
   private async readExistingDocsFromOutput(outputRoot: string): Promise<{
