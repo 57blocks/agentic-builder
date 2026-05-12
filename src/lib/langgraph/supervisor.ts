@@ -41,8 +41,14 @@ import {
 } from "./tools";
 import {
   injectBaselineEndpoints,
+  detectContractPrefix,
   type ApiContractEntry,
 } from "./baseline-endpoints";
+import {
+  wireRegistrationsIntoIndex,
+  pinApiRouterPrefix,
+  computeRelativeImportPath,
+} from "./route-audit-autofix";
 import { computeStagnationReplan } from "@/lib/pipeline/self-heal";
 import {
   chatCompletionWithFallback,
@@ -6760,6 +6766,15 @@ interface RouteRegistrationAudit {
   findings: string[];
   /** Modules that have a `*.routes.ts` file but are never wired into index.ts. */
   unregisteredModules: string[];
+  /** Structured per-module data — used by the route-audit auto-wire codemod. */
+  implementedModules: Array<{
+    file: string;
+    exportNames: string[];
+    primaryExportName: string | null;
+    isRegistered: boolean;
+  }>;
+  /** Detected apiRouter prefix from index.ts (defaults to "/api"). */
+  apiRouterPrefix: string;
   /** register*Routes imports in index.ts that don't resolve to a real module. */
   unresolvedRegistrations: string[];
   /** Endpoints declared in API_CONTRACTS.json but no matching route implementation found. */
@@ -6793,6 +6808,8 @@ async function auditApiRouteRegistration(
   const empty: RouteRegistrationAudit = {
     findings: [],
     unregisteredModules: [],
+    implementedModules: [],
+    apiRouterPrefix: "/api",
     unresolvedRegistrations: [],
     missingContractEndpoints: [],
     undeclaredEndpoints: [],
@@ -7058,6 +7075,13 @@ async function auditApiRouteRegistration(
   return {
     findings,
     unregisteredModules,
+    implementedModules: implemented.map((m) => ({
+      file: m.file,
+      exportNames: m.exportNames,
+      primaryExportName: m.exportName,
+      isRegistered: m.exportNames.some((n) => registeredNames.has(n)),
+    })),
+    apiRouterPrefix: apiPrefix,
     unresolvedRegistrations,
     missingContractEndpoints,
     undeclaredEndpoints,
@@ -7496,6 +7520,115 @@ async function autoAppendMissingScopedEndpoints(
   return { added, skipped };
 }
 
+interface RouteAutoRepairResult {
+  appliedAny: boolean;
+  prefixPin: ReturnType<typeof pinApiRouterPrefix> | null;
+  wired: string[];
+  skippedWires: Array<{ exportName: string; reason: string }>;
+}
+
+/**
+ * Deterministic preflight repairs for `backend/src/api/modules/index.ts`:
+ *
+ *   1. **Prefix pin**: when API_CONTRACTS.json's dominant prefix is
+ *      `/api/vN` but the current apiRouter is `new Router({ prefix: "/api" })`,
+ *      rewrite the literal so route mounting matches the contract.
+ *   2. **Register wire-in**: for every `*.routes.ts` whose `register<X>Routes`
+ *      export is not called in index.ts, append `import` + call to the
+ *      aggregator.
+ *
+ * Both are no-ops when the audit was clean. When something was written,
+ * caller MUST re-run `auditApiRouteRegistration` to see the post-repair state.
+ */
+async function autoRepairRouteRegistration(
+  outputDir: string,
+  audit: RouteRegistrationAudit,
+): Promise<RouteAutoRepairResult> {
+  const indexPath = "backend/src/api/modules/index.ts";
+  const indexRaw = await fsRead(indexPath, outputDir);
+  if (
+    indexRaw.startsWith("FILE_NOT_FOUND") ||
+    indexRaw.startsWith("REJECTED")
+  ) {
+    return {
+      appliedAny: false,
+      prefixPin: null,
+      wired: [],
+      skippedWires: [],
+    };
+  }
+
+  // Step 1: detect dominant contract prefix and pin if safe.
+  const contractRaw = await fsRead("API_CONTRACTS.json", outputDir);
+  let contractPrefix: string | null = null;
+  if (
+    !contractRaw.startsWith("FILE_NOT_FOUND") &&
+    !contractRaw.startsWith("REJECTED")
+  ) {
+    try {
+      const parsedRaw = JSON.parse(contractRaw);
+      if (Array.isArray(parsedRaw)) {
+        const contracts = (parsedRaw as Array<Record<string, unknown>>)
+          .filter(
+            (c) =>
+              typeof c.endpoint === "string" && typeof c.method === "string",
+          )
+          .map((c) => ({
+            service: typeof c.service === "string" ? c.service : "",
+            endpoint: c.endpoint as string,
+            method: c.method as string,
+          })) as ApiContractEntry[];
+        if (contracts.length > 0) {
+          contractPrefix = detectContractPrefix(contracts);
+        }
+      }
+    } catch {
+      // Ignore malformed contracts — earlier phases handle reporting.
+    }
+  }
+
+  let content = indexRaw;
+  let prefixPinResult: ReturnType<typeof pinApiRouterPrefix> | null = null;
+  if (contractPrefix) {
+    prefixPinResult = pinApiRouterPrefix(content, contractPrefix);
+    if (prefixPinResult.changed) {
+      content = prefixPinResult.content;
+    }
+  }
+
+  // Step 2: build the wire-in list from unregistered modules.
+  const toWire = audit.implementedModules
+    .filter(
+      (m) => !m.isRegistered && m.primaryExportName !== null,
+    )
+    .map((m) => ({
+      exportName: m.primaryExportName as string,
+      importPath: computeRelativeImportPath(indexPath, m.file),
+    }));
+
+  let wired: string[] = [];
+  let skippedWires: Array<{ exportName: string; reason: string }> = [];
+  if (toWire.length > 0) {
+    const r = wireRegistrationsIntoIndex(content, toWire);
+    content = r.content;
+    wired = r.wired;
+    skippedWires = r.skipped;
+  }
+
+  const appliedAny =
+    (prefixPinResult?.changed ?? false) || wired.length > 0;
+  if (appliedAny) {
+    await fsWrite(indexPath, content, outputDir);
+  }
+
+  return {
+    appliedAny,
+    prefixPin: prefixPinResult,
+    wired,
+    skippedWires,
+  };
+}
+
 /**
  * Merged integration verify + fix as a single agentic loop.
  *
@@ -7717,7 +7850,43 @@ async function integrationVerifyAndFix(
     }
   }
 
-  const routeAudit = await auditApiRouteRegistration(state.outputDir);
+  let routeAudit = await auditApiRouteRegistration(state.outputDir);
+
+  // ── Deterministic auto-repairs for the route audit (R10 + R11) ─────────
+  // Two failure patterns we now codemod instead of LLM-iterating:
+  //   1. /api vs /api/v1 prefix drift  → pin the apiRouter prefix to the
+  //      dominant contract prefix when current === "/api" and contract === "/api/vN".
+  //   2. Unregistered register*Routes  → append import + call to index.ts.
+  // After any fix, re-run the audit so downstream telemetry + system-prompt
+  // blocks reflect the post-repair state.
+  const routeAutorepairs = await autoRepairRouteRegistration(
+    state.outputDir,
+    routeAudit,
+  );
+  if (routeAutorepairs.appliedAny) {
+    if (routeAutorepairs.prefixPin?.changed) {
+      console.log(
+        `${label}: prefix pin: ${routeAutorepairs.prefixPin.from} → ${routeAutorepairs.prefixPin.to} in backend/src/api/modules/index.ts.`,
+      );
+    }
+    if (routeAutorepairs.wired.length > 0) {
+      console.log(
+        `${label}: auto-wired ${routeAutorepairs.wired.length} register*Routes call(s) in index.ts: ${routeAutorepairs.wired.join(", ")}.`,
+      );
+    }
+    getRepairEmitter(state.sessionId)({
+      stage: "preflight-route-audit",
+      event: "route_audit_autorepaired",
+      details: {
+        when: "preflight",
+        prefixPin: routeAutorepairs.prefixPin,
+        wired: routeAutorepairs.wired,
+        skippedWires: routeAutorepairs.skippedWires,
+      },
+    });
+    routeAudit = await auditApiRouteRegistration(state.outputDir);
+  }
+
   const initialApiClientUniqueness = await auditFrontendApiClientUniqueness(
     state.outputDir,
   );
