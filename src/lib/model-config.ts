@@ -26,7 +26,7 @@ export const MODEL_CONFIG = {
   trd: "openai/gpt-5.4-mini",
   sysdesign: "gpt-4o",
   implguide: "gpt-4o",
-  design: "openai/gpt-5.4-mini",
+  design: "openai/gpt-5.4",
   pencil: "openai/gpt-5.4",
   pencilToolUse: "openai/gpt-5.4",
   mockup: "gpt-4o-mini",

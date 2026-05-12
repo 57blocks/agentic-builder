@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Upload, X, FileImage, Code } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
-import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import type { StepId } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
@@ -17,11 +16,6 @@ import {
   type DesignStyle,
   type StitchGenerateResult,
 } from "./agent";
-import {
-  getDesignCache,
-  setDesignCache,
-  type DesignCache,
-} from "./snapshot";
 
 // ─── Style Carousel ──────────────────────────────────────────────────────────
 
@@ -523,28 +517,38 @@ export function DesignUI(props: StepUIProps) {
   const currentStep = useStepStore((s) => s.currentStep);
   const isRunning = useStepStore((s) => s.isRunning);
   const executeStep = useStepStore((s) => s.executeStep);
-  const tier = useStepNavigationStore((s) => s.tier);
+  const patchStepMeta = useStepStore((s) => s.patchStepMeta);
+  const tier = useStepStore((s) => s.tier);
   const nextStep = getNextStep("design", tier as "S" | "M" | "L");
-  // After completing the stitch phase (last phase of design), go to the step after stitch
-  const stitchNextStep = getNextStep("stitch", tier as "S" | "M" | "L");
+  // stitchNextStep is the step after design (pencil/mockup/qa depending on tier)
+  const stitchNextStep = nextStep;
+
+  // ── Read persisted metadata from step-store (survives navigation) ──
+  const designMeta = (steps.design?.metadata ?? {}) as {
+    selectedStyleId?: string | null;
+    designStyles?: DesignStyle[] | null;
+    designSourceMode?: "ai" | "custom";
+    stitchResult?: StitchGenerateResult | null;
+    prdHash?: string | null;
+  };
 
   // ── Local design state ──────────────────────────────────────────────────
   const [phase, setPhase] = useState<DesignPhase>("style");
 
-  // Style selection
-  const [designStyles, setDesignStyles] = useState<DesignStyle[] | null>(null);
+  // Style selection — initialized from persisted metadata
+  const [designStyles, setDesignStyles] = useState<DesignStyle[] | null>(() => designMeta.designStyles ?? null);
   const [designStylesLoading, setDesignStylesLoading] = useState(false);
   const [designStylesError, setDesignStylesError] = useState<string | null>(null);
-  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(() => designMeta.selectedStyleId ?? null);
 
-  // Source mode: "ai" or "custom"
-  const [designSourceMode, setDesignSourceMode] = useState<"ai" | "custom">("ai");
+  // Source mode — initialized from persisted metadata
+  const [designSourceMode, setDesignSourceMode] = useState<"ai" | "custom">(() => designMeta.designSourceMode ?? "ai");
 
   // Custom upload files
   const [customFiles, setCustomFiles] = useState<CustomFile[]>([]);
 
-  // Stitch
-  const [stitchResult, setStitchResult] = useState<StitchGenerateResult | null>(null);
+  // Stitch — initialized from persisted metadata
+  const [stitchResult, setStitchResult] = useState<StitchGenerateResult | null>(() => designMeta.stitchResult ?? null);
   const [stitchGenerating, setStitchGenerating] = useState(false);
   const [stitchError, setStitchError] = useState<string | null>(null);
 
@@ -565,43 +569,24 @@ export function DesignUI(props: StepUIProps) {
     : (steps.design?.content ?? "");
   const isDesignDone = steps.design?.status === "completed";
 
-  // ── Sync cache to snapshot on changes ────────────────────────────────────
+  // ── PRD content + hash ───────────────────────────────────────────────────
   const prdContent = steps.prd?.content ?? "";
   const prdHash = prdContent.trim() ? makePrdHash(prdContent) : null;
 
+  // ── Persist design metadata to step-store whenever it changes ────────────
   useEffect(() => {
-    const cache: DesignCache = {
+    patchStepMeta("design", {
       prdHash,
       designStyles,
-      selectedDesignStyleId: selectedStyleId,
+      selectedStyleId,
       designSourceMode,
-      customFileNames: customFiles.map((f) => f.file.name),
       stitchResult,
-    };
-    setDesignCache(cache);
-  }, [prdHash, designStyles, selectedStyleId, designSourceMode, customFiles, stitchResult]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prdHash, designStyles, selectedStyleId, designSourceMode, stitchResult]);
 
   // ── Auto-generate design styles once PRD content is available ────────────
   const autoGenRef = useRef(false);
-
-  // ── Restore cache on mount ──────────────────────────────────────────────
-  const restoredRef = useRef(false);
-  useEffect(() => {
-    if (restoredRef.current) return;
-    const cached = getDesignCache();
-    if (cached && cached.prdHash === prdHash) {
-      setDesignStyles(cached.designStyles);
-      setSelectedStyleId(cached.selectedDesignStyleId ?? null);
-      setDesignSourceMode(cached.designSourceMode ?? "ai");
-      setStitchResult(cached.stitchResult ?? null);
-      // Prevent auto-gen from overwriting restored styles
-      if (Array.isArray(cached.designStyles) && cached.designStyles.length > 0) {
-        autoGenRef.current = true;
-      }
-    }
-    restoredRef.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ── Auto-advance to spec when design completes ──────────────────────────
   const prevDesignRunning = useRef(isDesignRunning);
@@ -623,20 +608,7 @@ export function DesignUI(props: StepUIProps) {
     if (!prdContent.trim()) return;
     if (designStylesLoading) return;
     if (autoGenRef.current) return;
-    // Check cache first
-    const cached = getDesignCache();
-    if (
-      cached &&
-      cached.prdHash === prdHash &&
-      Array.isArray(cached.designStyles) &&
-      cached.designStyles.length > 0
-    ) {
-      setDesignStyles(cached.designStyles);
-      setSelectedStyleId(cached.selectedDesignStyleId ?? null);
-      autoGenRef.current = true;
-      return;
-    }
-    // Already have styles in state
+    // Already have styles (from persisted metadata or previous generation)
     if (Array.isArray(designStyles) && designStyles.length > 0) {
       autoGenRef.current = true;
       return;
@@ -826,31 +798,53 @@ export function DesignUI(props: StepUIProps) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
-      {/* ── Phase indicator ── */}
-      <div className="shrink-0 bg-slate-50 border-b border-[#e2e8f0] flex items-center px-8 py-3 gap-2 text-[13px] text-slate-500">
-        <span
-          className={
-            phase === "style" ? "text-[#712ae2] font-semibold" : ""
-          }
+      {/* ── Phase nav bar (replaces breadcrumb) ── */}
+      <div className="shrink-0 bg-white border-b border-[#e2e8f0] px-6 py-2 flex items-center justify-between">
+        {/* Prev */}
+        <button
+          onClick={() => {
+            if (phase === "style") props.onNavigate("prd" as StepId);
+            else if (phase === "spec") setPhase("style");
+            else setPhase("spec");
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
         >
-          Style
+          <ArrowLeft size={13} />
+          {phase === "style" ? "PRD" : phase === "spec" ? "Style" : "Design Spec"}
+        </button>
+
+        {/* Current phase label */}
+        <span className="text-[12px] font-semibold text-slate-500">
+          {phase === "style" ? "1 · Style" : phase === "spec" ? "2 · Design Spec" : "3 · Stitch Design"}
         </span>
-        <span className="text-slate-300">→</span>
-        <span
-          className={
-            phase === "spec" ? "text-[#712ae2] font-semibold" : ""
+
+        {/* Next */}
+        <button
+          onClick={() => {
+            if (phase === "style") {
+              handleGenerateDesignDoc();
+            } else if (phase === "spec") {
+              setPhase("stitch");
+            } else {
+              if (stitchNextStep) props.onNavigate(stitchNextStep);
+            }
+          }}
+          disabled={
+            (phase === "style" && (
+              (designSourceMode === "ai" && !selectedStyleId) ||
+              (designSourceMode === "custom" && customFiles.length === 0) ||
+              isDesignRunning
+            )) ||
+            (phase === "spec" && isDesignRunning)
           }
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Design Spec
-        </span>
-        <span className="text-slate-300">→</span>
-        <span
-          className={
-            phase === "stitch" ? "text-[#712ae2] font-semibold" : ""
-          }
-        >
-          Stitch Design
-        </span>
+          {phase === "style"
+            ? isDesignDone ? "Design Spec" : "Generate Spec"
+            : phase === "spec" ? "Stitch Design"
+            : "Next Step"}
+          <ArrowRight size={13} />
+        </button>
       </div>
 
       {/* ── Main Content ── */}
@@ -1325,8 +1319,15 @@ export function DesignUI(props: StepUIProps) {
               </div>
             )}
             {!stitchGenerating && !stitchResult && !stitchError && (
-              <div className="flex items-center justify-center h-full text-slate-400">
-                <p className="text-sm">Waiting for design to generate…</p>
+              <div className="flex flex-col items-center justify-center h-full gap-4">
+                <p className="text-[13px] text-slate-400">Design Spec is ready. Generate Stitch mockups below.</p>
+                <button
+                  onClick={() => handleGenerateWithStitch()}
+                  disabled={!steps.design?.content || isRunning}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Generate with Stitch
+                </button>
               </div>
             )}
           </>
@@ -1334,57 +1335,7 @@ export function DesignUI(props: StepUIProps) {
       </div>
 
       {/* ── Bottom navigation bar ── */}
-      <div className="shrink-0 border-t border-[#e2e8f0] bg-white px-8 py-3 flex items-center justify-between">
-        {/* ── Previous ── */}
-        <div>
-          {phase === "style" ? (
-            <button
-              onClick={() => props.onNavigate("prd" as StepId)}
-              className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              <ArrowLeft size={14} /> Previous
-            </button>
-          ) : (
-            <button
-              onClick={() =>
-                setPhase(phase === "spec" ? "style" : "spec")
-              }
-              className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              <ArrowLeft size={14} /> Previous
-            </button>
-          )}
-        </div>
-
-        {/* ── Next ── */}
-        <div className="flex items-center gap-3">
-          {phase === "style" && (
-            <button
-              onClick={handleGenerateDesignDoc}
-              disabled={
-                (designSourceMode === "ai" && !selectedStyleId) ||
-                (designSourceMode === "custom" && customFiles.length === 0) ||
-                isDesignRunning
-              }
-              className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {designSourceMode === "ai" && !selectedStyleId
-                ? "Select a style to continue"
-                : designSourceMode === "custom" && customFiles.length === 0
-                  ? "Upload a file to continue"
-                  : isDesignRunning
-                    ? (
-                      <>
-                        <Loading size="sm" /> Generating…
-                      </>
-                    )
-                    : (
-                      <>
-                        Generate Design Spec <ArrowRight size={14} />
-                      </>
-                    )}
-            </button>
-          )}
+      <div className="shrink-0 border-t border-[#e2e8f0] bg-white px-8 py-3 flex items-center justify-end">
 
           {phase === "spec" && (
             <StageInputBar
@@ -1457,7 +1408,7 @@ export function DesignUI(props: StepUIProps) {
               actions={
                 <button
                   onClick={() => {
-                    if (stitchNextStep) props.onNavigate(stitchNextStep);
+                    props.onNavigate("trd");
                   }}
                   disabled={isRunning}
                   className="flex items-center gap-2 shrink-0 px-4 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-full hover:bg-[#6b24da] transition-colors disabled:opacity-40"
@@ -1468,7 +1419,6 @@ export function DesignUI(props: StepUIProps) {
             />
           )}
         </div>
-      </div>
     </div>
   );
 }
