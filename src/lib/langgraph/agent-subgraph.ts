@@ -1929,6 +1929,11 @@ async function generateCode(state: WorkerState) {
           }
         : undefined;
 
+    // Snapshot the initial context length so we can trim round-accumulated
+    // messages (tool results, assistant file blocks) between multi-rounds.
+    // Without this, context grows from ~15 K → 80 K+ over 8 rounds.
+    const initialMessagesLength = messages.length;
+
     while (rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS) {
       rounds += 1;
       const response = await runCodegenWorkerLoop(
@@ -2016,6 +2021,13 @@ async function generateCode(state: WorkerState) {
         .slice(-40)
         .map((f) => `- ${f}`)
         .join("\n");
+      // Compress messages accumulated during this round back to the initial
+      // context snapshot.  This prevents the prompt from growing linearly
+      // with the number of rounds (15 K → 86 K+).  All tool call results and
+      // large assistant file-block messages are dropped; the continuation
+      // message below re-injects the file list so the model retains awareness
+      // of what has already been written.
+      messages.splice(initialMessagesLength);
       messages.push({
         role: "user",
         content: [
