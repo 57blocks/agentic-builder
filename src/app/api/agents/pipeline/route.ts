@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
     prdEditInstruction,
     existingPrd,
     sessionId,
+    prdEditInstruction,
+    existingPrd,
   } = body as {
     featureBrief?: string;
     codeOutputDir?: string;
@@ -27,6 +29,8 @@ export async function POST(request: NextRequest) {
     /** Stable client-generated id linking this pipeline run with a
      *  subsequent kickoff so memory records share the same kickoffId. */
     sessionId?: string;
+    prdEditInstruction?: string;
+    existingPrd?: string;
   };
 
   const featureBrief =

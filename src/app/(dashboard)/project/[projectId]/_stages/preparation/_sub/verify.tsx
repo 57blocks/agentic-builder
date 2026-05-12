@@ -17,7 +17,6 @@ export default function VerifySubStage() {
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
   const isDone  = step?.status === "completed";
 
-  // Auto-trigger Verify generation if not yet generated and nothing is running
   useEffect(() => {
     if (!step && !isRunning) {
       runVerify();
@@ -26,6 +25,7 @@ export default function VerifySubStage() {
 
   return (
     <DocViewerSubStage
+      activeTabId="verify"
       title="Pre-Kickoff Verification"
       subtitle="Final review checklist — confirm all documents are ready before starting code generation"
       editPlaceholder="Ask AgenticBuilder to refine the verification checklist..."
