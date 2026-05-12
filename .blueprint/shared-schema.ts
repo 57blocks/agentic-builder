@@ -2,193 +2,285 @@
 // frontend AND backend code both touch. Both sides MUST import from this
 // module rather than redefine. No `any`. ISO 8601 strings for timestamps.
 
-export type UserId = string;
-export type TaskId = string;
-export type RefreshTokenId = string;
-export type PasswordResetTokenId = string;
-export type AuditEventId = string;
+export type UUID = string;
 
-export type ThemePreference = "light" | "dark";
-export type TaskPriority = "low" | "medium" | "high";
-export type TaskStatus = "pending" | "in_progress" | "done";
-export type TaskSortField = "dueDate" | "createdAt";
-export type SortDirection = "asc" | "desc";
+export type ProjectId = UUID;
+export type UserId = UUID;
+export type TaskId = UUID;
+export type TaskRunId = UUID;
+export type WebhookId = UUID;
+export type WebhookDeliveryId = UUID;
+export type AuditLogId = UUID;
+export type FileArtifactId = UUID;
+
+export type ProjectStatus = "active" | "archived";
+export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
+export type WebhookStatus = "enabled" | "disabled";
+export type DeliveryStatus = "pending" | "succeeded" | "failed" | "retrying";
+export type FileArtifactKind = "export" | "attachment" | "snapshot";
 
 export interface User {
   id: UserId;
   email: string;
+  name: string;
+  authProvider: string;
+  authProviderSubject: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Project {
+  id: ProjectId;
+  name: string;
+  description: string | null;
+  status: ProjectStatus;
+  ownerUserId: UserId;
+  sourceFilePath: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface Task {
   id: TaskId;
-  userId: UserId;
+  projectId: ProjectId;
   title: string;
   description: string | null;
-  dueDate: string | null;
-  priority: TaskPriority;
   status: TaskStatus;
+  orderIndex: number;
+  assigneeUserId: UserId | null;
   createdAt: string;
   updatedAt: string;
-  completedAt: string | null;
-  archivedAt: string | null;
 }
 
-export interface RefreshToken {
-  id: RefreshTokenId;
-  userId: UserId;
-  expiresAt: string;
+export interface TaskRun {
+  id: TaskRunId;
+  projectId: ProjectId;
+  triggeredByUserId: UserId;
+  status: "queued" | "running" | "succeeded" | "failed";
+  inputSnapshot: Record<string, unknown>;
+  resultSummary: string | null;
   createdAt: string;
-  lastUsedAt: string | null;
-  revokedAt: string | null;
 }
 
-export interface PasswordResetToken {
-  id: PasswordResetTokenId;
-  userId: UserId;
-  expiresAt: string;
+export interface Webhook {
+  id: WebhookId;
+  projectId: ProjectId | null;
+  url: string;
+  eventTypes: string[];
+  enabled: boolean;
+  secretRef: string;
   createdAt: string;
-  usedAt: string | null;
+  updatedAt: string;
 }
 
-export interface AuditEvent {
-  id: AuditEventId;
-  userId: UserId | null;
+export interface WebhookDelivery {
+  id: WebhookDeliveryId;
+  webhookId: WebhookId;
+  eventType: string;
+  payload: Record<string, unknown>;
+  attemptCount: number;
+  status: DeliveryStatus;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  createdAt: string;
+}
+
+export interface AuditLog {
+  id: AuditLogId;
+  actorUserId: UserId | null;
   action: string;
-  entityType: string;
-  entityId: string | null;
-  metadata: Record<string, string | number | boolean | null>;
-  ipAddress: string | null;
-  userAgent: string | null;
+  resourceType: string;
+  resourceId: string;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
 
-export interface AuthSession {
-  user: User;
-  accessToken: string;
+export interface FileArtifact {
+  id: FileArtifactId;
+  projectId: ProjectId | null;
+  kind: FileArtifactKind;
+  storageKey: string;
+  mimeType: string;
+  sizeBytes: number;
+  checksum: string;
+  createdAt: string;
 }
 
-export interface RegisterRequest {
-  email: string;
-  password: string;
-  confirmPassword: string;
+export interface ListProjectsResponse {
+  projects: Project[];
 }
 
-export interface RegisterResponse {
-  user: User;
-  accessToken: string;
+export interface GetProjectRequest {
+  projectId: ProjectId;
+}
+export interface GetProjectResponse {
+  project: Project;
 }
 
-export interface LoginRequest {
-  email: string;
-  password: string;
+export interface CreateProjectRequest {
+  name: string;
+  description?: string | null;
+  sourceFilePath?: string | null;
+}
+export interface CreateProjectResponse {
+  project: Project;
 }
 
-export interface LoginResponse {
-  user: User;
-  accessToken: string;
+export interface UpdateProjectRequest {
+  projectId: ProjectId;
+  name?: string;
+  description?: string | null;
+  status?: ProjectStatus;
+  sourceFilePath?: string | null;
+}
+export interface UpdateProjectResponse {
+  project: Project;
 }
 
-export interface LogoutRequest {
-  refreshToken?: string;
+export interface DeleteProjectRequest {
+  projectId: ProjectId;
 }
-
-export interface LogoutResponse {
-  success: true;
-}
-
-export interface RefreshSessionRequest {
-  refreshToken?: string;
-}
-
-export interface RefreshSessionResponse {
-  user: User;
-  accessToken: string;
-}
-
-export interface PasswordResetRequestRequest {
-  email: string;
-}
-
-export interface PasswordResetRequestResponse {
-  success: true;
-}
-
-export interface MeResponse {
-  user: User;
-}
-
-export interface GetProfileResponse {
-  user: User;
-}
-
-export interface UpdateProfileRequest {
-  email: string;
-}
-
-export interface UpdateProfileResponse {
-  user: User;
+export interface DeleteProjectResponse {
+  deleted: true;
 }
 
 export interface ListTasksRequest {
-  status?: TaskStatus | "all";
-  priority?: TaskPriority | "all";
-  sort?: TaskSortField;
-  direction?: SortDirection;
+  projectId: ProjectId;
 }
-
 export interface ListTasksResponse {
   tasks: Task[];
 }
 
-export interface GetTaskRequest {
-  id: TaskId;
-}
-
-export interface GetTaskResponse {
-  task: Task;
-}
-
 export interface CreateTaskRequest {
+  projectId: ProjectId;
   title: string;
   description?: string | null;
-  dueDate?: string | null;
-  priority: TaskPriority;
+  assigneeUserId?: UserId | null;
 }
-
 export interface CreateTaskResponse {
   task: Task;
 }
 
 export interface UpdateTaskRequest {
+  projectId: ProjectId;
+  taskId: TaskId;
   title?: string;
   description?: string | null;
-  dueDate?: string | null;
-  priority?: TaskPriority;
   status?: TaskStatus;
+  orderIndex?: number;
+  assigneeUserId?: UserId | null;
 }
-
 export interface UpdateTaskResponse {
   task: Task;
 }
 
 export interface DeleteTaskRequest {
-  id: TaskId;
+  projectId: ProjectId;
+  taskId: TaskId;
 }
-
 export interface DeleteTaskResponse {
-  success: true;
+  deleted: true;
 }
 
-export interface DashboardSummaryResponse {
-  total: number;
-  pending: number;
-  done: number;
+export interface ListTaskRunsRequest {
+  projectId: ProjectId;
+}
+export interface ListTaskRunsResponse {
+  taskRuns: TaskRun[];
+}
+
+export interface GenerateTaskRunRequest {
+  projectId: ProjectId;
+  inputSnapshot: Record<string, unknown>;
+}
+export interface GenerateTaskRunResponse {
+  taskRun: TaskRun;
+}
+
+export interface ListWebhooksResponse {
+  webhooks: Webhook[];
+}
+
+export interface CreateWebhookRequest {
+  projectId?: ProjectId | null;
+  url: string;
+  eventTypes: string[];
+  enabled?: boolean;
+}
+export interface CreateWebhookResponse {
+  webhook: Webhook;
+}
+
+export interface UpdateWebhookRequest {
+  webhookId: WebhookId;
+  projectId?: ProjectId | null;
+  url?: string;
+  eventTypes?: string[];
+  enabled?: boolean;
+}
+export interface UpdateWebhookResponse {
+  webhook: Webhook;
+}
+
+export interface DeleteWebhookRequest {
+  webhookId: WebhookId;
+}
+export interface DeleteWebhookResponse {
+  deleted: true;
+}
+
+export interface TestWebhookRequest {
+  webhookId: WebhookId;
+}
+export interface TestWebhookResponse {
+  delivery: WebhookDelivery;
+}
+
+export interface ListAuditLogsRequest {
+  cursor?: string | null;
+  limit?: number;
+}
+export interface ListAuditLogsResponse {
+  auditLogs: AuditLog[];
+  nextCursor: string | null;
+}
+
+export interface GetAuditLogRequest {
+  auditLogId: AuditLogId;
+}
+export interface GetAuditLogResponse {
+  auditLog: AuditLog;
+}
+
+export interface UploadFileRequest {
+  projectId?: ProjectId | null;
+  kind: FileArtifactKind;
+  mimeType: string;
+  sizeBytes: number;
+  checksum: string;
+}
+export interface UploadFileResponse {
+  fileArtifact: FileArtifact;
+  uploadUrl: string;
+}
+
+export interface GetFileArtifactRequest {
+  fileArtifactId: FileArtifactId;
+}
+export interface GetFileArtifactResponse {
+  fileArtifact: FileArtifact;
+}
+
+export interface DeleteFileArtifactRequest {
+  fileArtifactId: FileArtifactId;
+}
+export interface DeleteFileArtifactResponse {
+  deleted: true;
 }
 
 export interface HealthResponse {
-  ok: true;
-  service: "taskflow-api";
+  status: "ok";
+  uptimeSeconds: number;
+  version: string;
   timestamp: string;
 }

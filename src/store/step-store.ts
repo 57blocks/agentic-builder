@@ -128,6 +128,8 @@ export interface StepStoreState {
 
   /** Set a single step result */
   setStepResult: (stepId: StepId, result: StepResultData) => void;
+  /** Merge extra metadata into a step without touching status/content/cost */
+  patchStepMeta: (stepId: StepId, meta: Record<string, unknown>) => void;
   /** Mark a step as running */
   setStepRunning: (stepId: StepId) => void;
   /** Append streaming content to step (debounced snapshot save) */
@@ -192,6 +194,23 @@ export const useStepStore = create<StepStoreState>()(
           steps: { ...s.steps, [stepId]: result },
           totalCostUsd: s.totalCostUsd + (result.costUsd ?? 0),
         }));
+      },
+
+      patchStepMeta: (stepId, meta) => {
+        set((s) => {
+          const existing = s.steps[stepId];
+          return {
+            steps: {
+              ...s.steps,
+              [stepId]: {
+                ...(existing ?? { stepId, status: "pending" as const, timestamp: new Date().toISOString() }),
+                metadata: { ...(existing?.metadata ?? {}), ...meta },
+              },
+            },
+          };
+        });
+        // Debounced DB persist so style/stitch changes survive refresh
+        _scheduleStreamSave(get, stepId);
       },
 
       setStepRunning: (stepId) => {
