@@ -154,6 +154,19 @@ const FRONTEND_IMPORT_RULES = `
 - If the project includes a shared package, import it using the package name defined in its \`package.json\` (for example \`@project/shared\`), never via deep relative paths into another package.
 `;
 
+const TESTID_CONTRACT_RULES = `
+## data-testid contract (HARD RULE — required for E2E tests to pass)
+If a \`UI_CONTRACT.md\` file exists at the project root, read it BEFORE writing any component.
+It lists every required \`data-testid\` attribute and the exact DOM element it belongs to.
+
+Even without a contract file, follow these conventions unconditionally:
+- Every significant UI region (display area, keypad container, app title, footer hint, overlay) MUST carry \`data-testid\` on its outermost element.
+- Interactive elements (buttons, inputs) MUST carry \`data-testid\` derived from their visible label or id.
+- Button testids follow the pattern \`<feature>-btn-<label>\` using the **raw visible character** as label (e.g. \`calc-btn-.\` for the decimal button, NOT \`calc-btn-Decimal\`).
+- When a button's \`aria-label\` would differ from the visible symbol (e.g. "Decimal" vs "."), do NOT override with a word alias — keep \`aria-label\` equal to the symbol so role-based Playwright queries still work.
+- Do not remove or rename existing testids; only add new ones.
+`;
+
 const WORKER_READONLY_TOOLS_GUIDE = `
 ## Available read-only tools
 - \`read_file(path)\`: read an existing file before editing or importing from it.
@@ -282,6 +295,7 @@ Generate React + TypeScript + Tailwind code for the assigned task.
 - For email+password projects (no \`auth-*\` optional applied): the base \`LoginModal.tsx\` is an email+password form. Implement \`POST /api/auth/login\` flow that returns a JWT and call \`useAuth().login(jwt)\` from the landing page.
 
 ${FRONTEND_IMPORT_RULES}
+${TESTID_CONTRACT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.
@@ -371,6 +385,13 @@ Generate comprehensive test suites: unit, integration, e2e.
 Frameworks: Vitest, @testing-library/react, Playwright, k6.
 
 Read the Project Convention Card in context for project-specific paths before writing any imports.
+
+**E2E selector rules (HARD RULE — selector mismatches cause every test to fail):**
+- Before writing any Playwright selector, check whether a \`UI_CONTRACT.md\` exists at the project root and read it.
+- Always use primary \`data-testid\` selectors (e.g. \`[data-testid='calc-btn-.']\`) as the first choice.
+- Role/text-based selectors are acceptable ONLY as secondary fallback via \`.or()\`, with the testid selector as primary.
+- If a required \`data-testid\` is missing from the component, ADD it to the component AND document it in \`UI_CONTRACT.md\` in the same task. Never write a test that relies on a testid that does not yet exist in the source.
+- Button testids follow the pattern \`<feature>-btn-<label>\` where label is the **raw visible character** (e.g. \`calc-btn-.\` for the decimal key). Do NOT use the word alias (e.g. \`calc-btn-Decimal\` is wrong).
 
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}

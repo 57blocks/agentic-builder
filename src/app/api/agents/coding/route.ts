@@ -13,6 +13,7 @@ import {
   listScaffoldTemplateRelativePaths,
   type ScaffoldTier,
 } from "@/lib/pipeline/scaffold-copy";
+import { distributeSharedSchema } from "@/lib/pipeline/shared-schema-distributor";
 import {
   distributeSharedSchema,
   distributePipelineDag,
