@@ -28,11 +28,7 @@ export type StepId =
   | "summary"
   | "task-breakdown"
   // coding
-  | "architect"
-  | "backend"
-  | "frontend"
-  | "test"
-  | "coding-verify"
+  | "agents"
   // preview
   | "serve"
   | "e2e";
@@ -47,7 +43,6 @@ export type GroupId =
   | "planning"
   | "summary"
   | "agents"
-  | "verification"
   | "server"
   | "testing";
 
@@ -243,60 +238,9 @@ export const PIPELINE_FLOW: FlowNode[] = [
         id: "agents",
         label: "Agents",
         level: 2,
-        parallel: true,
-        children: [
-          {
-            id: "architect",
-            label: "Architect",
-            level: 3,
-            stepConfig: {
-              uiKind: "agent-log",
-              agentRole: "architect",
-            },
-          },
-          {
-            id: "backend",
-            label: "Backend",
-            level: 3,
-            stepConfig: {
-              uiKind: "agent-log",
-              agentRole: "backend",
-            },
-          },
-          {
-            id: "frontend",
-            label: "Frontend",
-            level: 3,
-            stepConfig: {
-              uiKind: "agent-log",
-              agentRole: "frontend",
-            },
-          },
-          {
-            id: "test",
-            label: "Tests",
-            level: 3,
-            stepConfig: {
-              uiKind: "agent-log",
-              agentRole: "test",
-            },
-          },
-        ],
-      },
-      {
-        id: "verification",
-        label: "Verification",
-        level: 2,
-        dependsOn: ["agents"],
-        tiers: ["M", "L"],
-        children: [
-          {
-            id: "coding-verify",
-            label: "Integration Verify",
-            level: 3,
-            stepConfig: { uiKind: "custom" },
-          },
-        ],
+        stepConfig: {
+          uiKind: "panel",
+        },
       },
     ],
   },
@@ -521,11 +465,7 @@ export const STEP_LABELS: Record<StepId, string> = {
   "env-setup": "Env Setup",
   summary: "Summary",
   "task-breakdown": "Task Breakdown",
-  architect: "Architect",
-  backend: "Backend",
-  frontend: "Frontend",
-  test: "Tests",
-  "coding-verify": "Integration Verify",
+  agents: "Agents",
   serve: "Dev Server",
   e2e: "E2E",
 };
@@ -540,7 +480,6 @@ export const GROUP_LABELS: Record<GroupId, string> = {
   planning: "Planning",
   summary: "Summary",
   agents: "Agents",
-  verification: "Verification",
   server: "Server",
   testing: "Testing",
 };
