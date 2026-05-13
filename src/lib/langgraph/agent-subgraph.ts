@@ -375,6 +375,29 @@ When the resource-detector emitted \`LLM_PROVIDER\` + \`LLM_API_KEY\` + \`LLM_BA
 
 If you're tempted to import \`OpenAI\` from \`"openai"\` inside a service file, STOP — go through \`llmService\` instead. The tests / repair gates check for direct vendor imports and will fail.
 
+**API routes manifest (HARD RULE — required whenever this task adds or changes HTTP routes):**
+After all your code files, emit ONE manifest declaring every endpoint you implemented in THIS task. Path: \`_meta/routes/<feature-slug>.json\` at the **project root** (NOT inside \`backend/\`). \`<feature-slug>\` is a kebab-case slug for your domain — pick \`auth.json\`, \`tasks-crud.json\`, \`feeds-stream.json\`, whatever uniquely identifies this task. Different tasks must use different slugs (collisions silently overwrite).
+
+The manifest is a JSON array; each entry:
+\`\`\`json
+{
+  "service": "auth",
+  "method": "POST",
+  "endpoint": "/api/auth/login",
+  "requestFields": "{ email: string; password: string }",
+  "responseFields": "{ token: string; user: { id: string; email: string } }",
+  "authType": "none",
+  "description": "log in with email + password"
+}
+\`\`\`
+- \`endpoint\` is the FULL path the frontend will call, including any \`/api\` mount prefix.
+- \`method\` is uppercase: \`GET\` | \`POST\` | \`PUT\` | \`PATCH\` | \`DELETE\`.
+- \`requestFields\` / \`responseFields\` are TypeScript type literals copied verbatim from your handler's actual types — NOT prose. Use \`"none"\` if the body / response is empty.
+- \`authType\` is \`"none"\` | \`"bearer"\` | \`"session"\`.
+- If the task implements zero HTTP routes (pure internal services), skip the manifest.
+
+The frontend agent reads this file as the source of truth for API calls. Declaring an endpoint you didn't implement → runtime 404. Implementing routes but skipping the manifest → frontend guesses paths and field names, usually wrong.
+
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.

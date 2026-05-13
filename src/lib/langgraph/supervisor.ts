@@ -3279,11 +3279,54 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   const feCount = workersForRole("frontend", state.frontendTasks.length);
   const feChunks = chunkTasks(state.frontendTasks, feCount);
 
-  // Build a rich API reference block from the full contracts.
+  // state.apiContracts is the append-merged union of:
+  //   1. generate_api_contracts (PRD-inferred, speculative — feeds BE as spec)
+  //   2. extract_real_contracts_manifest (BE self-declared in _meta/routes/*)
+  //   3. extract_real_contracts_llm (read from BE's actual route files)
+  //   4. extract_real_contracts_regex (pattern-matched from BE's actual files)
+  // FE must only see (2)-(4) — what BE actually wrote — otherwise it'll call
+  // endpoints that exist only in TRD's imagination. Dedupe by method+endpoint,
+  // preferring manifest > LLM > regex (more field info upstream).
+  const sourcePriority = (c: ApiContract): number => {
+    switch (c.generatedBy) {
+      case "extract_real_contracts_manifest":
+        return 3;
+      case "extract_real_contracts_llm":
+        return 2;
+      case "extract_real_contracts_regex":
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  const realByKey = new Map<string, ApiContract>();
+  for (const c of state.apiContracts) {
+    if (sourcePriority(c) === 0) continue;
+    const key = `${(c.method ?? "GET").toUpperCase()} ${c.endpoint}`;
+    const existing = realByKey.get(key);
+    if (!existing || sourcePriority(c) > sourcePriority(existing)) {
+      realByKey.set(key, c);
+    }
+  }
+  const realContracts = Array.from(realByKey.values());
+
+  // Fallback: if extraction yielded nothing (LLM error AND no regex hits),
+  // fall back to the full set so FE isn't completely blind. Log this — it
+  // means BE's route shape didn't match either extractor and likely needs
+  // attention.
+  const feContracts =
+    realContracts.length > 0 ? realContracts : state.apiContracts;
+  if (realContracts.length === 0 && state.apiContracts.length > 0) {
+    console.warn(
+      `[Supervisor] dispatchFrontendWorkers: no BE-extracted contracts available; falling back to ${state.apiContracts.length} TRD-derived contracts for FE prompt.`,
+    );
+  }
+
+  // Build a rich API reference block from the BE-extracted contracts.
   // This is injected into projectContext so LLM cannot miss it.
   let apiReferenceBlock = "";
-  if (state.apiContracts.length > 0) {
-    const contractLines = state.apiContracts.map((c) => {
+  if (feContracts.length > 0) {
+    const contractLines = feContracts.map((c) => {
       const lines = [
         `### ${c.method} ${c.endpoint}`,
         `- **Service**: ${c.service}`,
@@ -3325,7 +3368,7 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
         outputDir: state.outputDir,
         projectContext: feContext,
         fileRegistrySnapshot: state.fileRegistry,
-        apiContractsSnapshot: state.apiContracts,
+        apiContractsSnapshot: feContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
         currentTaskIndex: 0,
         ralphConfig: state.ralphConfig,
@@ -3336,12 +3379,185 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
 }
 
 /**
+ * BE workers self-declare their endpoints in `_meta/routes/<slug>.json`.
+ * This is the cheapest and most accurate source of truth: BE knows its own
+ * TypeScript types and route mount paths, no need to reverse-engineer.
+ *
+ * Returns null if no manifest dir exists or all files are unparseable —
+ * caller should fall back to LLM/regex extraction.
+ */
+async function readRoutesManifest(
+  outputDir: string,
+): Promise<ApiContract[] | null> {
+  const dir = path.join(outputDir, "_meta", "routes");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return null;
+  }
+  const jsonFiles = entries.filter((f) => f.toLowerCase().endsWith(".json"));
+  if (jsonFiles.length === 0) return null;
+
+  const contracts: ApiContract[] = [];
+  const seen = new Set<string>();
+  let parsedFiles = 0;
+
+  for (const fname of jsonFiles) {
+    const raw = await fsRead(
+      path.join("_meta", "routes", fname),
+      outputDir,
+    );
+    if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      console.warn(
+        `[Supervisor] readRoutesManifest: ${fname} not valid JSON, skipping`,
+      );
+      continue;
+    }
+    if (!Array.isArray(parsed)) {
+      console.warn(
+        `[Supervisor] readRoutesManifest: ${fname} root is not an array, skipping`,
+      );
+      continue;
+    }
+    parsedFiles++;
+
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      const method =
+        typeof r.method === "string" ? r.method.toUpperCase().trim() : "";
+      const endpoint =
+        typeof r.endpoint === "string" ? r.endpoint.trim() : "";
+      if (!method || !endpoint) continue;
+      const key = `${method} ${endpoint}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const reqRaw = typeof r.requestFields === "string" ? r.requestFields : "";
+      const resRaw =
+        typeof r.responseFields === "string" ? r.responseFields : "";
+      const reqFields = reqRaw && reqRaw !== "none" ? reqRaw : undefined;
+      const resFields = resRaw && resRaw !== "none" ? resRaw : undefined;
+
+      contracts.push({
+        service:
+          typeof r.service === "string" && r.service.length > 0
+            ? r.service
+            : fname.replace(/\.json$/i, ""),
+        method,
+        endpoint,
+        requestFields: reqFields,
+        responseFields: resFields,
+        authType: typeof r.authType === "string" ? r.authType : "none",
+        description:
+          typeof r.description === "string" ? r.description : undefined,
+        schema: [
+          reqFields ? `request: ${reqFields}` : "",
+          resFields ? `response: ${resFields}` : "",
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        generatedBy: "extract_real_contracts_manifest",
+      });
+    }
+  }
+
+  if (parsedFiles === 0 || contracts.length === 0) return null;
+
+  console.log(
+    `[Supervisor] readRoutesManifest: loaded ${contracts.length} endpoint(s) from ${parsedFiles} manifest file(s) in _meta/routes/`,
+  );
+  return contracts;
+}
+
+/**
+ * Cheap sanity check: for each manifest entry, confirm the HTTP verb literal
+ * appears in some BE source file. Catches BE declaring endpoints it never
+ * wired up (hallucinated manifest). Field-level accuracy is NOT checked —
+ * trust BE's self-report there.
+ *
+ * Returns the verified subset and a list of dropped entries for logging.
+ */
+async function verifyManifestAgainstSource(
+  manifest: ApiContract[],
+  state: SupervisorState,
+): Promise<{ verified: ApiContract[]; dropped: ApiContract[] }> {
+  const beFiles = state.fileRegistry.filter(
+    (f) => f.role === "backend" && /\.(ts|js)$/.test(f.path),
+  );
+  const haystackParts: string[] = [];
+  for (const f of beFiles) {
+    const content = await fsRead(f.path, state.outputDir);
+    if (!content.startsWith("FILE_NOT_FOUND")) haystackParts.push(content);
+  }
+  const haystack = haystackParts.join("\n");
+  if (haystack.length === 0) {
+    return { verified: manifest, dropped: [] };
+  }
+
+  const verified: ApiContract[] = [];
+  const dropped: ApiContract[] = [];
+  for (const c of manifest) {
+    // Look for either `.get(`/`.post(` etc. OR decorator-style `@Get(`/`@Post(`.
+    const verbRe = new RegExp(
+      `(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`,
+      "i",
+    );
+    if (verbRe.test(haystack)) {
+      verified.push(c);
+    } else {
+      dropped.push(c);
+    }
+  }
+  return { verified, dropped };
+}
+
+/**
  * After BE Workers complete, extract real routes from generated files
  * to supplement/correct the api_contract_phase contracts.
+ *
+ * Resolution order:
+ *   1. `_meta/routes/*.json` manifest (BE self-declared, has real TS types).
+ *   2. LLM extraction from BE route files (~$0.01-0.05/run).
+ *   3. Regex fallback (path-only, no field info).
  */
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
+  // 1. Prefer BE-declared manifest when present.
+  const manifest = await readRoutesManifest(state.outputDir);
+  if (manifest && manifest.length > 0) {
+    const { verified, dropped } = await verifyManifestAgainstSource(
+      manifest,
+      state,
+    );
+    if (dropped.length > 0) {
+      console.warn(
+        `[Supervisor] extractRealContracts: dropped ${dropped.length} manifest entry(s) that don't appear in BE source: ${dropped
+          .map((d) => `${d.method} ${d.endpoint}`)
+          .join(", ")}`,
+      );
+    }
+    if (verified.length > 0) {
+      console.log(
+        `[Supervisor] extractRealContracts: using ${verified.length} contract(s) from BE manifest (skipping LLM extraction)`,
+      );
+      return { apiContracts: verified };
+    }
+    // Manifest existed but nothing verified — fall through to LLM/regex.
+    console.warn(
+      "[Supervisor] extractRealContracts: manifest had entries but none verified against source; falling back to extraction.",
+    );
+  }
+
+  // 2. Legacy: LLM + regex extraction.
   // Collect backend route/controller files and shared type files
   const beFiles = state.fileRegistry.filter(
     (f) =>
