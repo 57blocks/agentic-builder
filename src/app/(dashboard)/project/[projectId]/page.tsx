@@ -117,7 +117,7 @@ export default function ProjectPage() {
   }, [projectId]);
 
   // ── Step change handler — save snapshot, update step, load new snapshot, persist ──
-  const handleStepChange = useCallback((stepId: StepId) => {
+  const handleStepChange = useCallback(async (stepId: StepId) => {
     const prevStep = activeStepRef.current;
 
     // Save snapshot for the CURRENT step before navigating away
@@ -125,13 +125,19 @@ export default function ProjectPage() {
       saveCurrentSnapshot(projectId, prevStep);
     }
 
+    // Gate auto-start effects: set isHydrated=false so step components skip
+    // auto-generation until the snapshot is fully restored.
+    useStepStore.setState({ isHydrated: false });
+
+    // Load snapshot for the new step FIRST — prevents auto-start race
+    await loadSnapshotForStep(projectId, stepId);
+
+    // Now safe to render the new step with restored data
     setActiveStep(stepId);
     activeStepRef.current = stepId;
+    useStepStore.setState({ isHydrated: true });
 
-    // Load snapshot for the new step
-    loadSnapshotForStep(projectId, stepId);
-
-    // Persist activeStep to backend immediately (fire-and-forget)
+    // Persist activeStep to backend (fire-and-forget)
     persistActiveStep(projectId, stepId).catch(console.error);
   }, [projectId]);
 

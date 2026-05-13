@@ -177,15 +177,29 @@ export default function PipelineBreadcrumb({
   const handleL1Select = (stageId: string) => {
     const stage = stages.find((s) => s.id === stageId);
     const firstGroup = stage?.children?.[0];
-    const firstStep = firstGroup?.children?.[0];
-    if (firstStep) onStepChange(firstStep.id as StepId);
+    if (!firstGroup) return;
+    // Level-2 standalone step (e.g., initial, intent, prd, design) — use its own id
+    if (!firstGroup.children || firstGroup.children.length === 0) {
+      onStepChange(firstGroup.id as StepId);
+    } else {
+      // Group with children — use the first child step
+      const firstStep = firstGroup.children.find((s) => !s.tiers || s.tiers.includes(tier));
+      if (firstStep) onStepChange(firstStep.id as StepId);
+    }
   };
 
   const handleL2Select = (groupId: string) => {
     const stage = stages.find((s) => s.id === activeStageId);
     const group = stage?.children?.find((g) => g.id === groupId);
-    const firstStep = group?.children?.find((s) => !s.tiers || s.tiers.includes(tier));
-    if (firstStep) onStepChange(firstStep.id as StepId);
+    if (!group) return;
+    // Level-2 standalone step (no children) — use its own id
+    if (!group.children || group.children.length === 0) {
+      onStepChange(group.id as StepId);
+    } else {
+      // Group with children — use the first available child
+      const firstStep = group.children.find((s) => !s.tiers || s.tiers.includes(tier));
+      if (firstStep) onStepChange(firstStep.id as StepId);
+    }
   };
 
   const handleL3Select = (stepId: string) => {
