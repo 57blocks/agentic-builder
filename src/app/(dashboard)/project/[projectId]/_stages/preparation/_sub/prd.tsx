@@ -368,11 +368,11 @@ function SparkleIcon() {
 
 type DocTab = "prd" | "design" | "trd" | "qa";
 
-const DOC_TABS: { id: DocTab; label: string }[] = [
+const ALL_DOC_TABS: { id: DocTab; label: string; hideForTiers?: string[] }[] = [
   { id: "prd",    label: "PRD" },
   { id: "design", label: "Design Document" },
-  { id: "trd",    label: "Technical Specs" },
-  { id: "qa",     label: "QA Plan" },
+  { id: "trd",    label: "Technical Specs", hideForTiers: ["S"] },
+  { id: "qa",     label: "QA Plan",         hideForTiers: ["S"] },
 ];
 
 export default function PrdSubStage() {
@@ -385,6 +385,10 @@ export default function PrdSubStage() {
   const rerunPrd         = usePipelineStore((s) => s.rerunPrd);
   const goToSubStage     = useStageStore((s) => s.goToSubStage);
   const goToStage        = useStageStore((s) => s.goToStage);
+  const tier = usePipelineStore(
+    (s) => (s.steps.intent?.metadata as { classification?: { tier?: string } } | undefined)?.classification?.tier ?? "M"
+  );
+  const DOC_TABS = ALL_DOC_TABS.filter((t) => !t.hideForTiers?.includes(tier));
   const isStageHydrated  = useStageStore((s) => s.isStageHydrated);
 
   const [editInput, setEditInput] = useState("");
