@@ -2059,6 +2059,7 @@ function formatMarkdownReport(input: {
     `- Runtime readiness: ${readinessHeader}`,
     `- Started at: ${input.startedAt}`,
     `- Ended at: ${input.endedAt}`,
+    `- Total duration: ${formatDuration(Date.parse(input.endedAt) - Date.parse(input.startedAt))}`,
     `- Generator git: \`${input.generatorGitSha ?? "(unknown)"}\``,
     `- Scaffold fix attempts: ${input.scaffoldFixAttempts ?? 0}`,
     `- Integration fix attempts: ${input.integrationFixAttempts ?? 0}`,
