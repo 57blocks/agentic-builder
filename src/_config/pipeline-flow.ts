@@ -41,7 +41,7 @@ export type GroupId =
   | "input"
   | "core-docs"
   | "tech-docs"
-  | "design-group"
+  | "design"
   | "quality"
   | "setup"
   | "planning"
@@ -119,33 +119,16 @@ export const PIPELINE_FLOW: FlowNode[] = [
         },
       },
       {
-        id: "design-group",
+        id: "design",
         label: "Design",
         level: 2,
         dependsOn: ["core-docs"],
         tiers: ["M", "L"],
-        children: [
-          {
-            id: "design",
-            label: "Design Spec",
-            level: 3,
-            stepConfig: {
-              uiKind: "custom",
-              docTabId: "design",
-              apiEndpoint: "/api/agents/parallel-generate",
-            },
-          },
-          {
-            id: "stitch",
-            label: "Stitch",
-            level: 3,
-            dependsOn: ["design"],
-            stepConfig: {
-              uiKind: "doc-viewer",
-              apiEndpoint: "/api/agents/parallel-generate",
-            },
-          },
-        ],
+        stepConfig: {
+          uiKind: "custom",
+          docTabId: "design",
+          apiEndpoint: "/api/agents/parallel-generate",
+        },
       },
       {
         id: "tech-docs",
@@ -551,7 +534,7 @@ export const GROUP_LABELS: Record<GroupId, string> = {
   input: "Input",
   "core-docs": "Core Docs",
   "tech-docs": "Tech Docs",
-  "design-group": "Design",
+  design: "Design",
   quality: "Quality",
   setup: "Setup",
   planning: "Planning",
