@@ -56,10 +56,6 @@ const BASELINE_JUSTIFICATION_AUTH =
   "(login/refresh/logout/me). Not enumerated in PRD prose but required " +
   "for every user flow that hits a bearer-guarded route.";
 
-const BASELINE_JUSTIFICATION_HEALTH =
-  "BASELINE — health probe required by Playwright webServer config and " +
-  "every deployment liveness check. Scaffold ships the route.";
-
 const BASELINE_AUTH_TEMPLATES: Array<
   Omit<ApiContractEntry, "endpoint"> & {
     /** Path WITHOUT the project prefix — we re-prefix at inject time. */
@@ -112,20 +108,6 @@ const BASELINE_AUTH_TEMPLATES: Array<
     audience: "user",
   },
 ];
-
-const BASELINE_HEALTH_TEMPLATE: Omit<ApiContractEntry, "endpoint"> & {
-  pathSuffix: string;
-} = {
-  service: "health",
-  pathSuffix: "/health",
-  method: "GET",
-  requestSchema: "none",
-  responseSchema: "{ status: \"ok\"; uptimeSec: number }",
-  auth: "none",
-  description: "Liveness probe. Used by Playwright webServer and ops monitors.",
-  prdJustification: BASELINE_JUSTIFICATION_HEALTH,
-  audience: "admin",
-};
 
 /**
  * Infer the route prefix used by the existing contracts (e.g. `/api`,
@@ -211,21 +193,14 @@ export function injectBaselineEndpoints(
     added.push(key);
   }
 
-  // Health baseline — always (scaffold ships the route).
-  {
-    const endpoint = prefix + BASELINE_HEALTH_TEMPLATE.pathSuffix;
-    const key = contractKey(BASELINE_HEALTH_TEMPLATE.method, endpoint);
-    if (existing.has(key)) {
-      skipped.push({
-        id: key,
-        reason: "already present in LLM output",
-      });
-    } else {
-      const { pathSuffix: _suffix, ...rest } = BASELINE_HEALTH_TEMPLATE;
-      augmented.push({ ...rest, endpoint });
-      added.push(key);
-    }
-  }
+  // NOTE: a previous version injected a `/health` baseline contract here.
+  // It was removed because the scaffold ships `/api/health` directly on
+  // apiRouter (Playwright webServer probe) while the contract prefix is
+  // often `/api/v1` — the resulting `/api/v1/health` entry never matched
+  // a real implementation and produced a perpetual false-fail in the
+  // route audit. The scaffold's `/api/health` continues to exist for
+  // infra probes and is exempted from the audit's "implemented but not
+  // in contract" check by `isContractAuditExempt`.
 
   return { contracts: augmented, added, skipped };
 }

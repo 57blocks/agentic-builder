@@ -114,22 +114,32 @@ describe("injectBaselineEndpoints — auth surface gating", () => {
   });
 });
 
-describe("injectBaselineEndpoints — health always", () => {
-  it("injects /health regardless of auth state", () => {
+describe("injectBaselineEndpoints — no health injection (R14)", () => {
+  // Health baseline was removed: scaffold ships /api/health for the
+  // Playwright webServer probe, but contracts often use /api/v1/* — the
+  // injected /api/v1/health entry never matched the real implementation
+  // and produced a permanent false-fail. Scaffold's /api/health is
+  // exempted from the audit's "implemented but not in contract" check.
+  it("does NOT inject any /health entry", () => {
     const r = injectBaselineEndpoints({
-      contracts: [contract({ method: "GET", endpoint: "/api/items" })],
+      contracts: [contract({ method: "GET", endpoint: "/api/v1/items" })],
       hasAuthRoutes: false,
     });
-    expect(r.added).toContain("GET /api/health");
+    expect(r.added.filter((s) => /\/health/.test(s))).toEqual([]);
+    expect(r.contracts.filter((c) => c.endpoint.endsWith("/health"))).toEqual(
+      [],
+    );
   });
 
-  it("skips /health when LLM already emitted it", () => {
+  it("preserves a contract's existing /health entry without duplicating", () => {
     const r = injectBaselineEndpoints({
       contracts: [contract({ method: "GET", endpoint: "/api/health" })],
       hasAuthRoutes: false,
     });
+    expect(
+      r.contracts.filter((c) => c.endpoint === "/api/health"),
+    ).toHaveLength(1);
     expect(r.added).not.toContain("GET /api/health");
-    expect(r.skipped.find((s) => s.id === "GET /api/health")).toBeDefined();
   });
 });
 

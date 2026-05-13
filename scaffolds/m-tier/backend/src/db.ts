@@ -41,4 +41,13 @@ export async function initDb(): Promise<void> {
   // Each helper respects TIMESCALE_DISABLED=1 and catches the missing-
   // extension error, so a fresh Postgres install never crashes startup.
   await enableTimescaleExtension(sequelize);
+
+  // Apply pending Sequelize migrations from `src/database/migrations/`.
+  // Default ON so a fresh checkout boots into a usable schema; set
+  // `AUTO_MIGRATE=0` to run them manually via `pnpm migrate` (recommended
+  // for production deploys with a separate release step).
+  if (process.env.AUTO_MIGRATE !== "0") {
+    const { runMigrations } = await import("./database/runMigrations");
+    await runMigrations();
+  }
 }

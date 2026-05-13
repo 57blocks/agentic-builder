@@ -27,11 +27,23 @@ describe("checkMigrationCoverage — gap detection", () => {
     const r = checkMigrationCoverage({
       writtenFiles: [
         "backend/src/models/User.ts",
-        "backend/src/migrations/0002_add_user_email.ts",
+        "backend/src/database/migrations/0002_add_user_email.ts",
       ],
     });
     expect(r.ok).toBe(true);
     expect(r.gaps).toEqual([]);
+  });
+
+  it("does NOT credit the legacy backend/src/migrations/ path (umzug runner uses database/migrations)", () => {
+    const r = checkMigrationCoverage({
+      writtenFiles: [
+        "backend/src/models/User.ts",
+        "backend/src/migrations/0002_add_user_email.ts",
+      ],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.migrationFilesTouched).toEqual([]);
+    expect(r.gaps).toHaveLength(1);
   });
 
   it("ok=true when neither model nor migration is touched", () => {
@@ -122,7 +134,7 @@ describe("formatMigrationGapInstruction", () => {
     );
     expect(msg).toContain('Task "task-add-user"');
     expect(msg).toContain("backend/src/models/User.ts");
-    expect(msg).toContain("backend/src/migrations/NNNN_user.ts");
+    expect(msg).toContain("backend/src/database/migrations/NNNN_user.ts");
     expect(msg).toContain("up({");
     expect(msg).toContain("down({");
   });
