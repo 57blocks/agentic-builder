@@ -135,6 +135,7 @@ export default function PipelineBreadcrumb({
     const stage = stages.find((s) => s.id === activeStageId);
     if (!stage?.children) return [];
     return stage.children
+      .filter((g) => g.id !== "initial")
       .filter((g) => !g.tiers || g.tiers.includes(tier))
       .map((g) => ({
         id: g.id,
@@ -176,7 +177,7 @@ export default function PipelineBreadcrumb({
   // ── Handlers ──
   const handleL1Select = (stageId: string) => {
     const stage = stages.find((s) => s.id === stageId);
-    const firstGroup = stage?.children?.[0];
+    const firstGroup = stage?.children?.find((g) => g.id !== "initial");
     if (!firstGroup) return;
     // Level-2 standalone step (e.g., initial, intent, prd, design) — use its own id
     if (!firstGroup.children || firstGroup.children.length === 0) {
