@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { getSystemMemory } from "@/lib/memory";
 import { memoryEnabled } from "@/lib/memory/env";
 import { summarizeDesignDiff } from "@/lib/memory/design-diff-summarize";
+import { getTraceLogger } from "@/lib/memory/trace";
 import { normalizeProjectTier, type ProjectTier } from "@/lib/agents/shared/project-classifier";
 
 interface DesignCaptureRequest {
@@ -91,6 +92,14 @@ export async function POST(req: Request): Promise<NextResponse> {
         refs: { kickoffId: sessionId },
         metrics: { score: 0.4 },
       });
+      await emitPrepOutcome({
+        sessionId,
+        phase: "design",
+        source: "human_approval",
+        newRecordId: record.id,
+        projectType,
+        tier,
+      });
       return NextResponse.json({ ok: true, recordId: record.id, outcome: "positive" });
     }
 
@@ -126,6 +135,15 @@ export async function POST(req: Request): Promise<NextResponse> {
       metrics: { score: 0.35 },
     });
 
+    await emitPrepOutcome({
+      sessionId,
+      phase: "design",
+      source: "human_edit",
+      newRecordId: record.id,
+      projectType,
+      tier,
+    });
+
     return NextResponse.json({
       ok: true,
       recordId: record.id,
@@ -138,5 +156,35 @@ export async function POST(req: Request): Promise<NextResponse> {
       { ok: true, skipped: true, error: (err as Error).message },
       { status: 200 },
     );
+  }
+}
+
+interface EmitPrepOutcomeArgs {
+  sessionId: string;
+  phase: "prd" | "design";
+  source: "human_approval" | "human_edit";
+  newRecordId: string;
+  projectType: string;
+  tier: string;
+}
+
+/** Mirror of the helper in /api/memory/prd/capture — see there for docs. */
+async function emitPrepOutcome(args: EmitPrepOutcomeArgs): Promise<void> {
+  try {
+    await getTraceLogger(process.cwd()).log({
+      op: "prep-outcome",
+      layer: "L1",
+      kickoffId: args.sessionId,
+      agent: args.phase === "prd" ? "pm" : "design",
+      details: {
+        phase: args.phase,
+        source: args.source,
+        newRecordId: args.newRecordId,
+        projectType: args.projectType,
+        tier: args.tier,
+      },
+    });
+  } catch {
+    /* swallow */
   }
 }

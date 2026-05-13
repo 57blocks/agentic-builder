@@ -18,6 +18,7 @@ import { NextResponse } from "next/server";
 import { getSystemMemory } from "@/lib/memory";
 import { memoryEnabled } from "@/lib/memory/env";
 import { summarizePrdDiff } from "@/lib/memory/prd-diff-summarize";
+import { getTraceLogger } from "@/lib/memory/trace";
 import { normalizeProjectTier, type ProjectTier } from "@/lib/agents/shared/project-classifier";
 
 interface PrdCaptureRequest {
@@ -101,6 +102,14 @@ export async function POST(req: Request): Promise<NextResponse> {
         refs: { kickoffId: sessionId },
         metrics: { score: 0.4 }, // start above active threshold so it can inject
       });
+      await emitPrepOutcome({
+        sessionId,
+        phase: "prd",
+        source: "human_approval",
+        newRecordId: record.id,
+        projectType,
+        tier,
+      });
       return NextResponse.json({ ok: true, recordId: record.id, outcome: "positive" });
     }
 
@@ -140,6 +149,15 @@ export async function POST(req: Request): Promise<NextResponse> {
       metrics: { score: 0.35 }, // active by default; demoted by attribution if irrelevant
     });
 
+    await emitPrepOutcome({
+      sessionId,
+      phase: "prd",
+      source: "human_edit",
+      newRecordId: record.id,
+      projectType,
+      tier,
+    });
+
     return NextResponse.json({
       ok: true,
       recordId: record.id,
@@ -152,5 +170,40 @@ export async function POST(req: Request): Promise<NextResponse> {
       { ok: true, skipped: true, error: (err as Error).message },
       { status: 200 },
     );
+  }
+}
+
+interface EmitPrepOutcomeArgs {
+  sessionId: string;
+  phase: "prd" | "design";
+  source: "human_approval" | "human_edit";
+  newRecordId: string;
+  projectType: string;
+  tier: string;
+}
+
+/**
+ * Append a `prep-outcome` event to the L1 trace so the preparation-phase
+ * attribution job can later credit / blame the patterns injected into this
+ * session's PRD or Design agent. Failures are swallowed — observability
+ * must never break the user-facing capture flow.
+ */
+async function emitPrepOutcome(args: EmitPrepOutcomeArgs): Promise<void> {
+  try {
+    await getTraceLogger(process.cwd()).log({
+      op: "prep-outcome",
+      layer: "L1",
+      kickoffId: args.sessionId,
+      agent: args.phase === "prd" ? "pm" : "design",
+      details: {
+        phase: args.phase,
+        source: args.source,
+        newRecordId: args.newRecordId,
+        projectType: args.projectType,
+        tier: args.tier,
+      },
+    });
+  } catch {
+    /* swallow */
   }
 }
