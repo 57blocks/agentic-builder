@@ -556,6 +556,8 @@ export function DesignUI(props: StepUIProps) {
   const [stitchScreenshots, setStitchScreenshots] = useState<ScreenshotItem[]>([]);
   const [stitchScreensLoading, setStitchScreensLoading] = useState(false);
   const [screenshotIdx, setScreenshotIdx] = useState(0);
+  const [phaseMenuOpen, setPhaseMenuOpen] = useState(false);
+  const phaseMenuRef = useRef<HTMLDivElement>(null);
 
   // ── Derived step state ──────────────────────────────────────────────────
   const isDesignRunning = isRunning && currentStep === "design";
@@ -813,6 +815,18 @@ export function DesignUI(props: StepUIProps) {
     (phase === "style" && hasDesignSpec) ||
     (phase === "spec" && hasStitchResult);
 
+  // ── Close phase menu on outside click ──
+  useEffect(() => {
+    if (!phaseMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (phaseMenuRef.current && !phaseMenuRef.current.contains(e.target as Node)) {
+        setPhaseMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [phaseMenuOpen]);
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
@@ -826,9 +840,41 @@ export function DesignUI(props: StepUIProps) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
         )}
-        <span className="text-[13px] font-semibold text-slate-600 min-w-[100px] text-center select-none">
-          {phase === "style" ? "Style" : phase === "spec" ? "Design Spec" : "Stitch Design"}
-        </span>
+        <div className="relative" ref={phaseMenuRef}>
+          <button
+            onClick={() => { console.log("[DesignUI] phase label click, current phase:", phase, "menuOpen:", phaseMenuOpen); setPhaseMenuOpen((v) => !v); }}
+            className="text-[13px] font-semibold text-slate-600 min-w-[100px] text-center select-none hover:text-[#712ae2] transition-colors"
+          >
+            {phase === "style" ? "Style" : phase === "spec" ? "Design Spec" : "Stitch Design"}
+          </button>
+          {phaseMenuOpen && (
+            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 z-30 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[140px]">
+              {(["style", "spec", "stitch"] as const).map((p) => {
+                const isActive = phase === p;
+                const canJump =
+                  p === "style" ||
+                  (p === "spec" && hasDesignSpec) ||
+                  (p === "stitch" && hasStitchResult);
+                return (
+                  <button
+                    key={p}
+                    disabled={!canJump}
+                    onClick={() => { console.log("[DesignUI] phase menu click", { p, canJump, phase, hasDesignSpec, hasStitchResult }); setPhase(p); setPhaseMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-2 text-[12px] font-medium transition-colors ${
+                      isActive
+                        ? "text-[#712ae2] bg-[rgba(113,42,226,0.06)]"
+                        : canJump
+                          ? "text-slate-700 hover:bg-slate-50"
+                          : "text-slate-300 cursor-not-allowed"
+                    }`}
+                  >
+                    {p === "style" ? "Style" : p === "spec" ? "Design Spec" : "Stitch Design"}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         {showRightArrow && (
           <button
             onClick={goToNextPhase}
