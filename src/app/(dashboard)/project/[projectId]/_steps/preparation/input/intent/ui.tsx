@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Sparkles, Bot, User, Loader2, ArrowRight,
-  RefreshCw, MoreVertical, Check, CheckCheck,
+  Check, CheckCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStepStore } from "@/store/step-store";
@@ -427,7 +427,7 @@ export function IntentUI(props: StepUIProps) {
 
   return (
     <div className="flex flex-col w-full flex-1 min-h-0 bg-linear-to-br from-slate-50 via-slate-50 to-slate-100 rounded-2xl overflow-hidden shadow-lg">
-      <div className="shrink-0 flex items-center justify-between px-8 py-6 bg-white/60 backdrop-blur-md border-b border-white/40">
+      <div className="shrink-0 flex items-center px-8 py-6 bg-white/60 backdrop-blur-md border-b border-white/40">
         <div>
           <h2 className="text-lg font-bold text-slate-900 leading-6">Project Intent Refinement</h2>
           <div className="flex items-center gap-2 mt-1">
@@ -435,11 +435,7 @@ export function IntentUI(props: StepUIProps) {
             <span className="text-xs text-slate-600 font-medium">{isRechecking ? "Analyzing…" : intentAllClear ? "Ready to generate" : "Describe your project"}</span>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700 hover:bg-white/50"><RefreshCw size={16} /></Button>
-          <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700 hover:bg-white/50"><MoreVertical size={16} /></Button>
         </div>
-      </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8 space-y-6">
         {isEmpty && (

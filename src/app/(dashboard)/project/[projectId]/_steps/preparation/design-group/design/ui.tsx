@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Upload, X, FileImage, Code } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
-import { getNextStep } from "@/_config/pipeline-flow";
 import type { StepId } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
@@ -518,10 +517,6 @@ export function DesignUI(props: StepUIProps) {
   const isRunning = useStepStore((s) => s.isRunning);
   const executeStep = useStepStore((s) => s.executeStep);
   const patchStepMeta = useStepStore((s) => s.patchStepMeta);
-  const tier = useStepStore((s) => s.tier);
-  const nextStep = getNextStep("design", tier as "S" | "M" | "L");
-  // stitchNextStep is the step after design (pencil/mockup/qa depending on tier)
-  const stitchNextStep = nextStep;
 
   // ── Read persisted metadata from step-store (survives navigation) ──
   const designMeta = (steps.design?.metadata ?? {}) as {
@@ -623,6 +618,7 @@ export function DesignUI(props: StepUIProps) {
         setDesignStylesError(result.error);
       } else {
         setDesignStyles(result.styles);
+        setSelectedStyleId(result.styles[0]?.id ?? null);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -804,13 +800,11 @@ export function DesignUI(props: StepUIProps) {
 
   const goToNextPhase = useCallback(() => {
     if (phase === "style") {
-      handleGenerateDesignDoc();
+      setPhase("spec");
     } else if (phase === "spec") {
       setPhase("stitch");
-    } else {
-      if (stitchNextStep) props.onNavigate(stitchNextStep);
     }
-  }, [phase, handleGenerateDesignDoc, stitchNextStep, props]);
+  }, [phase]);
 
   const hasDesignSpec = !!steps.design?.content;
   const hasStitchResult = !!stitchResult;
@@ -852,7 +846,7 @@ export function DesignUI(props: StepUIProps) {
           <>
             <div className="py-8 flex flex-col gap-6">
               <div className="flex flex-row gap-6 items-stretch">
-              {/* ── Card 1: AI Generated (radio + carousel inline) ── */}
+              {/* ── Card 1: Recommended (radio + carousel inline) ── */}
               <div
                 onClick={() => setDesignSourceMode("ai")}
                 className={`w-2/3 flex gap-4 rounded-xl border-2 p-5 cursor-pointer transition-all ${
@@ -872,7 +866,7 @@ export function DesignUI(props: StepUIProps) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-3">
-                    <h3 className="text-[14px] font-bold text-slate-900">AI Generated</h3>
+                    <h3 className="text-[14px] font-bold text-slate-900">Recommended</h3>
                     <span className="text-[11px] text-slate-400">AI analyzes PRD to generate styles</span>
                   </div>
 
@@ -905,6 +899,7 @@ export function DesignUI(props: StepUIProps) {
                                   setDesignStylesError(result.error);
                                 } else {
                                   setDesignStyles(result.styles);
+                                  setSelectedStyleId(result.styles[0]?.id ?? null);
                                 }
                               });
                             }}
@@ -1032,7 +1027,7 @@ export function DesignUI(props: StepUIProps) {
                   }
                   className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
                 >
-                  {isDesignDone ? "Continue to Design Spec" : "Generate Design Spec"}
+                  {designSourceMode === "ai" ? "Generate based on this style" : "Generate based on reference"}
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -1291,7 +1286,7 @@ export function DesignUI(props: StepUIProps) {
       </div>
 
       {/* ── Bottom navigation bar ── */}
-      <div className="shrink-0 border-t border-[#e2e8f0] bg-white px-8 py-3 flex items-center justify-end">
+      <div className="shrink-0 border-t border-[#e2e8f0] bg-white px-8 py-3 flex items-center gap-3">
 
           {phase === "spec" && (
             <StageInputBar
@@ -1321,17 +1316,16 @@ export function DesignUI(props: StepUIProps) {
               }}
               placeholder="Edit the design spec…"
               disabled={isDesignRunning}
+              className="flex-1"
               actions={
                 <div className="flex items-center gap-2 shrink-0">
-                  {stitchNextStep && (
-                    <button
-                      onClick={() => props.onNavigate(stitchNextStep)}
-                      disabled={isRunning}
-                      className="flex items-center gap-2 shrink-0 px-4 py-2 text-[13px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors disabled:opacity-40"
-                    >
-                      Skip to Next <ArrowRight size={14} />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => props.onNavigate("trd")}
+                    disabled={isRunning}
+                    className="flex items-center gap-2 shrink-0 px-4 py-2 text-[13px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors disabled:opacity-40"
+                  >
+                    Skip to Next <ArrowRight size={14} />
+                  </button>
                   <button
                     onClick={() => {
                       setSpecInput("");
@@ -1350,29 +1344,15 @@ export function DesignUI(props: StepUIProps) {
           )}
 
           {phase === "stitch" && (
-            <StageInputBar
-              value={stitchInput}
-              onChange={setStitchInput}
-              onSubmit={() => {
-                const i = stitchInput.trim();
-                if (!i || isRunning) return;
-                setStitchInput("");
-                handleGenerateWithStitch(i);
-              }}
-              placeholder="Describe changes…"
-              disabled={isRunning}
-              actions={
+            <div className="flex items-center justify-end w-full">
                 <button
-                  onClick={() => {
-                    props.onNavigate("trd");
-                  }}
+                  onClick={() => props.onNavigate("trd")}
                   disabled={isRunning}
-                  className="flex items-center gap-2 shrink-0 px-4 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-full hover:bg-[#6b24da] transition-colors disabled:opacity-40"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 shadow-md hover:shadow-lg"
                 >
-                  Next Step <ArrowRight size={14} />
+                  Next Step <ArrowRight size={16} />
                 </button>
-              }
-            />
+            </div>
           )}
         </div>
     </div>
