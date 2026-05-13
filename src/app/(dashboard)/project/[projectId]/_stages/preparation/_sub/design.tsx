@@ -506,6 +506,10 @@ export default function DesignSubStage() {
   const tier = usePipelineStore(
     (s) => (s.steps.intent?.metadata as { classification?: { tier?: string } } | undefined)?.classification?.tier ?? "M"
   );
+  const projectType = usePipelineStore(
+    (s) => (s.steps.intent?.metadata as { classification?: { type?: string } } | undefined)?.classification?.type ?? "unknown"
+  );
+  const sessionId = usePipelineStore((s) => s.kickoffSessionId);
   const DOC_TABS = ALL_DOC_TABS.filter((t) => !t.hideForTiers?.includes(tier));
 
   // ── Derived step state ──
@@ -535,6 +539,37 @@ export default function DesignSubStage() {
     }
     prevDesignRunning.current = isDesignRunning;
   }, [isDesignRunning, isDesignDone]);
+
+  // Capture the very first AI-generated design content so we can compute a
+  // "user accepted as-is" vs "user edited" signal at memory-capture time.
+  // Subsequent re-runs do NOT overwrite this (we want to compare against
+  // the *initial* draft, not the latest one).
+  const originalDesignRef = useRef<string>("");
+  useEffect(() => {
+    if (isDesignDone && !originalDesignRef.current && steps.design?.content) {
+      originalDesignRef.current = steps.design.content;
+    }
+  }, [isDesignDone, steps.design?.content]);
+
+  const captureDesignMemory = () => {
+    const finalDesign = steps.design?.content ?? "";
+    const original = originalDesignRef.current || finalDesign;
+    if (!sessionId || finalDesign.length < 200) return;
+    fetch("/api/memory/design/capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        tier,
+        projectType,
+        originalDesign: original,
+        finalDesign,
+        source: original === finalDesign ? "human_approval" : "human_edit",
+      }),
+    }).catch(() => {
+      // memory write failure must not surface to the user
+    });
+  };
 
   // On mount: load the saved snapshot for this sub-stage first, so any
   // previously generated stitchResult (or other state) is restored before
@@ -1127,6 +1162,7 @@ export default function DesignSubStage() {
           actions={
             <button
               onClick={() => {
+                captureDesignMemory();
                 runTrd();
                 goToSubStage("trd", "preparation");
               }}

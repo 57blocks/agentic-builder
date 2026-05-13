@@ -70,7 +70,12 @@ interface MemoryState {
   dismissAttribution: () => void;
 }
 
-const SUPPORTED_KINDS_DEFAULT: MemoryKind[] = ["failure-pattern", "classification"];
+const SUPPORTED_KINDS_DEFAULT: MemoryKind[] = [
+  "failure-pattern",
+  "classification",
+  "prd-pattern",
+  "design-pattern",
+];
 
 export const useMemoryStore = create<MemoryState>((set, get) => ({
   items: [],
