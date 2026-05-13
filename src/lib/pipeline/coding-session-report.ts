@@ -2727,7 +2727,13 @@ export async function writeCodingSessionReport(
     integrationErrors: input.integrationErrors,
     runtimeVerifyErrors: input.runtimeVerifyErrors,
     e2eVerifyErrors: input.e2eVerifyErrors,
-    uncoveredCount: input.finalAudit?.uncovered.length ?? 0,
+    // IC-xx items are soft interaction spec warnings that do not block the gate.
+    // Use only hard-uncovered ids (non IC-xx) for the scoring deduction so that
+    // soft warnings do not inflate the penalty.
+    uncoveredCount: input.finalAudit
+      ? (input.finalAudit.hardUncovered?.length
+          ?? input.finalAudit.uncovered.filter((e) => !/^IC-\d+$/i.test(e.id)).length)
+      : 0,
     taskResults: input.taskResults,
     repairSummary,
   });

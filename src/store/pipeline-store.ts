@@ -364,6 +364,7 @@ export const usePipelineStore = create<PipelineState>()(
           kickoffSessionId: sessionId,
         });
 
+        const { stitchResult } = get();
         fetch("/api/agents/kickoff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -377,6 +378,8 @@ export const usePipelineStore = create<PipelineState>()(
             design: steps.design?.content ?? "",
             pencil: steps.pencil?.content ?? "",
             sessionId,
+            stitchProjectId: stitchResult?.projectId ?? null,
+            stitchScreenId: stitchResult?.screenId ?? null,
           }),
         })
           .then(async (resp) => {
@@ -1582,7 +1585,9 @@ export const usePipelineStore = create<PipelineState>()(
       refreshImportedPrdStatus: async () => {
         set({ importedPrdLoading: "loading", importedPrdError: null });
         try {
-          const resp = await fetch("/api/agents/pipeline/prd-import", {
+          const { codeOutputDir } = get();
+          const params = codeOutputDir ? `?codeOutputDir=${encodeURIComponent(codeOutputDir)}` : "";
+          const resp = await fetch(`/api/agents/pipeline/prd-import${params}`, {
             method: "GET",
             cache: "no-store",
           });
@@ -1615,10 +1620,11 @@ export const usePipelineStore = create<PipelineState>()(
         }
         set({ importedPrdLoading: "saving", importedPrdError: null });
         try {
+          const { codeOutputDir } = get();
           const resp = await fetch("/api/agents/pipeline/prd-import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content }),
+            body: JSON.stringify({ content, codeOutputDir: codeOutputDir || undefined }),
           });
           const data = (await resp.json().catch(() => ({}))) as {
             error?: string;
@@ -1864,7 +1870,9 @@ export const usePipelineStore = create<PipelineState>()(
       clearImportedPrd: async () => {
         set({ importedPrdLoading: "clearing", importedPrdError: null });
         try {
-          const resp = await fetch("/api/agents/pipeline/prd-import", {
+          const { codeOutputDir } = get();
+          const params = codeOutputDir ? `?codeOutputDir=${encodeURIComponent(codeOutputDir)}` : "";
+          const resp = await fetch(`/api/agents/pipeline/prd-import${params}`, {
             method: "DELETE",
           });
           const data = (await resp.json().catch(() => ({}))) as {

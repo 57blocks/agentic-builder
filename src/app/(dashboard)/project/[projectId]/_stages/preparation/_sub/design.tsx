@@ -11,11 +11,11 @@ import Loading from "@/components/Loading";
 type DocTab = "prd" | "design" | "trd" | "qa";
 type InnerTab = "style" | "spec" | "stitch";
 
-const DOC_TABS: { id: DocTab; label: string }[] = [
-  { id: "prd", label: "PRD" },
+const ALL_DOC_TABS: { id: DocTab; label: string; hideForTiers?: string[] }[] = [
+  { id: "prd",    label: "PRD" },
   { id: "design", label: "Design Document" },
-  { id: "trd", label: "Technical Specs" },
-  { id: "qa", label: "QA Plan" },
+  { id: "trd",    label: "Technical Specs", hideForTiers: ["S"] },
+  { id: "qa",     label: "QA Plan",         hideForTiers: ["S"] },
 ];
 
 const INNER_TABS: { id: InnerTab; label: string }[] = [
@@ -503,6 +503,10 @@ export default function DesignSubStage() {
   const loadSubStageSnapshot = usePipelineStore((s) => s.loadSubStageSnapshot);
   const goToSubStage = useStageStore((s) => s.goToSubStage);
   const isStageHydrated = useStageStore((s) => s.isStageHydrated);
+  const tier = usePipelineStore(
+    (s) => (s.steps.intent?.metadata as { classification?: { tier?: string } } | undefined)?.classification?.tier ?? "M"
+  );
+  const DOC_TABS = ALL_DOC_TABS.filter((t) => !t.hideForTiers?.includes(tier));
 
   // ── Derived step state ──
   const prdContent = steps.prd?.content ?? "";
