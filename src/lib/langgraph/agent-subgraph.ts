@@ -598,13 +598,14 @@ export async function buildProjectConventionCard(
         "- **Sequelize migration RULE (CRITICAL)**: If your task modifies any " +
           "file under `backend/src/models/` (add/remove column, change type, " +
           "change association, change index), you MUST also write a NEW " +
-          "migration under `backend/src/migrations/NNNN_<short-desc>.ts`. " +
+          "migration under `backend/src/database/migrations/NNNN_<short-desc>.ts`. " +
           "NNNN is one greater than the highest existing migration number. " +
           "Export both `async up({ context: queryInterface })` and " +
           "`async down({ context: queryInterface })` covering every change. " +
           "Do NOT modify existing migrations — always add a new file. The " +
           "post-task migration-coverage check will flag missing migrations " +
-          "and create a repair task.",
+          "and create a repair task. The umzug runner in `src/database/runMigrations.ts` " +
+          "applies these on backend startup.",
       );
 
       // ── TimescaleDB safety RULE ─────────────────────────────────────────

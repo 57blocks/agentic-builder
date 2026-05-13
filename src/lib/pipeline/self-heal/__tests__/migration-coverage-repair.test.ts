@@ -98,7 +98,7 @@ describe("runMigrationCoverageRepair — happy path", () => {
           taskTitle: "OK task",
           ok: true,
           modelFilesTouched: ["backend/src/models/User.ts"],
-          migrationFilesTouched: ["backend/src/migrations/0002_user.ts"],
+          migrationFilesTouched: ["backend/src/database/migrations/0002_user.ts"],
           gaps: [],
           checkedAt: "2026-05-09T00:00:00Z",
         },

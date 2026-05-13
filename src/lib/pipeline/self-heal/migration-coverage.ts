@@ -1,7 +1,9 @@
 /**
  * Sequelize migration coverage — verifies that whenever a worker task
  * modifies a Sequelize model under `backend/src/models/`, the same task
- * also writes a corresponding migration under `backend/src/migrations/`.
+ * also writes a corresponding migration under
+ * `backend/src/database/migrations/` (the umzug-canonical location,
+ * matched by the scaffold's migration runner and supervisor.ts:4541).
  *
  * Pure function: given the file list a worker just wrote, return the
  * set of model files that lack an accompanying migration. The caller
@@ -9,11 +11,11 @@
  * `<outputDir>/.ralph/migration-coverage.json` so a downstream self-heal
  * pass can convert gaps into repair tasks.
  *
- * MVP scope: detect-only, not auto-fix. The validator does not look at
- * git diffs, AST, or migration content correctness — it answers the
- * binary question "did this task touch a model without writing a
- * migration?". Phase 2 is to actually run the migration against an
- * ephemeral SQLite DB and verify up()/down() round-trips.
+ * Historical note: an earlier version of this check defaulted to
+ * `backend/src/migrations/`, which workers stopped using once the
+ * scaffold standardised on `backend/src/database/migrations/`. The path
+ * mismatch produced 14+ phantom "gap" findings every run; the
+ * detection now matches what the worker actually writes.
  */
 
 export interface MigrationCoverageInput {
@@ -40,7 +42,7 @@ export interface MigrationCoverageResult {
 }
 
 const DEFAULT_MODEL_DIR = "backend/src/models";
-const DEFAULT_MIGRATION_DIR = "backend/src/migrations";
+const DEFAULT_MIGRATION_DIR = "backend/src/database/migrations";
 
 const TS_FILE = /\.ts$/i;
 const MODEL_INDEX_NAMES = new Set(["index.ts", "index.tsx"]);
@@ -99,7 +101,7 @@ export function formatMigrationGapInstruction(
     : `Model \`${gap.modelPath}\` was modified without a corresponding Sequelize migration. `;
   return (
     lead +
-    `Add \`backend/src/migrations/NNNN_${kebab(gap.modelName)}.ts\` (where ` +
+    `Add \`backend/src/database/migrations/NNNN_${kebab(gap.modelName)}.ts\` (where ` +
     "NNNN is one greater than the highest existing migration number) " +
     "exporting both `async up({ context: queryInterface })` and " +
     "`async down({ context: queryInterface })` covering every column / type / " +

@@ -2081,7 +2081,7 @@ function formatMarkdownReport(input: {
     lines.push("## Migration Coverage");
     lines.push(
       "Per-task check that any change under `backend/src/models/` is " +
-        "accompanied by a new migration under `backend/src/migrations/`. Full " +
+        "accompanied by a new migration under `backend/src/database/migrations/`. Full " +
         "report: `.ralph/migration-coverage.json`.",
     );
     lines.push("");
