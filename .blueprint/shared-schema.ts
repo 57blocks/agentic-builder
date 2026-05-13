@@ -3,20 +3,13 @@
 // module rather than redefine. No `any`. ISO 8601 strings for timestamps.
 
 export type UserId = string;
-export type TaskId = string;
-export type CategoryId = string;
 export type SessionId = string;
-
-export type TaskPriority = "HIGH" | "MEDIUM" | "LOW";
-export type TaskCompletionStatus = "active" | "completed";
-export type SortDirection = "asc" | "desc";
-export type TaskSortBy = "dueDate" | "priority" | "createdAt";
-export type TaskFilterStatus = "all" | "active" | "completed";
+export type TaskId = string;
 
 export interface User {
   id: UserId;
-  name: string;
   email: string;
+  displayName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,36 +18,28 @@ export interface Session {
   id: SessionId;
   userId: UserId;
   expiresAt: string;
-  createdAt: string;
-}
-
-export interface Category {
-  id: CategoryId;
-  userId: UserId;
-  name: string;
+  revokedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type TaskStatus = "to_do" | "in_progress" | "done";
+export type TaskPriority = "low" | "medium" | "high";
 
 export interface Task {
   id: TaskId;
   userId: UserId;
   title: string;
   description: string | null;
-  dueDate: string | null;
+  status: TaskStatus;
   priority: TaskPriority;
-  completed: boolean;
-  categoryId: CategoryId | null;
+  dueDate: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface AuthUserResponse {
-  user: User;
-}
-
 export interface RegisterRequest {
-  name: string;
+  displayName: string;
   email: string;
   password: string;
 }
@@ -83,19 +68,13 @@ export interface MeResponse {
 }
 
 export interface ListTasksRequest {
-  status?: TaskFilterStatus;
-  categoryId?: CategoryId;
-  sortBy?: TaskSortBy;
-  sortDirection?: SortDirection;
-  page?: number;
-  limit?: number;
+  status?: TaskStatus | "all";
+  sort?: "newest" | "oldest" | "due_date_asc" | "due_date_desc" | "priority";
+  search?: string;
 }
 
 export interface ListTasksResponse {
   tasks: Task[];
-  page: number;
-  limit: number;
-  total: number;
 }
 
 export interface GetTaskRequest {
@@ -109,9 +88,9 @@ export interface GetTaskResponse {
 export interface CreateTaskRequest {
   title: string;
   description?: string;
-  dueDate?: string;
+  status?: TaskStatus;
   priority?: TaskPriority;
-  categoryId?: CategoryId | null;
+  dueDate?: string;
 }
 
 export interface CreateTaskResponse {
@@ -120,23 +99,14 @@ export interface CreateTaskResponse {
 
 export interface UpdateTaskRequest {
   id: TaskId;
-  title: string;
-  description: string | null;
-  dueDate: string | null;
-  priority: TaskPriority;
-  categoryId: CategoryId | null;
-  completed: boolean;
+  title?: string;
+  description?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  dueDate?: string | null;
 }
 
 export interface UpdateTaskResponse {
-  task: Task;
-}
-
-export interface ToggleTaskCompletionRequest {
-  id: TaskId;
-}
-
-export interface ToggleTaskCompletionResponse {
   task: Task;
 }
 
@@ -148,41 +118,23 @@ export interface DeleteTaskResponse {
   success: true;
 }
 
-export interface ListCategoriesRequest {}
-
-export interface ListCategoriesResponse {
-  categories: Category[];
+export interface UpdateMeRequest {
+  displayName?: string;
+  password?: string;
 }
 
-export interface CreateCategoryRequest {
-  name: string;
+export interface UpdateMeResponse {
+  user: User;
 }
 
-export interface CreateCategoryResponse {
-  category: Category;
-}
+export interface DeleteMeRequest {}
 
-export interface UpdateCategoryRequest {
-  id: CategoryId;
-  name: string;
-}
-
-export interface UpdateCategoryResponse {
-  category: Category;
-}
-
-export interface DeleteCategoryRequest {
-  id: CategoryId;
-}
-
-export interface DeleteCategoryResponse {
+export interface DeleteMeResponse {
   success: true;
 }
 
-export interface ApiError {
-  error: {
-    code: string;
-    message: string;
-    details?: Record<string, string[]>;
-  };
+export interface ApiErrorResponse {
+  code: string;
+  message: string;
+  fieldErrors?: Record<string, string>;
 }
