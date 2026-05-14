@@ -1,5 +1,5 @@
 import { readKickoffRepoMetadata, pushGeneratedCodeToKickoffRepo } from "@/lib/pipeline/push-kickoff-repo";
-import { createAppDatabase } from "./database";
+import { readKickoffDatabaseMetadata } from "@/lib/pipeline/kickoff-database";
 import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "./dokploy";
 import { emitStep, completeJob, failJob } from "./job-manager";
 import type { StepId } from "./types";
@@ -9,7 +9,6 @@ interface PipelineEnv {
   DOKPLOY_URL: string;
   DOKPLOY_TOKEN: string;
   DOKPLOY_DOMAIN: string;
-  SHARED_PG_CONNECTION_STRING: string;
 }
 
 interface PipelineParams {
@@ -63,20 +62,16 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
     emit(jobId, "git-push", "done", "Code pushed to GitHub");
   }
 
-  // Step 3: Create per-app database
-  emit(jobId, "create-database", "running", "Creating database...");
-  let databaseUrl: string;
-  try {
-    databaseUrl = await createAppDatabase({
-      connectionString: env.SHARED_PG_CONNECTION_STRING,
-      appName,
-    });
-  } catch (err) {
-    emit(jobId, "create-database", "error", `Database creation failed: ${err instanceof Error ? err.message : String(err)}`);
+  // Step 3: Load database URL (created during kickoff)
+  emit(jobId, "create-database", "running", "Loading database connection...");
+  const dbMeta = await readKickoffDatabaseMetadata(projectRoot);
+  if (!dbMeta?.databaseUrl) {
+    emit(jobId, "create-database", "error", "No database metadata found. Re-run kickoff with SHARED_PG_CONNECTION_STRING set.");
     failJob(jobId);
     return;
   }
-  emit(jobId, "create-database", "done", "Database ready");
+  const databaseUrl = dbMeta.databaseUrl;
+  emit(jobId, "create-database", "done", `Database ready (${dbMeta.appName})`);
 
   // Step 4: Create Dokploy project + compose service
   emit(jobId, "create-dokploy", "running", "Creating Dokploy project...");
