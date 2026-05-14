@@ -118,8 +118,15 @@ export async function ensureDatabase(): Promise<void> {
 }
 
 export async function runMigrations(): Promise<void> {
-  // Ensure the database exists before attempting to connect / migrate.
-  await ensureDatabase();
+  // On managed Postgres (e.g. AWS RDS) the role/database already exist and
+  // we lack superuser to create them — skip the ensureDatabase() bootstrap.
+  const connStr = process.env.DATABASE_URL ?? "";
+  const isManagedPg = connStr.includes("rds.amazonaws.com");
+  if (!isManagedPg) {
+    await ensureDatabase();
+  } else {
+    console.log("[migrate] Managed Postgres detected — skipping ensureDatabase().");
+  }
   // Nothing to do if the migrations directory doesn't exist yet.
   if (!fs.existsSync(migrationsDir)) {
     console.warn("[migrate] Migrations directory not found, skipping:", migrationsDir);
