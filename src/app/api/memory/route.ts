@@ -14,6 +14,7 @@ const SUPPORTED_KINDS: MemoryKind[] = [
   "classification",
   "prd-pattern",
   "design-pattern",
+  "design-knowledge",
 ];
 const ACTIVE_THRESHOLD = 0.3;
 
