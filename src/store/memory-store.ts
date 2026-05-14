@@ -103,6 +103,7 @@ const SUPPORTED_KINDS_DEFAULT: MemoryKind[] = [
   "classification",
   "prd-pattern",
   "design-pattern",
+  "design-knowledge",
 ];
 
 export const useMemoryStore = create<MemoryState>((set, get) => ({

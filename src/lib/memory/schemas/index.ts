@@ -45,6 +45,10 @@ const REGISTRY: Partial<Record<MemoryKind, KindSpec>> = {
   "prd-pattern": { format: "markdown", maxBytes: 4 * 1024 },
   "design-pattern": { format: "markdown", maxBytes: 4 * 1024 },
 
+  // L1 — Design Knowledge Base (company style library + daily design trends)
+  // Larger budget: holds full industry style guides from 57B library.
+  "design-knowledge": { format: "markdown", maxBytes: 8 * 1024 },
+
   // Other kinds — markdown by default until their schema lands
   // (failure-pattern, decision, handoff-note, etc.)
 };
