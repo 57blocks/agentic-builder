@@ -1942,6 +1942,15 @@ async function generateCode(state: WorkerState) {
       task.subSteps && task.subSteps.length > 0
         ? `\n\nPre-defined sub-steps:\n${task.subSteps.map((s) => `${s.step}. ${s.action}: ${s.detail}`).join("\n")}`
         : "";
+    const tddPlanHint =
+      task.tddPlan?.tests && task.tddPlan.tests.length > 0
+        ? `\n\nTDD seed tests this implementation must satisfy:\n${task.tddPlan.tests
+            .map(
+              (test) =>
+                `- ${test.id} [${test.priority}/${test.type}] ${test.file}\n  command: ${test.command}\n  RED: ${test.expectedRed}\n  GREEN: ${test.expectedGreen}\n  Write this test file before the production implementation when it is part of this task's file plan.`,
+            )
+            .join("\n")}`
+        : "";
 
     const multiRoundInstruction = CODEGEN_MULTI_ROUND_ENABLED
       ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
@@ -1949,7 +1958,7 @@ async function generateCode(state: WorkerState) {
 
     messages.push({
       role: "user",
-      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
+      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
     });
 
     const startMs = Date.now();

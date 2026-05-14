@@ -56,6 +56,16 @@ import {
   repairTaskCoverage,
   repairMissingBackendPhase,
 } from "./self-heal";
+import { AttemptTracker } from "./self-heal/attempt-tracker";
+import { escalateRepairCircuit } from "./self-heal/escalate-repair-circuit";
+import { missingIdsScopeKey } from "./self-heal/attempt-tracker";
+import {
+  runEvidenceGate,
+  evidenceFromPrdSpecGate,
+  evidenceFromGateReport,
+  evidenceFromRulesValidation,
+  evidenceFromDagValidation,
+} from "./gates";
 import {
   recallPrdContext,
   recallDesignContext,
@@ -883,6 +893,10 @@ export class PipelineEngine {
         createJsonlRepairSink(outputRoot),
         consoleRepairSink,
       ]);
+      const repairAttemptTracker = new AttemptTracker({
+        outputDir: outputRoot,
+      });
+      await repairAttemptTracker.load();
 
       // Surface task-breakdown truncation honestly. The Coverage Gate
       // self-heal below will still try to cover the missing PRD ids with
@@ -923,6 +937,7 @@ export class PipelineEngine {
             tier,
             sessionId: run.sessionId,
             emitter: coverageRepairEmitter,
+            attemptTracker: repairAttemptTracker,
           });
           finalTaskBreakdown = repairResult.tasks;
           taskCoverageGate = runTaskCoverageGate(
@@ -935,6 +950,19 @@ export class PipelineEngine {
             finalMissing: repairResult.finalMissing,
             costUsd: repairResult.costUsd,
           };
+          if (repairResult.circuitOpen) {
+            await escalateRepairCircuit({
+              scope: {
+                stage: "coverage-gate",
+                scopeKey: missingIdsScopeKey(taskCoverageGate.missingIds),
+              },
+              tracker: repairAttemptTracker,
+              outputDir: outputRoot,
+              emitter: coverageRepairEmitter,
+              sessionId: run.sessionId,
+              reason: "Task-coverage repair circuit opened — the same missing-id set has been retried 3+ times without progress.",
+            });
+          }
         } catch (repairErr) {
           console.warn(
             `[Engine] Coverage Gate self-heal threw:`,
@@ -1021,6 +1049,7 @@ export class PipelineEngine {
             uncoveredIds: taskCoverageGate.missingIds,
             sessionId: run.sessionId,
             emitter: coverageRepairEmitter,
+            attemptTracker: repairAttemptTracker,
           });
           finalTaskBreakdown = phaseResult.tasks;
           phaseGateReport = runPhaseRequirementGate({
@@ -1037,6 +1066,16 @@ export class PipelineEngine {
             synthetic: phaseResult.synthetic !== null,
             costUsd: phaseResult.costUsd,
           };
+          if (phaseResult.circuitOpen) {
+            await escalateRepairCircuit({
+              scope: { stage: "phase-gate", scopeKey: "backend" },
+              tracker: repairAttemptTracker,
+              outputDir: outputRoot,
+              emitter: coverageRepairEmitter,
+              sessionId: run.sessionId,
+              reason: "Backend phase repair circuit opened — synthesised tasks did not actually close the backend gap.",
+            });
+          }
           // After phase-repair we may have covered new ids too — refresh the
           // coverage gate so the warning block reflects reality.
           taskCoverageGate = runTaskCoverageGate(
@@ -1059,6 +1098,34 @@ export class PipelineEngine {
             },
           });
         }
+      }
+
+      // Evidence-gate evaluation for task-breakdown — telemetry only during
+      // Phase B rollout. The pipeline does NOT block on this verdict yet;
+      // the existing coverage-warning block continues to drive UX.
+      try {
+        const taskBreakdownEvidence = [
+          evidenceFromGateReport(taskCoverageGate),
+          evidenceFromGateReport(phaseGateReport),
+        ];
+        const tbEvidenceReport = runEvidenceGate(
+          "task-breakdown",
+          taskBreakdownEvidence,
+        );
+        coverageRepairEmitter({
+          stage: "task-breakdown",
+          event: "evidence_gate_evaluated",
+          details: {
+            passed: tbEvidenceReport.passed,
+            missingRequirements: tbEvidenceReport.missingRequirements,
+            evidenceCount: taskBreakdownEvidence.length,
+          },
+        });
+      } catch (evidenceErr) {
+        console.warn(
+          `[Engine] task-breakdown evidence gate threw (non-fatal):`,
+          evidenceErr instanceof Error ? evidenceErr.message : evidenceErr,
+        );
       }
 
       const tbSummary =
@@ -1174,12 +1241,18 @@ export class PipelineEngine {
     const prd = run.steps.prd;
     if (!prd?.content || prd.status !== "completed") return run;
     const gate = runPrdSpecGate(prd.content);
+    const prdEvidence = [evidenceFromPrdSpecGate(gate)];
+    const prdEvidenceReport = runEvidenceGate("prd", prdEvidence);
     run.steps.prd = {
       ...prd,
       metadata: {
         ...prd.metadata,
         prdRequirementIndex: gate.index,
         prdSpecGate: { passed: gate.passed, warnings: gate.warnings },
+        evidenceGate: {
+          passed: prdEvidenceReport.passed,
+          missingRequirements: prdEvidenceReport.missingRequirements,
+        },
       },
     };
     return run;
@@ -1253,6 +1326,22 @@ export class PipelineEngine {
       );
     }
 
+    // Evidence-gate for TRD — both validators must pass. Telemetry-only
+    // during Phase B rollout; the metadata block lets the UI surface the
+    // verdict without altering pipeline flow.
+    let trdEvidenceVerdict: { passed: boolean; missingRequirements: string[] } | undefined;
+    if (result.rulesValidation && result.dagValidation) {
+      const evidence = [
+        evidenceFromRulesValidation(result.rulesValidation),
+        evidenceFromDagValidation(result.dagValidation),
+      ];
+      const report = runEvidenceGate("trd", evidence);
+      trdEvidenceVerdict = {
+        passed: report.passed,
+        missingRequirements: report.missingRequirements,
+      };
+    }
+
     run.steps.trd = {
       ...trd,
       metadata: {
@@ -1268,6 +1357,7 @@ export class PipelineEngine {
             ? { dagValidation: result.dagValidation }
             : {}),
         },
+        ...(trdEvidenceVerdict ? { evidenceGate: trdEvidenceVerdict } : {}),
       },
     };
   }
@@ -1328,9 +1418,20 @@ export class PipelineEngine {
         | PrdRequirementIndex
         | undefined) ?? extractPrdRequirementIndex(prdContent);
     const gate = runQaCoverageGate(prdIndex, qa.content);
+    // QA evidence is currently single-validator (qa-ac-coverage); the
+    // verifier-agent evidence is captured elsewhere when it runs.
+    const qaEvidence = [evidenceFromGateReport(gate)];
+    const qaEvidenceReport = runEvidenceGate("qa", qaEvidence);
     run.steps.qa = {
       ...qa,
-      metadata: { ...qa.metadata, qaCoverageGate: gate },
+      metadata: {
+        ...qa.metadata,
+        qaCoverageGate: gate,
+        evidenceGate: {
+          passed: qaEvidenceReport.passed,
+          missingRequirements: qaEvidenceReport.missingRequirements,
+        },
+      },
     };
     return run;
   }

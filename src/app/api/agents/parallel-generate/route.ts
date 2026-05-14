@@ -78,13 +78,13 @@ function buildAgentMap(
         sys,
         sid,
       ),
-    design: (prd, _trd, _sys, _ds, sid) => {
+    design: (prd, _trd, _sys, _ds, sid, _prdSpec, onChunk) => {
       const agent = new DesignAgent();
       const ctx = designAdditional.trim() ? designAdditional : undefined;
       if (referenceImageBase64?.trim()) {
         return agent.generateDesignWithReferenceImage(prd, referenceImageBase64, ctx, sid);
       }
-      return agent.generateDesign(prd, ctx, sid);
+      return agent.generateDesign(prd, ctx, sid, onChunk);
     },
     qa: (prd, _trd, _sys, _ds, sid, _prdSpec, onChunk) =>
       new QAAgent().generateAudit(prd, "", sid, onChunk),

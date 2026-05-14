@@ -2,6 +2,10 @@ import { BaseAgent } from "../shared/base-agent";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterVisionChatCompletion, estimateCost, resolveModel } from "@/lib/openrouter";
 import type { VisionContentPart } from "@/lib/llm-types";
+import {
+  docGenerationThinking,
+  resolveDocMaxTokens,
+} from "../shared/doc-agent-settings";
 
 const SYSTEM_PROMPT = `You are a senior UI/UX Design Agent for 57Blocks Agentic Builder Pod.
 
@@ -72,7 +76,11 @@ export class DesignAgent extends BaseAgent {
       systemPrompt: SYSTEM_PROMPT,
       defaultModel: MODEL_CONFIG.design,
       temperature: 0.7,
-      maxTokens: 32000,
+      maxTokens: resolveDocMaxTokens("DESIGN_DOC_MAX_TOKENS", {
+        deepseek: 96000,
+        openrouter: 32000,
+      }),
+      thinking: docGenerationThinking(),
     });
   }
 
@@ -80,9 +88,24 @@ export class DesignAgent extends BaseAgent {
     prdContent: string,
     additionalContext?: string,
     sessionId?: string,
+    onChunk?: (chunk: string) => void,
   ) {
+    const message = `Based on the following PRD, generate a complete self-contained HTML Design System document as described in your instructions.\n\nYou MUST generate ALL sections in order:\n1. Left TOC sidebar\n2. Hero\n3. Color System (backgrounds, brand, text, status, semantic)\n4. Typography (font pairs, scale table)\n5. Spacing (visual bar scale)\n6. Radius + Shadows\n7. Components (buttons, badges, inputs, tabs, cards, KPI grid, data table, alert feed)\n8. Page Patterns (sidebar nav, topbar, domain-specific patterns)\n9. CSS Token Quick Reference\n\nDo NOT stop early. Output ONLY the HTML — start with <!DOCTYPE html> and end with </html>.\n\nPRD:\n\n${prdContent}`;
+
+    if (onChunk) {
+      return this.streamRun(
+        message,
+        (chunk, type) => {
+          if (type === "content") onChunk(chunk);
+        },
+        additionalContext,
+        "step-2-design",
+        sessionId,
+      );
+    }
+
     return this.run(
-      `Based on the following PRD, generate a complete self-contained HTML Design System document as described in your instructions.\n\nYou MUST generate ALL sections in order:\n1. Left TOC sidebar\n2. Hero\n3. Color System (backgrounds, brand, text, status, semantic)\n4. Typography (font pairs, scale table)\n5. Spacing (visual bar scale)\n6. Radius + Shadows\n7. Components (buttons, badges, inputs, tabs, cards, KPI grid, data table, alert feed)\n8. Page Patterns (sidebar nav, topbar, domain-specific patterns)\n9. CSS Token Quick Reference\n\nDo NOT stop early. Output ONLY the HTML — start with <!DOCTYPE html> and end with </html>.\n\nPRD:\n\n${prdContent}`,
+      message,
       additionalContext,
       "step-2-design",
       sessionId,

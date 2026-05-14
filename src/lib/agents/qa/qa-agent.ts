@@ -1,5 +1,9 @@
 import { BaseAgent } from "../shared/base-agent";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import {
+  docGenerationThinking,
+  resolveDocMaxTokens,
+} from "../shared/doc-agent-settings";
 
 const SYSTEM_PROMPT = `You are a senior QA Agent for 57Blocks Agentic Builder Pod.
 
@@ -73,7 +77,11 @@ export class QAAgent extends BaseAgent {
       systemPrompt: SYSTEM_PROMPT,
       defaultModel: MODEL_CONFIG.qa,
       temperature: 0.3,
-      maxTokens: 8192,
+      maxTokens: resolveDocMaxTokens("QA_DOC_MAX_TOKENS", {
+        deepseek: 24576,
+        openrouter: 8192,
+      }),
+      thinking: docGenerationThinking(),
     });
   }
 

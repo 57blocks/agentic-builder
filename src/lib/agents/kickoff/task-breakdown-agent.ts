@@ -90,7 +90,7 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
   - **MANDATORY for every page-level frontend task**: the task \`description\` and at least one \`subStep\` MUST explicitly list every backend API endpoint the page reads from or writes to (e.g. \`GET /api/projects\`, \`POST /api/projects\`, \`DELETE /api/projects/:id\`). Derive these from the PRD and the Backend Services task's file list. If no endpoint applies (e.g. a static layout task), state "no API calls required" explicitly.
   - **FORBIDDEN in frontend tasks**: any subStep that says "use mock data", "hardcode data", or "TODO: replace with API". All data must come from real API calls via the frontend API client.
 - **Integration** — **Optional** single task: Vite proxy assumptions, Koa CORS/auth headers, frontend API client error handling, and env/config alignment between frontend and backend.
-- **Testing** — **Do not** add tasks with phase "Testing" (automated test tasks are disabled in the pipeline).
+- **Testing** — **Do not** add separate tasks with phase "Testing". Instead, every P0/P1 implementation task MUST include an embedded \`tddPlan.tests[]\` array so Test Writer / Runtime Executor can create RED/GREEN evidence for that task.
 
 **Bad for M:**
 - separate tasks per endpoint or per tiny UI component, or \"create frontend/package.json from scratch\";
@@ -225,6 +225,31 @@ The same split applies to the Markets scanner pipeline (Twitter API + Jina + Ope
 
 **The scaffold does NOT implement your features.** The scaffold only provides the project skeleton (package.json, tsconfig, app shell). Every endpoint, every business rule, every page must be coded in Backend Services or Frontend tasks. Do not omit Backend Services because the scaffold already has \`backend/\`, \`frontend/\`, \`apps/api\`, or \`apps/web\` — those are starter shells, not implemented features.
 
+## TDD seed plan — REQUIRED for P0/P1 tasks
+Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in each P0/P1 task:
+- Backend route/API tasks MUST include at least one \`api-contract\` test.
+- Frontend API client tasks MUST include at least one \`frontend-service\` test.
+- Page/route tasks MUST include at least one \`route-smoke\` test proving the route renders the real page and triggers real API hooks (not a placeholder).
+- Runtime/dependency tasks MUST include at least one \`runtime-smoke\` test for local startup/fallback behavior.
+- Each test MUST state the exact test file path, command, expected RED failure, and expected GREEN result.
+
+Example \`tddPlan\`:
+\`\`\`json
+"tddPlan": {
+  "tests": [
+    {
+      "id": "TDD-AUTH-LOGIN-001",
+      "type": "api-contract",
+      "priority": "P0",
+      "file": "backend/src/api/modules/auth/auth.routes.test.ts",
+      "command": "cd backend && pnpm test auth.routes.test.ts",
+      "expectedRed": "POST /api/v1/auth/login returns 404 or not implemented before route exists",
+      "expectedGreen": "valid email/password returns 200 with accessToken, refreshToken and user role"
+    }
+  ]
+}
+\`\`\`
+
 ## Task count — derive from PRD (no fixed quota)
 - **Do not** target a predetermined number of tasks. The **only** driver for how many tasks to output is **document scope**: user flows, pages, APIs, data stores, integrations, and **coverage of every AC/FR (and PAGE-*/CMP-* if listed)** via \`coversRequirementIds\`.
 - **Derive** the list by: (1) enumerating what must exist in code to satisfy the PRD; (2) grouping into tasks that respect dependencies and parallelizable units; (3) **merging** work that belongs in one deliverable; **splitting** only when dependency order or review boundaries require it.
@@ -270,14 +295,27 @@ Each element has this shape:
     "npm run build succeeds",
     "npm run dev starts the dev server on localhost"
   ],
-  "coversRequirementIds": ["AC-01", "FR-FE01", "F-01"]
+  "coversRequirementIds": ["AC-01", "FR-FE01", "F-01"],
+  "tddPlan": {
+    "tests": [
+      {
+        "id": "TDD-T-001-001",
+        "type": "runtime-smoke",
+        "priority": "P0",
+        "file": "tests/runtime/startup.test.ts",
+        "command": "pnpm test tests/runtime/startup.test.ts",
+        "expectedRed": "startup smoke fails before the feature wiring exists",
+        "expectedGreen": "startup smoke passes with the generated app booting cleanly"
+      }
+    ]
+  }
 }
 
 Field rules:
 - **id**: sequential T-001, T-002, ... (string)
 - **phase**: one of "Scaffolding", "Frontend", "Data Layer", "Auth & Gateway", "Backend Services",
   "Integration", "Infrastructure" (string).
-  **Never** use phase "Testing" — the pipeline does not run dedicated test tasks yet.
+  **Never** use phase "Testing" — TDD is embedded in implementation tasks via \`tddPlan.tests[]\`.
   For frontend-only projects, use ONLY "Scaffolding", "Frontend".
 - **title**: short imperative sentence (< 80 chars)
 - **description**: 1-3 sentences explaining what to build, which files to touch, and
@@ -309,6 +347,8 @@ Field rules:
 - **coversRequirementIds**: string array of PRD IDs this task fully or materially implements.
   Include **every** relevant **AC-***, **FR-*** (and **F-** if used in PRD) ID that this task addresses.
   Across all tasks, these IDs should cover as much of the PRD’s AC/FR list as possible (pipeline validates coverage).
+- **tddPlan.tests**: required for P0/P1 tasks. Each test MUST include \`id\`, \`type\`, \`priority\`, \`file\`, \`command\`, \`expectedRed\`, and \`expectedGreen\`. The command must be executable by the generated project, and RED/GREEN expectations must be specific enough for a runtime executor to validate.
+  Every \`tddPlan.tests[].file\` MUST also be listed in this task's \`files.creates\` or \`files.modifies\` so the worker produces the test file before/with the implementation.
 
 ## Critical: Scaffolding task behavior per tier
 

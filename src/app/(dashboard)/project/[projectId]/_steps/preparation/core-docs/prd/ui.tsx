@@ -163,7 +163,8 @@ export function PrdUI(props: StepUIProps) {
 
   const isThisRunning = isRunning && currentStep === "prd";
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
-  const isDone = step?.status === "completed";
+  const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
+  const error = step?.status === "failed" ? step.error : null;
 
   // On hydration, if PRD already exists, sync tier to nav store in case it was
   // never persisted (e.g. projects created before this fix was deployed).
@@ -277,7 +278,8 @@ export function PrdUI(props: StepUIProps) {
               </div>
             </div>
             <div className="p-8">
-              {!content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
+              {error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
+              : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
               : <MarkdownRenderer content={content} variant="prd" />}
             <div ref={bottomRef} />
