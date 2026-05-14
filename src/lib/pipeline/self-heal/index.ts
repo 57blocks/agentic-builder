@@ -104,3 +104,16 @@ export type {
   StagnationReplanInput,
   StagnationReplanResult,
 } from "./stagnation-replan";
+export { AttemptTracker, missingIdsScopeKey } from "./attempt-tracker";
+export type {
+  AttemptScope,
+  AttemptRecord,
+  AttemptHistoryEntry,
+  AttemptOutcome,
+  AttemptTrackerOptions,
+} from "./attempt-tracker";
+export { escalateRepairCircuit } from "./escalate-repair-circuit";
+export type {
+  EscalateRepairCircuitInput,
+  EscalateRepairCircuitResult,
+} from "./escalate-repair-circuit";

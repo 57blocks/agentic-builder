@@ -81,12 +81,21 @@ import {
 } from "@/lib/pipeline/human-decision";
 import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
+import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
+import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
+import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
+import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
   triageE2eFailures,
   hasInfraSignal,
   type FailedTestRecord,
 } from "./e2e-triage";
+import { compactChatMessagesSemantically } from "./conversation-semantic-compact";
+import {
+  STRUCTURED_SUPERVISOR_TOOLS,
+  executeStructuredSupervisorTool,
+} from "./structured-verify-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -228,38 +237,10 @@ function countRemovedOrphanToolMessages(messages: ChatMessage[]): number {
   return removed;
 }
 
-function calculateSafeTailStart(
-  messages: ChatMessage[],
-  desiredStart: number,
-): number {
-  let safeStart = desiredStart;
-
-  const findAssistantIndexForTool = (
-    toolIdx: number,
-    toolCallId: string,
-  ): number => {
-    if (!toolCallId) return -1;
-    for (let i = toolIdx - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (!msg || msg.role !== "assistant") continue;
-      const hasMatch = (msg.tool_calls ?? []).some(
-        (tc) => tc.id === toolCallId,
-      );
-      if (hasMatch) return i;
-    }
-    return -1;
-  };
-
-  for (let i = desiredStart; i < messages.length; i++) {
-    const msg = messages[i];
-    if (!msg || msg.role !== "tool") continue;
-    const assistantIdx = findAssistantIndexForTool(i, msg.tool_call_id ?? "");
-    if (assistantIdx >= 0) {
-      safeStart = Math.min(safeStart, assistantIdx);
-    }
-  }
-
-  return Math.max(1, Math.min(safeStart, messages.length - 1));
+function isContextLengthError(message: string): boolean {
+  return /context(?: length| window)?|maximum context|context_length_exceeded|too many tokens|prompt is too long|token limit/i.test(
+    message,
+  );
 }
 
 async function callWithOrphanToolRetry(
@@ -2480,6 +2461,22 @@ function routeAfterIntegrationVerify(state: SupervisorState): string {
   return "e2e_verify";
 }
 
+function routeAfterTddGreenVerify(state: SupervisorState): string {
+  if (state.integrationErrors?.includes("TDD hard gate failed")) {
+    console.log(
+      "[Supervisor] routeAfterTddGreenVerify: P0 TDD hard gate failed — returning to integration_verify for another repair pass.",
+    );
+    return "integration_verify";
+  }
+  return routeAfterIntegrationVerify(state);
+}
+
+function routeAfterTddGreenVerifyRetry(state: SupervisorState): string {
+  return state.integrationErrors?.includes("TDD hard gate failed")
+    ? "integration_verify"
+    : "summary";
+}
+
 /**
  * Extract the most-uniquely-identifying segment of a Playwright test name.
  * Tests are typically written as `<spec>:<line>:<col> › <suite> › <title>`
@@ -3892,8 +3889,6 @@ async function runBuildGate(outputDir: string): Promise<string> {
 
 // ─── Phase-level verify + fix (agentic loop) ───
 
-const MAX_VERIFY_FIX_ITERATIONS = 50;
-
 /**
  * RALPH Phase 2 — External Judge.
  * Runs `npm test` (or `npm run test`) and returns a trimmed error string when
@@ -4047,6 +4042,7 @@ const SUPERVISOR_VERIFY_TOOLS: OpenRouterToolDefinition[] = [
       },
     },
   },
+  ...STRUCTURED_SUPERVISOR_TOOLS,
 ];
 
 /** Execute a single tool call from the verify+fix agent loop. */
@@ -4243,6 +4239,12 @@ async function executeSupervisorTool(
   outputDir: string,
 ): Promise<string> {
   const MAX_OUT = 4000;
+  const structuredResult = await executeStructuredSupervisorTool({
+    name,
+    args,
+    outputDir,
+  });
+  if (structuredResult !== null) return structuredResult;
   switch (name) {
     case "bash": {
       const command = String(args.command ?? "").trim();
@@ -4579,8 +4581,8 @@ function escapeRegExp(input: string): string {
  *
  * The LLM is given bash, read_file, write_file, list_files, and grep tools.
  * It installs deps, runs `prisma generate`, runs `tsc`, reads error files,
- * writes fixes, and keeps iterating until tsc passes or MAX_VERIFY_FIX_ITERATIONS
- * is reached. It finishes by calling `report_done`.
+ * writes fixes, and keeps iterating until it calls `report_done` or the model
+ * stops making callable progress.
  *
  * Returns { scaffoldErrors: "" } on success, { scaffoldErrors: <errors> } on failure.
  * Replaces the old separate phaseVerify + phaseFix nodes and their graph loop.
@@ -4602,15 +4604,8 @@ async function phaseVerifyAndFix(
     return { scaffoldErrors: undefined, scaffoldFixAttempts: 0 };
   }
 
-  const MAX_ITER = state.ralphConfig.enabled
-    ? Math.min(
-        state.ralphConfig.maxIterationsPerPhase * 3,
-        MAX_VERIFY_FIX_ITERATIONS,
-      )
-    : MAX_VERIFY_FIX_ITERATIONS;
-
   console.log(
-    `${label}: starting agentic loop (max ${MAX_ITER} iterations)...`,
+    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
   );
 
   const pm = await detectPackageManager(state.outputDir);
@@ -4806,64 +4801,43 @@ async function phaseVerifyAndFix(
   let finalStatus: "pass" | "fail" = "fail";
   let finalSummary = "";
   let totalCostUsd = 0;
+  let contextCompressionUsed = false;
 
   /**
    * Estimate rough token count from messages (4 chars ≈ 1 token).
    * When the conversation grows beyond ~80k tokens, compact the middle portion
    * into a single summary assistant message, keeping system + last 6 messages.
    */
-  function compactMessagesIfNeeded(): void {
-    const COMPACT_THRESHOLD = 20_000 * 4; // ~20k tokens in chars
-    const KEEP_TAIL = 6; // keep last N messages after system prompt
-    const totalChars = messages.reduce(
-      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0),
-      0,
-    );
-    if (totalChars < COMPACT_THRESHOLD) return;
-
-    const systemMsg = messages[0];
-    const desiredStart = Math.max(1, messages.length - KEEP_TAIL);
-    const tailStart = calculateSafeTailStart(messages, desiredStart);
-    const tail = messages.slice(tailStart);
-    const middle = messages.slice(1, tailStart);
-
-    // Build a summary of the compacted middle
-    const actionLines: string[] = [];
-    for (const m of middle) {
-      if (m.role === "tool") {
-        actionLines.push(
-          `[tool result] ${String(m.content ?? "").slice(0, 200)}`,
-        );
-      } else if (m.role === "assistant") {
-        const calls = (m.tool_calls ?? [])
-          .map((tc) => tc.function.name)
-          .join(", ");
-        if (calls) actionLines.push(`[assistant called] ${calls}`);
-      }
-    }
-    const summary =
-      `[Context compacted — ${middle.length} messages omitted]\n` +
-      `Previous actions summary:\n${actionLines.slice(-30).join("\n")}`;
-
-    messages.splice(
-      0,
-      messages.length,
-      systemMsg,
-      { role: "assistant", content: summary },
-      ...tail,
-    );
-    const removed = countRemovedOrphanToolMessages(messages);
+  async function compactMessagesIfNeeded(force = false): Promise<boolean> {
+    if (contextCompressionUsed) return false;
+    const result = await compactChatMessagesSemantically({
+      messages,
+      modelChain,
+      label,
+      force,
+      stateSummary: [
+        `phase=verify_fix`,
+        `iterations=${iterations}`,
+        `finalStatus=${finalStatus}`,
+        finalSummary ? `currentSummary=${finalSummary.slice(0, 800)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    if (!result.compacted) return false;
+    contextCompressionUsed = true;
     console.log(
-      `${label}: context compacted — removed ${middle.length} messages (was ~${Math.round(totalChars / 4)} tokens), orphan_tools_removed=${removed}`,
+      `${label}: semantic context compacted — removed ${result.removedMessages} messages (was ~${result.estimatedTokensBefore} tokens), orphan_tools_removed=${result.orphanToolsRemoved}`,
     );
+    return true;
   }
 
-  while (iterations < MAX_ITER) {
+  while (true) {
     iterations++;
-    console.log(`${label}: iteration ${iterations}/${MAX_ITER}`);
+    console.log(`${label}: iteration ${iterations}`);
 
     // Compact context if growing too large
-    compactMessagesIfNeeded();
+    await compactMessagesIfNeeded();
 
     let resp;
     try {
@@ -4875,6 +4849,10 @@ async function phaseVerifyAndFix(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
+        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        continue;
+      }
       console.error(`${label}: LLM call failed: ${msg}`);
       break;
     }
@@ -6575,7 +6553,82 @@ async function syncDeps(_state: SupervisorState) {
   return {};
 }
 
-const MAX_INTEGRATION_VERIFY_FIX_ITERATIONS = 150;
+async function tddTestWriterAndRed(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const emitter = getRepairEmitter(state.sessionId);
+  const writer = await runTddTestWriter({
+    outputDir: state.outputDir,
+    tasks: state.tasks,
+    projectContext: state.projectContext,
+    sessionId: state.sessionId,
+    emitter,
+  });
+  console.log(`[Supervisor] TDD Test Writer: ${writer.summary}`);
+
+  const review = await reviewTddTests({
+    outputDir: state.outputDir,
+    emitter,
+  });
+  console.log(`[Supervisor] TDD Review (pre-implementation): ${review.summary}`);
+
+  const red = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "red",
+    emitter,
+  });
+  console.log(`[Supervisor] ${red.summary}`);
+
+  return {
+    totalCostUsd: writer.costUsd,
+  };
+}
+
+async function tddGreenVerifyAndReview(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const emitter = getRepairEmitter(state.sessionId);
+  const green = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "green",
+    emitter,
+  });
+  const review = await reviewTddTests({
+    outputDir: state.outputDir,
+    emitter,
+  });
+
+  const blockers: string[] = [];
+  if (green.p0Failures.length > 0) {
+    blockers.push(`P0 TDD GREEN failures: ${green.p0Failures.join(", ")}`);
+  }
+  if (review.p0Errors.length > 0) {
+    blockers.push(
+      `P0 TDD review errors: ${review.p0Errors
+        .slice(0, 10)
+        .map((finding) => `${finding.testId}: ${finding.message}`)
+        .join("; ")}`,
+    );
+  }
+
+  const existing = state.integrationErrors?.trim();
+  const integrationErrors =
+    blockers.length > 0
+      ? [existing, "TDD hard gate failed:", ...blockers]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 4000)
+      : existing;
+
+  console.log(
+    `[Supervisor] TDD GREEN gate: ${green.summary} ${review.summary}`,
+  );
+
+  return {
+    integrationErrors,
+  };
+}
+
 // Tightened thresholds: previous 8/18 burned ~100k tokens on read-only loops
 // before the abort fired. 3 iterations without mutation is enough to know the
 // LLM is reading in circles; 10 iterations is the hard stop.
@@ -7814,22 +7867,16 @@ export async function autoRepairRouteRegistration(
  *
  * Replaces the old separate integrationVerify + integrationFix nodes and their
  * conditional loop edge. The LLM is given the same bash/filesystem/grep tools
- * as phaseVerifyAndFix and runs up to MAX_INTEGRATION_VERIFY_FIX_ITERATIONS
- * rounds to discover and fix all compile/convention/build errors.
+ * as phaseVerifyAndFix and keeps running until it reports completion, stops
+ * making callable progress, or hits the stagnation fallback policy.
  */
 async function integrationVerifyAndFix(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
   const label = "[Supervisor] IntegrationVerifyFix";
-  const MAX_ITER = state.ralphConfig.enabled
-    ? Math.min(
-        state.ralphConfig.maxIterationsPerPhase * 5,
-        MAX_INTEGRATION_VERIFY_FIX_ITERATIONS,
-      )
-    : MAX_INTEGRATION_VERIFY_FIX_ITERATIONS;
 
   console.log(
-    `${label}: starting agentic loop (max ${MAX_ITER} iterations)...`,
+    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -8525,6 +8572,7 @@ async function integrationVerifyAndFix(
   const migrationCoverageBlock = migrationCoverageResult
     ? formatMigrationCoverageBlock(migrationCoverageResult)
     : "";
+  const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
 
   const openingUserContent = [
     `Project directory: ${state.outputDir}`,
@@ -8533,6 +8581,7 @@ async function integrationVerifyAndFix(
     coverageBlock,
     migrationCoverageBlock,
     runtimeAuditBlock,
+    tddRepairBlock,
     dependencyAuditBlock,
     residualConflictBlock,
     frontendNormalizationBlock,
@@ -8561,6 +8610,7 @@ async function integrationVerifyAndFix(
   let finalStatus: "pass" | "fail" = "fail";
   let finalSummary = "";
   let totalCostUsd = 0;
+  let contextCompressionUsed = false;
   const integrationReasoningOptions = buildIntegrationReasoningOptions();
   let validationStale = true;
   let lastMutationAt: string | null = null;
@@ -8891,66 +8941,40 @@ async function integrationVerifyAndFix(
    * Context compression: when messages exceed ~20k tokens, compact the middle
    * portion into a summary, keeping system prompt + last 6 messages.
    */
-  function compactMessagesIfNeeded(): void {
-    const COMPACT_THRESHOLD = 20_000 * 4;
-    const KEEP_TAIL = 6;
-    const totalChars = messages.reduce(
-      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0),
-      0,
-    );
-    if (totalChars < COMPACT_THRESHOLD) return;
-
-    const systemMsg = messages[0];
-    const desiredStart = Math.max(1, messages.length - KEEP_TAIL);
-    const tailStart = calculateSafeTailStart(messages, desiredStart);
-    const tail = messages.slice(tailStart);
-    const middle = messages.slice(1, tailStart);
-
-    const actionLines: string[] = [];
-    for (const m of middle) {
-      if (m.role === "tool") {
-        actionLines.push(
-          `[tool result] ${String(m.content ?? "").slice(0, 200)}`,
-        );
-      } else if (m.role === "assistant") {
-        const calls = (m.tool_calls ?? [])
-          .map((tc) => tc.function.name)
-          .join(", ");
-        if (calls) actionLines.push(`[assistant called] ${calls}`);
-      }
-    }
-    const summary =
-      `[Context compacted — ${middle.length} messages omitted]\n` +
-      `Validation state:\n` +
-      `- stale: ${validationStale}\n` +
-      `- last mutation: ${lastMutationAt ?? "never"} (${lastMutationReason})\n` +
-      `- progress score: ${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}\n` +
-      `- last meaningful progress: iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason})\n` +
-      `- last full validation: ${lastFullValidationAt ?? "never"}\n` +
-      `- frontend tsc ok at: ${frontendTscOkAt ?? "never"}\n` +
-      `- frontend build ok at: ${frontendBuildOkAt ?? "never"}\n` +
-      `- backend tsc ok at: ${backendTscOkAt ?? "never"}\n` +
-      `- backend smoke ok at: ${backendSmokeOkAt ?? "never"}\n` +
-      `Previous actions summary:\n${actionLines.slice(-30).join("\n")}`;
-
-    messages.splice(
-      0,
-      messages.length,
-      systemMsg,
-      { role: "assistant", content: summary },
-      ...tail,
-    );
-    const removed = countRemovedOrphanToolMessages(messages);
+  async function compactMessagesIfNeeded(force = false): Promise<boolean> {
+    if (contextCompressionUsed) return false;
+    const result = await compactChatMessagesSemantically({
+      messages,
+      modelChain,
+      label,
+      force,
+      stateSummary: [
+        `phase=integration_verify_fix`,
+        `iterations=${iterations}`,
+        `validationStale=${validationStale}`,
+        `lastMutation=${lastMutationAt ?? "never"} (${lastMutationReason})`,
+        `progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}`,
+        `lastMeaningfulProgress=iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason})`,
+        `lastFullValidation=${lastFullValidationAt ?? "never"}`,
+        `frontendTscOkAt=${frontendTscOkAt ?? "never"}`,
+        `frontendBuildOkAt=${frontendBuildOkAt ?? "never"}`,
+        `backendTscOkAt=${backendTscOkAt ?? "never"}`,
+        `backendSmokeOkAt=${backendSmokeOkAt ?? "never"}`,
+      ].join("\n"),
+    });
+    if (!result.compacted) return false;
+    contextCompressionUsed = true;
     console.log(
-      `${label}: context compacted — removed ${middle.length} messages (was ~${Math.round(totalChars / 4)} tokens), orphan_tools_removed=${removed}`,
+      `${label}: semantic context compacted — removed ${result.removedMessages} messages (was ~${result.estimatedTokensBefore} tokens), orphan_tools_removed=${result.orphanToolsRemoved}`,
     );
+    return true;
   }
 
-  while (iterations < MAX_ITER) {
+  while (true) {
     iterations++;
-    console.log(`${label}: iteration ${iterations}/${MAX_ITER}`);
+    console.log(`${label}: iteration ${iterations}`);
 
-    compactMessagesIfNeeded();
+    await compactMessagesIfNeeded();
 
     let resp;
     try {
@@ -8963,6 +8987,10 @@ async function integrationVerifyAndFix(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
+        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        continue;
+      }
       console.error(`${label}: LLM call failed: ${msg}`);
       break;
     }
@@ -9895,6 +9923,7 @@ export function createSupervisorGraph() {
     .addNode("dispatch_gate", dispatchGate)
     .addNode("dependency_baseline", dependencyBaseline)
     .addNode("generate_api_contracts", generateApiContracts)
+    .addNode("tdd_test_writer", tddTestWriterAndRed)
     .addNode("be_worker", parallelWorkerNode)
     .addNode("be_phase_verify", (s) =>
       phaseVerifyAndFix(s, { workerHintRoles: ["backend", "test"] }),
@@ -9907,6 +9936,7 @@ export function createSupervisorGraph() {
     )
     .addNode("sync_deps", syncDeps)
     .addNode("integration_verify", integrationVerifyAndFix)
+    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
     .addNode("e2e_verify", e2eVerifyAndFix)
     .addNode("summary", summary)
 
@@ -9920,8 +9950,9 @@ export function createSupervisorGraph() {
     .addEdge("scaffold_fix", "scaffold_verify")
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
+    .addEdge("generate_api_contracts", "tdd_test_writer")
     .addConditionalEdges(
-      "generate_api_contracts",
+      "tdd_test_writer",
       dispatchBackendAndTestWorkers,
     )
     .addEdge("be_worker", "be_phase_verify")
@@ -9931,7 +9962,9 @@ export function createSupervisorGraph() {
     .addEdge("fe_worker", "fe_phase_verify")
     .addEdge("fe_phase_verify", "sync_deps")
     .addEdge("sync_deps", "integration_verify")
-    .addConditionalEdges("integration_verify", routeAfterIntegrationVerify, {
+    .addEdge("integration_verify", "tdd_green_verify")
+    .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
+      integration_verify: "integration_verify",
       e2e_verify: "e2e_verify",
       summary: "summary",
     })
@@ -9947,9 +9980,14 @@ export function createSupervisorGraph() {
 export function createIntegrationRetryGraph() {
   const graph = new StateGraph(SupervisorStateAnnotation)
     .addNode("integration_verify", integrationVerifyAndFix)
+    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
     .addNode("summary", summary)
     .addEdge(START, "integration_verify")
-    .addEdge("integration_verify", "summary")
+    .addEdge("integration_verify", "tdd_green_verify")
+    .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerifyRetry, {
+      integration_verify: "integration_verify",
+      summary: "summary",
+    })
     .addEdge("summary", END);
 
   return graph.compile();

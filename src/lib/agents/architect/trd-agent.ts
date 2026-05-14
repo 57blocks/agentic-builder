@@ -1,5 +1,9 @@
 import { BaseAgent } from "../shared/base-agent";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import {
+  docGenerationThinking,
+  resolveDocMaxTokens,
+} from "../shared/doc-agent-settings";
 import type {
   PrdDomainSpec,
   PrdRuleSpec,
@@ -205,7 +209,11 @@ export class TRDAgent extends BaseAgent {
       temperature: 0.5,
       // Bumped from 16384 to fit the §6 schema block (often 300-800 lines
       // of TS for non-trivial projects) plus the human-readable doc.
-      maxTokens: 24576,
+      maxTokens: resolveDocMaxTokens("TRD_DOC_MAX_TOKENS", {
+        deepseek: 65536,
+        openrouter: 24576,
+      }),
+      thinking: docGenerationThinking(),
     });
   }
 

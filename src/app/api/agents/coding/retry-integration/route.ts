@@ -25,6 +25,7 @@ import {
   buildFrontendDesignContextForCodegen,
   readPencilDesignDoc,
 } from "@/lib/pipeline/frontend-design-context";
+import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
 
 export const maxDuration = 600;
 
@@ -243,6 +244,13 @@ export async function POST(request: NextRequest) {
       const graph = createIntegrationRetryGraph();
 
       try {
+        try {
+          await writeTddManifestFromTasks(outputRoot, codingTasks);
+        } catch (e) {
+          console.warn(
+            `[CodingAPI][retry-integration] TDD manifest write failed: ${e}`,
+          );
+        }
         const streamIterator = await graph.stream(
           {
             tasks: codingTasks,
@@ -251,8 +259,9 @@ export async function POST(request: NextRequest) {
             frontendDesignContext,
             scaffoldProtectedPaths,
             ralphConfig,
+            sessionId,
           },
-          { subgraphs: true, streamMode: "updates", recursionLimit: 100 },
+          { subgraphs: true, streamMode: "updates", recursionLimit: 10000 },
         );
 
         for await (const chunk of streamIterator) {

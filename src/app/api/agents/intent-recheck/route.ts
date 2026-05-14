@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { streamChatCompletion, resolveModel } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { classifyProject } from "@/lib/agents/shared/project-classifier";
+import { fallbackIntentForm } from "./intent-fallback";
 
 /**
  * POST /api/agents/intent-recheck
@@ -104,12 +105,6 @@ export async function POST(request: NextRequest) {
     ];
 
     const model = resolveModel(MODEL_CONFIG.intent);
-    const llmStream = await streamChatCompletion(messages, {
-      model,
-      temperature: 0.3,
-      max_tokens: 800,
-    });
-
     const encoder = new TextEncoder();
 
     // Emit pipeline-style SSE events so the client can reuse the same
@@ -118,10 +113,54 @@ export async function POST(request: NextRequest) {
       return encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
     }
 
+    function sendFallback(
+      controller: ReadableStreamDefaultController<Uint8Array>,
+      reason: string,
+    ) {
+      const fallback = fallbackIntentForm(brief, reason);
+      controller.enqueue(
+        send({
+          type: "step_stream",
+          stepId: "intent",
+          data: { chunk: fallback.summary, chunkType: "content" },
+        }),
+      );
+      controller.enqueue(
+        send({
+          type: "step_complete",
+          stepId: "intent",
+          data: {
+            stepId: "intent",
+            status: "completed",
+            content: JSON.stringify(fallback),
+            timestamp: new Date().toISOString(),
+            metadata: { fallback: true, reason },
+          },
+        }),
+      );
+    }
+
     const readable = new ReadableStream({
       async start(controller) {
         // ── step_start ──
         controller.enqueue(send({ type: "step_start", stepId: "intent", data: { status: "running" } }));
+
+        let llmStream: ReadableStream<Uint8Array>;
+        try {
+          llmStream = await streamChatCompletion(messages, {
+            model,
+            temperature: 0.3,
+            max_tokens: 4096,
+            response_format: { type: "json_object" },
+          });
+        } catch (err) {
+          sendFallback(
+            controller,
+            err instanceof Error ? `llm_error: ${err.message}` : "llm_error",
+          );
+          controller.close();
+          return;
+        }
 
         const reader = llmStream.getReader();
         const decoder = new TextDecoder();
@@ -205,25 +244,16 @@ export async function POST(request: NextRequest) {
                 },
               }));
             } catch {
-              controller.enqueue(send({
-                type: "step_error",
-                stepId: "intent",
-                data: { error: "Failed to parse intent JSON", status: "failed" },
-              }));
+              sendFallback(controller, "parse_error: Failed to parse intent JSON");
             }
           } else {
-            controller.enqueue(send({
-              type: "step_error",
-              stepId: "intent",
-              data: { error: "No JSON found in model response", status: "failed" },
-            }));
+            sendFallback(controller, "parse_error: No JSON found in model response");
           }
         } catch (err) {
-          controller.enqueue(send({
-            type: "step_error",
-            stepId: "intent",
-            data: { error: err instanceof Error ? err.message : "stream error", status: "failed" },
-          }));
+          sendFallback(
+            controller,
+            err instanceof Error ? `stream_error: ${err.message}` : "stream_error",
+          );
         } finally {
           reader.releaseLock();
           controller.close();

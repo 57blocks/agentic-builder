@@ -1,5 +1,6 @@
 import { BaseAgent } from "../shared/base-agent";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { resolveDocMaxTokens } from "../shared/doc-agent-settings";
 
 import type { ProjectTier } from "../shared/project-classifier";
 
@@ -387,9 +388,18 @@ const TIER_PROMPTS: Record<ProjectTier, string> = {
 };
 
 const TIER_MAX_TOKENS: Record<ProjectTier, number> = {
-  S: 6144,
-  M: 12288,
-  L: 24576,
+  S: resolveDocMaxTokens("PRD_DOC_MAX_TOKENS", {
+    deepseek: 32768,
+    openrouter: 6144,
+  }),
+  M: resolveDocMaxTokens("PRD_DOC_MAX_TOKENS", {
+    deepseek: 65536,
+    openrouter: 12288,
+  }),
+  L: resolveDocMaxTokens("PRD_DOC_MAX_TOKENS", {
+    deepseek: 65536,
+    openrouter: 24576,
+  }),
 };
 
 const TIER_FULL_NAMES: Record<ProjectTier, string> = {

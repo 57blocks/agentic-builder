@@ -61,11 +61,18 @@ import {
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
   dispatchAuditRepair,
+  AttemptTracker,
+  escalateRepairCircuit,
+  missingIdsScopeKey,
   type RepairEmitter,
   type RepairEvent,
   type AuditTaskSummary,
   type FeatureChecklistAuditResult,
 } from "@/lib/pipeline/self-heal";
+import {
+  runEvidenceGate,
+  collectCodingStageEvidence,
+} from "@/lib/pipeline/gates";
 import { createMemorySelfHealSink } from "@/lib/memory/self-heal-sink";
 import { extractPrdRequirementIndex } from "@/lib/requirements/extract-prd-spec";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
@@ -84,6 +91,7 @@ import {
   clearSessionCheckpoint,
   type TaskCheckpointEntry,
 } from "@/lib/pipeline/session-checkpoint";
+import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
 
 const execFileAsync = promisify(execFile);
 
@@ -1237,6 +1245,10 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
+      const auditAttemptTracker = new AttemptTracker({
+        outputDir: outputRoot,
+      });
+      await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
       // Pre-populate skipped tasks (from previous session) as completed_with_warnings
       // so they appear in audit and scoring reports without being re-generated.
@@ -1299,6 +1311,15 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        try {
+          const tddManifest = await writeTddManifestFromTasks(outputRoot, codingTasks);
+          console.log(
+            `[CodingAPI] TDD manifest written with ${tddManifest.testCount} test(s): ${tddManifest.path}`,
+          );
+        } catch (e) {
+          console.warn(`[CodingAPI] TDD manifest write failed: ${e}`);
+        }
+
         // RALPH Phase 1+3: initialise progress tracker and write IMPLEMENTATION_PLAN.md
         if (ralphConfig.enabled) {
           try {
@@ -1327,7 +1348,7 @@ export async function POST(request: NextRequest) {
             sessionId,
             prdSpec,
           },
-          { subgraphs: true, streamMode: "updates", recursionLimit: 100 },
+          { subgraphs: true, streamMode: "updates", recursionLimit: 10000 },
         );
 
         for await (const chunk of streamIterator) {
@@ -1400,7 +1421,31 @@ export async function POST(request: NextRequest) {
               ralphConfig,
               sessionId,
               emitter: repairEmitter,
+              attemptTracker: auditAttemptTracker,
             });
+
+            if (dispatchResult.circuitOpenRoles?.length) {
+              const frontendIds = finalAudit.uncovered
+                .filter((e) => /^(PAGE|CMP|IC)-/i.test(e.id))
+                .map((e) => e.id);
+              const backendIds = finalAudit.uncovered
+                .filter((e) => !/^(PAGE|CMP|IC)-/i.test(e.id))
+                .map((e) => e.id);
+              for (const role of dispatchResult.circuitOpenRoles) {
+                const ids = role === "frontend" ? frontendIds : backendIds;
+                await escalateRepairCircuit({
+                  scope: {
+                    stage: "post-gen-audit",
+                    scopeKey: `${role}:${missingIdsScopeKey(ids)}`,
+                  },
+                  tracker: auditAttemptTracker,
+                  outputDir: outputRoot,
+                  emitter: repairEmitter,
+                  sessionId,
+                  reason: `Audit-repair dispatch circuit opened for role=${role} — worker subgraph cannot close the gap after 3+ attempts on the same uncovered-id set.`,
+                });
+              }
+            }
 
             if (
               dispatchResult.backendGeneratedFiles.length +
@@ -1429,6 +1474,34 @@ export async function POST(request: NextRequest) {
             }
           }
           finalAuditResult = finalAudit;
+
+          // Evidence gate (Phase A pilot) — read persisted .ralph/*.json
+          // artefacts written by the supervisor's smoke/tsc/tdd validators
+          // and refuse the stage if any required validator is missing or
+          // failing. Telemetry-only during the rollout — does not block
+          // pipeline advance yet so we observe evidence-gate decisions
+          // alongside the existing audit-driven blocking.
+          try {
+            const { evidence, missingArtefacts } =
+              await collectCodingStageEvidence(outputRoot);
+            const evidenceReport = runEvidenceGate("coding", evidence);
+            repairEmitter({
+              sessionId,
+              stage: "post-gen-audit",
+              event: "evidence_gate_evaluated",
+              details: {
+                passed: evidenceReport.passed,
+                missingRequirements: evidenceReport.missingRequirements,
+                missingArtefacts,
+                evidenceCount: evidence.length,
+              },
+            });
+          } catch (evidenceErr) {
+            console.warn(
+              `[CodingAPI] evidence gate threw (non-fatal):`,
+              evidenceErr instanceof Error ? evidenceErr.message : evidenceErr,
+            );
+          }
 
           const blockingFailures = summarizeBlockingGateErrors(
             collectedGateSnapshot,

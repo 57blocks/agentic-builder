@@ -4,6 +4,13 @@ import {
   gpt5StreamChatCompletion,
 } from "./providers/gpt5";
 import {
+  chatCompletionsDeepSeekV4,
+  isDeepSeekV4Provider,
+  DEEPSEEK_V4_DEFAULT_BASE,
+  DEEPSEEK_V4_DEFAULT_MODEL,
+} from "./providers/deepseek-v4";
+import { streamChatCompletionsDeepSeekV4 } from "./providers/deepseek-v4-stream";
+import {
   isGeminiProvider,
   geminiChatCompletion,
   geminiStreamChatCompletion,
@@ -47,6 +54,26 @@ export class ModelTimeoutError extends Error {
 }
 
 const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o";
+
+function isTruthyEnvFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "on"
+  );
+}
+
+function shouldForceOpenRouter(): boolean {
+  const provider = process.env.LLM_PROVIDER?.trim().toLowerCase();
+  return (
+    provider === "openrouter" ||
+    isTruthyEnvFlag(process.env.USE_OPENROUTER) ||
+    isTruthyEnvFlag(process.env.FORCE_OPENROUTER)
+  );
+}
 
 function openRouterHeaders(apiKey: string): Record<string, string> {
   return {
@@ -123,7 +150,25 @@ export async function chatCompletion(
 ): Promise<OpenRouterResponse> {
   const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
 
-  if (isGeminiProvider()) {
+  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct  model=${dsModel}  base=${dsBase}  (requested=${requestedModel})`,
+    );
+    return chatCompletionsDeepSeekV4(messages, {
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 4096,
+      tools: options.tools,
+      tool_choice: options.tool_choice,
+      response_format: options.response_format,
+      thinking: options.thinking,
+    });
+  }
+
+  if (isGeminiProvider() && !shouldForceOpenRouter()) {
     const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
     console.log(
       `[LLM] provider=gemini  model=${geminiModel}  (requested=${requestedModel})`,
@@ -210,7 +255,25 @@ export async function streamChatCompletion(
   messages: ChatMessage[],
   options: Omit<OpenRouterOptions, "stream"> = {},
 ) {
-  if (isGeminiProvider()) {
+  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+    const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct-stream  model=${dsModel}  base=${dsBase}  (requested=${requestedModel})`,
+    );
+    return streamChatCompletionsDeepSeekV4(messages, {
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 4096,
+      tools: options.tools,
+      tool_choice: options.tool_choice,
+      response_format: options.response_format,
+      thinking: options.thinking,
+    });
+  }
+  if (isGeminiProvider() && !shouldForceOpenRouter()) {
     return geminiStreamChatCompletion(messages, options);
   }
   if (options.model === GPT5_MODEL_ID) {
