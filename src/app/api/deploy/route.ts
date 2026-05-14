@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
       GITHUB_TOKEN: requireEnv("GITHUB_TOKEN"),
       DOKPLOY_URL: requireEnv("DOKPLOY_URL"),
       DOKPLOY_TOKEN: requireEnv("DOKPLOY_TOKEN"),
+      DOKPLOY_DOMAIN: requireEnv("DOKPLOY_DOMAIN"),
       SHARED_PG_CONNECTION_STRING: requireEnv("SHARED_PG_CONNECTION_STRING"),
     };
   } catch (err) {
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     generatedCodePath: body.generatedCodePath.trim(),
     projectRoot: process.cwd(),
     env,
+    skipSteps: Array.isArray(body.skipSteps) ? body.skipSteps : undefined,
   });
 
   return NextResponse.json({ jobId: job.id });

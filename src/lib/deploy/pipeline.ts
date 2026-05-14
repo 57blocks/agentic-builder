@@ -1,6 +1,6 @@
 import { readKickoffRepoMetadata, pushGeneratedCodeToKickoffRepo } from "@/lib/pipeline/push-kickoff-repo";
 import { createAppDatabase } from "./database";
-import { createDokployProject, createDokployCompose, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "./dokploy";
+import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "./dokploy";
 import { emitStep, completeJob, failJob } from "./job-manager";
 import type { StepId } from "./types";
 
@@ -8,6 +8,7 @@ interface PipelineEnv {
   GITHUB_TOKEN: string;
   DOKPLOY_URL: string;
   DOKPLOY_TOKEN: string;
+  DOKPLOY_DOMAIN: string;
   SHARED_PG_CONNECTION_STRING: string;
 }
 
@@ -17,6 +18,7 @@ interface PipelineParams {
   generatedCodePath: string;
   projectRoot: string;
   env: PipelineEnv;
+  skipSteps?: string[];
 }
 
 function emit(jobId: string, step: StepId, status: "running" | "done" | "error", message: string, url?: string) {
@@ -25,30 +27,41 @@ function emit(jobId: string, step: StepId, status: "running" | "done" | "error",
 
 export async function runDeployPipeline(params: PipelineParams): Promise<void> {
   const { jobId, appName, generatedCodePath, projectRoot, env } = params;
+  const skip = new Set(params.skipSteps ?? []);
 
   // Step 1: Verify kickoff repo exists
-  emit(jobId, "verify-repo", "running", "Verifying GitHub repository...");
-  const repoMeta = await readKickoffRepoMetadata(projectRoot);
-  if (!repoMeta?.cloneUrl) {
-    emit(jobId, "verify-repo", "error", "No kickoff repository found. Run the kickoff stage first.");
-    failJob(jobId);
-    return;
+  let repoMeta: Awaited<ReturnType<typeof readKickoffRepoMetadata>>;
+  if (skip.has("verify-repo")) {
+    repoMeta = await readKickoffRepoMetadata(projectRoot);
+    emit(jobId, "verify-repo", "done", "Skipped (already done)");
+  } else {
+    emit(jobId, "verify-repo", "running", "Verifying GitHub repository...");
+    repoMeta = await readKickoffRepoMetadata(projectRoot);
+    if (!repoMeta?.cloneUrl) {
+      emit(jobId, "verify-repo", "error", "No kickoff repository found. Run the kickoff stage first.");
+      failJob(jobId);
+      return;
+    }
+    emit(jobId, "verify-repo", "done", `Repository confirmed: ${repoMeta.htmlUrl ?? repoMeta.cloneUrl}`);
   }
-  emit(jobId, "verify-repo", "done", `Repository confirmed: ${repoMeta.htmlUrl ?? repoMeta.cloneUrl}`);
 
   // Step 2: Push generated code
-  emit(jobId, "git-push", "running", "Pushing generated code to GitHub...");
-  const pushResult = await pushGeneratedCodeToKickoffRepo({
-    projectRoot,
-    codeOutputDir: generatedCodePath,
-    token: env.GITHUB_TOKEN,
-  });
-  if (!pushResult.ok) {
-    emit(jobId, "git-push", "error", pushResult.message);
-    failJob(jobId);
-    return;
+  if (skip.has("git-push")) {
+    emit(jobId, "git-push", "done", "Skipped (already done)");
+  } else {
+    emit(jobId, "git-push", "running", "Pushing generated code to GitHub...");
+    const pushResult = await pushGeneratedCodeToKickoffRepo({
+      projectRoot,
+      codeOutputDir: generatedCodePath,
+      token: env.GITHUB_TOKEN,
+    });
+    if (!pushResult.ok) {
+      emit(jobId, "git-push", "error", pushResult.message);
+      failJob(jobId);
+      return;
+    }
+    emit(jobId, "git-push", "done", "Code pushed to GitHub");
   }
-  emit(jobId, "git-push", "done", "Code pushed to GitHub");
 
   // Step 3: Create per-app database
   emit(jobId, "create-database", "running", "Creating database...");
@@ -69,13 +82,16 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
   emit(jobId, "create-dokploy", "running", "Creating Dokploy project...");
   let composeId: string;
   try {
-    const projectId = await createDokployProject({ baseUrl: env.DOKPLOY_URL, token: env.DOKPLOY_TOKEN, name: appName });
-    composeId = await createDokployCompose({ baseUrl: env.DOKPLOY_URL, token: env.DOKPLOY_TOKEN, name: appName, projectId });
+    const { projectId, environmentId } = await createDokployProject({ baseUrl: env.DOKPLOY_URL, token: env.DOKPLOY_TOKEN, name: appName });
+    const compose = await createDokployCompose({ baseUrl: env.DOKPLOY_URL, token: env.DOKPLOY_TOKEN, name: appName, projectId, environmentId });
+    composeId = compose.composeId;
+    const appHost = `${compose.appName}.${env.DOKPLOY_DOMAIN}`;
+    await createDokployDomain({ baseUrl: env.DOKPLOY_URL, token: env.DOKPLOY_TOKEN, composeId, host: appHost, serviceName: "frontend" });
     await updateDokployCompose({
       baseUrl: env.DOKPLOY_URL,
       token: env.DOKPLOY_TOKEN,
       composeId,
-      repository: repoMeta.htmlUrl ?? repoMeta.cloneUrl,
+      repository: repoMeta.cloneUrl,
       branch: "main",
       env: `DATABASE_URL=${databaseUrl}\n`,
     });

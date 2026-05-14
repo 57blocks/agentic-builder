@@ -57,9 +57,19 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
     .replace(/^-+|-+$/g, "")
     .slice(0, 40) || "generated-app";
 
-  const handleDeploy = async () => {
+  const doneSteps = steps.filter((s) => s.status === "done").map((s) => s.step);
+  const [manualSkip, setManualSkip] = useState<Set<string>>(new Set());
+
+  const toggleSkip = (step: string) =>
+    setManualSkip((prev) => {
+      const next = new Set(prev);
+      next.has(step) ? next.delete(step) : next.add(step);
+      return next;
+    });
+
+  const handleDeploy = async (skipSteps?: string[]) => {
     setFinalStatus("running");
-    setSteps([]);
+    if (!skipSteps?.length) setSteps([]);
     setDeployUrl(null);
     setRepoUrl(null);
     setErrorMsg(null);
@@ -67,7 +77,7 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
     const res = await fetch("/api/deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appName, generatedCodePath: codeOutputDir }),
+      body: JSON.stringify({ appName, generatedCodePath: codeOutputDir, skipSteps }),
     });
 
     if (!res.ok) {
@@ -131,13 +141,28 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
       </p>
 
       {finalStatus === "idle" && (
-        <button
-          type="button"
-          onClick={() => void handleDeploy()}
-          className="mt-3 rounded-lg bg-[#712ae2] hover:bg-[#5f24c2] px-4 py-2 text-xs font-semibold text-white transition-colors"
-        >
-          Deploy {appName}
-        </button>
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {ALL_STEPS.map((step) => (
+              <label key={step} className="flex items-center gap-1.5 text-[12px] text-zinc-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualSkip.has(step)}
+                  onChange={() => toggleSkip(step)}
+                  className="accent-zinc-500"
+                />
+                skip: {STEP_LABELS[step]}
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleDeploy(manualSkip.size > 0 ? [...manualSkip] : undefined)}
+            className="rounded-lg bg-[#712ae2] hover:bg-[#5f24c2] px-4 py-2 text-xs font-semibold text-white transition-colors"
+          >
+            Deploy {appName}
+          </button>
+        </div>
       )}
 
       {finalStatus !== "idle" && (
@@ -152,10 +177,20 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
         <p className="mt-2 text-[12px] text-red-600">{errorMsg}</p>
       )}
 
+      {finalStatus === "error" && doneSteps.length > 0 && (
+        <button
+          type="button"
+          onClick={() => void handleDeploy(doneSteps)}
+          className="mt-2 rounded-lg bg-zinc-700 hover:bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition-colors"
+        >
+          Continue from failed step
+        </button>
+      )}
+
       {finalStatus === "done" && (
         <div className="mt-3 flex flex-wrap gap-3 text-[12px]">
           {deployUrl && (
-            <a href={deployUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+            <a href={deployUrl} className="text-indigo-600 underline">
               Open app ↗
             </a>
           )}
@@ -166,7 +201,7 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
           )}
           <button
             type="button"
-            onClick={() => { setFinalStatus("idle"); setJobId(null); }}
+            onClick={() => { setFinalStatus("idle"); setJobId(null); setSteps([]); }}
             className="text-zinc-400 hover:text-zinc-600"
           >
             Deploy again
@@ -174,7 +209,7 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
         </div>
       )}
 
-      {/* suppress unused warning — jobId used for future retry logic */}
+      {/* suppress unused warning */}
       {jobId && null}
     </div>
   );
