@@ -11,7 +11,11 @@ export async function createAppDatabase(params: {
   appName: string;
 }): Promise<string> {
   const dbName = sanitizeDbName(params.appName);
-  const client = new Client({ connectionString: params.connectionString });
+  const isLocal = /localhost|127\.0\.0\.1/.test(params.connectionString);
+  const client = new Client({
+    connectionString: params.connectionString,
+    ssl: isLocal ? false : { rejectUnauthorized: false },
+  });
   await client.connect();
   try {
     await client.query(`CREATE DATABASE "${dbName}"`);

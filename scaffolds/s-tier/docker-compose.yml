@@ -1,7 +1,15 @@
 version: "3.9"
 services:
   frontend:
-    build: .
-    ports:
-      - "80:80"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "80"
+    networks:
+      - dokploy-network
     restart: unless-stopped
+
+networks:
+  dokploy-network:
+    external: true

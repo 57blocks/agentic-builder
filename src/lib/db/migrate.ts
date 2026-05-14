@@ -33,10 +33,11 @@ function maintenancePoolOpts(): ConstructorParameters<typeof Pool>[0] {
     const u = new URL(connStr);
     const socketHost = u.searchParams.get("host");
     return {
-      // No user/password — connect as the OS user (superuser on dev machines)
       host:     socketHost ?? (u.hostname || "localhost"),
       port:     u.port ? Number(u.port) : 5432,
       database: "postgres", // maintenance DB — always exists
+      user:     u.username || undefined,
+      password: u.password || undefined,
       connectionTimeoutMillis: 5_000,
     };
   } catch {

@@ -3,19 +3,29 @@ services:
   backend:
     build:
       context: ./backend
+      dockerfile: Dockerfile
     environment:
       NODE_ENV: production
       PORT: "3001"
       DATABASE_URL: ${DATABASE_URL}
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
+    networks:
+      - dokploy-network
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-    ports:
-      - "3000:80"
-    restart: unless-stopped
+      dockerfile: Dockerfile
+    expose:
+      - "80"
+    networks:
+      - dokploy-network
     depends_on:
       - backend
+    restart: unless-stopped
+
+networks:
+  dokploy-network:
+    external: true

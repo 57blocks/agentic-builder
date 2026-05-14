@@ -26,4 +26,5 @@ export interface DeployJob {
 export interface DeployRequest {
   appName: string;
   generatedCodePath: string;
+  skipSteps?: StepId[];
 }
