@@ -106,5 +106,4 @@ export const STEP_REGISTRY: Record<StepId, StepEntry> = {
   serve: { component: ServeUI, agent: serveAgent, snapshot: createStepDataSnapshot("serve") },
   e2e:   { component: E2eUI,   agent: e2eAgent,   snapshot: createStepDataSnapshot("e2e") },
   deploy:  { component: DeployUI,  agent: deployAgent,  snapshot: createStepDataSnapshot("deploy") },
->>>>>>> b34ccb4 (feat(deploy): wire up full deploy pipeline with Dokploy and stage integration)
 };

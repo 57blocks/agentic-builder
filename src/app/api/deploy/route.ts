@@ -21,14 +21,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let env: { GITHUB_TOKEN: string; DOKPLOY_URL: string; DOKPLOY_TOKEN: string; SHARED_PG_CONNECTION_STRING: string };
+  let env: { GITHUB_TOKEN: string; DOKPLOY_URL: string; DOKPLOY_TOKEN: string; DOKPLOY_DOMAIN: string };
   try {
     env = {
       GITHUB_TOKEN: requireEnv("GITHUB_TOKEN"),
       DOKPLOY_URL: requireEnv("DOKPLOY_URL"),
       DOKPLOY_TOKEN: requireEnv("DOKPLOY_TOKEN"),
       DOKPLOY_DOMAIN: requireEnv("DOKPLOY_DOMAIN"),
-      SHARED_PG_CONNECTION_STRING: requireEnv("SHARED_PG_CONNECTION_STRING"),
     };
   } catch (err) {
     return NextResponse.json(

@@ -28,27 +28,32 @@ beforeEach(() => {
 });
 
 describe("createDokployProject", () => {
-  it("posts to /api/project.create and returns projectId", async () => {
-    mockFetch.mockReturnValueOnce(jsonResponse({ projectId: "proj-1" }));
-    const id = await createDokployProject({ baseUrl: BASE, token: TOKEN, name: "my-app" });
+  it("posts to /api/project.create and returns project + environment ids", async () => {
+    mockFetch.mockReturnValueOnce(jsonResponse({
+      project: { projectId: "proj-1" },
+      environment: { environmentId: "env-1" },
+    }));
+    const result = await createDokployProject({ baseUrl: BASE, token: TOKEN, name: "my-app" });
     expect(mockFetch).toHaveBeenCalledWith(
       `${BASE}/api/project.create`,
       expect.objectContaining({ method: "POST" })
     );
-    expect(id).toBe("proj-1");
+    expect(result).toEqual({ projectId: "proj-1", environmentId: "env-1" });
   });
 });
 
 describe("createDokployCompose", () => {
-  it("posts to /api/compose.create and returns composeId", async () => {
-    mockFetch.mockReturnValueOnce(jsonResponse({ composeId: "comp-1" }));
-    const id = await createDokployCompose({ baseUrl: BASE, token: TOKEN, name: "my-app", projectId: "proj-1" });
-    expect(id).toBe("comp-1");
+  it("posts to /api/compose.create and returns composeId + appName", async () => {
+    mockFetch.mockReturnValueOnce(jsonResponse({ composeId: "comp-1", appName: "my-app-abc" }));
+    const result = await createDokployCompose({
+      baseUrl: BASE, token: TOKEN, name: "my-app", projectId: "proj-1", environmentId: "env-1",
+    });
+    expect(result).toEqual({ composeId: "comp-1", appName: "my-app-abc" });
   });
 });
 
 describe("updateDokployCompose", () => {
-  it("posts to /api/compose.update with all fields", async () => {
+  it("posts to /api/compose.update with git source fields", async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({}));
     await updateDokployCompose({
       baseUrl: BASE,
@@ -60,7 +65,9 @@ describe("updateDokployCompose", () => {
     });
     const body = JSON.parse(vi.mocked(mockFetch).mock.calls[0][1]!.body as string) as Record<string, string>;
     expect(body.composeId).toBe("comp-1");
-    expect(body.repository).toBe("https://github.com/owner/app");
+    expect(body.sourceType).toBe("git");
+    expect(body.customGitUrl).toBe("https://github.com/owner/app");
+    expect(body.customGitBranch).toBe("main");
     expect(body.env).toContain("DATABASE_URL");
   });
 });

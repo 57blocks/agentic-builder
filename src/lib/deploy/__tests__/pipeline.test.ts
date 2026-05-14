@@ -4,12 +4,13 @@ vi.mock("@/lib/pipeline/push-kickoff-repo", () => ({
   readKickoffRepoMetadata: vi.fn(),
   pushGeneratedCodeToKickoffRepo: vi.fn(),
 }));
-vi.mock("../database", () => ({
-  createAppDatabase: vi.fn(),
+vi.mock("@/lib/pipeline/kickoff-database", () => ({
+  readKickoffDatabaseMetadata: vi.fn(),
 }));
 vi.mock("../dokploy", () => ({
   createDokployProject: vi.fn(),
   createDokployCompose: vi.fn(),
+  createDokployDomain: vi.fn(),
   updateDokployCompose: vi.fn(),
   deployDokployCompose: vi.fn(),
   pollDeployStatus: vi.fn(),
@@ -21,8 +22,8 @@ vi.mock("../job-manager", () => ({
 }));
 
 import { readKickoffRepoMetadata, pushGeneratedCodeToKickoffRepo } from "@/lib/pipeline/push-kickoff-repo";
-import { createAppDatabase } from "../database";
-import { createDokployProject, createDokployCompose, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "../dokploy";
+import { readKickoffDatabaseMetadata } from "@/lib/pipeline/kickoff-database";
+import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "../dokploy";
 import { emitStep, completeJob, failJob } from "../job-manager";
 import { runDeployPipeline } from "../pipeline";
 
@@ -30,7 +31,7 @@ const ENV = {
   GITHUB_TOKEN: "gh-token",
   DOKPLOY_URL: "https://dokploy.example.com",
   DOKPLOY_TOKEN: "dk-token",
-  SHARED_PG_CONNECTION_STRING: "postgresql://user:pass@host:5432/postgres",
+  DOKPLOY_DOMAIN: "apps.example.com",
 };
 
 beforeEach(() => {
@@ -42,9 +43,14 @@ beforeEach(() => {
     savedAt: new Date().toISOString(),
   });
   vi.mocked(pushGeneratedCodeToKickoffRepo).mockResolvedValue({ ok: true, message: "Pushed" });
-  vi.mocked(createAppDatabase).mockResolvedValue("postgresql://user:pass@host:5432/my_app");
-  vi.mocked(createDokployProject).mockResolvedValue("proj-1");
-  vi.mocked(createDokployCompose).mockResolvedValue("comp-1");
+  vi.mocked(readKickoffDatabaseMetadata).mockResolvedValue({
+    databaseUrl: "postgresql://user:pass@host:5432/my_app",
+    appName: "my-app",
+    savedAt: new Date().toISOString(),
+  });
+  vi.mocked(createDokployProject).mockResolvedValue({ projectId: "proj-1", environmentId: "env-1" });
+  vi.mocked(createDokployCompose).mockResolvedValue({ composeId: "comp-1", appName: "my-app-abc" });
+  vi.mocked(createDokployDomain).mockResolvedValue(undefined);
   vi.mocked(updateDokployCompose).mockResolvedValue(undefined);
   vi.mocked(deployDokployCompose).mockResolvedValue(undefined);
   vi.mocked(pollDeployStatus).mockResolvedValue("https://app.example.com");
@@ -82,6 +88,22 @@ describe("runDeployPipeline", () => {
     expect(emitStep).toHaveBeenCalledWith("job-1", expect.objectContaining({ step: "verify-repo", status: "error" }));
     expect(failJob).toHaveBeenCalledWith("job-1");
     expect(pushGeneratedCodeToKickoffRepo).not.toHaveBeenCalled();
+  });
+
+  it("calls failJob when database metadata is missing", async () => {
+    vi.mocked(readKickoffDatabaseMetadata).mockResolvedValue(null);
+
+    await runDeployPipeline({
+      jobId: "job-1",
+      appName: "my-app",
+      generatedCodePath: "generated-code",
+      projectRoot: "/project",
+      env: ENV,
+    });
+
+    expect(emitStep).toHaveBeenCalledWith("job-1", expect.objectContaining({ step: "create-database", status: "error" }));
+    expect(failJob).toHaveBeenCalledWith("job-1");
+    expect(createDokployProject).not.toHaveBeenCalled();
   });
 
   it("calls failJob when git push fails", async () => {
