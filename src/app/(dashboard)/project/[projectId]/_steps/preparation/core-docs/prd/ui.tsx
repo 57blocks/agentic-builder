@@ -138,6 +138,8 @@ export function PrdUI(props: StepUIProps) {
   const featureBrief = useStepStore((s) => s.featureBrief);
   const isHydrated = useStepStore((s) => s.isHydrated);
   const executeStep = useStepStore((s) => s.executeStep);
+  const kickoffSessionId = useStepStore((s) => s.kickoffSessionId);
+  const intentMeta = useStepStore((s) => s.steps.intent?.metadata as { classification?: { type?: string } } | undefined);
   // Navigation
   const tier = useStepNavigationStore((s) => s.tier);
   const nextStep = getNextStep("prd", tier);
@@ -327,7 +329,25 @@ export function PrdUI(props: StepUIProps) {
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
-        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => { if (nextStep) props.onNavigate(nextStep); }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
+        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => {
+          // Fire-and-forget memory capture before navigating
+          const finalContent = step?.content ?? "";
+          if (finalContent && kickoffSessionId) {
+            const originalContent = prdHistoryRef.current[0]?.content ?? finalContent;
+            fetch("/api/memory/prd/capture", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: kickoffSessionId,
+                originalPrd: originalContent,
+                finalPrd: finalContent,
+                tier,
+                projectType: intentMeta?.classification?.type ?? "unknown",
+              }),
+            }).catch(() => {/* ignore */});
+          }
+          if (nextStep) props.onNavigate(nextStep);
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
       />
     </div>
   );
