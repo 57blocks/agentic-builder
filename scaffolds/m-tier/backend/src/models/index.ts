@@ -44,12 +44,13 @@ import { sequelize } from "../db";
 // );
 
 export async function syncModels(): Promise<void> {
-  // Without `alter`, existing tables are never updated when models gain columns.
-  // Enable `alter` in non-production (or when DB_SYNC_ALTER=true) so local DBs
-  // stay aligned with the Sequelize models after codegen iterations.
-  const syncAlter =
-    process.env.DB_SYNC_ALTER === "true" ||
-    (process.env.NODE_ENV !== "production" &&
-      process.env.DB_SYNC_ALTER !== "false");
+  // Migrations under `src/database/migrations/` are the source of truth for
+  // schema changes. `sync({ alter: true })` re-runs DDL on every boot which
+  // re-triggers any latent issue in the model definitions (e.g. JSONB
+  // `defaultValue: {}` crashes Sequelize's SQL serializer with "Invalid value
+  // {}"). Default to `alter: false`; opt in only when the developer explicitly
+  // sets `DB_SYNC_ALTER=true` for a quick local schema sync without writing a
+  // migration.
+  const syncAlter = process.env.DB_SYNC_ALTER === "true";
   await sequelize.sync({ alter: syncAlter });
 }
