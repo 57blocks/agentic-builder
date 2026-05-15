@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { PipelineEngine } from "@/lib/pipeline/engine";
 import type { PipelineEvent } from "@/lib/pipeline/types";
+import { wrapPipelineEventHandler } from "@/lib/memory/event-bridge";
 
 export const maxDuration = 300;
 
@@ -13,11 +14,19 @@ export async function POST(request: NextRequest) {
     codeOutputDir,
     fastFromPrd,
     pauseAfterPrd,
+    sessionId,
+    prdEditInstruction,
+    existingPrd,
   } = body as {
     featureBrief?: string;
     codeOutputDir?: string;
     fastFromPrd?: boolean;
     pauseAfterPrd?: boolean;
+    /** Stable client-generated id linking this pipeline run with a
+     *  subsequent kickoff so memory records share the same kickoffId. */
+    sessionId?: string;
+    prdEditInstruction?: string;
+    existingPrd?: string;
   };
 
   const featureBrief =
@@ -34,7 +43,18 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const engine = new PipelineEngine(send);
+      const projectRoot = process.cwd();
+      const memoryAwareSend = wrapPipelineEventHandler(send, {
+        projectRoot,
+        codeOutputDir:
+          typeof codeOutputDir === "string" ? codeOutputDir : undefined,
+        featureBrief,
+        kickoffIdOverride:
+          typeof sessionId === "string" && sessionId.length > 0
+            ? sessionId
+            : undefined,
+      });
+      const engine = new PipelineEngine(memoryAwareSend, projectRoot);
       const run = engine.createRun(featureBrief);
 
       try {
@@ -43,6 +63,14 @@ export async function POST(request: NextRequest) {
             typeof codeOutputDir === "string" ? codeOutputDir : undefined,
           fastFromPrd: fastFromPrd === true,
           pauseAfterPrd: pauseAfterPrd === true,
+          prdEditInstruction:
+            typeof prdEditInstruction === "string" && prdEditInstruction.trim()
+              ? prdEditInstruction.trim()
+              : undefined,
+          existingPrd:
+            typeof existingPrd === "string" && existingPrd.trim()
+              ? existingPrd.trim()
+              : undefined,
         });
 
         // Auto-save pipeline snapshot for debug reuse

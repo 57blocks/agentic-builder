@@ -22,8 +22,22 @@ declare module "koa" {
   }
 
   interface DefaultState {
-    /** User payload populated by `authMiddleware` after JWT verification. */
+    /**
+     * Normalized user identity attached by whichever auth middleware is
+     * registered (email+password JWT in the base scaffold, Privy / Clerk
+     * via `_optional/auth-*` modules). For OAuth providers, `id` is the
+     * EXTERNAL user id (Privy DID, Clerk userId, etc.) — controllers
+     * MUST resolve to a DB row via the `<provider>_id` column before
+     * using it as an FK (see CODEGEN_HARDENING_PLAN.md §4.3).
+     */
     user?: { id: string; email?: string; [key: string]: unknown };
+    /**
+     * Provider-specific token claims for the request, when an OAuth
+     * middleware is wired in. Type narrowed by feature-specific helpers:
+     * Privy → `PrivyVerifiedClaims`, Clerk → `ClerkClaims`, etc.
+     */
+    privy?: unknown;
+    clerk?: unknown;
   }
 }
 

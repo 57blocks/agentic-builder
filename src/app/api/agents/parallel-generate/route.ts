@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import path from "path";
 import {
   TRDAgent,
   SysDesignAgent,
@@ -8,12 +9,10 @@ import {
   VerifierAgent,
 } from "@/lib/agents";
 import type { AgentResult } from "@/lib/agents";
-import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { getDesignStylePreset } from "@/lib/pipeline/design-style-presets";
-import {
-  runPencilLiveSession,
-  type PencilLiveEvent,
-} from "@/lib/pencil-host/live-runner";
+import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
+import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
+import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
 /** Pencil step: LLM (up to 16k tokens) + many batch_design chunks can exceed 5 minutes. */
 export const maxDuration = 600;
@@ -24,6 +23,8 @@ type DocAgentFn = (
   sysDesign: string,
   designSpec: string,
   sessionId: string,
+  prdSpec?: PrdSpec | null,
+  onChunk?: (chunk: string) => void,
 ) => Promise<AgentResult>;
 
 const TIER_STACK_CONSTRAINT: Record<string, string> = {
@@ -56,8 +57,14 @@ function buildAgentMap(
     .filter((s) => s.trim().length > 0)
     .join("\n\n");
   return {
-    trd: (prd, _trd, _sys, _ds, sid) =>
-      new TRDAgent().generateTRD(`${tierConstraint}\n\n${prd}`, undefined, sid),
+    trd: (prd, _trd, _sys, _ds, sid, prdSpec, onChunk) =>
+      new TRDAgent().generateTRD(
+        `${tierConstraint}\n\n${prd}`,
+        undefined,
+        sid,
+        prdSpec ?? null,
+        onChunk,
+      ),
     sysdesign: (prd, trd, _sys, _ds, sid) =>
       new SysDesignAgent().generateSysDesign(
         `${tierConstraint}\n\n${prd}`,
@@ -71,18 +78,33 @@ function buildAgentMap(
         sys,
         sid,
       ),
-    design: (prd, _trd, _sys, _ds, sid) => {
+    design: (prd, _trd, _sys, _ds, sid, _prdSpec, onChunk) => {
       const agent = new DesignAgent();
       const ctx = designAdditional.trim() ? designAdditional : undefined;
       if (referenceImageBase64?.trim()) {
         return agent.generateDesignWithReferenceImage(prd, referenceImageBase64, ctx, sid);
       }
-      return agent.generateDesign(prd, ctx, sid);
+      return agent.generateDesign(prd, ctx, sid, onChunk);
     },
-    qa: (prd, _trd, _sys, _ds, sid) =>
-      new QAAgent().generateAudit(prd, "", sid),
+    qa: (prd, _trd, _sys, _ds, sid, _prdSpec, onChunk) =>
+      new QAAgent().generateAudit(prd, "", sid, onChunk),
     verify: (prd, _trd, _sys, _ds, sid) =>
       new VerifierAgent().verifyAlignment(prd, "", sid),
+    pencil: (prd, _trd, _sys, ds, sid) => {
+      // Temporarily generate a Markdown wireframe spec via LLM instead of launching Pencil.app
+      const wireframeCtx = [
+        designAdditional.trim() ? designAdditional : "",
+        ds.trim() ? `## Confirmed Design Spec\n${ds}` : "",
+        `## Task\nGenerate a detailed **wireframe specification** in Markdown.\n` +
+          `For each screen / key page, produce:\n` +
+          `- ASCII or text-art layout sketch\n` +
+          `- List of UI components with placement notes\n` +
+          `- Key user interactions and state changes\n` +
+          `- Navigation flow between screens\n` +
+          `Use the design tokens and style direction from the Design Spec above. Do NOT output code.`,
+      ].filter(s => s.trim()).join("\n\n");
+      return new DesignAgent().generateDesign(prd, wireframeCtx, sid);
+    },
   };
 }
 
@@ -90,7 +112,7 @@ const TOKEN_ESTIMATES: Record<string, number> = {
   trd: 6000,
   sysdesign: 5000,
   implguide: 4000,
-  design: 3000,
+  design: 16000,
   pencil: 8000,
   qa: 2500,
   verify: 2000,
@@ -118,6 +140,7 @@ export async function POST(request: NextRequest) {
     designStyleId,
     designSpecContent,
     styleReferenceImageBase64,
+    prdSpec,
   } = body as {
     prdContent: string;
     selectedDocs: string[];
@@ -132,20 +155,28 @@ export async function POST(request: NextRequest) {
     designSpecContent?: string;
     /** Base64 data URL of a reference image for style matching. */
     styleReferenceImageBase64?: string;
+    /** Structured PRD spec from `steps.prd.metadata.prdSpec` — used by
+     *  TRD to inject domain.rules as authoritative source. */
+    prdSpec?: PrdSpec | null;
   };
 
   const effectiveTier = (tier ?? "M").toUpperCase() as "S" | "M" | "L";
+  const designVariants = (body as Record<string, unknown>).designVariants as
+    | Array<{ variantId: string; directionPrompt: string }>
+    | undefined;
 
-  if (!prdContent || !selectedDocs || selectedDocs.length === 0) {
+  if (!prdContent || (!designVariants?.length && (!selectedDocs || selectedDocs.length === 0))) {
     return Response.json(
-      { error: "prdContent and selectedDocs are required" },
+      { error: "prdContent and selectedDocs (or designVariants) are required" },
       { status: 400 },
     );
   }
 
   const hasPencilOnlyBatch =
     selectedDocs.includes("pencil") && !selectedDocs.includes("design");
-  if (hasPencilOnlyBatch && !designSpecContent?.trim()) {
+  // Allow pencil-only when a designStyleId is provided — the style preset's
+  // pencilPrompt carries enough design context without a full Design Spec doc.
+  if (hasPencilOnlyBatch && !designSpecContent?.trim() && !designStyleId?.trim()) {
     return Response.json(
       {
         error:
@@ -159,9 +190,13 @@ export async function POST(request: NextRequest) {
   const tierConstraint =
     TIER_STACK_CONSTRAINT[effectiveTier] ?? TIER_STACK_CONSTRAINT.M;
   const stylePreset = getDesignStylePreset(designStyleId);
+  // designDirectionPrompt overrides the preset's designSpecPrompt when provided
+  const designDirectionPrompt = typeof (body as Record<string, unknown>).designDirectionPrompt === "string"
+    ? (body as Record<string, unknown>).designDirectionPrompt as string
+    : undefined;
   const agentMap = buildAgentMap(
     tierConstraint,
-    stylePreset.designSpecPrompt,
+    designDirectionPrompt ?? stylePreset.designSpecPrompt,
     styleReferenceImageBase64,
   );
 
@@ -171,6 +206,43 @@ export async function POST(request: NextRequest) {
       function send(data: unknown) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
+
+      // ── Design-variants mode: single request, 5 parallel variants ──────────
+      if (designVariants && designVariants.length > 0) {
+        send({ type: "variants_start", total: designVariants.length });
+        await Promise.all(
+          designVariants.map(async ({ variantId, directionPrompt }) => {
+            send({ type: "variant_start", variantId });
+            const variantAgentMap = buildAgentMap(
+              tierConstraint,
+              directionPrompt,
+              styleReferenceImageBase64,
+            );
+            try {
+              const result = await variantAgentMap.design(
+                prdContent, "", "", "", sessionId,
+              );
+              send({
+                type: "variant_complete",
+                variantId,
+                content: result.content,
+                costUsd: result.costUsd,
+                durationMs: result.durationMs,
+              });
+            } catch (err) {
+              send({
+                type: "variant_error",
+                variantId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }),
+        );
+        send({ type: "variants_complete" });
+        controller.close();
+        return;
+      }
+      // ── End design-variants mode ──────────────────────────────────────────────
 
       send({
         type: "generation_start",
@@ -206,37 +278,85 @@ export async function POST(request: NextRequest) {
         send({ type: "doc_start", docId, label: DOC_LABELS[docId] ?? docId });
         try {
           let result: AgentResult;
-          if (docId === "pencil") {
-            const specForPencil =
-              ds.trim() ||
-              (typeof designSpecContent === "string" ? designSpecContent : "");
-            result = await runPencilLiveSession({
-              prdContent,
-              designSpec: specForPencil,
-              projectRoot: outputRoot,
-              sessionId,
-              augmentMarkdown: pencilAugmentMarkdown,
-              styleAugment: pencilStyleAugment,
-              onEvent: (event: PencilLiveEvent) => {
-                send({
-                  type: "doc_progress",
-                  docId,
-                  label: DOC_LABELS[docId] ?? docId,
-                  event,
-                });
-              },
-            });
-          } else {
-            const agentFn = agentMap[docId];
-            if (!agentFn) throw new Error(`Unknown doc: ${docId}`);
-            result = await agentFn(prdContent, trd, sys, ds, sessionId);
-          }
+          const agentFn = agentMap[docId];
+          if (!agentFn) throw new Error(`Unknown doc: ${docId}`);
+          result = await agentFn(
+            prdContent, trd, sys, ds, sessionId, prdSpec,
+            (chunk: string) => send({ type: "doc_stream", docId, chunk }),
+          );
           results[docId] = {
             content: result.content,
             costUsd: result.costUsd,
             durationMs: result.durationMs,
             tokens: result.usage.total_tokens,
           };
+
+          // TRD-only side effect: persist §6 schema + §7 rules DSL into
+          // .blueprint/ so kickoff's distributor can fan them out to
+          // workers. Mirrors PipelineEngine.persistTrdArtifacts but for
+          // the parallel-generate flow used by pipeline-ui.
+          let trdArtifactsSummary:
+            | {
+                schemaTs?: string;
+                rulesYaml?: string;
+                pipelineDagYaml?: string;
+              }
+            | undefined;
+          if (docId === "trd") {
+            try {
+              const blueprintDir = path.resolve(process.cwd(), ".blueprint");
+              const persisted = await persistTrdArtifactsFromContent(
+                result.content,
+                blueprintDir,
+              );
+              trdArtifactsSummary = {};
+              if (persisted.written.schemaTs) {
+                trdArtifactsSummary.schemaTs = path.relative(
+                  process.cwd(),
+                  persisted.written.schemaTs,
+                );
+              }
+              if (persisted.written.rulesYaml) {
+                trdArtifactsSummary.rulesYaml = path.relative(
+                  process.cwd(),
+                  persisted.written.rulesYaml,
+                );
+              }
+              if (persisted.written.pipelineDagYaml) {
+                trdArtifactsSummary.pipelineDagYaml = path.relative(
+                  process.cwd(),
+                  persisted.written.pipelineDagYaml,
+                );
+              }
+              if (
+                persisted.rulesValidation &&
+                !persisted.rulesValidation.ok
+              ) {
+                console.warn(
+                  `[parallel-generate] business-rules.dsl.yaml has ${persisted.rulesValidation.warnings.length} warning(s):`,
+                  persisted.rulesValidation.warnings
+                    .map((w) => `${w.code}: ${w.message}`)
+                    .join("; "),
+                );
+              }
+              if (persisted.dagValidation && !persisted.dagValidation.ok) {
+                console.warn(
+                  `[parallel-generate] pipeline-dag.yaml has ${persisted.dagValidation.warnings.length} warning(s):`,
+                  persisted.dagValidation.warnings
+                    .map((w) => `${w.code}: ${w.message}`)
+                    .join("; "),
+                );
+              }
+              console.log(
+                `[parallel-generate] TRD artifacts persisted: schema=${trdArtifactsSummary.schemaTs ?? "(none)"} rules=${trdArtifactsSummary.rulesYaml ?? "(none)"} dag=${trdArtifactsSummary.pipelineDagYaml ?? "(none)"}`,
+              );
+            } catch (e) {
+              console.warn(
+                `[parallel-generate] persistTrdArtifacts warning: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+
           send({
             type: "doc_complete",
             docId,
@@ -245,6 +365,9 @@ export async function POST(request: NextRequest) {
             costUsd: result.costUsd,
             durationMs: result.durationMs,
             tokens: result.usage.total_tokens,
+            ...(trdArtifactsSummary
+              ? { trdArtifacts: trdArtifactsSummary }
+              : {}),
           });
         } catch (error) {
           const msg =

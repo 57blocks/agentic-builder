@@ -100,6 +100,24 @@ export interface KickoffWorkItem {
   acceptanceCriteria?: string[];
   /** PRD requirement IDs this task implements (AC-*, FR-*), for coverage gates. */
   coversRequirementIds?: string[];
+  /** TDD seed plan consumed by future Test Writer / Runtime Executor gates. */
+  tddPlan?: {
+    tests: Array<{
+      id: string;
+      type:
+        | "api-contract"
+        | "frontend-service"
+        | "route-smoke"
+        | "runtime-smoke"
+        | "e2e"
+        | string;
+      priority: "P0" | "P1" | "P2";
+      file: string;
+      command: string;
+      expectedRed: string;
+      expectedGreen: string;
+    }>;
+  };
 }
 
 // ─── Multi-Agent Coding Session ───

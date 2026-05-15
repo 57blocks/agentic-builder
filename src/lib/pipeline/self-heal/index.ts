@@ -43,3 +43,77 @@ export type {
   AuditRepairDispatchInput,
   AuditRepairDispatchResult,
 } from "./audit-repair-dispatch";
+export { runContractUsageCoverage } from "./contract-usage-coverage";
+export type {
+  ContractUsageCoverageInput,
+  ContractUsageCoverageResult,
+  CoverageCaseId,
+  CoverageClassification,
+  CoverageRepairTask,
+  CoveragePolicy,
+} from "./contract-usage-coverage";
+export {
+  runRuntimeIntegrationAudit,
+  formatRuntimeAuditBlock,
+} from "./runtime-integration-audit";
+export type {
+  RuntimeIntegrationAuditInput,
+  RuntimeIntegrationAuditResult,
+  RuntimeAuditFinding,
+  RuntimeAuditRuleId,
+  RuntimeAuditScope,
+  RuntimeAuditSeverity,
+} from "./runtime-integration-audit";
+export { runRuntimeSmokeGate } from "./runtime-smoke-gate";
+export type {
+  RuntimeSmokeFailure,
+  RuntimeSmokeFailureCode,
+  RuntimeSmokeGateInput,
+  RuntimeSmokeGateResult,
+  RuntimeSmokeSuccess,
+} from "./runtime-smoke-gate";
+export { runTscDiagnosticsAsTasks } from "./tsc-diagnostics-as-tasks";
+export type {
+  TscDiagnosticTask,
+  TscDiagnosticsInput,
+  TscDiagnosticsResult,
+} from "./tsc-diagnostics-as-tasks";
+export {
+  checkMigrationCoverage,
+  formatMigrationGapInstruction,
+} from "./migration-coverage";
+export type {
+  MigrationCoverageInput,
+  MigrationCoverageResult,
+  MigrationCoverageGap,
+} from "./migration-coverage";
+export {
+  runMigrationCoverageRepair,
+  formatMigrationCoverageBlock,
+} from "./migration-coverage-repair";
+export type {
+  MigrationRepairTask,
+  MigrationCoverageRepairInput,
+  MigrationCoverageRepairResult,
+} from "./migration-coverage-repair";
+export {
+  computeStagnationReplan,
+  buildReplanContext,
+} from "./stagnation-replan";
+export type {
+  StagnationReplanInput,
+  StagnationReplanResult,
+} from "./stagnation-replan";
+export { AttemptTracker, missingIdsScopeKey } from "./attempt-tracker";
+export type {
+  AttemptScope,
+  AttemptRecord,
+  AttemptHistoryEntry,
+  AttemptOutcome,
+  AttemptTrackerOptions,
+} from "./attempt-tracker";
+export { escalateRepairCircuit } from "./escalate-repair-circuit";
+export type {
+  EscalateRepairCircuitInput,
+  EscalateRepairCircuitResult,
+} from "./escalate-repair-circuit";

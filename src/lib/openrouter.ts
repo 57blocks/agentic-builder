@@ -2,12 +2,19 @@ import {
   GPT5_MODEL_ID,
   gpt5ChatCompletion,
   gpt5StreamChatCompletion,
-} from "./gpt5";
+} from "./providers/gpt5";
+import {
+  chatCompletionsDeepSeekV4,
+  isDeepSeekV4Provider,
+  DEEPSEEK_V4_DEFAULT_BASE,
+  DEEPSEEK_V4_DEFAULT_MODEL,
+} from "./providers/deepseek-v4";
+import { streamChatCompletionsDeepSeekV4 } from "./providers/deepseek-v4-stream";
 import {
   isGeminiProvider,
   geminiChatCompletion,
   geminiStreamChatCompletion,
-} from "./gemini";
+} from "./providers/gemini";
 import type {
   ChatMessage,
   VisionChatMessage,
@@ -31,10 +38,42 @@ export type {
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_CHAT_TIMEOUT_MS = Number(
-  process.env.OPENROUTER_CHAT_TIMEOUT_MS ?? "600000",
+  process.env.OPENROUTER_CHAT_TIMEOUT_MS ?? "120000",
 );
 
+/**
+ * Thrown when our own AbortController fires due to per-call timeout.
+ * Distinct from user-initiated AbortError so chatCompletionWithFallback
+ * can fall through to the next model instead of re-throwing immediately.
+ */
+export class ModelTimeoutError extends Error {
+  constructor(model: string, timeoutMs: number) {
+    super(`Model ${model} timed out after ${timeoutMs}ms`);
+    this.name = "ModelTimeoutError";
+  }
+}
+
 const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o";
+
+function isTruthyEnvFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "on"
+  );
+}
+
+function shouldForceOpenRouter(): boolean {
+  const provider = process.env.LLM_PROVIDER?.trim().toLowerCase();
+  return (
+    provider === "openrouter" ||
+    isTruthyEnvFlag(process.env.USE_OPENROUTER) ||
+    isTruthyEnvFlag(process.env.FORCE_OPENROUTER)
+  );
+}
 
 function openRouterHeaders(apiKey: string): Record<string, string> {
   return {
@@ -111,7 +150,25 @@ export async function chatCompletion(
 ): Promise<OpenRouterResponse> {
   const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
 
-  if (isGeminiProvider()) {
+  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct  model=${dsModel}  base=${dsBase}  (requested=${requestedModel})`,
+    );
+    return chatCompletionsDeepSeekV4(messages, {
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 4096,
+      tools: options.tools,
+      tool_choice: options.tool_choice,
+      response_format: options.response_format,
+      thinking: options.thinking,
+    });
+  }
+
+  if (isGeminiProvider() && !shouldForceOpenRouter()) {
     const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
     console.log(
       `[LLM] provider=gemini  model=${geminiModel}  (requested=${requestedModel})`,
@@ -135,7 +192,9 @@ const FALLBACK_RETRY_DELAY_MS = 2_000;
 
 /**
  * Try an ordered list of models; on LLM-level failure (API error, timeout, empty response)
- * fall through to the next model. Non-LLM errors (e.g. AbortError) are re-thrown immediately.
+ * fall through to the next model.
+ * - ModelTimeoutError (our own per-call timeout) → treated as soft failure, falls to next model.
+ * - AbortError (external cancellation, e.g. user killed the request) → re-thrown immediately.
  */
 export async function chatCompletionWithFallback(
   messages: ChatMessage[],
@@ -166,6 +225,7 @@ export async function chatCompletionWithFallback(
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
 
+      // External cancellation (user/upstream abort) — stop immediately, do not try next model
       if (lastErr.name === "AbortError") throw lastErr;
 
       const isLast = i === modelChain.length - 1;
@@ -176,10 +236,15 @@ export async function chatCompletionWithFallback(
         throw lastErr;
       }
 
+      const reason =
+        lastErr.name === "ModelTimeoutError" ? "timeout" : "error";
       console.warn(
-        `[LLM Fallback] model=${model} failed (${lastErr.message.slice(0, 150)}), trying next: ${modelChain[i + 1]}`,
+        `[LLM Fallback] model=${model} ${reason} (${lastErr.message.slice(0, 150)}), trying next: ${modelChain[i + 1]}`,
       );
-      await new Promise((r) => setTimeout(r, FALLBACK_RETRY_DELAY_MS));
+      // Skip delay on timeout — the model already burned the wait time
+      if (lastErr.name !== "ModelTimeoutError") {
+        await new Promise((r) => setTimeout(r, FALLBACK_RETRY_DELAY_MS));
+      }
     }
   }
 
@@ -190,7 +255,25 @@ export async function streamChatCompletion(
   messages: ChatMessage[],
   options: Omit<OpenRouterOptions, "stream"> = {},
 ) {
-  if (isGeminiProvider()) {
+  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+    const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct-stream  model=${dsModel}  base=${dsBase}  (requested=${requestedModel})`,
+    );
+    return streamChatCompletionsDeepSeekV4(messages, {
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 4096,
+      tools: options.tools,
+      tool_choice: options.tool_choice,
+      response_format: options.response_format,
+      thinking: options.thinking,
+    });
+  }
+  if (isGeminiProvider() && !shouldForceOpenRouter()) {
     return geminiStreamChatCompletion(messages, options);
   }
   if (options.model === GPT5_MODEL_ID) {
@@ -223,14 +306,15 @@ export async function openRouterChatCompletion(
     response_format,
     reasoning,
     thinking,
+    timeoutMs: perCallTimeoutMs,
   } = options;
 
   const controller = new AbortController();
-  const timeoutMs =
-    Number.isFinite(OPENROUTER_CHAT_TIMEOUT_MS) &&
-    OPENROUTER_CHAT_TIMEOUT_MS > 0
+  const globalTimeout =
+    Number.isFinite(OPENROUTER_CHAT_TIMEOUT_MS) && OPENROUTER_CHAT_TIMEOUT_MS > 0
       ? OPENROUTER_CHAT_TIMEOUT_MS
-      : 90_000;
+      : 120_000;
+  const timeoutMs = perCallTimeoutMs ?? globalTimeout;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
@@ -255,9 +339,7 @@ export async function openRouterChatCompletion(
     });
   } catch (error) {
     if ((error as { name?: string })?.name === "AbortError") {
-      throw new Error(
-        `OpenRouter request timeout after ${timeoutMs}ms (model=${model})`,
-      );
+      throw new ModelTimeoutError(model, timeoutMs);
     }
     throw error;
   } finally {

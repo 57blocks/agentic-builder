@@ -1,0 +1,11 @@
+version: 1
+pipelines:
+  - id: scoring-cycle
+    description: "5-minute stablecoin risk scoring run"
+    schedule: { cron: "*/5 * * * *" }
+    failure: { strategy: continue, retries: 0 }
+    nodes:
+      - { id: collect,   service: DataAdapterService,   function: fetchAllMetrics }
+      - { id: normalize, service: NormalizationService, function: executeNormalization,   dependsOn: [collect] }
+      - { id: score,     service: ScoringEngine,        function: calculateComposite,      dependsOn: [normalize] }
+      - { id: alert,     service: AlertService,          function: generateAlerts,         dependsOn: [score] }

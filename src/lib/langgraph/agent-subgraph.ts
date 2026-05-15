@@ -1,4 +1,5 @@
 import path from "path";
+import * as nodeFs from "fs/promises";
 import { StateGraph, START, END } from "@langchain/langgraph";
 import {
   WorkerStateAnnotation,
@@ -20,7 +21,15 @@ import {
   type ChatMessage,
   chatCompletionWithFallback,
 } from "@/lib/openrouter";
-import { invokeCodegenOrOpenRouter } from "@/lib/codegen-openai-compatible";
+import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
+import { recallAndPrepareInject } from "@/lib/memory/recall-context";
+import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
+import { classifyFailureMode } from "@/lib/memory/distill/failure-mode";
+import { parseMemoryCites, recordMemoryCites } from "@/lib/memory/cite";
+import {
+  checkMigrationCoverage,
+  formatMigrationGapInstruction,
+} from "@/lib/pipeline/self-heal/migration-coverage";
 import { resolveModel } from "@/lib/openrouter";
 import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
 import type {
@@ -55,12 +64,24 @@ const MAX_OUTPUT_TOKENS = (() => {
   if (!Number.isFinite(raw) || raw <= 0) {
     return DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS;
   }
-  return Math.min(Math.max(Math.floor(raw), 1024), 32768);
+  // Cap raised to 128K to support large-context models (e.g. DeepSeek V4 Pro).
+  return Math.min(Math.max(Math.floor(raw), 1024), 131_072);
 })();
 const MAX_TASK_GENERATION_RETRIES = 2;
-const MAX_WORKER_TOOL_ITERATIONS = 6;
+const MAX_WORKER_TOOL_ITERATIONS = 10;
 const MAX_WORKER_TOOL_OUTPUT_CHARS = 12000;
 const WORKER_LLM_HEARTBEAT_MS = 10_000;
+// Raise the iteration ceiling so complex tasks have enough read rounds.
+// 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
+// enough budget while still bounding the worst case.
+// Anti read-only spiral: inject a nudge when the model has read for too long.
+// Set relative to MAX_WORKER_TOOL_ITERATIONS so the nudge happens near the end,
+// not in the middle — we don't want to cut short legitimate reads.
+const READ_STALL_NUDGE_AFTER = 5;        // nudge at round 5/10
+// Force tool_choice:"none" only when very close to the limit, as a last resort.
+// At this point the model has had ample reads; we'd rather get imperfect code
+// than throw an iteration-exceeded error.
+const READ_STALL_FORCE_WRITE_AFTER = 8;  // force-write at round 8/10
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -123,10 +144,30 @@ const RALPH_FAILED_RE = /<promise>TASK_FAILED:\s*([\s\S]*?)<\/promise>/;
  */
 const FRONTEND_IMPORT_RULES = `
 ## Frontend import path rules
-- Read the provided \`vite.config.ts\` / \`tsconfig.json\` context before writing imports.
-- If those files show \`@\` mapped to \`./src\`, use the \`@/\` alias for cross-directory imports.
-- If no alias is configured, use normal relative imports and do NOT invent \`@/\`.
+- ALWAYS call \`read_file("frontend/vite.config.ts")\` before writing any import that uses the \`@/\` alias.
+- Only use \`@/\` imports if \`vite.config.ts\` already contains a \`resolve.alias\` block mapping \`@\` to \`./src\` (or similar).
+- If \`@/\` alias is NOT yet configured in \`vite.config.ts\`, you MUST add it before (or in the same write-batch as) any file that uses it:
+  \`\`\`ts
+  import path from "path";
+  // inside defineConfig:
+  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  \`\`\`
+  Also ensure \`tsconfig.app.json\` (or \`tsconfig.json\`) has \`"paths": { "@/*": ["src/*"] }\` under \`compilerOptions\`.
+- If no alias exists and you cannot update the config, fall back to relative imports and do NOT invent \`@/\`.
 - If the project includes a shared package, import it using the package name defined in its \`package.json\` (for example \`@project/shared\`), never via deep relative paths into another package.
+`;
+
+const TESTID_CONTRACT_RULES = `
+## data-testid contract (HARD RULE — required for E2E tests to pass)
+If a \`UI_CONTRACT.md\` file exists at the project root, read it BEFORE writing any component.
+It lists every required \`data-testid\` attribute and the exact DOM element it belongs to.
+
+Even without a contract file, follow these conventions unconditionally:
+- Every significant UI region (display area, keypad container, app title, footer hint, overlay) MUST carry \`data-testid\` on its outermost element.
+- Interactive elements (buttons, inputs) MUST carry \`data-testid\` derived from their visible label or id.
+- Button testids follow the pattern \`<feature>-btn-<label>\` using the **raw visible character** as label (e.g. \`calc-btn-.\` for the decimal button, NOT \`calc-btn-Decimal\`).
+- When a button's \`aria-label\` would differ from the visible symbol (e.g. "Decimal" vs "."), do NOT override with a word alias — keep \`aria-label\` equal to the symbol so role-based Playwright queries still work.
+- Do not remove or rename existing testids; only add new ones.
 `;
 
 const WORKER_READONLY_TOOLS_GUIDE = `
@@ -235,10 +276,29 @@ Generate React + TypeScript + Tailwind code for the assigned task.
 - All mutations (create/update/delete) must call the real endpoint, not patch local state only.
 - Wrap awaited calls driving loading state with a min-duration helper (~400 ms) so spinners stay visible long enough for E2E assertions.
 
-**Auth:**
-- If implementing \`AuthContext\`/\`AuthProvider\`: read token/user from localStorage on mount, expose \`login(token, user)\`/\`logout()\`, set \`isAuthenticated\` from token presence. Never ship a no-op stub.
+**Framework pitfalls (must follow exactly — these are common production crashes):**
+- **\`useSyncExternalStore\` snapshot caching (HARD RULE):** When implementing a custom store consumed via \`useSyncExternalStore\`, \`getSnapshot()\` MUST return the SAME object reference until state actually changes. Build a \`cachedSnapshot\` variable inside the setter (the function that mutates state) and return it from \`getSnapshot()\`. Returning a fresh object on every call (\`return { isAuthenticated: !!token, accessToken: token }\`) triggers React's "Maximum update depth exceeded" loop because React sees a "new" snapshot on every render. Pattern:
+    \`\`\`ts
+    let snapshot = { isAuthenticated: false, accessToken: null };
+    function setStore(next: Partial<typeof snapshot>) {
+      snapshot = { ...snapshot, ...next };  // rebuild ONCE per real change
+      listeners.forEach((l) => l());
+    }
+    function getSnapshot() { return snapshot; }   // return cached ref
+    \`\`\`
+- **\`useBlocker\` requires a data router (HARD RULE):** \`useBlocker\` from \`react-router-dom\` only works inside \`createBrowserRouter\` (data router). If the project uses \`<BrowserRouter>\` (check \`frontend/src/main.tsx\` BEFORE importing \`useBlocker\`), DO NOT import \`useBlocker\` — it crashes with "useBlocker must be used within a data router". Implement unsaved-changes blocking with \`useState\` (\`pendingNavigation\` + \`requestNavigation\` callback) instead.
+- **Data-router-only hooks**: \`useLoaderData\`, \`useActionData\`, \`useFetcher\`, \`useRouteLoaderData\`, \`useNavigation\` are also data-router-only. Same check applies.
+- **\`useEffect\` cleanup typing**: Do NOT annotate effect callbacks with \`(): void =>\`. The callback may return a cleanup function so the type must be inferred. Write \`useEffect(() => { ... })\`.
+
+**Auth state derivation (HARD RULE — applies to email+password AND OAuth projects):**
+- \`isAuthenticated\` is derived from the presence of an access token, NOT a separate boolean field that can drift. Same for \`hasCompletedOnboarding\` — derive from the user object's onboarding fields (e.g. \`!!user.style_tag\`), do NOT keep a parallel boolean state.
+- The backend is the source of truth for both fields. On \`/api/users/me\` response, set local state from the response — do NOT compute \`hasCompletedOnboarding\` from frontend-only signals.
+- \`AuthContext\` / auth store: read token from localStorage on mount, expose \`login(token, user?)\` / \`logout()\`. Never ship a no-op stub. When using a custom store + \`useSyncExternalStore\`, follow the snapshot caching pitfall above.
+- For OAuth projects (when \`scaffolds/<tier>/_optional/auth-privy\` etc. is applied — check \`.blueprint/scaffold-applied.json\` for the list): the scaffold has ALREADY shipped \`frontend/src/providers/PrivyProvider.tsx\`, an OAuth-aware \`AppProviders.tsx\`, an OAuth-aware \`LoginModal.tsx\`, and \`frontend/src/hooks/usePrivyAuthBridge.ts\`. Your job is ONLY to: (a) call \`usePrivyAuthBridge()\` once near the root (e.g. inside the top-level layout), and (b) pass \`onLogin={(token) => useAuth().login(token)}\` to \`<LoginModal>\` from the landing/login page. DO NOT re-implement these files.
+- For email+password projects (no \`auth-*\` optional applied): the base \`LoginModal.tsx\` is an email+password form. Implement \`POST /api/auth/login\` flow that returns a JWT and call \`useAuth().login(jwt)\` from the landing page.
 
 ${FRONTEND_IMPORT_RULES}
+${TESTID_CONTRACT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.
@@ -269,6 +329,75 @@ Generate backend code (routes, services, domain logic) for the assigned task.
 - JWT helpers: \`signJwt\` / \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Never call \`jsonwebtoken\` directly in feature code.
 - Every endpoint in \`API_CONTRACTS.json\` for this domain must be implemented and registered.
 
+**External identity vs database primary key (HARD RULE — when an OAuth provider is wired in):**
+When the project applies an \`_optional/auth-*\` scaffold (Privy, Clerk, Auth0, …), \`ctx.state.user.id\` is the EXTERNAL provider id (Privy DID like \`did:privy:cmoir...\`, Clerk userId, Auth0 sub) — NOT your database row's primary key. The User row stores it as a SEPARATE column (typically \`privy_id\` / \`clerk_id\` / \`external_id\`); the DB primary key is an internal UUID.
+
+In every controller / service that consumes \`ctx.state.user.id\`, ALWAYS resolve to the DB row first:
+\`\`\`ts
+const user = await User.findOne({ where: { privy_id: ctx.state.user.id } });
+if (!user) ctx.throw(404, "User not found");
+// from here, use \`user.id\` (UUID) for any FK queries.
+const items = await Feed.findAll({ where: { user_id: user.id } });
+\`\`\`
+NEVER pass the external id directly into Sequelize queries that expect a UUID FK — Postgres throws \`invalid input syntax for type uuid: "did:privy:..."\`. NEVER call \`User.findByPk(ctx.state.user.id)\` when \`ctx.state.user.id\` is an external id; \`findByPk\` looks up by primary key. Common pattern: extract a small helper \`async function resolveDbUser(ctx) { ... }\` per controller and call it at the top of every handler.
+
+**Background jobs (queue / worker / SSE) — must include lifecycle:**
+When implementing a background pipeline (feed aggregator, market scanner, ingestion job, scheduled digest), the SAME PR / task MUST include all of:
+
+1. \`enqueueXxx(userId)\` returns a \`run_id\`. Default impl is in-process (Promise-based) so the demo runs without Redis. Behind \`USE_REDIS_QUEUE=1\` flag, route through BullMQ. NEVER block on \`enqueueXxx\` for more than ~1.5s — wrap with a timeout and resolve early so the calling HTTP handler isn't held hostage by a missing Redis.
+2. The worker MUST use the same \`run_id\` end-to-end. Do NOT call \`randomUUID()\` inside the worker to overwrite the id; if you do, the SSE / status endpoint can't find the run.
+3. Public refresh endpoint MUST call \`clearActiveRunsForUser(userId)\` BEFORE starting a new run. \`clearActiveRunsForUser\` updates any existing \`status="running"\` rows for the user to \`failed\` with a \`completed_at\` timestamp. Without this, a crashed previous run blocks every retry with \`ALREADY_RUNNING\`.
+4. Status / stream endpoints MUST distinguish run-id formats:
+   \`\`\`ts
+   if (runId.startsWith("inproc:")) {
+     // memory-backed run: subscribe to in-process EventEmitter; do NOT touch DB
+   } else if (isUuid(runId)) {
+     const run = await XxxRun.findByPk(runId);
+     // ...
+   } else {
+     ctx.throw(400, "Invalid run_id format");
+   }
+   \`\`\`
+   Calling \`findByPk\` on an \`inproc:\` id throws \`invalid input syntax for type uuid\` and 5xxs the SSE stream.
+5. Structured file logging at every step (start / external-call / external-success / external-fail / step-N-success / complete / fail) at \`<backend>/logs/<feature>.log\`. Use a tiny \`appendLog(line)\` helper in the worker, not \`console.log\` — log files are how operators debug stalls.
+6. \`startXxxWorker()\` MUST be invoked from \`backend/src/server.ts\` on startup. Without this call the in-process queue has no consumer and \`enqueueXxx\` resolves with a \`run_id\` that NEVER advances → the user sees an indefinite spinner.
+
+**Empty results vs failure (HARD RULE for any aggregation / search pipeline):**
+When a multi-source aggregation pipeline returns zero rows from ALL upstream sources, the run MUST complete with \`status="completed"\` and an empty payload (e.g. \`story_count=0\`, clear the user's existing items). It MUST NOT throw \`NO_SOURCES\` / \`Zero stories\` / \`AGGREGATION_FAILED\`. Empty result is a normal user-visible state, NOT an error — the frontend renders an "empty feed" placeholder, the user gets a clear next-step ("try changing your topics"), and the run is recoverable. Throwing on empty turns a benign empty state into a hard failure that leaves stale \`running\` rows in the DB.
+
+**LLM client abstraction (HARD RULE when the project declares an \`LLM_*\` env bundle):**
+When the resource-detector emitted \`LLM_PROVIDER\` + \`LLM_API_KEY\` + \`LLM_BASE_URL\` + \`LLM_MODEL\` (check the External Resources block at the top of your task context), every LLM call MUST go through ONE provider-aware client at \`backend/src/services/llmService.ts\`:
+
+- The client reads \`LLM_PROVIDER\` (\`"openai" | "gemini" | "anthropic" | "openrouter"\`) and instantiates the matching adapter at module load.
+- Default model = \`process.env.LLM_MODEL\`. Default base URL = \`process.env.LLM_BASE_URL\` when set, else the provider's standard URL.
+- ALL feature code (ranking, summarisation, classification, embeddings) calls \`llmService.chat(messages, opts)\` / \`llmService.embed(text)\` — never instantiates \`new OpenAI(...)\` / Gemini SDK / Anthropic SDK directly.
+- NEVER hardcode \`"https://api.openai.com/v1"\` / \`"gpt-4o-mini"\` / a vendor-specific env var like \`OPENAI_API_KEY\` in feature files. Switching providers must be a one-line env change with zero source edits.
+
+If you're tempted to import \`OpenAI\` from \`"openai"\` inside a service file, STOP — go through \`llmService\` instead. The tests / repair gates check for direct vendor imports and will fail.
+
+**API routes manifest (HARD RULE — required whenever this task adds or changes HTTP routes):**
+After all your code files, emit ONE manifest declaring every endpoint you implemented in THIS task. Path: \`_meta/routes/<feature-slug>.json\` at the **project root** (NOT inside \`backend/\`). \`<feature-slug>\` is a kebab-case slug for your domain — pick \`auth.json\`, \`tasks-crud.json\`, \`feeds-stream.json\`, whatever uniquely identifies this task. Different tasks must use different slugs (collisions silently overwrite).
+
+The manifest is a JSON array; each entry:
+\`\`\`json
+{
+  "service": "auth",
+  "method": "POST",
+  "endpoint": "/api/auth/login",
+  "requestFields": "{ email: string; password: string }",
+  "responseFields": "{ token: string; user: { id: string; email: string } }",
+  "authType": "none",
+  "description": "log in with email + password"
+}
+\`\`\`
+- \`endpoint\` is the FULL path the frontend will call, including any \`/api\` mount prefix.
+- \`method\` is uppercase: \`GET\` | \`POST\` | \`PUT\` | \`PATCH\` | \`DELETE\`.
+- \`requestFields\` / \`responseFields\` are TypeScript type literals copied verbatim from your handler's actual types — NOT prose. Use \`"none"\` if the body / response is empty.
+- \`authType\` is \`"none"\` | \`"bearer"\` | \`"session"\`.
+- If the task implements zero HTTP routes (pure internal services), skip the manifest.
+
+The frontend agent reads this file as the source of truth for API calls. Declaring an endpoint you didn't implement → runtime 404. Implementing routes but skipping the manifest → frontend guesses paths and field names, usually wrong.
+
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.
@@ -282,6 +411,13 @@ Generate comprehensive test suites: unit, integration, e2e.
 Frameworks: Vitest, @testing-library/react, Playwright, k6.
 
 Read the Project Convention Card in context for project-specific paths before writing any imports.
+
+**E2E selector rules (HARD RULE — selector mismatches cause every test to fail):**
+- Before writing any Playwright selector, check whether a \`UI_CONTRACT.md\` exists at the project root and read it.
+- Always use primary \`data-testid\` selectors (e.g. \`[data-testid='calc-btn-.']\`) as the first choice.
+- Role/text-based selectors are acceptable ONLY as secondary fallback via \`.or()\`, with the testid selector as primary.
+- If a required \`data-testid\` is missing from the component, ADD it to the component AND document it in \`UI_CONTRACT.md\` in the same task. Never write a test that relies on a testid that does not yet exist in the source.
+- Button testids follow the pattern \`<feature>-btn-<label>\` where label is the **raw visible character** (e.g. \`calc-btn-.\` for the decimal key). Do NOT use the word alias (e.g. \`calc-btn-Decimal\` is wrong).
 
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
@@ -486,7 +622,57 @@ export async function buildProjectConventionCard(
     const hasSequelize = backendPkg.includes('"sequelize"');
     if (hasKoa)  lines.push("- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation");
     if (hasExpress) lines.push("- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`");
-    if (hasSequelize) lines.push("- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.");
+    if (hasSequelize) {
+      lines.push("- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.");
+      lines.push(
+        "- **Sequelize migration RULE (CRITICAL)**: If your task modifies any " +
+          "file under `backend/src/models/` (add/remove column, change type, " +
+          "change association, change index), you MUST also write a NEW " +
+          "migration under `backend/src/database/migrations/NNNN_<short-desc>.ts`. " +
+          "NNNN is one greater than the highest existing migration number. " +
+          "Export both `async up({ context: queryInterface })` and " +
+          "`async down({ context: queryInterface })` covering every change. " +
+          "Do NOT modify existing migrations — always add a new file. The " +
+          "post-task migration-coverage check will flag missing migrations " +
+          "and create a repair task. The umzug runner in `src/database/runMigrations.ts` " +
+          "applies these on backend startup.",
+      );
+
+      // ── TimescaleDB safety RULE ─────────────────────────────────────────
+      // Fires when the project references TimescaleDB anywhere — db.ts
+      // helper, PRD/TRD mention, or existing migrations. Raw
+      // `CREATE EXTENSION timescaledb` in migrations is the single most
+      // common reason an M-tier backend won't start on a fresh Postgres.
+      const timescaleHelper = await fsRead(
+        "backend/src/utils/timescale.ts",
+        outputDir,
+      );
+      const dbInit = await fsRead("backend/src/db.ts", outputDir);
+      const usesTimescale =
+        (!timescaleHelper.startsWith("FILE_NOT_FOUND") &&
+          !timescaleHelper.startsWith("REJECTED")) ||
+        (!dbInit.startsWith("FILE_NOT_FOUND") &&
+          /timescale|TIMESCALE_DISABLED|hypertable/i.test(dbInit));
+      if (usesTimescale) {
+        lines.push(
+          "- **TimescaleDB safety RULE (CRITICAL)**: TimescaleDB is NOT part " +
+            "of stock PostgreSQL — Homebrew, Docker dev images, CI runners, " +
+            "and most cloud preview DBs do not have it. Calling " +
+            "`CREATE EXTENSION timescaledb` or `create_hypertable` directly " +
+            "in any migration's `up()` body will THROW and kill backend " +
+            "startup. Use the helpers in `backend/src/utils/timescale.ts` " +
+            "instead — they respect `TIMESCALE_DISABLED=1` (set in `.env.example`) " +
+            "and silently fall back to plain Postgres tables when the " +
+            "extension is unavailable. Specifically: " +
+            "(a) `enableTimescaleExtension(sequelize)` for CREATE EXTENSION; " +
+            "(b) `createHypertableIfPossible(queryInterface, 'table', 'time_col')` " +
+            "for hypertable conversion; " +
+            "(c) `runTimescaleQuery(sequelize, sql, 'description')` for " +
+            "compression / retention / continuous aggregate SQL. " +
+            "NEVER inline raw Timescale SQL in a migration's up() body.",
+        );
+      }
+    }
   }
 
   // ── Route registrar convention ────────────────────────────────────────────
@@ -502,6 +688,50 @@ export async function buildProjectConventionCard(
   const jwtHelper = await fsRead("backend/src/utils/jwt.ts", outputDir);
   if (!jwtHelper.startsWith("FILE_NOT_FOUND")) {
     lines.push("- **JWT**: use `signJwt`/`verifyJwt` from `backend/src/utils/jwt.ts`. Never call `jsonwebtoken` directly in feature code.");
+  }
+
+  // ── Shared schema (TRD §6 product) ───────────────────────────────────────
+  // Detect either side: distributor writes both for M-tier; for S/L only one
+  // location applies. If found, instruct workers to import from it rather
+  // than re-declare any type whose name appears there.
+  const sharedSchemaCandidates = [
+    "frontend/src/shared/schema.ts",
+    "backend/src/shared/schema.ts",
+    "src/shared/schema.ts",
+    "packages/shared/src/schema.ts",
+  ];
+  const presentSchemas: string[] = [];
+  for (const p of sharedSchemaCandidates) {
+    const content = await fsRead(p, outputDir);
+    if (
+      !content.startsWith("FILE_NOT_FOUND") &&
+      !content.startsWith("REJECTED")
+    ) {
+      presentSchemas.push(p);
+    }
+  }
+  if (presentSchemas.length > 0) {
+    lines.push(
+      `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
+    );
+  }
+
+  // ── Workflow DAG (TRD §8 product) ────────────────────────────────────────
+  // When pipeline-dag.yaml exists, the project has multi-step deterministic
+  // service chains. Workers implementing those services MUST follow the
+  // declared order and failure strategy.
+  const dagContent = await fsRead(".blueprint/pipeline-dag.yaml", outputDir);
+  if (
+    !dagContent.startsWith("FILE_NOT_FOUND") &&
+    !dagContent.startsWith("REJECTED")
+  ) {
+    lines.push(
+      "- **Workflow DAG (CANONICAL)**: `.blueprint/pipeline-dag.yaml` defines " +
+        "ordered service chains. **Read it before implementing any service " +
+        "named in a node.** Call services in `dependsOn` order, honor the " +
+        "declared `failure.strategy` (abort / continue / retry-N), and do " +
+        "NOT invent a different chain. The file is scaffold-protected.",
+    );
   }
 
   // ── Playwright webServer & health route (E2E infra contract) ──────────────
@@ -582,11 +812,36 @@ async function executeWorkerReadonlyTool(
   }
 }
 
+/**
+ * Context required for the worker loop to trigger a second-pass memory
+ * recall mid-task when a fresh error signal appears in tool output or
+ * model content. When omitted, second-pass recall is silently disabled
+ * (loop behaves identically to before).
+ */
+interface SecondaryRecallContext {
+  agent: string;
+  role?: string;
+  task: {
+    id?: string;
+    title?: string;
+    description?: string;
+    files?: string[];
+  };
+  projectRoot?: string;
+  kickoffId?: string;
+  layers?: ("L1" | "L2")[];
+  /** Patterns already injected by the primary recall — excluded from
+   *  second-pass candidates so we don't re-inject the same blocks. */
+  primaryInjectedIds: string[];
+  tokenBudget?: number;
+}
+
 async function runCodegenWorkerLoop(
   messages: ChatMessage[],
   outputDir: string,
   sessionId?: string,
   workerLabel?: string,
+  recallCtx?: SecondaryRecallContext,
 ): Promise<{
   content: string;
   rawContent: string;
@@ -595,13 +850,46 @@ async function runCodegenWorkerLoop(
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** Pattern ids injected by the secondary recall (empty if not fired). */
+  secondaryInjectedIds: string[];
 }> {
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
+  let consecutiveReadRounds = 0;
+  // Track second-pass recall state so we fire it at most once per worker
+  // run — otherwise a chatty model that mentions errors in every round
+  // would burn through the L1 store with redundant injects.
+  let didSecondaryRecall = false;
+  const primaryIds = new Set(recallCtx?.primaryInjectedIds ?? []);
+  const injectedIds = new Set(primaryIds);
+  const secondaryInjectedIds: string[] = [];
 
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
+    // Anti-spiral: inject a nudge message after too many consecutive read rounds.
+    if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
+      console.log(
+        `[Worker] Read-stall nudge after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+      );
+      messages.push({
+        role: "user",
+        content:
+          `You have spent ${consecutiveReadRounds} rounds reading files. ` +
+          `You now have enough context. STOP calling read tools. ` +
+          `Output your implementation NOW using \`\`\`file:path\`\`\` blocks. ` +
+          `Do not read any more files — write the code directly.`,
+      });
+    }
+
+    // Anti-spiral: after even more stall, force the model to output text (no tool calls).
+    const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    if (forceWrite) {
+      console.log(
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+      );
+    }
+
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
@@ -613,8 +901,9 @@ async function runCodegenWorkerLoop(
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
       openRouterVariant: "codeGen",
-      tools: WORKER_READONLY_TOOLS,
-      tool_choice: "auto",
+      // When forcing write, omit tools entirely so the model cannot call them.
+      tools: forceWrite ? undefined : WORKER_READONLY_TOOLS,
+      tool_choice: forceWrite ? "none" : "auto",
     }).finally(() => {
       clearInterval(heartbeat);
     });
@@ -646,10 +935,15 @@ async function runCodegenWorkerLoop(
       );
     }
 
+    const reasoningContent = choice?.message?.reasoning_content;
     messages.push({
       role: "assistant",
       content,
-      tool_calls: toolCalls,
+      // Omit tool_calls entirely when empty — DeepSeek V4 rejects [] with a 400.
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      // DeepSeek V4 thinking mode: echo reasoning_content back so the API
+      // doesn't reject the next turn with "must be passed back" error.
+      ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
     });
 
     if (toolCalls.length === 0) {
@@ -661,9 +955,14 @@ async function runCodegenWorkerLoop(
         promptTokens,
         completionTokens,
         totalTokens,
+        secondaryInjectedIds,
       };
     }
 
+    // All tool calls in this round were read-only — increment the stall counter.
+    consecutiveReadRounds++;
+
+    const toolResultTexts: string[] = [];
     for (const toolCall of toolCalls) {
       let args: Record<string, unknown>;
       try {
@@ -685,12 +984,80 @@ async function runCodegenWorkerLoop(
         name: toolCall.function.name,
         content: result,
       });
+      toolResultTexts.push(result);
+    }
+
+    // Second-pass memory recall: if the model's content or any tool result
+    // exposes a fresh error signal we haven't seen before, fetch memories
+    // tailored to that error and append them as a system message. Fired
+    // at most once per worker run — see didSecondaryRecall above.
+    if (recallCtx && !didSecondaryRecall) {
+      const errorSignal = detectErrorSignalForRecall(content, toolResultTexts);
+      if (errorSignal) {
+        didSecondaryRecall = true;
+        const recall = await recallAndPrepareInject({
+          agent: recallCtx.agent,
+          role: recallCtx.role,
+          task: {
+            ...recallCtx.task,
+            description:
+              `${recallCtx.task.description ?? ""}\n\n## Encountered error signal\n${errorSignal.snippet}`.trim(),
+          },
+          projectRoot: recallCtx.projectRoot,
+          kickoffId: recallCtx.kickoffId,
+          layers: recallCtx.layers,
+          tokenBudget: recallCtx.tokenBudget,
+          excludeIds: Array.from(injectedIds),
+          pass: "secondary",
+        });
+        if (recall.block) {
+          for (const r of recall.active) {
+            injectedIds.add(r.id);
+            if (!primaryIds.has(r.id)) secondaryInjectedIds.push(r.id);
+          }
+          messages.push({
+            role: "system",
+            content:
+              `## Memory · second-pass recall (failure-mode: ${errorSignal.mode})\n` +
+              recall.block,
+          });
+        }
+      }
     }
   }
 
   throw new Error(
     `Worker tool loop exceeded ${MAX_WORKER_TOOL_ITERATIONS} iterations without final code output.`,
   );
+}
+
+/**
+ * Scan model output and tool results for a fresh failure-mode signal. We
+ * use the existing failure-mode classifier so the trigger language stays
+ * consistent with the metric bucketing.
+ *
+ * Returns the first non-"unknown" mode + a short snippet for the prompt
+ * augmentation, or null when nothing suspicious is present.
+ */
+export function detectErrorSignalForRecall(
+  modelContent: string,
+  toolResultTexts: string[],
+): { mode: string; snippet: string } | null {
+  const candidates: { source: "model" | "tool"; text: string }[] = [];
+  if (modelContent) candidates.push({ source: "model", text: modelContent });
+  for (const t of toolResultTexts) {
+    if (t) candidates.push({ source: "tool", text: t });
+  }
+
+  for (const c of candidates) {
+    const mode = classifyFailureMode(c.text);
+    if (mode === "unknown") continue;
+    // Keep the snippet short — enough to disambiguate the error in the
+    // recall query but not so long it dominates the description.
+    const snippet = c.text.slice(0, 400);
+    return { mode, snippet };
+  }
+  return null;
 }
 
 interface MalformedFileBlock {
@@ -1541,9 +1908,48 @@ async function generateCode(state: WorkerState) {
         content: `## Project Context\n${contextParts.join("\n\n")}`,
       });
     }
+
+    // Memory recall (Phase C-3): inject active failure-patterns matching
+    // the current task. Layer 2 only — Layer 3 (shadow) is trace-logged
+    // by recallAndPrepareInject but does NOT modify the prompt. The
+    // helper itself respects MEMORY_ENABLED / MEMORY_INJECT flags and
+    // never throws.
+    const memoryRecall = await recallAndPrepareInject({
+      agent: "worker_codegen",
+      role: state.role,
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        files: Array.isArray(task.files) ? task.files : undefined,
+      },
+      projectRoot: state.outputDir,
+      kickoffId: state.sessionId,
+      layers: ["L1", "L2"],
+      tokenBudget: getInjectTokenBudgetForRole(state.role),
+    });
+    if (memoryRecall.block) {
+      messages.push({ role: "system", content: memoryRecall.block });
+    }
+    // Soft cite instruction — only when memory was actually injected so we
+    // don't spend tokens on instructions for an empty feature. Missing cites
+    // are fine; attribution falls back to "all injected" when none parse.
+    const citeHint =
+      memoryRecall.active.length > 0
+        ? `\n\nIf any record from the <memory-context> block above directly informed your code, declare it before the <plan> tag using:\n  <memory-cite ids="FP-xxx,FP-yyy" />\nList only ids you actually used. Citing is optional but helps the system credit useful patterns.`
+        : "";
     const subStepsHint =
       task.subSteps && task.subSteps.length > 0
         ? `\n\nPre-defined sub-steps:\n${task.subSteps.map((s) => `${s.step}. ${s.action}: ${s.detail}`).join("\n")}`
+        : "";
+    const tddPlanHint =
+      task.tddPlan?.tests && task.tddPlan.tests.length > 0
+        ? `\n\nTDD seed tests this implementation must satisfy:\n${task.tddPlan.tests
+            .map(
+              (test) =>
+                `- ${test.id} [${test.priority}/${test.type}] ${test.file}\n  command: ${test.command}\n  RED: ${test.expectedRed}\n  GREEN: ${test.expectedGreen}\n  Write this test file before the production implementation when it is part of this task's file plan.`,
+            )
+            .join("\n")}`
         : "";
 
     const multiRoundInstruction = CODEGEN_MULTI_ROUND_ENABLED
@@ -1552,7 +1958,7 @@ async function generateCode(state: WorkerState) {
 
     messages.push({
       role: "user",
-      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
+      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
     });
 
     const startMs = Date.now();
@@ -1572,6 +1978,30 @@ async function generateCode(state: WorkerState) {
     let rounds = 0;
     let lastModel = "unknown";
 
+    const secondaryRecallCtx: SecondaryRecallContext | undefined =
+      memoryRecall.active.length > 0 || memoryRecall.shadow.length > 0
+        ? {
+            agent: "worker_codegen",
+            role: state.role,
+            task: {
+              id: task.id,
+              title: task.title,
+              description: task.description,
+              files: Array.isArray(task.files) ? task.files : undefined,
+            },
+            projectRoot: state.outputDir,
+            kickoffId: state.sessionId,
+            layers: ["L1", "L2"],
+            primaryInjectedIds: memoryRecall.active.map((r) => r.id),
+            tokenBudget: getInjectTokenBudgetForRole(state.role),
+          }
+        : undefined;
+
+    // Snapshot the initial context length so we can trim round-accumulated
+    // messages (tool results, assistant file blocks) between multi-rounds.
+    // Without this, context grows from ~15 K → 80 K+ over 8 rounds.
+    const initialMessagesLength = messages.length;
+
     while (rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS) {
       rounds += 1;
       const response = await runCodegenWorkerLoop(
@@ -1579,6 +2009,7 @@ async function generateCode(state: WorkerState) {
         state.outputDir,
         state.sessionId,
         state.workerLabel,
+        secondaryRecallCtx,
       );
       const content = response.content;
       validateCodegenFileOutput(content);
@@ -1592,6 +2023,28 @@ async function generateCode(state: WorkerState) {
         `\n\n<!-- round:${rounds} model:${response.model} -->\n` +
         response.rawContent;
       lastModel = response.model;
+
+      // Parse cite tags emitted by the worker so attribution can credit
+      // the specific patterns the model claims it used. Best-effort: never
+      // throws, validates ids against the actual injected set so a
+      // hallucinated id can't poison scoring.
+      if (memoryRecall.active.length > 0) {
+        const citedIds = parseMemoryCites(content);
+        if (citedIds.length > 0) {
+          const allInjected = [
+            ...memoryRecall.active.map((r) => r.id),
+            ...response.secondaryInjectedIds,
+          ];
+          await recordMemoryCites({
+            traceRoot: state.outputDir,
+            agent: "worker_codegen",
+            kickoffId: state.sessionId,
+            taskId: task.id,
+            citedIds,
+            injectedIds: allInjected,
+          });
+        }
+      }
 
       let roundWrites = 0;
       for (const [fp, fc] of Object.entries(parsedFiles)) {
@@ -1636,6 +2089,13 @@ async function generateCode(state: WorkerState) {
         .slice(-40)
         .map((f) => `- ${f}`)
         .join("\n");
+      // Compress messages accumulated during this round back to the initial
+      // context snapshot.  This prevents the prompt from growing linearly
+      // with the number of rounds (15 K → 86 K+).  All tool call results and
+      // large assistant file-block messages are dropped; the continuation
+      // message below re-injects the file list so the model retains awareness
+      // of what has already been written.
+      messages.splice(initialMessagesLength);
       messages.push({
         role: "user",
         content: [
@@ -1660,6 +2120,69 @@ async function generateCode(state: WorkerState) {
     console.log(
       `[Worker:${state.workerLabel}] Generated ${writtenFiles.length} files in ${(durationMs / 1000).toFixed(1)}s (rounds=${rounds}, model=${lastModel}, cost: $${totalCostUsd.toFixed(4)})`,
     );
+
+    // Migration-coverage check — fires per-task immediately after writes.
+    // If the worker touched a Sequelize model without a migration, log a
+    // warning and persist the gap to .ralph/migration-coverage.json so
+    // downstream self-heal can convert it into a repair task.
+    try {
+      const coverage = checkMigrationCoverage({ writtenFiles });
+      if (coverage.modelFilesTouched.length > 0 || coverage.migrationFilesTouched.length > 0) {
+        const ralphDir = path.join(state.outputDir, ".ralph");
+        await nodeFs.mkdir(ralphDir, { recursive: true });
+        const reportPath = path.join(ralphDir, "migration-coverage.json");
+        let report: {
+          version: number;
+          updatedAt: string;
+          tasks: Record<
+            string,
+            {
+              taskId: string;
+              taskTitle: string;
+              ok: boolean;
+              modelFilesTouched: string[];
+              migrationFilesTouched: string[];
+              gaps: { modelPath: string; modelName: string; instruction: string }[];
+              checkedAt: string;
+            }
+          >;
+        };
+        try {
+          const raw = await nodeFs.readFile(reportPath, "utf8");
+          report = JSON.parse(raw);
+          if (typeof report?.tasks !== "object" || report?.tasks === null) {
+            throw new Error("malformed");
+          }
+        } catch {
+          report = { version: 1, updatedAt: "", tasks: {} };
+        }
+        const checkedAt = new Date().toISOString();
+        report.tasks[task.id] = {
+          taskId: task.id,
+          taskTitle: task.title,
+          ok: coverage.ok,
+          modelFilesTouched: coverage.modelFilesTouched,
+          migrationFilesTouched: coverage.migrationFilesTouched,
+          gaps: coverage.gaps.map((g) => ({
+            ...g,
+            instruction: formatMigrationGapInstruction(g, task.id),
+          })),
+          checkedAt,
+        };
+        report.updatedAt = checkedAt;
+        await nodeFs.writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+
+        if (!coverage.ok) {
+          console.warn(
+            `[Worker:${state.workerLabel}] Migration coverage gap: task "${task.id}" touched ${coverage.modelFilesTouched.length} model file(s) without writing a migration. ${coverage.gaps.length} gap(s) recorded in .ralph/migration-coverage.json.`,
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(
+        `[Worker:${state.workerLabel}] Migration coverage check failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
 
     // RALPH: check for missing promise and log a warning (enforcement happens in routeAfterGenerate)
     if (state.ralphConfig.enabled) {

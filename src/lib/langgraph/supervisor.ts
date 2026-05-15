@@ -40,6 +40,16 @@ import {
   type FsWriteOptions,
 } from "./tools";
 import {
+  injectBaselineEndpoints,
+  detectContractPrefix,
+  type ApiContractEntry,
+} from "./baseline-endpoints";
+import {
+  wireRegistrationsIntoIndex,
+  computeRelativeImportPath,
+} from "./route-audit-autofix";
+import { computeStagnationReplan } from "@/lib/pipeline/self-heal";
+import {
   chatCompletionWithFallback,
   resolveModel,
   estimateCost,
@@ -55,14 +65,37 @@ import type {
 } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { triagePrebuiltArchitectTasks } from "./architect-triage";
-import { getRepairEmitter } from "@/lib/pipeline/self-heal";
+import {
+  getRepairEmitter,
+  runContractUsageCoverage,
+  runRuntimeIntegrationAudit,
+  formatRuntimeAuditBlock,
+  runRuntimeSmokeGate,
+  runTscDiagnosticsAsTasks,
+  runMigrationCoverageRepair,
+  formatMigrationCoverageBlock,
+} from "@/lib/pipeline/self-heal";
+import {
+  requestHumanDecision,
+  INTEGRATION_DECISION_OPTIONS,
+} from "@/lib/pipeline/human-decision";
+import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
+import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
+import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
+import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
+import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
   triageE2eFailures,
   hasInfraSignal,
   type FailedTestRecord,
 } from "./e2e-triage";
+import { compactChatMessagesSemantically } from "./conversation-semantic-compact";
+import {
+  STRUCTURED_SUPERVISOR_TOOLS,
+  executeStructuredSupervisorTool,
+} from "./structured-verify-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -204,38 +237,10 @@ function countRemovedOrphanToolMessages(messages: ChatMessage[]): number {
   return removed;
 }
 
-function calculateSafeTailStart(
-  messages: ChatMessage[],
-  desiredStart: number,
-): number {
-  let safeStart = desiredStart;
-
-  const findAssistantIndexForTool = (
-    toolIdx: number,
-    toolCallId: string,
-  ): number => {
-    if (!toolCallId) return -1;
-    for (let i = toolIdx - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (!msg || msg.role !== "assistant") continue;
-      const hasMatch = (msg.tool_calls ?? []).some(
-        (tc) => tc.id === toolCallId,
-      );
-      if (hasMatch) return i;
-    }
-    return -1;
-  };
-
-  for (let i = desiredStart; i < messages.length; i++) {
-    const msg = messages[i];
-    if (!msg || msg.role !== "tool") continue;
-    const assistantIdx = findAssistantIndexForTool(i, msg.tool_call_id ?? "");
-    if (assistantIdx >= 0) {
-      safeStart = Math.min(safeStart, assistantIdx);
-    }
-  }
-
-  return Math.max(1, Math.min(safeStart, messages.length - 1));
+function isContextLengthError(message: string): boolean {
+  return /context(?: length| window)?|maximum context|context_length_exceeded|too many tokens|prompt is too long|token limit/i.test(
+    message,
+  );
 }
 
 async function callWithOrphanToolRetry(
@@ -1492,6 +1497,32 @@ async function collectConventionViolations(
         );
         touchedFiles.add(routerPath);
       }
+
+      // Detect placeholder antd <Result> used in lieu of real view components.
+      // Each view file that exists under views/ must be rendered directly in the route, not wrapped by a Result placeholder.
+      const resultPlaceholderInRouter =
+        /<Result\b[^>]*status\s*=/.test(routerContent);
+      if (resultPlaceholderInRouter) {
+        violations.push(
+          `[CONVENTION] ${routerPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
+            `Import and render the actual view component for every route — placeholder <Result> elements are forbidden in production routing.`,
+        );
+        touchedFiles.add(routerPath);
+      }
+
+      // Also check App.tsx when it doubles as the route registry.
+      const appPath = "frontend/src/App.tsx";
+      const appContent = await fsRead(appPath, outputDir);
+      if (!appContent.startsWith("FILE_NOT_FOUND") && !appContent.startsWith("REJECTED")) {
+        const resultPlaceholderInApp = /<Result\b[^>]*status\s*=/.test(appContent);
+        if (resultPlaceholderInApp && viewFiles.length > 0) {
+          violations.push(
+            `[CONVENTION] ${appPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
+              `Import and render the actual view components from frontend/src/views/ for every route.`,
+          );
+          touchedFiles.add(appPath);
+        }
+      }
     }
 
     const homeEntryCandidates = [
@@ -1547,6 +1578,35 @@ async function collectConventionViolations(
     }
   }
 
+  // Check backend db.ts for unsafe unconditional CREATE EXTENSION timescaledb.
+  // TimescaleDB is not available on standard Postgres installs; the call must be
+  // guarded by an env var or wrapped in a try/catch with a soft fallback.
+  if (isMTier) {
+    const dbCandidates = [
+      "backend/src/db.ts",
+      "backend/src/config/database.ts",
+      "backend/src/database/connection.ts",
+    ];
+    for (const dbPath of dbCandidates) {
+      const dbContent = await fsRead(dbPath, outputDir);
+      if (dbContent.startsWith("FILE_NOT_FOUND") || dbContent.startsWith("REJECTED")) {
+        continue;
+      }
+      const hasHardTimescale =
+        /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?timescaledb/i.test(dbContent) &&
+        !/TIMESCALE_DISABLED|process\.env\.TIMESCALE/i.test(dbContent);
+      if (hasHardTimescale) {
+        violations.push(
+          `[CONVENTION] ${dbPath}: Unconditional "CREATE EXTENSION timescaledb" will crash on standard PostgreSQL installs. ` +
+            `Wrap the call in a try/catch with a console.warn fallback, or guard it with an env flag (e.g. TIMESCALE_DISABLED). ` +
+            `Do NOT throw on extension unavailability — the server must start without TimescaleDB.`,
+        );
+        touchedFiles.add(dbPath);
+      }
+      break;
+    }
+  }
+
   return {
     errorsText: violations.join("\n"),
     files: [...touchedFiles],
@@ -1592,10 +1652,11 @@ function summarizeE2eTaskContext(tasks: CodingTask[]): string {
 }
 
 /**
- * The canonical `webServer` block — must start BOTH the backend (on :4000,
- * health-probed at /api/health) and the frontend (on :5173). The Vite dev
- * server proxies `/api/*` to the backend, so the backend MUST be running
- * before any API-driven Playwright test executes.
+ * The canonical `webServer` block for M-tier projects — must start BOTH the
+ * backend (on :4000, health-probed at /api/health) and the frontend (on :5173).
+ * The Vite dev server proxies `/api/*` to the backend, so the backend MUST be
+ * running before any API-driven Playwright test executes.
+ * Only used when backend/package.json exists (M-tier layout).
  */
 const PLAYWRIGHT_CONFIG_CANONICAL = `import { defineConfig, devices } from "@playwright/test";
 
@@ -1646,10 +1707,11 @@ export default defineConfig({
 /**
  * Audit (and auto-repair) the frontend `playwright.config.ts` so its
  * `webServer` field always starts BOTH the backend and the frontend in
- * m-tier projects. The single most common cause of last-mile e2e `infra`
- * failures is a worker collapsing the `webServer` array back to a single
- * object, which leaves the backend offline and every API-touching test
- * fails with ECONNREFUSED through the Vite proxy.
+ * M-tier projects (those that have a `backend/` directory). The single most
+ * common cause of last-mile e2e `infra` failures is a worker collapsing the
+ * `webServer` array back to a single object, which leaves the backend offline
+ * and every API-touching test fails with ECONNREFUSED through the Vite proxy.
+ * For S-tier projects (no backend/package.json), this is a no-op.
  */
 async function ensurePlaywrightConfigStartsBackend(
   outputDir: string,
@@ -2253,8 +2315,8 @@ async function e2eVerifyAndFix(
         "",
         "## Rules",
         "- NEVER modify any file that matches *.spec.ts, *.spec.tsx, *.test.ts, *.test.tsx.",
-        "- NEVER modify `frontend/playwright.config.ts`'s `webServer` field. It MUST stay an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/health`) AND the frontend (`pnpm dev`). Collapsing it into a single object is the #1 cause of `infra: ECONNREFUSED` failures and the supervisor will rewrite it back.",
-        "- NEVER delete `backend/src/api/modules/health/health.routes.ts` or remove the `registerHealthRoutes(...)` call in `backend/src/api/modules/index.ts`. The Playwright `webServer` health probe at `/api/health` depends on it.",
+        "- NEVER modify `frontend/playwright.config.ts`'s `webServer` field for M-tier projects (projects that have a `backend/` directory). For those projects it MUST stay an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/health`) AND the frontend (`pnpm dev`). Collapsing it into a single object is the #1 cause of `infra: ECONNREFUSED` failures and the supervisor will rewrite it back. For S-tier projects (no `backend/` directory), the `webServer` field SHOULD be a single frontend-only object — do NOT add a backend entry.",
+        "- NEVER delete `backend/src/api/modules/health/health.routes.ts` or remove the `registerHealthRoutes(...)` call in `backend/src/api/modules/index.ts` in M-tier projects. The Playwright `webServer` health probe at `/api/health` depends on it.",
         "- Treat every locator, URL, button label, and aria-label in the test files as the ground truth for what the UI must render.",
         "- When a test expects a button named 'Go Home', the source component MUST render a button with that exact accessible name.",
         "- When a test navigates to /dashboard or /settings, those routes MUST exist and render the correct page.",
@@ -2379,8 +2441,40 @@ async function e2eVerifyAndFix(
 }
 
 function routeAfterIntegrationVerify(state: SupervisorState): string {
-  if (state.integrationErrors) return "summary";
+  // CODEGEN_HARDENING_PLAN.md §7.3 — "FAILED_BUT_CONTINUED" policy:
+  // Always proceed to e2e_verify even when integration failed. Skipping e2e
+  // because integration FAIL'd hides the highest-signal readiness data
+  // (whether the app actually starts and serves traffic). Session 52851b86
+  // SKIPPED runtime+e2e because of an over-generated contract that could
+  // never have implemented endpoints — but the produced code DID build and
+  // start. The report should reflect that, not collapse to a single
+  // "graph_error" header.
+  //
+  // The session's overall status will still be marked "fail" downstream
+  // (route.ts wraps the post-graph throw on any non-empty gate errors),
+  // but every gate gets to run and contribute its evidence first.
+  if (state.integrationErrors) {
+    console.log(
+      "[Supervisor] routeAfterIntegrationVerify: integration FAILED — proceeding to e2e_verify anyway (FAIL_CONTINUED policy).",
+    );
+  }
   return "e2e_verify";
+}
+
+function routeAfterTddGreenVerify(state: SupervisorState): string {
+  if (state.integrationErrors?.includes("TDD hard gate failed")) {
+    console.log(
+      "[Supervisor] routeAfterTddGreenVerify: P0 TDD hard gate failed — returning to integration_verify for another repair pass.",
+    );
+    return "integration_verify";
+  }
+  return routeAfterIntegrationVerify(state);
+}
+
+function routeAfterTddGreenVerifyRetry(state: SupervisorState): string {
+  return state.integrationErrors?.includes("TDD hard gate failed")
+    ? "integration_verify"
+    : "summary";
 }
 
 /**
@@ -2476,44 +2570,72 @@ Each element has this shape:
   "requestSchema": "string (TypeScript type literal for request body/params, or 'none')",
   "responseSchema": "string (TypeScript type literal for success response body)",
   "auth": "none|bearer|session",
-  "description": "string (one sentence)"
+  "description": "string (one sentence)",
+  "prdJustification": "string (verbatim PRD line/section that justifies this endpoint)",
+  "audience": "user|admin"
 }
 
-## MANDATORY: Nested resource endpoints for parent-child relationships
+## CRITICAL: Contract scope rule (HARD RULE — read first)
 
-When the PRD or supplied type/model definitions describe a one-to-many relationship
-between two resources (e.g. a Project "has" Tasks, a User "has" Comments, an Order
-"has" LineItems), you MUST emit BOTH sets of endpoints:
+The PRD is the ONLY source of truth. An endpoint belongs in this contract ONLY if
+AT LEAST ONE of the following is true, and you can quote the PRD line that justifies it
+in the \`prdJustification\` field:
 
-  1. **Flat endpoints** on the child resource:
-       GET    /api/{children}              — list with filters
-       POST   /api/{children}              — create
-       GET    /api/{children}/:id          — get one
-       PATCH  /api/{children}/:id          — update
-       DELETE /api/{children}/:id          — delete
+  (a) A "User flow" / "User journey" step in the PRD describes a user action
+      that requires it (e.g. "user marks a story as read"
+      → PATCH /api/feed-items/:id/read).
+  (b) A "UX / Pages" section names a page or component that needs the data
+      (e.g. "Onboarding Style page" → POST /api/users/me/style-assessment).
+  (c) An "Admin / Integration features" section names an internal consumer
+      (admin dashboard, webhook, cron). Mark these with \`"audience": "admin"\`
+      so the usage audit knows to skip them.
 
-  2. **Scoped-list endpoint** under the parent (THIS IS THE ONE MOST OFTEN MISSED):
-       GET    /api/{parents}/:id/{children}
-       Description: "List all {children} belonging to the {parent} identified by :id."
-       Support the same filtering/sorting/pagination query params the flat list accepts.
-       Example relationships and resulting scoped lists:
-         Project hasMany Tasks         → GET /api/projects/:id/tasks
-         User    hasMany Posts         → GET /api/users/:id/posts
-         Order   hasMany LineItems     → GET /api/orders/:id/line-items
+DO NOT default-enumerate "GET /list, GET /:id, POST, PATCH, DELETE" for every
+ORM model. The ORM model existing is NOT evidence that a REST endpoint is required.
+Most apps need <5 endpoints per model; many models need 0 (they only feed inner
+joins or are populated by background jobs).
 
-Rules:
-- The scoped-list endpoint is ADDITIONAL, not a replacement for the flat list.
-- Detect relationships from every signal available: PRD wording ("tasks belong to a project",
-  "user's posts"), TypeScript types/interfaces with a foreign-key field (e.g. \`projectId\`),
-  ORM model snippets (\`Project.hasMany(Task)\`, \`Task.belongsTo(Project)\`).
-- If the parent→child relationship exists but you are unsure about exact pluralisation,
-  still emit the endpoint — use the child resource's plural form consistent with its flat
-  endpoint (e.g. if flat is \`/api/tasks\`, scoped is \`/api/projects/:id/tasks\`).
-- Never silently drop a scoped endpoint because a flat one already exists.
+For each endpoint you DO emit:
+  - \`prdJustification\` MUST be non-empty AND verbatim from the PRD context provided.
+    If you cannot quote the PRD, OMIT the endpoint.
+  - \`audience\` MUST be \`"user"\` (called by the consumer-facing frontend) or
+    \`"admin"\` (internal / admin UI / system).
 
-A separate post-generation gate will audit ORM models for hasMany/belongsTo relations
-and REJECT the contract if any scoped-list endpoint is missing. Get it right the first
-time to avoid a rework loop.`;
+When in doubt: OMIT. A missing endpoint is cheap to add later (the
+contract-usage-coverage audit + frontend-api-uniqueness audit will surface it).
+A surplus endpoint poisons the integration gate, makes the backend worker chase
+impossible repairs, and burns LLM budget — that is what we are explicitly
+preventing here.
+
+## Nested resource endpoints (relationship-driven, NOT default CRUD)
+
+When the PRD or supplied ORM model definitions describe a one-to-many relationship
+between two resources (e.g. Project hasMany Tasks, User hasMany Posts):
+
+  1. **Flat endpoints on the child resource** — emit ONLY the verbs the PRD
+     actually describes for that resource. NEVER default-enumerate all 5
+     CRUD verbs. Examples:
+       - PRD says "users create and view posts" → emit POST /api/posts and
+         GET /api/posts/:id only. Do NOT emit PATCH/DELETE unless PRD describes
+         "users edit their post" or "users delete their post".
+       - PRD says "feed items are populated by a background aggregator and the
+         user only reads them" → emit GET /api/feed-items only. No POST,
+         no PATCH, no DELETE.
+
+  2. **Scoped-list endpoint under the parent** (this one IS relationship-driven
+     and SHOULD be inferred when the PRD describes a parent-detail page that
+     lists children):
+       GET /api/{parents}/:id/{children}
+       Examples:
+         "Project detail page shows its tasks"   → GET /api/projects/:id/tasks
+         "User profile page shows their posts"   → GET /api/users/:id/posts
+       Do NOT emit the scoped-list endpoint when the PRD never describes a
+       parent-detail UI that lists the children.
+
+A separate post-generation gate will audit ORM models for hasMany/belongsTo
+relations and warn about missing scoped-list endpoints — but only when the
+parent-detail UI is actually described in the PRD. Speculative scoped lists
+(no PRD page) are AS BAD as speculative flat CRUD.`;
 
 async function generateApiContracts(state: SupervisorState) {
   if (state.backendTasks.length === 0) {
@@ -2630,6 +2752,8 @@ async function generateApiContracts(state: SupervisorState) {
       responseSchema?: string;
       auth?: string;
       description?: string;
+      prdJustification?: string;
+      audience?: string;
     }> = [];
 
     try {
@@ -2647,6 +2771,70 @@ async function generateApiContracts(state: SupervisorState) {
       return { totalCostUsd: costUsd };
     }
 
+    // ── v2 scope-rule telemetry ────────────────────────────────────────────
+    // CODEGEN_HARDENING_PLAN.md §7.1 requires every emitted endpoint to carry
+    // a non-empty `prdJustification` and an `audience` value. We log how the
+    // model is doing on these so the contract-usage-coverage audit (T1.2) can
+    // make decisions and so the report's retrofit suggestions can detect drift.
+    const normalisedAudience = (raw: string | undefined): "user" | "admin" => {
+      const v = (raw ?? "").trim().toLowerCase();
+      return v === "admin" ? "admin" : "user";
+    };
+    const missingJustification = parsed.filter(
+      (p) => !(p.prdJustification ?? "").trim(),
+    );
+    if (missingJustification.length > 0) {
+      console.warn(
+        `[Supervisor] generateApiContracts: ${missingJustification.length}/${parsed.length} endpoint(s) emitted with empty prdJustification — these are at risk of being pruned by the contract-usage-coverage audit.`,
+      );
+      getRepairEmitter(state.sessionId)({
+        stage: "generate_api_contracts",
+        event: "contract_scope_rule_violation",
+        details: {
+          totalEndpoints: parsed.length,
+          missingJustification: missingJustification.length,
+          sample: missingJustification
+            .slice(0, 5)
+            .map((p) => `${p.method} ${p.endpoint}`),
+        },
+      });
+    }
+
+    // ── Baseline endpoint injection ───────────────────────────────────────
+    // The contract LLM is told "when in doubt, OMIT" so it doesn't emit
+    // speculative CRUD. The downside: implicit baselines like
+    // POST /auth/login that the PRD assumes (the way it assumes TCP/IP
+    // works) get dropped too. Backfill them deterministically here from
+    // a curated whitelist that ALWAYS applies to any backend project.
+    // Detection: contracts mention `service: "auth"` OR the scaffold
+    // ships `auth.routes.ts`. Endpoints already emitted by the LLM are
+    // de-duped by `METHOD <path>` so we never double-emit.
+    const authRoutesContent = await fsRead(
+      "backend/src/api/modules/auth/auth.routes.ts",
+      state.outputDir,
+    );
+    const hasAuthRoutes =
+      !authRoutesContent.startsWith("FILE_NOT_FOUND") &&
+      !authRoutesContent.startsWith("REJECTED");
+    const baselineResult = injectBaselineEndpoints({
+      contracts: parsed as ApiContractEntry[],
+      hasAuthRoutes,
+    });
+    if (baselineResult.added.length > 0) {
+      console.log(
+        `[Supervisor] generateApiContracts: baseline-injected ${baselineResult.added.length} implicit endpoint(s): ${baselineResult.added.join(", ")}`,
+      );
+      getRepairEmitter(state.sessionId)({
+        stage: "generate_api_contracts",
+        event: "baseline_endpoints_injected",
+        details: {
+          added: baselineResult.added,
+          skipped: baselineResult.skipped,
+        },
+      });
+    }
+    parsed = baselineResult.contracts;
+
     const contracts: ApiContract[] = parsed.map((item) => ({
       service: item.service ?? "unknown",
       endpoint: item.endpoint ?? "/",
@@ -2662,12 +2850,16 @@ async function generateApiContracts(state: SupervisorState) {
         .filter(Boolean)
         .join(" | "),
       generatedBy: "api_contract_phase",
+      prdJustification: item.prdJustification ?? undefined,
+      audience: normalisedAudience(item.audience),
     }));
 
     const contractJson = JSON.stringify(
       parsed.map((item, i) => ({
         ...item,
         id: `API-${String(i + 1).padStart(3, "0")}`,
+        prdJustification: (item.prdJustification ?? "").trim(),
+        audience: normalisedAudience(item.audience),
       })),
       null,
       2,
@@ -2675,7 +2867,7 @@ async function generateApiContracts(state: SupervisorState) {
     await fsWrite("API_CONTRACTS.json", contractJson, state.outputDir);
 
     console.log(
-      `[Supervisor] generateApiContracts: generated ${contracts.length} contracts, written to API_CONTRACTS.json (model=${response.model}, cost: $${costUsd.toFixed(4)})`,
+      `[Supervisor] generateApiContracts: generated ${contracts.length} contracts (${contracts.length - missingJustification.length} with PRD justification), written to API_CONTRACTS.json (model=${response.model}, cost: $${costUsd.toFixed(4)})`,
     );
 
     // ── Contract-vs-models completeness audit + auto-append ────────────────
@@ -2728,8 +2920,86 @@ async function generateApiContracts(state: SupervisorState) {
       );
     }
 
+    // ── Contract usage coverage (post-contract phase) ──────────────────────
+    // Prune endpoints with no PRD justification BEFORE downstream task
+    // breakdown / worker codegen sees them. This is the single most effective
+    // fix for the "speculative CRUD wedge" failure mode that produced
+    // session 52851b86's 45 missing-impl errors and the verify-fix stagnation.
+    // See CODEGEN_HARDENING_PLAN.md §7.1.
+    let prunedCount = 0;
+    try {
+      const coverage = await runContractUsageCoverage({
+        outputDir: state.outputDir,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+        phase: "post-contract",
+      });
+      prunedCount = coverage.pruned.length;
+      if (coverage.pruned.length > 0) {
+        console.log(
+          `[Supervisor] generateApiContracts: contract-usage-coverage pruned ${coverage.pruned.length} surplus endpoint(s) lacking PRD justification: ${coverage.pruned
+            .slice(0, 6)
+            .map((p) => `${p.method} ${p.endpoint}`)
+            .join(", ")}${coverage.pruned.length > 6 ? ", …" : ""}.`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[Supervisor] generateApiContracts: contract-usage-coverage skipped — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // If we pruned, reload the (now-shrunk) contract from disk and rebuild
+    // the in-memory ApiContract[] so downstream nodes don't see ghost entries.
+    let finalContracts = contracts;
+    if (prunedCount > 0) {
+      try {
+        const reloaded = await fsRead("API_CONTRACTS.json", state.outputDir);
+        if (
+          !reloaded.startsWith("FILE_NOT_FOUND") &&
+          !reloaded.startsWith("REJECTED")
+        ) {
+          const reparsed = JSON.parse(reloaded) as Array<{
+            service?: string;
+            endpoint?: string;
+            method?: string;
+            requestSchema?: string;
+            responseSchema?: string;
+            auth?: string;
+            description?: string;
+            prdJustification?: string;
+            audience?: string;
+          }>;
+          if (Array.isArray(reparsed)) {
+            finalContracts = reparsed.map((item) => ({
+              service: item.service ?? "unknown",
+              endpoint: item.endpoint ?? "/",
+              method: (item.method ?? "GET").toUpperCase(),
+              requestFields: item.requestSchema ?? undefined,
+              responseFields: item.responseSchema ?? undefined,
+              authType: item.auth ?? "none",
+              description: item.description ?? undefined,
+              schema: [
+                item.requestSchema ? `request: ${item.requestSchema}` : "",
+                item.responseSchema ? `response: ${item.responseSchema}` : "",
+              ]
+                .filter(Boolean)
+                .join(" | "),
+              generatedBy: "api_contract_phase",
+              prdJustification: item.prdJustification ?? undefined,
+              audience: normalisedAudience(item.audience),
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[Supervisor] generateApiContracts: failed to reload pruned contract — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     return {
-      apiContracts: contracts,
+      apiContracts: finalContracts,
       totalCostUsd: costUsd,
     };
   } catch (e) {
@@ -3006,11 +3276,54 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   const feCount = workersForRole("frontend", state.frontendTasks.length);
   const feChunks = chunkTasks(state.frontendTasks, feCount);
 
-  // Build a rich API reference block from the full contracts.
+  // state.apiContracts is the append-merged union of:
+  //   1. generate_api_contracts (PRD-inferred, speculative — feeds BE as spec)
+  //   2. extract_real_contracts_manifest (BE self-declared in _meta/routes/*)
+  //   3. extract_real_contracts_llm (read from BE's actual route files)
+  //   4. extract_real_contracts_regex (pattern-matched from BE's actual files)
+  // FE must only see (2)-(4) — what BE actually wrote — otherwise it'll call
+  // endpoints that exist only in TRD's imagination. Dedupe by method+endpoint,
+  // preferring manifest > LLM > regex (more field info upstream).
+  const sourcePriority = (c: ApiContract): number => {
+    switch (c.generatedBy) {
+      case "extract_real_contracts_manifest":
+        return 3;
+      case "extract_real_contracts_llm":
+        return 2;
+      case "extract_real_contracts_regex":
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  const realByKey = new Map<string, ApiContract>();
+  for (const c of state.apiContracts) {
+    if (sourcePriority(c) === 0) continue;
+    const key = `${(c.method ?? "GET").toUpperCase()} ${c.endpoint}`;
+    const existing = realByKey.get(key);
+    if (!existing || sourcePriority(c) > sourcePriority(existing)) {
+      realByKey.set(key, c);
+    }
+  }
+  const realContracts = Array.from(realByKey.values());
+
+  // Fallback: if extraction yielded nothing (LLM error AND no regex hits),
+  // fall back to the full set so FE isn't completely blind. Log this — it
+  // means BE's route shape didn't match either extractor and likely needs
+  // attention.
+  const feContracts =
+    realContracts.length > 0 ? realContracts : state.apiContracts;
+  if (realContracts.length === 0 && state.apiContracts.length > 0) {
+    console.warn(
+      `[Supervisor] dispatchFrontendWorkers: no BE-extracted contracts available; falling back to ${state.apiContracts.length} TRD-derived contracts for FE prompt.`,
+    );
+  }
+
+  // Build a rich API reference block from the BE-extracted contracts.
   // This is injected into projectContext so LLM cannot miss it.
   let apiReferenceBlock = "";
-  if (state.apiContracts.length > 0) {
-    const contractLines = state.apiContracts.map((c) => {
+  if (feContracts.length > 0) {
+    const contractLines = feContracts.map((c) => {
       const lines = [
         `### ${c.method} ${c.endpoint}`,
         `- **Service**: ${c.service}`,
@@ -3052,7 +3365,7 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
         outputDir: state.outputDir,
         projectContext: feContext,
         fileRegistrySnapshot: state.fileRegistry,
-        apiContractsSnapshot: state.apiContracts,
+        apiContractsSnapshot: feContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
         currentTaskIndex: 0,
         ralphConfig: state.ralphConfig,
@@ -3063,12 +3376,185 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
 }
 
 /**
+ * BE workers self-declare their endpoints in `_meta/routes/<slug>.json`.
+ * This is the cheapest and most accurate source of truth: BE knows its own
+ * TypeScript types and route mount paths, no need to reverse-engineer.
+ *
+ * Returns null if no manifest dir exists or all files are unparseable —
+ * caller should fall back to LLM/regex extraction.
+ */
+async function readRoutesManifest(
+  outputDir: string,
+): Promise<ApiContract[] | null> {
+  const dir = path.join(outputDir, "_meta", "routes");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return null;
+  }
+  const jsonFiles = entries.filter((f) => f.toLowerCase().endsWith(".json"));
+  if (jsonFiles.length === 0) return null;
+
+  const contracts: ApiContract[] = [];
+  const seen = new Set<string>();
+  let parsedFiles = 0;
+
+  for (const fname of jsonFiles) {
+    const raw = await fsRead(
+      path.join("_meta", "routes", fname),
+      outputDir,
+    );
+    if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      console.warn(
+        `[Supervisor] readRoutesManifest: ${fname} not valid JSON, skipping`,
+      );
+      continue;
+    }
+    if (!Array.isArray(parsed)) {
+      console.warn(
+        `[Supervisor] readRoutesManifest: ${fname} root is not an array, skipping`,
+      );
+      continue;
+    }
+    parsedFiles++;
+
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      const method =
+        typeof r.method === "string" ? r.method.toUpperCase().trim() : "";
+      const endpoint =
+        typeof r.endpoint === "string" ? r.endpoint.trim() : "";
+      if (!method || !endpoint) continue;
+      const key = `${method} ${endpoint}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const reqRaw = typeof r.requestFields === "string" ? r.requestFields : "";
+      const resRaw =
+        typeof r.responseFields === "string" ? r.responseFields : "";
+      const reqFields = reqRaw && reqRaw !== "none" ? reqRaw : undefined;
+      const resFields = resRaw && resRaw !== "none" ? resRaw : undefined;
+
+      contracts.push({
+        service:
+          typeof r.service === "string" && r.service.length > 0
+            ? r.service
+            : fname.replace(/\.json$/i, ""),
+        method,
+        endpoint,
+        requestFields: reqFields,
+        responseFields: resFields,
+        authType: typeof r.authType === "string" ? r.authType : "none",
+        description:
+          typeof r.description === "string" ? r.description : undefined,
+        schema: [
+          reqFields ? `request: ${reqFields}` : "",
+          resFields ? `response: ${resFields}` : "",
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        generatedBy: "extract_real_contracts_manifest",
+      });
+    }
+  }
+
+  if (parsedFiles === 0 || contracts.length === 0) return null;
+
+  console.log(
+    `[Supervisor] readRoutesManifest: loaded ${contracts.length} endpoint(s) from ${parsedFiles} manifest file(s) in _meta/routes/`,
+  );
+  return contracts;
+}
+
+/**
+ * Cheap sanity check: for each manifest entry, confirm the HTTP verb literal
+ * appears in some BE source file. Catches BE declaring endpoints it never
+ * wired up (hallucinated manifest). Field-level accuracy is NOT checked —
+ * trust BE's self-report there.
+ *
+ * Returns the verified subset and a list of dropped entries for logging.
+ */
+async function verifyManifestAgainstSource(
+  manifest: ApiContract[],
+  state: SupervisorState,
+): Promise<{ verified: ApiContract[]; dropped: ApiContract[] }> {
+  const beFiles = state.fileRegistry.filter(
+    (f) => f.role === "backend" && /\.(ts|js)$/.test(f.path),
+  );
+  const haystackParts: string[] = [];
+  for (const f of beFiles) {
+    const content = await fsRead(f.path, state.outputDir);
+    if (!content.startsWith("FILE_NOT_FOUND")) haystackParts.push(content);
+  }
+  const haystack = haystackParts.join("\n");
+  if (haystack.length === 0) {
+    return { verified: manifest, dropped: [] };
+  }
+
+  const verified: ApiContract[] = [];
+  const dropped: ApiContract[] = [];
+  for (const c of manifest) {
+    // Look for either `.get(`/`.post(` etc. OR decorator-style `@Get(`/`@Post(`.
+    const verbRe = new RegExp(
+      `(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`,
+      "i",
+    );
+    if (verbRe.test(haystack)) {
+      verified.push(c);
+    } else {
+      dropped.push(c);
+    }
+  }
+  return { verified, dropped };
+}
+
+/**
  * After BE Workers complete, extract real routes from generated files
  * to supplement/correct the api_contract_phase contracts.
+ *
+ * Resolution order:
+ *   1. `_meta/routes/*.json` manifest (BE self-declared, has real TS types).
+ *   2. LLM extraction from BE route files (~$0.01-0.05/run).
+ *   3. Regex fallback (path-only, no field info).
  */
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
+  // 1. Prefer BE-declared manifest when present.
+  const manifest = await readRoutesManifest(state.outputDir);
+  if (manifest && manifest.length > 0) {
+    const { verified, dropped } = await verifyManifestAgainstSource(
+      manifest,
+      state,
+    );
+    if (dropped.length > 0) {
+      console.warn(
+        `[Supervisor] extractRealContracts: dropped ${dropped.length} manifest entry(s) that don't appear in BE source: ${dropped
+          .map((d) => `${d.method} ${d.endpoint}`)
+          .join(", ")}`,
+      );
+    }
+    if (verified.length > 0) {
+      console.log(
+        `[Supervisor] extractRealContracts: using ${verified.length} contract(s) from BE manifest (skipping LLM extraction)`,
+      );
+      return { apiContracts: verified };
+    }
+    // Manifest existed but nothing verified — fall through to LLM/regex.
+    console.warn(
+      "[Supervisor] extractRealContracts: manifest had entries but none verified against source; falling back to extraction.",
+    );
+  }
+
+  // 2. Legacy: LLM + regex extraction.
   // Collect backend route/controller files and shared type files
   const beFiles = state.fileRegistry.filter(
     (f) =>
@@ -3403,8 +3889,6 @@ async function runBuildGate(outputDir: string): Promise<string> {
 
 // ─── Phase-level verify + fix (agentic loop) ───
 
-const MAX_VERIFY_FIX_ITERATIONS = 50;
-
 /**
  * RALPH Phase 2 — External Judge.
  * Runs `npm test` (or `npm run test`) and returns a trimmed error string when
@@ -3558,6 +4042,7 @@ const SUPERVISOR_VERIFY_TOOLS: OpenRouterToolDefinition[] = [
       },
     },
   },
+  ...STRUCTURED_SUPERVISOR_TOOLS,
 ];
 
 /** Execute a single tool call from the verify+fix agent loop. */
@@ -3754,6 +4239,12 @@ async function executeSupervisorTool(
   outputDir: string,
 ): Promise<string> {
   const MAX_OUT = 4000;
+  const structuredResult = await executeStructuredSupervisorTool({
+    name,
+    args,
+    outputDir,
+  });
+  if (structuredResult !== null) return structuredResult;
   switch (name) {
     case "bash": {
       const command = String(args.command ?? "").trim();
@@ -4090,8 +4581,8 @@ function escapeRegExp(input: string): string {
  *
  * The LLM is given bash, read_file, write_file, list_files, and grep tools.
  * It installs deps, runs `prisma generate`, runs `tsc`, reads error files,
- * writes fixes, and keeps iterating until tsc passes or MAX_VERIFY_FIX_ITERATIONS
- * is reached. It finishes by calling `report_done`.
+ * writes fixes, and keeps iterating until it calls `report_done` or the model
+ * stops making callable progress.
  *
  * Returns { scaffoldErrors: "" } on success, { scaffoldErrors: <errors> } on failure.
  * Replaces the old separate phaseVerify + phaseFix nodes and their graph loop.
@@ -4113,15 +4604,8 @@ async function phaseVerifyAndFix(
     return { scaffoldErrors: undefined, scaffoldFixAttempts: 0 };
   }
 
-  const MAX_ITER = state.ralphConfig.enabled
-    ? Math.min(
-        state.ralphConfig.maxIterationsPerPhase * 3,
-        MAX_VERIFY_FIX_ITERATIONS,
-      )
-    : MAX_VERIFY_FIX_ITERATIONS;
-
   console.log(
-    `${label}: starting agentic loop (max ${MAX_ITER} iterations)...`,
+    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
   );
 
   const pm = await detectPackageManager(state.outputDir);
@@ -4317,64 +4801,43 @@ async function phaseVerifyAndFix(
   let finalStatus: "pass" | "fail" = "fail";
   let finalSummary = "";
   let totalCostUsd = 0;
+  let contextCompressionUsed = false;
 
   /**
    * Estimate rough token count from messages (4 chars ≈ 1 token).
    * When the conversation grows beyond ~80k tokens, compact the middle portion
    * into a single summary assistant message, keeping system + last 6 messages.
    */
-  function compactMessagesIfNeeded(): void {
-    const COMPACT_THRESHOLD = 20_000 * 4; // ~20k tokens in chars
-    const KEEP_TAIL = 6; // keep last N messages after system prompt
-    const totalChars = messages.reduce(
-      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0),
-      0,
-    );
-    if (totalChars < COMPACT_THRESHOLD) return;
-
-    const systemMsg = messages[0];
-    const desiredStart = Math.max(1, messages.length - KEEP_TAIL);
-    const tailStart = calculateSafeTailStart(messages, desiredStart);
-    const tail = messages.slice(tailStart);
-    const middle = messages.slice(1, tailStart);
-
-    // Build a summary of the compacted middle
-    const actionLines: string[] = [];
-    for (const m of middle) {
-      if (m.role === "tool") {
-        actionLines.push(
-          `[tool result] ${String(m.content ?? "").slice(0, 200)}`,
-        );
-      } else if (m.role === "assistant") {
-        const calls = (m.tool_calls ?? [])
-          .map((tc) => tc.function.name)
-          .join(", ");
-        if (calls) actionLines.push(`[assistant called] ${calls}`);
-      }
-    }
-    const summary =
-      `[Context compacted — ${middle.length} messages omitted]\n` +
-      `Previous actions summary:\n${actionLines.slice(-30).join("\n")}`;
-
-    messages.splice(
-      0,
-      messages.length,
-      systemMsg,
-      { role: "assistant", content: summary },
-      ...tail,
-    );
-    const removed = countRemovedOrphanToolMessages(messages);
+  async function compactMessagesIfNeeded(force = false): Promise<boolean> {
+    if (contextCompressionUsed) return false;
+    const result = await compactChatMessagesSemantically({
+      messages,
+      modelChain,
+      label,
+      force,
+      stateSummary: [
+        `phase=verify_fix`,
+        `iterations=${iterations}`,
+        `finalStatus=${finalStatus}`,
+        finalSummary ? `currentSummary=${finalSummary.slice(0, 800)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    if (!result.compacted) return false;
+    contextCompressionUsed = true;
     console.log(
-      `${label}: context compacted — removed ${middle.length} messages (was ~${Math.round(totalChars / 4)} tokens), orphan_tools_removed=${removed}`,
+      `${label}: semantic context compacted — removed ${result.removedMessages} messages (was ~${result.estimatedTokensBefore} tokens), orphan_tools_removed=${result.orphanToolsRemoved}`,
     );
+    return true;
   }
 
-  while (iterations < MAX_ITER) {
+  while (true) {
     iterations++;
-    console.log(`${label}: iteration ${iterations}/${MAX_ITER}`);
+    console.log(`${label}: iteration ${iterations}`);
 
     // Compact context if growing too large
-    compactMessagesIfNeeded();
+    await compactMessagesIfNeeded();
 
     let resp;
     try {
@@ -4386,6 +4849,10 @@ async function phaseVerifyAndFix(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
+        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        continue;
+      }
       console.error(`${label}: LLM call failed: ${msg}`);
       break;
     }
@@ -6086,7 +6553,82 @@ async function syncDeps(_state: SupervisorState) {
   return {};
 }
 
-const MAX_INTEGRATION_VERIFY_FIX_ITERATIONS = 150;
+async function tddTestWriterAndRed(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const emitter = getRepairEmitter(state.sessionId);
+  const writer = await runTddTestWriter({
+    outputDir: state.outputDir,
+    tasks: state.tasks,
+    projectContext: state.projectContext,
+    sessionId: state.sessionId,
+    emitter,
+  });
+  console.log(`[Supervisor] TDD Test Writer: ${writer.summary}`);
+
+  const review = await reviewTddTests({
+    outputDir: state.outputDir,
+    emitter,
+  });
+  console.log(`[Supervisor] TDD Review (pre-implementation): ${review.summary}`);
+
+  const red = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "red",
+    emitter,
+  });
+  console.log(`[Supervisor] ${red.summary}`);
+
+  return {
+    totalCostUsd: writer.costUsd,
+  };
+}
+
+async function tddGreenVerifyAndReview(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const emitter = getRepairEmitter(state.sessionId);
+  const green = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "green",
+    emitter,
+  });
+  const review = await reviewTddTests({
+    outputDir: state.outputDir,
+    emitter,
+  });
+
+  const blockers: string[] = [];
+  if (green.p0Failures.length > 0) {
+    blockers.push(`P0 TDD GREEN failures: ${green.p0Failures.join(", ")}`);
+  }
+  if (review.p0Errors.length > 0) {
+    blockers.push(
+      `P0 TDD review errors: ${review.p0Errors
+        .slice(0, 10)
+        .map((finding) => `${finding.testId}: ${finding.message}`)
+        .join("; ")}`,
+    );
+  }
+
+  const existing = state.integrationErrors?.trim();
+  const integrationErrors =
+    blockers.length > 0
+      ? [existing, "TDD hard gate failed:", ...blockers]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 4000)
+      : existing;
+
+  console.log(
+    `[Supervisor] TDD GREEN gate: ${green.summary} ${review.summary}`,
+  );
+
+  return {
+    integrationErrors,
+  };
+}
+
 // Tightened thresholds: previous 8/18 burned ~100k tokens on read-only loops
 // before the abort fired. 3 iterations without mutation is enough to know the
 // LLM is reading in circles; 10 iterations is the hard stop.
@@ -6493,11 +7035,20 @@ async function collectTsxFiles(dir: string): Promise<string[]> {
   return results;
 }
 
-interface RouteRegistrationAudit {
+export interface RouteRegistrationAudit {
   /** Human-readable lines suitable for feeding into the system prompt. */
   findings: string[];
   /** Modules that have a `*.routes.ts` file but are never wired into index.ts. */
   unregisteredModules: string[];
+  /** Structured per-module data — used by the route-audit auto-wire codemod. */
+  implementedModules: Array<{
+    file: string;
+    exportNames: string[];
+    primaryExportName: string | null;
+    isRegistered: boolean;
+  }>;
+  /** Detected apiRouter prefix from index.ts (defaults to "/api"). */
+  apiRouterPrefix: string;
   /** register*Routes imports in index.ts that don't resolve to a real module. */
   unresolvedRegistrations: string[];
   /** Endpoints declared in API_CONTRACTS.json but no matching route implementation found. */
@@ -6525,12 +7076,14 @@ interface RouteRegistrationAudit {
  * Returns an empty result (no findings) if the project has no backend or no
  * api/modules tree, so frontend-only projects are a no-op.
  */
-async function auditApiRouteRegistration(
+export async function auditApiRouteRegistration(
   outputDir: string,
 ): Promise<RouteRegistrationAudit> {
   const empty: RouteRegistrationAudit = {
     findings: [],
     unregisteredModules: [],
+    implementedModules: [],
+    apiRouterPrefix: "/api",
     unresolvedRegistrations: [],
     missingContractEndpoints: [],
     undeclaredEndpoints: [],
@@ -6575,8 +7128,15 @@ async function auditApiRouteRegistration(
     /\b(?:router|apiRouter|[A-Za-z_$][\w$]*Router)\.(get|post|put|patch|delete|all|options|head)\s*\(\s*["'`]([^"'`]+)["'`]/g;
   const inlineNewRouterRe =
     /new\s+Router\s*\([^)]*\)\.(get|post|put|patch|delete|all|options|head)\s*\(\s*["'`]([^"'`]+)["'`]/g;
+  // Form 1: `apiRouter.use("/prefix", router.routes())`  — explicit string in .use()
   const mountPrefixRe =
     /apiRouter\.use\s*\(\s*["'`]([^"'`]+)["'`]\s*,\s*(?:router|[A-Za-z_$][\w$]*Router)\.routes/;
+  // Form 2: `new Router({ prefix: "/prefix" })` — prefix in constructor, then
+  // `apiRouter.use(router.routes(), ...)` with NO string argument.  This is the
+  // pattern Koa codegen uses for autogen/routes.ts and must be detected separately.
+  // Previously blind to this, which caused phantom "missing contract" findings.
+  const routerCtorPrefixRe =
+    /new\s+Router\s*\(\s*\{[^}]*\bprefix\s*:\s*["'`]([^"'`]+)["'`]/;
 
   for (const rel of moduleFiles) {
     const content = await fsRead(rel, outputDir);
@@ -6594,6 +7154,9 @@ async function auditApiRouteRegistration(
       exportNames.push(enm[1]);
     }
     const mountMatch = content.match(mountPrefixRe);
+    // Fall back to constructor-based prefix when the .use("/prefix", ...) form
+    // is absent — i.e. the sub-router was created with `new Router({ prefix })`.
+    const ctorPrefixMatch = mountMatch ? null : content.match(routerCtorPrefixRe);
     const endpoints: Array<{ method: string; endpoint: string }> = [];
     const seen = new Set<string>();
     const pushEndpoint = (method: string, endpoint: string): void => {
@@ -6627,7 +7190,9 @@ async function auditApiRouteRegistration(
         ? null
         : mountMatch
           ? mountMatch[1]
-          : null,
+          : ctorPrefixMatch
+            ? ctorPrefixMatch[1]
+            : null,
       endpoints,
     });
   }
@@ -6743,6 +7308,9 @@ async function auditApiRouteRegistration(
     const contractKeys = new Set<string>();
     for (const c of contracts) {
       if (!c.method || !c.endpoint) continue;
+      // Defensive: contributors sometimes accidentally include /api/health in
+      // API_CONTRACTS — strip it so it can't double-count.
+      if (isContractAuditExempt(c.method, c.endpoint)) continue;
       const key = `${c.method.toUpperCase()} ${normaliseApiPath(c.endpoint)}`;
       contractKeys.add(key);
       if (!routeMatches(key, implementedPaths)) {
@@ -6756,6 +7324,11 @@ async function auditApiRouteRegistration(
     for (const key of implementedPaths) {
       if (!routeMatches(key, contractKeys)) {
         const [method, endpoint] = key.split(" ");
+        // The scaffold-provided `/api/health` probe is intentionally NOT in
+        // API_CONTRACTS.json (it's infra, not a PRD-driven endpoint). Don't
+        // ding it as "undeclared" — that just creates noisy findings the
+        // worker can't resolve. See CODEGEN_HARDENING_PLAN.md §4.x.
+        if (isContractAuditExempt(method, endpoint)) continue;
         undeclaredEndpoints.push({ method, endpoint });
       }
     }
@@ -6788,6 +7361,13 @@ async function auditApiRouteRegistration(
   return {
     findings,
     unregisteredModules,
+    implementedModules: implemented.map((m) => ({
+      file: m.file,
+      exportNames: m.exportNames,
+      primaryExportName: m.exportName,
+      isRegistered: m.exportNames.some((n) => registeredNames.has(n)),
+    })),
+    apiRouterPrefix: apiPrefix,
     unresolvedRegistrations,
     missingContractEndpoints,
     undeclaredEndpoints,
@@ -6797,6 +7377,30 @@ async function auditApiRouteRegistration(
 function normaliseApiPath(p: string): string {
   const withLeading = p.startsWith("/") ? p : `/${p}`;
   return withLeading.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+}
+
+/**
+ * Endpoints that are infrastructure-provided by the scaffold and intentionally
+ * absent from API_CONTRACTS.json. They MUST be skipped from both the
+ * "undeclared endpoint" finding (in `auditApiRouteRegistration`) and the
+ * runtime smoke gate's auth-required-route assertions.
+ *
+ * Currently exempt:
+ *   - `GET /api/health` and `GET /health` (Playwright webServer probe).
+ */
+const CONTRACT_AUDIT_EXEMPT_ENDPOINTS: ReadonlyArray<{
+  method: string;
+  pathRe: RegExp;
+}> = [
+  { method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ },
+];
+
+export function isContractAuditExempt(method: string, endpoint: string): boolean {
+  const m = method.toUpperCase();
+  const p = normaliseApiPath(endpoint);
+  return CONTRACT_AUDIT_EXEMPT_ENDPOINTS.some(
+    (rule) => rule.method === m && rule.pathRe.test(p),
+  );
 }
 
 function joinApiPath(prefix: string, mount: string, route: string): string {
@@ -7202,27 +7806,77 @@ async function autoAppendMissingScopedEndpoints(
   return { added, skipped };
 }
 
+export interface RouteAutoRepairResult {
+  appliedAny: boolean;
+  wired: string[];
+  skippedWires: Array<{ exportName: string; reason: string }>;
+}
+
+/**
+ * Deterministic preflight repair: for every `*.routes.ts` whose
+ * `register<X>Routes` export is not called in
+ * `backend/src/api/modules/index.ts`, append the matching `import` + call
+ * to the aggregator. Caller MUST re-run `auditApiRouteRegistration` after
+ * any successful repair so downstream telemetry + system-prompt blocks
+ * reflect the post-repair state.
+ *
+ * An earlier version also rewrote the apiRouter prefix when contracts
+ * used `/api/vN` but `index.ts` used `/api`. That codemod was removed
+ * after the replay harness revealed that most real backends inject the
+ * `/v1/...` segment via a SUB-router prefix
+ * (`new Router({ prefix: "/v1/foo" })`) inside the routes file —
+ * bumping the apiRouter prefix to `/api/v1` would have produced
+ * double-versioned paths like `/api/v1/v1/foo`. The audit parser was
+ * fixed instead to recognize sub-router prefixes, which addresses the
+ * same symptom (phantom "missing contract" findings) without the
+ * regression risk.
+ */
+export async function autoRepairRouteRegistration(
+  outputDir: string,
+  audit: RouteRegistrationAudit,
+): Promise<RouteAutoRepairResult> {
+  const indexPath = "backend/src/api/modules/index.ts";
+  const indexRaw = await fsRead(indexPath, outputDir);
+  if (
+    indexRaw.startsWith("FILE_NOT_FOUND") ||
+    indexRaw.startsWith("REJECTED")
+  ) {
+    return { appliedAny: false, wired: [], skippedWires: [] };
+  }
+
+  const toWire = audit.implementedModules
+    .filter((m) => !m.isRegistered && m.primaryExportName !== null)
+    .map((m) => ({
+      exportName: m.primaryExportName as string,
+      importPath: computeRelativeImportPath(indexPath, m.file),
+    }));
+  if (toWire.length === 0) {
+    return { appliedAny: false, wired: [], skippedWires: [] };
+  }
+
+  const r = wireRegistrationsIntoIndex(indexRaw, toWire);
+  if (r.wired.length === 0) {
+    return { appliedAny: false, wired: [], skippedWires: r.skipped };
+  }
+  await fsWrite(indexPath, r.content, outputDir);
+  return { appliedAny: true, wired: r.wired, skippedWires: r.skipped };
+}
+
 /**
  * Merged integration verify + fix as a single agentic loop.
  *
  * Replaces the old separate integrationVerify + integrationFix nodes and their
  * conditional loop edge. The LLM is given the same bash/filesystem/grep tools
- * as phaseVerifyAndFix and runs up to MAX_INTEGRATION_VERIFY_FIX_ITERATIONS
- * rounds to discover and fix all compile/convention/build errors.
+ * as phaseVerifyAndFix and keeps running until it reports completion, stops
+ * making callable progress, or hits the stagnation fallback policy.
  */
 async function integrationVerifyAndFix(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
   const label = "[Supervisor] IntegrationVerifyFix";
-  const MAX_ITER = state.ralphConfig.enabled
-    ? Math.min(
-        state.ralphConfig.maxIterationsPerPhase * 5,
-        MAX_INTEGRATION_VERIFY_FIX_ITERATIONS,
-      )
-    : MAX_INTEGRATION_VERIFY_FIX_ITERATIONS;
 
   console.log(
-    `${label}: starting agentic loop (max ${MAX_ITER} iterations)...`,
+    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -7302,7 +7956,155 @@ async function integrationVerifyAndFix(
   const frontendConvergenceClusters = await detectFrontendConvergenceClusters(
     state.outputDir,
   );
-  const routeAudit = await auditApiRouteRegistration(state.outputDir);
+
+  // ── Contract usage coverage (pre-integration phase) ────────────────────
+  // Run BEFORE the route audit so any surplus contract entries get pruned
+  // first — this prevents the route audit from reporting them as "missing
+  // implementations" and wedging the verify-fix worker in a stagnation loop.
+  // The audit also produces `pendingRepairTasks` for the worker to consume
+  // as deterministic instructions (CODEGEN_HARDENING_PLAN.md §7.2).
+  let coverageResult: Awaited<ReturnType<typeof runContractUsageCoverage>> | null = null;
+  try {
+    coverageResult = await runContractUsageCoverage({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+      phase: "pre-integration",
+    });
+    if (coverageResult.pruned.length > 0) {
+      console.log(
+        `${label}: contract-usage-coverage pruned ${coverageResult.pruned.length} surplus endpoint(s) before route audit: ${coverageResult.pruned
+          .slice(0, 4)
+          .map((p) => `${p.method} ${p.endpoint}`)
+          .join(", ")}${coverageResult.pruned.length > 4 ? ", …" : ""}.`,
+      );
+    }
+    if (coverageResult.pendingRepairTasks.length > 0) {
+      console.log(
+        `${label}: contract-usage-coverage queued ${coverageResult.pendingRepairTasks.length} deterministic repair task(s) for verify-fix worker.`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: contract-usage-coverage skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // ── Migration coverage → repair tasks ──────────────────────────────────
+  // Reads `.ralph/migration-coverage.json` written per-task by the
+  // worker hook and converts each "model touched without migration" gap
+  // into a deterministic repair-task descriptor for the verify-fix
+  // worker to execute alongside the contract-coverage repairs above.
+  let migrationCoverageResult: Awaited<
+    ReturnType<typeof runMigrationCoverageRepair>
+  > | null = null;
+  try {
+    migrationCoverageResult = await runMigrationCoverageRepair({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+    });
+    if (migrationCoverageResult.pendingRepairTasks.length > 0) {
+      console.log(
+        `${label}: migration-coverage queued ${migrationCoverageResult.pendingRepairTasks.length} repair task(s) across ${migrationCoverageResult.tasksWithGaps} originating task(s).`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: migration-coverage repair skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // ── Runtime integration audit (CODEGEN_HARDENING_PLAN.md §4.2 / §4.3 /
+  //    §4.4 / §4.5 / §4.7) ────────────────────────────────────────────────
+  // Static grep-based audit catching the runtime pitfalls Phase 4 prompts
+  // warn against. Findings are persisted to
+  // `.blueprint/runtime-integration-audit.json` and surfaced in the
+  // verify-fix worker's opening user message via `runtimeAuditBlock`
+  // below. `appliedOptionalFeatures` is auto-loaded by the audit from
+  // `.blueprint/scaffold-applied.json`; `declaredEnvKeys` is read here
+  // because resource-requirements.json lives at process.cwd() (the host
+  // builder), not at the generated project root.
+  let runtimeAuditResult: Awaited<
+    ReturnType<typeof runRuntimeIntegrationAudit>
+  > | null = null;
+  try {
+    const declaredResources = await readResourceRequirements(process.cwd());
+    const declaredEnvKeys = declaredResources.map((r) => r.envKey);
+    runtimeAuditResult = await runRuntimeIntegrationAudit({
+      outputDir: state.outputDir,
+      declaredEnvKeys,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+    });
+    if (!runtimeAuditResult.clean) {
+      const errCount = runtimeAuditResult.bySeverity.error ?? 0;
+      const warnCount = runtimeAuditResult.bySeverity.warn ?? 0;
+      console.log(
+        `${label}: runtime-integration-audit found ${runtimeAuditResult.findings.length} finding(s) (${errCount} error, ${warnCount} warn) across ${Object.keys(runtimeAuditResult.byRule).length} rule(s).`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: runtime-integration-audit skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // ── tsc diagnostics → pendingRepairTasks (P5) ──────────────────────────
+  // Run `tsc --noEmit` for both backend and frontend, translate every
+  // diagnostic line into a deterministic repair task, and persist to
+  // `.ralph/tsc-diagnostics.json`. The verify-fix worker reads that file
+  // directly — no need to re-derive errors from raw stderr.
+  if (process.env.BLUEPRINT_DISABLE_TSC_DIAGNOSTICS !== "1") {
+    try {
+      const tscResult = await runTscDiagnosticsAsTasks({
+        outputDir: state.outputDir,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+      });
+      if (tscResult.tasks.length > 0) {
+        console.log(
+          `${label}: tsc-diagnostics queued ${tscResult.tasks.length} repair task(s) (${tscResult.workspaces
+            .filter((w) => !w.skipped)
+            .map((w) => `${w.workspace}=${w.diagnosticCount}`)
+            .join(", ")}).`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `${label}: tsc-diagnostics skipped — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  let routeAudit = await auditApiRouteRegistration(state.outputDir);
+
+  // ── Deterministic auto-repair for the route audit (R11) ──────────────
+  // For every register*Routes export the audit flagged as unregistered,
+  // append the import + call to backend/src/api/modules/index.ts so the
+  // routes are actually mounted. After the fix, re-run the audit so
+  // downstream telemetry + system-prompt blocks reflect the post-repair
+  // state.
+  const routeAutorepairs = await autoRepairRouteRegistration(
+    state.outputDir,
+    routeAudit,
+  );
+  if (routeAutorepairs.appliedAny) {
+    console.log(
+      `${label}: auto-wired ${routeAutorepairs.wired.length} register*Routes call(s) in index.ts: ${routeAutorepairs.wired.join(", ")}.`,
+    );
+    getRepairEmitter(state.sessionId)({
+      stage: "preflight-route-audit",
+      event: "route_audit_autorepaired",
+      details: {
+        when: "preflight",
+        wired: routeAutorepairs.wired,
+        skippedWires: routeAutorepairs.skippedWires,
+      },
+    });
+    routeAudit = await auditApiRouteRegistration(state.outputDir);
+  }
+
   const initialApiClientUniqueness = await auditFrontendApiClientUniqueness(
     state.outputDir,
   );
@@ -7535,7 +8337,39 @@ async function integrationVerifyAndFix(
     "  1. FIRST review PRD completeness and fill missing implementations so the product is actually usable.",
     "  2. THEN perform registration closure plus scoped compile/build verification until all final gates pass.",
     "",
-    "## Phase 0 — PRD Completeness & Routing/Module Registration",
+    "## Phase 0 — Contract usage coverage decisions (READ FIRST, ACT IMMEDIATELY)",
+    "Before any other work, check the user message for a `## Contract usage coverage` block.",
+    "That block contains a pre-classified list of contract / frontend-call mismatches. It is",
+    "AUTHORITATIVE — the classification was performed deterministically against API_CONTRACTS.json,",
+    "the actual frontend code, and the PRD. Do NOT re-derive these decisions; just execute them.",
+    "",
+    "The 4-quadrant decision tree (already applied for you):",
+    "  case (1) frontend-wiring-missing  → contract has it, frontend doesn't call it, PRD requires it.",
+    "                                       ACTION: write the frontend wiring (apiClient call + UI",
+    "                                       hookup). Do NOT modify API_CONTRACTS.json.",
+    "  case (2) contract-surplus          → already pruned from API_CONTRACTS.json by the audit.",
+    "                                       ACTION: none — the contract is now correct.",
+    "  case (3) contract-gap-add-and-impl → frontend already calls an endpoint not in contract,",
+    "                                       and PRD justifies it. ACTION: add the entry to",
+    "                                       API_CONTRACTS.json (infer schema from the call site)",
+    "                                       AND implement the backend route.",
+    "  case (4) frontend-rogue-call       → frontend calls an endpoint with no contract entry and",
+    "                                       no PRD justification. ACTION: remove the rogue call",
+    "                                       (or replace with the canonical contract endpoint).",
+    "",
+    "You ARE explicitly allowed to:",
+    "  - edit API_CONTRACTS.json (cases 2 already done; case 3 requires adding entries)",
+    "  - delete frontend API calls (case 4)",
+    "The PRD is the only source of truth. Contract is a derived artefact, NOT an immutable spec.",
+    "",
+    "Anti-pattern: defaulting to 'implement the missing endpoint' when the route audit later",
+    "reports it as missing-from-backend. If the contract entry corresponds to a case (1) repair",
+    "task above, the FRONTEND is what's missing — implementing a backend stub the frontend will",
+    "never call wastes budget. If the entry was a case (2) it was already pruned, so you'll never",
+    "see it again. If you DO see new missing-impl reports from the route audit not covered by the",
+    "above tasks, those are genuine backend gaps and you should implement them.",
+    "",
+    "## Phase 0.5 — PRD Completeness & Routing/Module Registration",
     "Before compile/build validation, inspect these integration points first:",
     "1. Review the PRD and identify missing pages, flows, handlers, middlewares, and end-to-end feature gaps.",
     "2. Frontend route closure:",
@@ -7642,10 +8476,112 @@ async function integrationVerifyAndFix(
     state.outputDir,
   ).catch(() => "");
 
+  // ── Coverage repair-task block ─────────────────────────────────────────
+  // Render the deterministic decisions from `runContractUsageCoverage` as a
+  // checklist the verify-fix worker should execute first. Empty string when
+  // the audit didn't produce actionable items (or wasn't run).
+  let coverageBlock = "";
+  if (coverageResult) {
+    const { totals, pruned, pendingRepairTasks } = coverageResult;
+    const noiseFree =
+      pruned.length === 0 && pendingRepairTasks.length === 0;
+    if (!noiseFree) {
+      const lines: string[] = ["", "## Contract usage coverage"];
+      lines.push(
+        `Totals: contractEntries=${totals.contractEntries}, frontendCalls=${totals.frontendCalls}, consistent=${totals.consistent}, surplus=${totals.surplus} (pruned), wiring-missing=${totals.frontendWiringMissing}, contract-gap=${totals.contractGap}, rogue=${totals.frontendRogue}, admin-skipped=${totals.adminSkipped}.`,
+      );
+      if (pruned.length > 0) {
+        lines.push("");
+        lines.push(
+          `**Already pruned from API_CONTRACTS.json (${pruned.length})** — these endpoints had no PRD justification and no frontend caller. Do NOT try to re-add them; they were correctly removed.`,
+        );
+        for (const p of pruned.slice(0, 12)) {
+          lines.push(`  - PRUNED: ${p.method} ${p.endpoint}`);
+        }
+        if (pruned.length > 12) {
+          lines.push(`  - … (+${pruned.length - 12} more, full list in .ralph/contract-usage-coverage.json)`);
+        }
+      }
+      if (pendingRepairTasks.length > 0) {
+        const wiring = pendingRepairTasks.filter(
+          (t) => t.case === "frontend-wiring-missing",
+        );
+        const gaps = pendingRepairTasks.filter(
+          (t) => t.case === "contract-gap-add-and-impl",
+        );
+        const rogue = pendingRepairTasks.filter(
+          (t) => t.case === "frontend-rogue-call",
+        );
+        if (wiring.length > 0) {
+          lines.push("");
+          lines.push(
+            `**Case (1) Frontend wiring missing — execute these (${wiring.length}):**`,
+          );
+          for (const t of wiring.slice(0, 10)) {
+            lines.push(`  - [frontend] ${t.method} ${t.endpoint} — ${t.directive}`);
+          }
+          if (wiring.length > 10) {
+            lines.push(`  - … (+${wiring.length - 10} more)`);
+          }
+        }
+        if (gaps.length > 0) {
+          lines.push("");
+          lines.push(
+            `**Case (3) Contract gap — add to API_CONTRACTS.json + implement backend (${gaps.length}):**`,
+          );
+          for (const t of gaps.slice(0, 10)) {
+            lines.push(
+              `  - [contract+backend] ${t.method} ${t.endpoint} (call site: ${t.sourcePath ?? "?"}) — ${t.directive}`,
+            );
+          }
+          if (gaps.length > 10) {
+            lines.push(`  - … (+${gaps.length - 10} more)`);
+          }
+        }
+        if (rogue.length > 0) {
+          lines.push("");
+          lines.push(
+            `**Case (4) Frontend rogue calls — remove or rewrite (${rogue.length}):**`,
+          );
+          for (const t of rogue.slice(0, 10)) {
+            lines.push(
+              `  - [frontend] ${t.method} ${t.endpoint} at ${t.sourcePath ?? "?"} — ${t.directive}`,
+            );
+          }
+          if (rogue.length > 10) {
+            lines.push(`  - … (+${rogue.length - 10} more)`);
+          }
+        }
+      }
+      lines.push("");
+      lines.push(
+        "These tasks are PRE-CLASSIFIED. Execute them in one batch pass before re-running the route audit. Full data: `.ralph/contract-usage-coverage.json`.",
+      );
+      coverageBlock = lines.join("\n");
+    }
+  }
+
+  // Render the runtime-integration-audit findings (CODEGEN_HARDENING_PLAN.md
+  // §4.2 / §4.3 / §4.4 / §4.5 / §4.7) — empty when the audit was clean or
+  // didn't run. Rendered immediately after `coverageBlock` so the worker
+  // sees both deterministic decision sets back-to-back.
+  const runtimeAuditBlock = runtimeAuditResult
+    ? formatRuntimeAuditBlock(runtimeAuditResult)
+    : "";
+
+  const migrationCoverageBlock = migrationCoverageResult
+    ? formatMigrationCoverageBlock(migrationCoverageResult)
+    : "";
+  const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
+
   const openingUserContent = [
     `Project directory: ${state.outputDir}`,
     `Package manager: ${pm}`,
     prdBlock,
+    coverageBlock,
+    migrationCoverageBlock,
+    runtimeAuditBlock,
+    tddRepairBlock,
     dependencyAuditBlock,
     residualConflictBlock,
     frontendNormalizationBlock,
@@ -7674,6 +8610,7 @@ async function integrationVerifyAndFix(
   let finalStatus: "pass" | "fail" = "fail";
   let finalSummary = "";
   let totalCostUsd = 0;
+  let contextCompressionUsed = false;
   const integrationReasoningOptions = buildIntegrationReasoningOptions();
   let validationStale = true;
   let lastMutationAt: string | null = null;
@@ -7686,6 +8623,20 @@ async function integrationVerifyAndFix(
   let consecutiveNoMutationIterations = 0;
   let lastStagnationGuidanceAt = 0;
   let stagnationWarningsWithoutProgress = 0;
+  // CODEGEN_HARDENING_PLAN.md §7.4 — pre-abort fallback retry. When the
+  // stagnation abort would normally fire, the worker gets ONE batched
+  // "do classify-then-write" prompt and 2 extra iterations to actually
+  // mutate the workspace. If that still produces nothing, we abort for
+  // real. This recovers the common failure mode where the worker had the
+  // right intent but couldn't see the next concrete action.
+  let stagnationFallbackUsed = false;
+  let stagnationFallbackIterationsLeft = 0;
+  let stagnationFallbackPassedEmitted = false;
+  // R6: when fallback ALSO exhausts without progress, try ONE fresh-eyes
+  // replan before truly aborting. Resets bloated message history,
+  // injects a focused 3-step plan from a separate LLM call.
+  let stagnationReplanAttempted = false;
+  let stagnationReplanBudgetLeft = 0;
   const repeatedReadOnlyActionCounts = new Map<string, number>();
   let progressScore = 0;
   let lastMeaningfulProgressIteration = 0;
@@ -7990,66 +8941,40 @@ async function integrationVerifyAndFix(
    * Context compression: when messages exceed ~20k tokens, compact the middle
    * portion into a summary, keeping system prompt + last 6 messages.
    */
-  function compactMessagesIfNeeded(): void {
-    const COMPACT_THRESHOLD = 20_000 * 4;
-    const KEEP_TAIL = 6;
-    const totalChars = messages.reduce(
-      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0),
-      0,
-    );
-    if (totalChars < COMPACT_THRESHOLD) return;
-
-    const systemMsg = messages[0];
-    const desiredStart = Math.max(1, messages.length - KEEP_TAIL);
-    const tailStart = calculateSafeTailStart(messages, desiredStart);
-    const tail = messages.slice(tailStart);
-    const middle = messages.slice(1, tailStart);
-
-    const actionLines: string[] = [];
-    for (const m of middle) {
-      if (m.role === "tool") {
-        actionLines.push(
-          `[tool result] ${String(m.content ?? "").slice(0, 200)}`,
-        );
-      } else if (m.role === "assistant") {
-        const calls = (m.tool_calls ?? [])
-          .map((tc) => tc.function.name)
-          .join(", ");
-        if (calls) actionLines.push(`[assistant called] ${calls}`);
-      }
-    }
-    const summary =
-      `[Context compacted — ${middle.length} messages omitted]\n` +
-      `Validation state:\n` +
-      `- stale: ${validationStale}\n` +
-      `- last mutation: ${lastMutationAt ?? "never"} (${lastMutationReason})\n` +
-      `- progress score: ${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}\n` +
-      `- last meaningful progress: iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason})\n` +
-      `- last full validation: ${lastFullValidationAt ?? "never"}\n` +
-      `- frontend tsc ok at: ${frontendTscOkAt ?? "never"}\n` +
-      `- frontend build ok at: ${frontendBuildOkAt ?? "never"}\n` +
-      `- backend tsc ok at: ${backendTscOkAt ?? "never"}\n` +
-      `- backend smoke ok at: ${backendSmokeOkAt ?? "never"}\n` +
-      `Previous actions summary:\n${actionLines.slice(-30).join("\n")}`;
-
-    messages.splice(
-      0,
-      messages.length,
-      systemMsg,
-      { role: "assistant", content: summary },
-      ...tail,
-    );
-    const removed = countRemovedOrphanToolMessages(messages);
+  async function compactMessagesIfNeeded(force = false): Promise<boolean> {
+    if (contextCompressionUsed) return false;
+    const result = await compactChatMessagesSemantically({
+      messages,
+      modelChain,
+      label,
+      force,
+      stateSummary: [
+        `phase=integration_verify_fix`,
+        `iterations=${iterations}`,
+        `validationStale=${validationStale}`,
+        `lastMutation=${lastMutationAt ?? "never"} (${lastMutationReason})`,
+        `progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}`,
+        `lastMeaningfulProgress=iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason})`,
+        `lastFullValidation=${lastFullValidationAt ?? "never"}`,
+        `frontendTscOkAt=${frontendTscOkAt ?? "never"}`,
+        `frontendBuildOkAt=${frontendBuildOkAt ?? "never"}`,
+        `backendTscOkAt=${backendTscOkAt ?? "never"}`,
+        `backendSmokeOkAt=${backendSmokeOkAt ?? "never"}`,
+      ].join("\n"),
+    });
+    if (!result.compacted) return false;
+    contextCompressionUsed = true;
     console.log(
-      `${label}: context compacted — removed ${middle.length} messages (was ~${Math.round(totalChars / 4)} tokens), orphan_tools_removed=${removed}`,
+      `${label}: semantic context compacted — removed ${result.removedMessages} messages (was ~${result.estimatedTokensBefore} tokens), orphan_tools_removed=${result.orphanToolsRemoved}`,
     );
+    return true;
   }
 
-  while (iterations < MAX_ITER) {
+  while (true) {
     iterations++;
-    console.log(`${label}: iteration ${iterations}/${MAX_ITER}`);
+    console.log(`${label}: iteration ${iterations}`);
 
-    compactMessagesIfNeeded();
+    await compactMessagesIfNeeded();
 
     let resp;
     try {
@@ -8062,6 +8987,10 @@ async function integrationVerifyAndFix(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
+        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        continue;
+      }
       console.error(`${label}: LLM call failed: ${msg}`);
       break;
     }
@@ -8253,6 +9182,27 @@ async function integrationVerifyAndFix(
       consecutiveNoMutationIterations = 0;
       stagnationWarningsWithoutProgress = 0;
       repeatedReadOnlyActionCounts.clear();
+      // CODEGEN_HARDENING_PLAN.md §7.4 — credit the fallback retry once
+      // the worker actually mutates after we injected the batched prompt.
+      // Emitting `stagnation_fallback_passed` lets the model-scoring
+      // system recognise "this was a pipeline rescue, not a model fault"
+      // and avoids spuriously down-weighting the model on the next run.
+      if (stagnationFallbackUsed && !stagnationFallbackPassedEmitted) {
+        stagnationFallbackPassedEmitted = true;
+        // Cancel remaining fallback budget — we're back on track.
+        stagnationFallbackIterationsLeft = 0;
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "stagnation_fallback_passed",
+          details: {
+            recoveredAtIteration: iterations,
+            mutationReason,
+          },
+        });
+        console.log(
+          `${label}: stagnation fallback recovered — worker mutated after batched prompt.`,
+        );
+      }
     } else if (iterationValidationProgress) {
       recordMeaningfulProgress(
         `validation progress (${iterationProgressReasons.join(", ")})`,
@@ -8310,19 +9260,299 @@ async function integrationVerifyAndFix(
         });
       }
       if (consecutiveNoMutationIterations >= abortAt) {
-        finalStatus = "fail";
-        finalSummary = [
-          "IntegrationVerifyFix stalled without making code changes.",
-          `No mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
-          `Dynamic stagnation threshold reached: abortAt=${abortAt}, progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}.`,
+        // ── Fallback retry (CODEGEN_HARDENING_PLAN.md §7.4) ──────────────
+        // Before truly aborting, give the worker ONE last shot with a
+        // batched classify-then-mutate prompt. The hypothesis: the worker
+        // was reading-only because it couldn't decide WHICH issue to fix
+        // first. The fallback removes that ambiguity by handing it a
+        // single, deterministic procedure. Worker gets 2 more iterations
+        // to actually mutate; if it still doesn't, the real abort fires.
+        if (!stagnationFallbackUsed) {
+          stagnationFallbackUsed = true;
+          stagnationFallbackIterationsLeft = 2;
+          consecutiveNoMutationIterations = 0;
+          stagnationWarningsWithoutProgress = 0;
+          repeatedReadOnlyActionCounts.clear();
+
+          messages.push({
+            role: "user",
+            content: [
+              "SYSTEM CORRECTION — STAGNATION ABORT WAS ABOUT TO FIRE. You get ONE last batched-mode chance to make progress.",
+              `Reason: no filesystem mutation for ${abortAt} iteration(s); progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}; last meaningful progress at iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason}).`,
+              repeatedAction ? `Most repeated action: ${repeatedAction}.` : "",
+              "",
+              "## Switch to single-batch classification mode",
+              "Do EXACTLY this on your next 2 turns. Do NOT free-form explore.",
+              "",
+              "Turn N (this turn):",
+              "  1. read_file(`API_CONTRACTS.json`)            — ONCE.",
+              "  2. read_file(`.ralph/contract-usage-coverage.json`) if it exists — that file already classifies every contract entry vs frontend call vs PRD.",
+              "  3. grep(`apiClient\\.|api\\.(get|post|put|patch|delete)\\(`, `frontend/src`) — collect all call sites in ONE pass.",
+              "  4. grep(`PRD|Product Requirement|User flow|UX`, `PRD.md`) is OPTIONAL — the audit already did this for you.",
+              "  5. For every (contract entry, frontend call) pair:",
+              "       Apply the 4-quadrant decision tree from your system prompt (case 1: wire frontend; case 2: prune contract; case 3: add to contract + implement; case 4: remove rogue call).",
+              "  6. Output a SINGLE batch of write_file calls covering the highest-confidence decisions. Do NOT verify between writes.",
+              "",
+              "Turn N+1:",
+              "  1. Re-run the FULL scoped validation (frontend tsc → frontend build → backend tsc → backend smoke) once.",
+              "  2. Either call report_done(status='pass', summary=…) if everything passes, OR write the minimal additional fixes the validation flagged, OR call report_done(status='fail', summary=…) naming the specific unresolved file/line.",
+              "",
+              "Hard rules during this batched mode:",
+              "- DO NOT re-read API_CONTRACTS.json, frontend api files, or PRD.md again. You already have what you need.",
+              "- DO NOT explore alternate files; trust the classification.",
+              "- DO NOT call report_done(status='pass') without first running the validation in turn N+1.",
+              "- If you genuinely cannot derive a fix from the classification, call report_done(status='fail', summary='unable to classify <specific endpoint> — needs human review'). That is preferable to another stagnation cycle.",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          });
+
+          getRepairEmitter(state.sessionId)({
+            stage: "integration-gate",
+            event: "stagnation_fallback_injected",
+            details: {
+              triggeredAtIteration: iterations,
+              consecutiveNoMutationIterations: abortAt,
+              progressScore,
+              progressMax: MAX_INTEGRATION_PROGRESS_SCORE,
+              lastMeaningfulProgressIteration,
+              lastMeaningfulProgressReason,
+              repeatedAction: repeatedAction ?? "none",
+              budgetIterations: stagnationFallbackIterationsLeft,
+            },
+          });
+
+          console.warn(
+            `${label}: pre-abort stagnation fallback injected — granting ${stagnationFallbackIterationsLeft} more iteration(s).`,
+          );
+          // Continue the outer loop — give the worker its budget.
+          continue;
+        }
+
+        // Already used the fallback — drain its budget; only then abort.
+        if (stagnationFallbackIterationsLeft > 0) {
+          stagnationFallbackIterationsLeft -= 1;
+          if (stagnationFallbackIterationsLeft > 0) {
+            console.warn(
+              `${label}: stagnation persists during fallback (${stagnationFallbackIterationsLeft} iteration(s) of fallback budget left).`,
+            );
+            continue;
+          }
+        }
+
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "stagnation_fallback_exhausted",
+          details: {
+            triggeredAtIteration: iterations,
+            consecutiveNoMutationIterations: abortAt,
+            progressScore,
+            progressMax: MAX_INTEGRATION_PROGRESS_SCORE,
+          },
+        });
+
+        // ── R6: pre-abort fresh-eyes replan ──────────────────────────────
+        // The fallback didn't work, which means the worker is stuck
+        // INSIDE its own message context. Call a separate LLM to produce
+        // a focused 3-step plan, drop the bloated history, and reseed.
+        if (!stagnationReplanAttempted) {
+          stagnationReplanAttempted = true;
+          const repeatedReads: string[] = [];
+          for (const [fp, n] of repeatedReadOnlyActionCounts.entries()) {
+            if (n >= 2 && fp.startsWith("read_file:")) {
+              repeatedReads.push(fp.replace(/^read_file:/, ""));
+            }
+          }
+          const repeatedActions: string[] = [];
+          for (const [fp, n] of repeatedReadOnlyActionCounts.entries()) {
+            if (n >= 2) repeatedActions.push(`${fp} ×${n}`);
+          }
+          const diagnostics = await collectStagnationDiagnostics(
+            state.outputDir,
+          );
+          const replanResult = await computeStagnationReplan({
+            diagnosticsSnapshot: diagnostics,
+            repeatedActions,
+            repeatedReads,
+            lastProgressReason: lastMeaningfulProgressReason,
+            iterationsConsumed: iterations - lastMeaningfulProgressIteration,
+            chat: async (msgs) => {
+              const replanChain = resolveModelChain(
+                MODEL_CONFIG.taskBreakdown ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
+                resolveModel,
+              );
+              const resp = await chatCompletionWithFallback(
+                msgs as ChatMessage[],
+                replanChain,
+                { temperature: 0.1, max_tokens: 2048 },
+              );
+              return resp.choices[0]?.message?.content ?? "";
+            },
+          });
+
+          if (replanResult.ok) {
+            // Drop the bloated message history but keep the system prompt
+            // — the system role definitions are still valid; only the
+            // accumulated tool-call history is poisoning the worker.
+            const systemMessage = messages[0]!;
+            messages.length = 0;
+            messages.push(systemMessage);
+            messages.push({
+              role: "user",
+              content: [
+                "SYSTEM CORRECTION — STAGNATION REPLAN (fallback also exhausted).",
+                "Your previous message history has been DROPPED to clear context poisoning.",
+                "Below is a fresh 3-step plan from an independent triage LLM. Execute it in order. Do NOT re-read files mentioned in the plan — act on them directly.",
+                "",
+                replanResult.plan,
+                "",
+                "After executing all three steps, call `report_done(status='pass', summary=…)` if validation passes, or `report_done(status='fail', summary=<specific blocker>)` if a concrete unresolvable issue remains.",
+              ].join("\n"),
+            });
+
+            stagnationReplanBudgetLeft = 4;
+            stagnationFallbackIterationsLeft = 0;
+            stagnationFallbackUsed = false;
+            consecutiveNoMutationIterations = 0;
+            stagnationWarningsWithoutProgress = 0;
+            repeatedReadOnlyActionCounts.clear();
+
+            getRepairEmitter(state.sessionId)({
+              stage: "integration-gate",
+              event: "stagnation_replan_injected",
+              details: {
+                triggeredAtIteration: iterations,
+                planBulletCount: replanResult.diagnostics.bulletCount,
+                budgetIterations: stagnationReplanBudgetLeft,
+              },
+            });
+            console.warn(
+              `${label}: pre-abort stagnation replan injected — granting ${stagnationReplanBudgetLeft} more iteration(s).`,
+            );
+            continue;
+          }
+
+          // Replan LLM itself failed — log and fall through to abort.
+          getRepairEmitter(state.sessionId)({
+            stage: "integration-gate",
+            event: "stagnation_replan_failed",
+            details: {
+              triggeredAtIteration: iterations,
+              reason: replanResult.diagnostics.reason ?? "unknown",
+            },
+          });
+          console.warn(
+            `${label}: stagnation replan failed (${replanResult.diagnostics.reason ?? "unknown"}); aborting.`,
+          );
+        } else if (stagnationReplanBudgetLeft > 0) {
+          // Drain replan budget before truly aborting.
+          stagnationReplanBudgetLeft -= 1;
+          if (stagnationReplanBudgetLeft > 0) {
+            console.warn(
+              `${label}: stagnation persists during replan window (${stagnationReplanBudgetLeft} iteration(s) of replan budget left).`,
+            );
+            continue;
+          }
+        }
+
+        // ── Human-in-the-loop decision (§7.5) ─────────────────────────────
+        // Before aborting, emit a `human_decision_needed` event to the browser
+        // and wait up to 5 min for the human to pick one of the 4-quadrant
+        // options. This unblocks the case where the worker cannot decide
+        // because the problem requires architectural judgement (e.g. the
+        // contract says "wire frontend" but the app is a pure SPA).
+        const humanDecisionContext = [
+          "IntegrationVerifyFix stagnated and could not determine the right action.",
+          `No filesystem mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
+          repeatedAction ? `Most repeated action: ${repeatedAction}.` : "",
           `Last meaningful progress: iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason}).`,
-          repeatedAction ? `Most repeated action: ${repeatedAction}` : "",
-          "Aborting instead of spending more iterations rereading the same files.",
+          "",
+          "Review the contract-usage-coverage block above and choose the correct action for the highest-priority unresolved mismatch.",
         ]
           .filter(Boolean)
           .join("\n");
-        console.warn(`${label}: aborting due to stagnation.`);
-        break;
+
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "human_decision_needed",
+          details: {
+            context: humanDecisionContext,
+            options: INTEGRATION_DECISION_OPTIONS,
+            triggeredAtIteration: iterations,
+            progressScore,
+            progressMax: MAX_INTEGRATION_PROGRESS_SCORE,
+            timeoutMs: 5 * 60 * 1000,
+          },
+        });
+
+        console.warn(
+          `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
+        );
+
+        let humanDecision: string;
+        try {
+          humanDecision = await requestHumanDecision(
+            state.sessionId,
+            INTEGRATION_DECISION_OPTIONS,
+            humanDecisionContext,
+          );
+        } catch {
+          humanDecision = "abort";
+        }
+
+        getRepairEmitter(state.sessionId)({
+          stage: "integration-gate",
+          event: "human_decision_received",
+          details: { decisionId: humanDecision, triggeredAtIteration: iterations },
+        });
+
+        if (humanDecision === "abort" || humanDecision === "timeout") {
+          finalStatus = "fail";
+          finalSummary = [
+            humanDecision === "timeout"
+              ? "Human decision timed out (5 min); aborting integration fix."
+              : "Human chose to abort the integration fix stage.",
+            `No mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
+            `Dynamic stagnation threshold: abortAt=${abortAt}, progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}.`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+          console.warn(`${label}: aborting on human decision (${humanDecision}).`);
+          break;
+        }
+
+        // Human picked an actionable option — find its label/description and
+        // inject a targeted instruction so the worker acts in the next turn.
+        const chosenOption = INTEGRATION_DECISION_OPTIONS.find(
+          (o) => o.id === humanDecision,
+        );
+        const humanInstruction = chosenOption
+          ? `HUMAN DECISION: ${chosenOption.label} — ${chosenOption.description}`
+          : `HUMAN DECISION: ${humanDecision}`;
+
+        messages.push({
+          role: "user",
+          content: [
+            "SYSTEM CORRECTION — HUMAN OVERRIDE: A human reviewer has decided the correct action.",
+            humanInstruction,
+            "",
+            "Apply this decision immediately on your NEXT turn.",
+            "Do NOT re-read files or re-classify. Make the write_file call(s) that correspond to this decision, then re-run scoped validation.",
+            "After validation passes, call report_done(status='pass', summary=…).",
+          ].join("\n"),
+        });
+
+        // Reset stagnation counters to grant 2 more iterations for the human-
+        // directed fix.
+        consecutiveNoMutationIterations = 0;
+        stagnationWarningsWithoutProgress = 0;
+        stagnationFallbackUsed = false;
+        stagnationFallbackIterationsLeft = 0;
+        repeatedReadOnlyActionCounts.clear();
+        console.warn(
+          `${label}: human decision "${humanDecision}" injected — resuming with 2 extra iterations.`,
+        );
+        continue;
       }
     }
 
@@ -8445,6 +9675,49 @@ async function integrationVerifyAndFix(
       parallelClients: finalApiClientUniqueness.parallelClients,
     },
   });
+
+  // ─── Runtime smoke gate (P0) ─────────────────────────────────────────
+  // Boot the backend and prove every contract endpoint returns something
+  // OTHER than 404. The whole goal is to pre-empt the "OAuth succeeds but
+  // every authenticated request returns 404" failure mode that has been
+  // the #1 cause of post-codegen regressions. Emits a snapshot to
+  // `.ralph/runtime-smoke.json` so the verify-fix worker can read it as
+  // pendingRepairTasks on the next loop.
+  if (process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1") {
+    try {
+      const smoke = await runRuntimeSmokeGate({
+        outputDir: state.outputDir,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+      });
+      if (!smoke.pass) {
+        finalStatus = "fail";
+        const top = smoke.failures.slice(0, 6).map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
+        finalSummary = [
+          finalSummary,
+          "Runtime smoke gate failed:",
+          smoke.bootFailed
+            ? "Backend did not start — see .ralph/runtime-smoke.json `evidence` field."
+            : `${smoke.failures.length} endpoint failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+          .slice(0, 4000);
+      }
+    } catch (err) {
+      // Smoke gate must NEVER hard-fail the pipeline — surface as a warning.
+      console.warn(
+        `[supervisor] runtime smoke gate threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      getRepairEmitter(state.sessionId)({
+        stage: "integration-gate",
+        event: "runtime_smoke_threw",
+        details: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
   if (finalApiClientUniquenessHardFail) {
     finalStatus = "fail";
     finalSummary = [
@@ -8512,6 +9785,107 @@ async function integrationVerifyAndFix(
   };
 }
 
+/**
+ * Snapshot the .ralph diagnostic files into the compact summary the
+ * stagnation-replan LLM consumes. Each list is capped to 10 entries so
+ * the prompt stays under the LLM's effective attention budget.
+ */
+async function collectStagnationDiagnostics(outputDir: string): Promise<{
+  tscErrors?: string[];
+  contractCoverageGaps?: string[];
+  routeAudit?: string[];
+  migrationGaps?: string[];
+}> {
+  const out: {
+    tscErrors?: string[];
+    contractCoverageGaps?: string[];
+    routeAudit?: string[];
+    migrationGaps?: string[];
+  } = {};
+
+  const tryReadJson = async (relPath: string): Promise<unknown> => {
+    const raw = await fsRead(relPath, outputDir);
+    if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as
+    | { tasks?: Array<{ instruction?: string }> }
+    | null;
+  if (tsc?.tasks && Array.isArray(tsc.tasks)) {
+    out.tscErrors = tsc.tasks
+      .map((t) => (typeof t?.instruction === "string" ? t.instruction : null))
+      .filter((s): s is string => !!s)
+      .slice(0, 10);
+  }
+
+  const coverage = (await tryReadJson(".ralph/contract-usage-coverage.json")) as
+    | {
+        pendingRepairTasks?: Array<{
+          method?: string;
+          endpoint?: string;
+          directive?: string;
+        }>;
+      }
+    | null;
+  if (coverage?.pendingRepairTasks && Array.isArray(coverage.pendingRepairTasks)) {
+    out.contractCoverageGaps = coverage.pendingRepairTasks
+      .slice(0, 10)
+      .map((t) => `${t.method ?? "?"} ${t.endpoint ?? "?"} — ${t.directive ?? ""}`);
+  }
+
+  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as
+    | {
+        unregisteredModules?: string[];
+        unresolvedRegistrations?: string[];
+      }
+    | null;
+  if (routeAudit) {
+    const lines: string[] = [];
+    for (const m of routeAudit.unregisteredModules ?? []) {
+      lines.push(`unregistered: ${m}`);
+    }
+    for (const r of routeAudit.unresolvedRegistrations ?? []) {
+      lines.push(`unresolved registration: ${r}`);
+    }
+    if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
+  }
+
+  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as
+    | {
+        tasks?: Record<
+          string,
+          {
+            ok?: boolean;
+            gaps?: Array<{ modelPath?: string; modelName?: string }>;
+          }
+        >;
+      }
+    | null;
+  if (migration?.tasks) {
+    const lines: string[] = [];
+    for (const entry of Object.values(migration.tasks)) {
+      if (!entry || entry.ok || !Array.isArray(entry.gaps)) continue;
+      for (const g of entry.gaps) {
+        lines.push(
+          `model ${g.modelPath ?? "?"} needs migration ${g.modelName ?? "?"}`,
+        );
+        if (lines.length >= 10) break;
+      }
+      if (lines.length >= 10) break;
+    }
+    if (lines.length > 0) out.migrationGaps = lines;
+  }
+
+  return out;
+}
+
 function summary(state: SupervisorState) {
   const totalTasks = state.phaseResults.reduce(
     (sum, pr) => sum + pr.taskResults.length,
@@ -8549,6 +9923,7 @@ export function createSupervisorGraph() {
     .addNode("dispatch_gate", dispatchGate)
     .addNode("dependency_baseline", dependencyBaseline)
     .addNode("generate_api_contracts", generateApiContracts)
+    .addNode("tdd_test_writer", tddTestWriterAndRed)
     .addNode("be_worker", parallelWorkerNode)
     .addNode("be_phase_verify", (s) =>
       phaseVerifyAndFix(s, { workerHintRoles: ["backend", "test"] }),
@@ -8561,6 +9936,7 @@ export function createSupervisorGraph() {
     )
     .addNode("sync_deps", syncDeps)
     .addNode("integration_verify", integrationVerifyAndFix)
+    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
     .addNode("e2e_verify", e2eVerifyAndFix)
     .addNode("summary", summary)
 
@@ -8574,8 +9950,9 @@ export function createSupervisorGraph() {
     .addEdge("scaffold_fix", "scaffold_verify")
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
+    .addEdge("generate_api_contracts", "tdd_test_writer")
     .addConditionalEdges(
-      "generate_api_contracts",
+      "tdd_test_writer",
       dispatchBackendAndTestWorkers,
     )
     .addEdge("be_worker", "be_phase_verify")
@@ -8585,7 +9962,9 @@ export function createSupervisorGraph() {
     .addEdge("fe_worker", "fe_phase_verify")
     .addEdge("fe_phase_verify", "sync_deps")
     .addEdge("sync_deps", "integration_verify")
-    .addConditionalEdges("integration_verify", routeAfterIntegrationVerify, {
+    .addEdge("integration_verify", "tdd_green_verify")
+    .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
+      integration_verify: "integration_verify",
       e2e_verify: "e2e_verify",
       summary: "summary",
     })
@@ -8601,9 +9980,14 @@ export function createSupervisorGraph() {
 export function createIntegrationRetryGraph() {
   const graph = new StateGraph(SupervisorStateAnnotation)
     .addNode("integration_verify", integrationVerifyAndFix)
+    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
     .addNode("summary", summary)
     .addEdge(START, "integration_verify")
-    .addEdge("integration_verify", "summary")
+    .addEdge("integration_verify", "tdd_green_verify")
+    .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerifyRetry, {
+      integration_verify: "integration_verify",
+      summary: "summary",
+    })
     .addEdge("summary", END);
 
   return graph.compile();
