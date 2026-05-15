@@ -14,19 +14,19 @@ export async function POST(request: NextRequest) {
     codeOutputDir,
     fastFromPrd,
     pauseAfterPrd,
+    sessionId,
     prdEditInstruction,
     existingPrd,
-    sessionId,
   } = body as {
     featureBrief?: string;
     codeOutputDir?: string;
     fastFromPrd?: boolean;
     pauseAfterPrd?: boolean;
-    prdEditInstruction?: string;
-    existingPrd?: string;
     /** Stable client-generated id linking this pipeline run with a
      *  subsequent kickoff so memory records share the same kickoffId. */
     sessionId?: string;
+    prdEditInstruction?: string;
+    existingPrd?: string;
   };
 
   const featureBrief =

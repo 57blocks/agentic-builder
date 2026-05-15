@@ -8,6 +8,8 @@ import type {
   KickoffWorkItem,
 } from "@/lib/pipeline/types";
 
+import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
+
 export interface IntegrationVerifyState {
   status: "verifying" | "fixing" | "passed" | "failed";
   errors?: string;
@@ -25,6 +27,14 @@ export interface E2EVerifyState {
   maxFixAttempts: number;
 }
 
+export interface PendingHumanDecision {
+  sessionId: string;
+  context: string;
+  options: HumanDecisionOption[];
+  /** ISO string — UI shows countdown */
+  expiresAt: string;
+}
+
 interface CodingState {
   sessionId: string | null;
   status: "idle" | "running" | "completed" | "failed";
@@ -37,6 +47,8 @@ interface CodingState {
   e2eVerify: E2EVerifyState | null;
   /** Supervisor-level logs (phase verify, fix, install, etc.) */
   supervisorLogs: AgentLogEntry[];
+  /** Set when integration_verify_fix is waiting for a human to pick an action. */
+  pendingHumanDecision: PendingHumanDecision | null;
 
   startCoding: (
     runId: string,
@@ -65,6 +77,8 @@ interface CodingState {
     projectTier?: string,
   ) => void;
   selectAgent: (agentId: string | null) => void;
+  /** Called by the decision UI when the user picks an option. */
+  submitHumanDecision: (decisionId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -80,8 +94,24 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   e2eVerify: null,
   gapAnalysis: null,
   supervisorLogs: [],
+  pendingHumanDecision: null,
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
+
+  submitHumanDecision: async (decisionId: string) => {
+    const { sessionId, pendingHumanDecision } = get();
+    if (!sessionId || !pendingHumanDecision) return;
+    set({ pendingHumanDecision: null });
+    try {
+      await fetch("/api/agents/coding/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, decisionId }),
+      });
+    } catch (err) {
+      console.error("[coding-store] submitHumanDecision failed:", err);
+    }
+  },
 
   startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent) => {
     set({
@@ -95,6 +125,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      pendingHumanDecision: null,
     });
 
     // Clear the last-session checkpoint so the "Retry Failed Tasks" button
@@ -176,6 +207,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      pendingHumanDecision: null,
     });
 
     fetch("/api/agents/coding", {
@@ -426,6 +458,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      pendingHumanDecision: null,
     });
   },
 }));
@@ -921,6 +954,33 @@ function handleCodingEvent(
         maxFixAttempts,
       },
     });
+    return;
+  }
+
+  // Handle repair_event from the supervisor's self-heal channel.
+  // Currently we only surface the human_decision_needed sub-event; all other
+  // repair events are silently dropped (they go to .ralph/repair-log.jsonl).
+  if (type === "repair_event") {
+    const repairEvent = payload.data?.event as string | undefined;
+    if (repairEvent === "human_decision_needed") {
+      const details = payload.data?.details as Record<string, unknown> | undefined;
+      const sessionId = payload.sessionId ?? get().sessionId;
+      if (sessionId) {
+        set({
+          pendingHumanDecision: {
+            sessionId,
+            context: (details?.context as string) ?? "",
+            options: (details?.options as HumanDecisionOption[]) ?? [],
+            expiresAt: new Date(
+              Date.now() + ((details?.timeoutMs as number) ?? 5 * 60 * 1000),
+            ).toISOString(),
+          },
+        });
+      }
+    }
+    if (repairEvent === "human_decision_received") {
+      set({ pendingHumanDecision: null });
+    }
     return;
   }
 }

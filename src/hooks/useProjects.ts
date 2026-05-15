@@ -44,12 +44,21 @@ export function useProjects(): UseProjectsReturn {
         body: JSON.stringify({ name, id: localId }),
       });
 
-      if (!res.ok) {
-        const err = (await res.json()) as { message?: string };
-        throw new Error(err.message ?? "Failed to create project.");
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
       }
 
-      const data = (await res.json()) as { project: Project };
+      if (!res.ok) {
+        const msg =
+          (body as { message?: string } | null)?.message ??
+          `Failed to create project (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+
+      const data = body as { project: Project };
       setProjects((prev) => {
         // If we had a local placeholder, replace it; otherwise insert at front
         if (localId) {

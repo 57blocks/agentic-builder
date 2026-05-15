@@ -626,7 +626,7 @@ export class PencilDesignAgent {
       const raw = process.env.PENCIL_BATCH_JSON_MAX_TOKENS;
       const parsed =
         raw !== undefined && raw !== "" ? Number.parseInt(raw, 10) : Number.NaN;
-      const n = Number.isNaN(parsed) ? 50000 : parsed;
+      const n = Number.isNaN(parsed) ? 96000 : parsed;
       return Math.min(128_000, Math.max(8_000, n));
     })();
     console.log(
@@ -854,7 +854,7 @@ export async function generatePencilDesignContent(
   const llmRes = await chatCompletion(messages, {
     model,
     temperature: 0.6,
-    max_tokens: 16384,
+    max_tokens: 49152,
     response_format: { type: "json_object" },
   });
 

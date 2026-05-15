@@ -8,6 +8,7 @@ import { getNextStep } from "@/_config/pipeline-flow";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import StageInputBar from "@/components/StageInputBar";
 import type { StepUIProps } from "../../../_shared/types";
+import type { ProjectTier } from "@/_config/pipeline-flow";
 
 // ─── In-memory PRD history ────────────────────────────────────────────────
 export interface PrdSnapshot { content: string; savedAt: Date; label: string; }
@@ -137,6 +138,8 @@ export function PrdUI(props: StepUIProps) {
   const featureBrief = useStepStore((s) => s.featureBrief);
   const isHydrated = useStepStore((s) => s.isHydrated);
   const executeStep = useStepStore((s) => s.executeStep);
+  const kickoffSessionId = useStepStore((s) => s.kickoffSessionId);
+  const intentMeta = useStepStore((s) => s.steps.intent?.metadata as { classification?: { type?: string } } | undefined);
   // Navigation
   const tier = useStepNavigationStore((s) => s.tier);
   const nextStep = getNextStep("prd", tier);
@@ -163,7 +166,32 @@ export function PrdUI(props: StepUIProps) {
 
   const isThisRunning = isRunning && currentStep === "prd";
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
-  const isDone = step?.status === "completed";
+  const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
+  const error = step?.status === "failed" ? step.error : null;
+
+  // On hydration, if PRD already exists, sync tier to nav store in case it was
+  // never persisted (e.g. projects created before this fix was deployed).
+  useEffect(() => {
+    if (!isHydrated || !isDone || isThisRunning) return;
+    const existing = step?.content ?? "";
+    if (!existing) return;
+    const tierMatch = existing.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+    if (!tierMatch) return;
+    const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
+    const navStore = useStepNavigationStore.getState();
+    if (navStore.tier !== parsedTier) {
+      navStore.setTier(parsedTier);
+      const slug = props.projectSlug;
+      if (slug) {
+        fetch(`/api/projects/${slug}/step-navigation`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier: parsedTier }),
+        }).catch((err) => console.error("[PrdUI] hydration tier persist error:", err));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, isDone]);
 
   // Track whether this session freshly executed the step (vs restored from hydration)
   const wasRunningRef = useRef(false);
@@ -183,6 +211,26 @@ export function PrdUI(props: StepUIProps) {
       if (finalContent) {
         const versionNum = prdHistoryRef.current.length + 1;
         prdHistoryRef.current = [...prdHistoryRef.current, { content: finalContent, savedAt: new Date(), label: versionNum === 1 ? `v${versionNum} · Initial` : `v${versionNum} · Edited` }];
+
+        // Parse Project Tier badge from PRD content and sync to navigation store + DB.
+        // The PRD may contain "**Project Tier: S**" or "**Project Tier: M**" etc.
+        const tierMatch = finalContent.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+        if (tierMatch) {
+          const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
+          const navStore = useStepNavigationStore.getState();
+          if (navStore.tier !== parsedTier) {
+            navStore.setTier(parsedTier);
+            // Persist to DB so the tier survives page refresh
+            const slug = props.projectSlug;
+            if (slug) {
+              fetch(`/api/projects/${slug}/step-navigation`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tier: parsedTier }),
+              }).catch((err) => console.error("[PrdUI] tier persist error:", err));
+            }
+          }
+        }
       }
     }
     prevIsDoneRef.current = isDone;
@@ -245,6 +293,15 @@ export function PrdUI(props: StepUIProps) {
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="bg-[rgba(113,42,226,0.1)] text-[#712ae2] text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">{isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}</span>
+                  {isDone && tier && (
+                    <span className={`text-[11px] font-semibold px-2 py-[2px] rounded-[2px] ${
+                      tier === "S" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                      tier === "M" ? "bg-blue-50 text-blue-700 border border-blue-200" :
+                                     "bg-orange-50 text-orange-700 border border-orange-200"
+                    }`}>
+                      {tier === "S" ? "S · Simple Frontend" : tier === "M" ? "M · Full-Stack App" : "L · Enterprise"}
+                    </span>
+                  )}
                   {isDone && <span className="text-[#94a3b8] text-[12px]">{step?.durationMs != null ? `Generated in ${(step.durationMs / 1000).toFixed(1)}s` : "Just now"}</span>}
                 </div>
                 <h2 className="text-[30px] font-semibold text-[#0f172a] tracking-[-0.3px] leading-[36px]">Product Requirements Document</h2>
@@ -257,7 +314,8 @@ export function PrdUI(props: StepUIProps) {
               </div>
             </div>
             <div className="p-8">
-              {!content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
+              {error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
+              : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
               : <MarkdownRenderer content={content} variant="prd" />}
             <div ref={bottomRef} />
@@ -271,7 +329,25 @@ export function PrdUI(props: StepUIProps) {
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
-        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => { if (nextStep) props.onNavigate(nextStep); }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
+        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => {
+          // Fire-and-forget memory capture before navigating
+          const finalContent = step?.content ?? "";
+          if (finalContent && kickoffSessionId) {
+            const originalContent = prdHistoryRef.current[0]?.content ?? finalContent;
+            fetch("/api/memory/prd/capture", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: kickoffSessionId,
+                originalPrd: originalContent,
+                finalPrd: finalContent,
+                tier,
+                projectType: intentMeta?.classification?.type ?? "unknown",
+              }),
+            }).catch(() => {/* ignore */});
+          }
+          if (nextStep) props.onNavigate(nextStep);
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
       />
     </div>
   );

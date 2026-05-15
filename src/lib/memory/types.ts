@@ -17,6 +17,11 @@ export type MemoryKind =
   | "scaffold-fitness"
   | "agent-tuning"
   | "model-routing"
+  // L1 (preparation phase patterns — Phase D)
+  | "prd-pattern"
+  | "design-pattern"
+  // L1 (design knowledge base — company style library + daily trends)
+  | "design-knowledge"
   // L2
   | "project-card"
   | "task-history"

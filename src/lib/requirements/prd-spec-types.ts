@@ -199,9 +199,41 @@ export interface PrdPageWireframe {
   imageUrl: string;
 }
 
+/** What kind of artefact produced this evidence. */
+export type EvidenceKind =
+  | "command"          // shell command run
+  | "validator"        // internal validator function
+  | "file-artifact"    // file produced / read
+  | "llm-self-check";  // LLM-emitted self-judgement (weakest tier)
+
+/** A piece of evidence backing a "this stage passed" claim. Stored on
+ *  GateReportBase so any downstream check can audit *why* the gate
+ *  reported passed. */
+export interface Evidence {
+  kind: EvidenceKind;
+  description: string;
+  command?: string;
+  exitCode?: number;
+  artifactPath?: string;
+  validatorName?: string;
+  /** Truncated digest (sha1.slice(0,12)) of the raw output. The original
+   *  output should be persisted alongside the producer's artefacts, not
+   *  embedded here, to keep evidence records bounded in size. */
+  outputDigest?: string;
+  producedAt: string;
+  passed: boolean;
+  /** Optional structured payload for downstream UIs (e.g. failure line
+   *  count, top-N error excerpts). Must be JSON-serialisable. */
+  details?: Record<string, unknown>;
+}
+
 export interface GateReportBase {
   gateId: string;
   passed: boolean;
   warnings: string[];
   missingIds: string[];
+  /** Evidence supporting the `passed` claim. Optional during the
+   *  evidence-gate rollout — gates that haven't been migrated yet may
+   *  return an empty/undefined array. */
+  evidence?: Evidence[];
 }

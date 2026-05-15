@@ -58,6 +58,8 @@ export async function chatCompletionsDeepSeekV4(
     max_tokens: number;
     tools?: OpenRouterToolDefinition[];
     tool_choice?: OpenRouterOptions["tool_choice"];
+    response_format?: OpenRouterOptions["response_format"];
+    thinking?: OpenRouterOptions["thinking"];
   },
 ): Promise<OpenRouterResponse> {
   const apiKey = process.env.DEEPSEEK_API_KEY!.trim();
@@ -68,9 +70,10 @@ export async function chatCompletionsDeepSeekV4(
     process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
   const url = `${base}/chat/completions`;
 
-  const enableThinking = isTruthyEnvFlag(
-    process.env.DEEPSEEK_V4_ENABLE_THINKING ?? "true",
-  );
+  const enableThinking =
+    options.thinking === false
+      ? false
+      : isTruthyEnvFlag(process.env.DEEPSEEK_V4_ENABLE_THINKING ?? "true");
   const reasoningEffort = (
     process.env.DEEPSEEK_V4_REASONING_EFFORT?.trim() || "high"
   ) as "low" | "medium" | "high";
@@ -85,6 +88,9 @@ export async function chatCompletionsDeepSeekV4(
       : {}),
     ...(options.tools?.length ? { tools: options.tools } : {}),
     ...(options.tool_choice ? { tool_choice: options.tool_choice } : {}),
+    ...(options.response_format
+      ? { response_format: options.response_format }
+      : {}),
   });
 
   let lastErr: Error | null = null;

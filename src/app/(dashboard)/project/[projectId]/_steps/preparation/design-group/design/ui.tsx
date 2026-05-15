@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Upload, X, FileImage, Code } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
+import { useStepNavigationStore } from "@/store/step-navigation-store";
 import type { StepId } from "@/_config/pipeline-flow";
+import { getNextStep } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
@@ -517,6 +519,12 @@ export function DesignUI(props: StepUIProps) {
   const isRunning = useStepStore((s) => s.isRunning);
   const executeStep = useStepStore((s) => s.executeStep);
   const patchStepMeta = useStepStore((s) => s.patchStepMeta);
+  const kickoffSessionId = useStepStore((s) => s.kickoffSessionId);
+  const intentMeta = useStepStore((s) => s.steps.intent?.metadata as { classification?: { type?: string } } | undefined);
+  const tier = useStepNavigationStore((s) => s.tier);
+
+  // Track the original AI-generated design spec for memory capture
+  const originalDesignRef = useRef<string>("");
 
   // ── Read persisted metadata from step-store (survives navigation) ──
   const designMeta = (steps.design?.metadata ?? {}) as {
@@ -589,6 +597,10 @@ export function DesignUI(props: StepUIProps) {
   const prevDesignRunning = useRef(isDesignRunning);
   useEffect(() => {
     if (prevDesignRunning.current && !isDesignRunning && isDesignDone) {
+      // Record the first AI-generated design spec for memory capture comparison
+      if (!originalDesignRef.current) {
+        originalDesignRef.current = steps.design?.content ?? "";
+      }
       setPhase("spec");
     }
     prevDesignRunning.current = isDesignRunning;
@@ -1467,7 +1479,10 @@ export function DesignUI(props: StepUIProps) {
               actions={
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => props.onNavigate("trd")}
+                    onClick={() => {
+                      const next = getNextStep("design", tier);
+                      if (next) props.onNavigate(next);
+                    }}
                     disabled={isRunning}
                     className="flex items-center gap-2 shrink-0 px-4 py-2 text-[13px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors disabled:opacity-40"
                   >
@@ -1493,7 +1508,26 @@ export function DesignUI(props: StepUIProps) {
           {phase === "stitch" && (
             <div className="flex items-center justify-end w-full">
                 <button
-                  onClick={() => props.onNavigate("trd")}
+                  onClick={() => {
+                    // Fire-and-forget memory capture for design phase
+                    const finalDesign = steps.design?.content ?? "";
+                    if (finalDesign && kickoffSessionId) {
+                      const originalDesign = originalDesignRef.current || finalDesign;
+                      fetch("/api/memory/design/capture", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          sessionId: kickoffSessionId,
+                          originalDesign,
+                          finalDesign,
+                          tier,
+                          projectType: intentMeta?.classification?.type ?? "unknown",
+                        }),
+                      }).catch(() => {/* ignore */});
+                    }
+                    const next = getNextStep("design", tier);
+                    if (next) props.onNavigate(next);
+                  }}
                   disabled={isRunning}
                   className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 shadow-md hover:shadow-lg"
                 >

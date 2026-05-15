@@ -12,6 +12,8 @@ import type {
   OpenRouterResponse,
   OpenRouterUsage,
 } from "@/lib/llm-types";
+import type { Evidence } from "@/lib/requirements/prd-spec-types";
+import { makeEvidence } from "@/lib/pipeline/gates/evidence-gate";
 
 export interface AgentConfig {
   name: string;
@@ -20,6 +22,7 @@ export interface AgentConfig {
   defaultModel: string | readonly string[];
   temperature?: number;
   maxTokens?: number;
+  thinking?: OpenRouterOptions["thinking"];
   customChatCompletion?: (
     messages: ChatMessage[],
     opts: OpenRouterOptions,
@@ -40,6 +43,11 @@ export interface AgentResult {
   durationMs: number;
   usage: OpenRouterUsage;
   traceId?: string;
+  /** Optional evidence the agent self-attests to its own completion. The
+   *  evidence-gate will treat `llm-self-check` evidence as insufficient on
+   *  its own — pair it with at least one validator/command evidence
+   *  produced by the engine. */
+  evidence?: Evidence[];
 }
 
 export class BaseAgent {
@@ -47,6 +55,17 @@ export class BaseAgent {
 
   constructor(config: AgentConfig) {
     this.config = config;
+  }
+
+  /**
+   * Build an Evidence record. Thin wrapper over `makeEvidence` exposed at
+   * the agent level so subclasses can call `this.produceEvidence(...)`
+   * instead of importing from the gates module directly.
+   */
+  protected produceEvidence(
+    partial: Omit<Evidence, "producedAt"> & { producedAt?: string },
+  ): Evidence {
+    return makeEvidence(partial);
   }
 
   protected buildMessages(
@@ -82,6 +101,7 @@ export class BaseAgent {
     const opts: OpenRouterOptions = {
       temperature: this.config.temperature ?? 0.7,
       max_tokens: this.config.maxTokens ?? 4096,
+      thinking: this.config.thinking,
     };
 
     let response: OpenRouterResponse;
@@ -136,6 +156,7 @@ export class BaseAgent {
       model: rawModel,
       temperature: this.config.temperature ?? 0.7,
       max_tokens: this.config.maxTokens ?? 4096,
+      thinking: this.config.thinking,
     };
 
     if (this.config.customStreamRun) {
