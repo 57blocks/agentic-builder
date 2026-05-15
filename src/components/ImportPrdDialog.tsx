@@ -8,6 +8,7 @@ import { usePipelineStore } from "@/store/pipeline-store";
 interface ImportPrdDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  onPrdImported?: (content: string) => void;
 }
 
 const ACCEPTED_EXTS = [".md", ".markdown", ".txt", ".pdf"];
@@ -87,6 +88,7 @@ async function parsePdfToText(file: File): Promise<string> {
 export default function ImportPrdDialog({
   isOpen,
   onClose,
+  onPrdImported,
 }: ImportPrdDialogProps) {
   const importedPrd = usePipelineStore((s) => s.importedPrd);
   const loading = usePipelineStore((s) => s.importedPrdLoading);
@@ -184,10 +186,11 @@ export default function ImportPrdDialog({
     }
     const ok = await importPrd(draft);
     if (ok) {
+      onPrdImported?.(trimmed);
       setDraft("");
       setLocalError(null);
     }
-  }, [draft, importPrd]);
+  }, [draft, importPrd, onPrdImported]);
 
   const handleClear = useCallback(async () => {
     const ok = await clearImportedPrd();
