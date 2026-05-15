@@ -93,9 +93,6 @@ export default function ImportPrdDialog({
   const importedPrd = usePipelineStore((s) => s.importedPrd);
   const loading = usePipelineStore((s) => s.importedPrdLoading);
   const error = usePipelineStore((s) => s.importedPrdError);
-  const refreshImportedPrdStatus = usePipelineStore(
-    (s) => s.refreshImportedPrdStatus,
-  );
   const importPrd = usePipelineStore((s) => s.importPrd);
   const clearImportedPrd = usePipelineStore((s) => s.clearImportedPrd);
 
@@ -105,12 +102,20 @@ export default function ImportPrdDialog({
   const [parsingPdf, setParsingPdf] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const hasCleared = useRef(false);
+
   useEffect(() => {
     if (!isOpen) return;
-    void refreshImportedPrdStatus();
+    hasCleared.current = false;
     setLocalError(null);
     setDraft("");
-  }, [isOpen, refreshImportedPrdStatus]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || hasCleared.current) return;
+    hasCleared.current = true;
+    void clearImportedPrd();
+  }, [isOpen, clearImportedPrd]);
 
   const isBusy = loading === "saving" || loading === "clearing" || parsingPdf;
 
@@ -240,7 +245,7 @@ export default function ImportPrdDialog({
                   <code className="rounded bg-[#f1f5f9] px-1 py-0.5 font-mono text-[11px] text-[#475569]">
                     .blueprint/PRD.md
                   </code>{" "}
-                  and reused by every run until cleared.
+                  for the current pipeline run.
                 </p>
               </div>
               <button

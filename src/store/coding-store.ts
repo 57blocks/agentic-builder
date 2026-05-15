@@ -56,6 +56,7 @@ interface CodingState {
     codeOutputDir: string,
     projectTier?: string,
     prdContent?: string,
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
   /** Re-run only the tasks that failed in the last session. */
   retryFailedTasks: (
@@ -65,6 +66,7 @@ interface CodingState {
     codeOutputDir: string,
     projectTier?: string,
     prdContent?: string,
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
   retryIntegrationVerify: (
     runId: string,
@@ -113,7 +115,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     }
   },
 
-  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent) => {
+  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent, stitchMeta) => {
     set({
       status: "running",
       error: null,
@@ -135,7 +137,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     fetch("/api/agents/coding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent }),
+      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent, stitchMeta }),
     })
       .then(async (resp) => {
         if (!resp.ok) {
@@ -195,7 +197,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       });
   },
 
-  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent) => {
+  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent, stitchMeta) => {
     set({
       status: "running",
       error: null,
@@ -219,6 +221,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         codeOutputDir,
         projectTier,
         prd: prdContent,
+        stitchMeta,
         retryFailedTaskIds: failedTaskIds,
       }),
     })
