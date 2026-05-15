@@ -7,6 +7,7 @@
 import {
   boolean,
   doublePrecision,
+  index,
   jsonb,
   pgTable,
   primaryKey,
@@ -96,6 +97,38 @@ export const projectStepArtifacts = pgTable(
   ],
 );
 
+// ─── coding_session_reports ──────────────────────────────────────────────────
+// One row per coding session report. Mirrors what `writeCodingSessionReport`
+// writes to `.ralph/coding-session-report.<sessionId>.{json,md}` so reports
+// survive output-dir cleanups and become queryable across projects.
+
+export const codingSessionReports = pgTable(
+  "coding_session_reports",
+  {
+    sessionId:       text("session_id").primaryKey(),
+    projectId:       text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    outputDir:       text("output_dir").notNull(),
+    status:          text("status").notNull(), // pass | fail | aborted
+    score:           doublePrecision("score"),
+    grade:           text("grade"),
+    primaryModel:    text("primary_model"),
+    totalCalls:      doublePrecision("total_calls").notNull().default(0),
+    totalTokens:     doublePrecision("total_tokens").notNull().default(0),
+    totalCostUsd:    doublePrecision("total_cost_usd").notNull().default(0),
+    durationMs:      doublePrecision("duration_ms").notNull().default(0),
+    startedAt:       timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt:         timestamp("ended_at", { withTimezone: true }).notNull(),
+    generatorGitSha: text("generator_git_sha"),
+    payload:         jsonb("payload").notNull(),
+    markdown:        text("markdown").notNull(),
+    createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("coding_session_reports_project_ended_idx").on(t.projectId, t.endedAt),
+    index("coding_session_reports_ended_idx").on(t.endedAt),
+  ],
+);
+
 // ─── Inferred TypeScript types ───────────────────────────────────────────────
 
 export type Project                 = typeof projects.$inferSelect;
@@ -104,3 +137,5 @@ export type ProjectStageState       = typeof projectStageState.$inferSelect;
 export type ProjectStepSnapshot = typeof projectStepSnapshot.$inferSelect;
 export type ProjectStepNavigation   = typeof projectStepNavigation.$inferSelect;
 export type ProjectStepArtifact     = typeof projectStepArtifacts.$inferSelect;
+export type CodingSessionReport     = typeof codingSessionReports.$inferSelect;
+export type NewCodingSessionReport  = typeof codingSessionReports.$inferInsert;
