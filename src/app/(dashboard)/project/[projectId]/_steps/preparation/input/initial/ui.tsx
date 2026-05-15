@@ -41,6 +41,10 @@ export function InitialUI(props: StepUIProps) {
 
   function handleInitialize() { if (!prompt.trim() || isRunning) return; setFeatureBrief(prompt.trim()); props.onNavigate("intent"); }
 
+  function handlePrdImported(content: string) {
+    setPrompt(content);
+  }
+
   return (
     <>
       <div className="flex flex-col justify-center items-center flex-1 h-full px-8 pt-8 pb-12 gap-10 overflow-auto">
@@ -74,7 +78,7 @@ export function InitialUI(props: StepUIProps) {
           </Card>
         </div>
       </div>
-      <ImportPrdDialog isOpen={prdDialogOpen} onClose={() => setPrdDialogOpen(false)} />
+      <ImportPrdDialog isOpen={prdDialogOpen} onClose={() => setPrdDialogOpen(false)} onPrdImported={handlePrdImported} />
     </>
   );
 }
