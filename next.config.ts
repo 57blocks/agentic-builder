@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+const pkg = JSON.parse(
+  readFileSync(resolve(__dirname, "package.json"), "utf-8"),
+);
 
 const nextConfig: NextConfig = {
   output: process.env.ELECTRON === "true" ? "export" : undefined,
@@ -11,6 +17,9 @@ const nextConfig: NextConfig = {
   // (e.g. `.next-b/`) lets both A and B coexist. Default stays `.next`.
   // Set NEXT_DIST_DIR=.next-b in `.env.parallel` for project B.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  env: {
+    NEXT_PUBLIC_APP_VERSION: pkg.version,
+  },
 };
 
 export default nextConfig;
