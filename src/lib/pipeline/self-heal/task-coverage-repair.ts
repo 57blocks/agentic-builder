@@ -30,6 +30,10 @@ import {
   normalizeOriginalTaskBreakdown,
 } from "@/lib/pipeline/kickoff-task-breakdown.server";
 import type { RepairEmitter } from "./events";
+import {
+  type AttemptTracker,
+  missingIdsScopeKey,
+} from "./attempt-tracker";
 
 const DEFAULT_MAX_ATTEMPTS = Number(
   process.env.COVERAGE_REPAIR_MAX_ATTEMPTS ?? "2",
@@ -51,6 +55,10 @@ export interface TaskCoverageRepairInput {
   tier: ProjectTier;
   sessionId?: string;
   emitter: RepairEmitter;
+  /** Cross-invocation attempt counter — see attempt-tracker.ts. When the
+   *  same missing-id set has been retried ≥ threshold times in this session,
+   *  the function returns early without calling the LLM. */
+  attemptTracker?: AttemptTracker;
 }
 
 export interface TaskCoverageRepairResult {
@@ -64,6 +72,8 @@ export interface TaskCoverageRepairResult {
   costUsd: number;
   durationMs: number;
   rawOutputs: string[];
+  /** True when the call was short-circuited by the circuit breaker. */
+  circuitOpen?: boolean;
 }
 
 /**
@@ -85,6 +95,7 @@ export async function repairTaskCoverage(
     tier,
     sessionId,
     emitter,
+    attemptTracker,
   } = input;
 
   const result: TaskCoverageRepairResult = {
@@ -98,6 +109,32 @@ export async function repairTaskCoverage(
   };
 
   if (missingIds.length === 0) return result;
+
+  const trackerScope = {
+    stage: "coverage-gate" as const,
+    scopeKey: missingIdsScopeKey(missingIds),
+  };
+
+  if (attemptTracker?.isCircuitOpen(trackerScope)) {
+    const record = attemptTracker.getRecord(trackerScope);
+    result.circuitOpen = true;
+    emitter({
+      stage: "coverage-gate",
+      event: "circuit_open",
+      attempt: record?.attempts,
+      circuitOpen: true,
+      missingIds,
+      details: {
+        reason: "Task-coverage repair has exhausted its retry budget for this missing-id set; escalating without another LLM round-trip.",
+        lastOutcome: record?.lastOutcome,
+      },
+    });
+    return result;
+  }
+
+  if (attemptTracker) {
+    await attemptTracker.noteStart(trackerScope);
+  }
 
   const agent = new TaskBreakdownAgent(tier, scaffoldBlock);
   const maxAttempts = clampPositiveInt(DEFAULT_MAX_ATTEMPTS, 1, 5);
@@ -245,6 +282,21 @@ export async function repairTaskCoverage(
       costUsd: result.costUsd,
     },
   });
+
+  if (attemptTracker) {
+    const repairedIds = missingIds.filter(
+      (id) => !result.finalMissing.includes(id),
+    );
+    if (repairedIds.length > 0 && result.finalMissing.length === 0) {
+      await attemptTracker.noteOutcome(trackerScope, "repaired", repairedIds);
+    } else if (repairedIds.length > 0) {
+      // Partial progress — clear the old scope and let the new (smaller)
+      // missing-id set get its own counter on the next invocation.
+      attemptTracker.reset(trackerScope);
+    } else {
+      await attemptTracker.noteOutcome(trackerScope, "still_missing");
+    }
+  }
 
   return result;
 }

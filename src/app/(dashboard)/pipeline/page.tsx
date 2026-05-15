@@ -250,15 +250,20 @@ export default function PipelinePage() {
       : prepSubTab;
 
   const handlePhaseClick = (phase: TopPhase) => {
+    console.log("[PipelinePage] handlePhaseClick called", { phase, activePhase, activeTab, prepSubTab, effectivePrepSub });
     if (phase === "coding" || phase === "preview") {
+      console.log("[PipelinePage] setting activeOverridePhase to", phase);
       setActiveOverridePhase(phase);
       return;
     }
     setActiveOverridePhase(null);
     if (phase === "preparation") {
+      console.log("[PipelinePage] setting activeTab to effectivePrepSub:", effectivePrepSub);
       setActiveTab(effectivePrepSub);
     } else {
-      setActiveTab(stepIdForPhase(phase));
+      const nextTab = stepIdForPhase(phase);
+      console.log("[PipelinePage] setting activeTab to stepIdForPhase:", nextTab);
+      setActiveTab(nextTab);
     }
   };
 
@@ -313,22 +318,6 @@ export default function PipelinePage() {
     },
     [updateSteps],
   );
-
-  // When the PRD step is populated from an imported `.blueprint/PRD.md` file,
-  // skip the review gate automatically — the user has already hand-authored
-  // this PRD and does not need to re-approve it. Without this, the pipeline
-  // appears "stuck" on the PRD review step after an imported run.
-  useEffect(() => {
-    const prd = steps.prd;
-    if (!prd || prd.status !== "completed") return;
-    if (prdConfirmed) return;
-    if (isRunning || prdRefining) return;
-    const source = (prd.metadata as { source?: string } | undefined)?.source;
-    if (source !== "static-prd-file") return;
-    const content = prd.content;
-    if (!content || content.trim().length === 0) return;
-    handlePrdConfirm(content);
-  }, [steps.prd, prdConfirmed, isRunning, prdRefining, handlePrdConfirm]);
 
   const handlePrdRegenerate = useCallback(() => {
     setPrdConfirmed(false);
