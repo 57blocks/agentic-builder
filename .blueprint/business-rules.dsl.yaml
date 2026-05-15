@@ -1,0 +1,46 @@
+version: 1
+rules:
+  # Risk Level Classification — enforced on every composite score
+  - id: RISK-LEVEL-1
+    name: "Composite score to risk level"
+    description: "Deterministic mapping from composite score (0-100) to risk label."
+    type: decision-table
+    inputs:
+      - { name: compositeScore, type: number }
+    output: { name: riskLevel, type: string }
+    cases:
+      - when: { compositeScore: "<=25" }
+        then: "Normal"
+      - when: { compositeScore: "<=50" }
+        then: "Elevated"
+      - when: { compositeScore: "<=75" }
+        then: "High-Risk"
+      - when: { }
+        then: "Critical"
+
+  # Rapid Mover Detection — evaluated per variable per cycle
+  - id: RAPID-MOVER-1
+    name: "Rapid mover flag"
+    description: "If a variable's normalized score increases by >= 25 points from the previous cycle, flag as rapid mover."
+    type: decision-table
+    inputs:
+      - { name: scoreDelta, type: number }
+    output: { name: isRapidMover, type: boolean }
+    cases:
+      - when: { scoreDelta: ">=25" }
+        then: true
+      - when: { }
+        then: false
+
+  # NOTE: Variable normalization rules (e.g., NORM-V1 through NORM-V9) must be added
+  # from the scoring specification. Each will be a piecewise-linear rule mapping
+  # raw value to normalized 0-100 score. Example placeholder:
+  # - id: NORM-V1
+  #   name: "Price deviation for USDC"
+  #   description: "Maps absolute deviation from $1 (pips) to risk score."
+  #   type: piecewise-linear
+  #   inputUnit: "pips"
+  #   outputRange: [0, 100]
+  #   segments:
+  #     - { from: 0, to: 5,  outputFrom: 0,  outputTo: 10 }
+  #     - { from: 5, to: 100, outputFrom: 10, outputTo: 100 }

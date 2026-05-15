@@ -194,6 +194,19 @@ export default function AppNav() {
         >
           Memory
         </Link>
+        <Link
+          href="/knowledge"
+          className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${
+            pathname === "/knowledge"
+              ? "text-slate-900"
+              : "text-slate-500 hover:text-slate-900"
+          }`}
+        >
+          <span>Knowledge</span>
+          <span className="text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full leading-none">
+            57B
+          </span>
+        </Link>
       </div>
 
       {/* Bottom: New Project + User Profile */}

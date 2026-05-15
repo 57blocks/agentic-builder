@@ -70,6 +70,7 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
       ctx.emitState({ isRunning: true, error: null, streamingContent: "", streamingThinking: "" });
 
       let resultContent = "";
+      let streamedContent = "";
       let resultCost = 0;
       let resultDuration = 0;
       let resultError: string | undefined;
@@ -127,6 +128,7 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
                 const current = ctx.getState().streamingThinking;
                 ctx.emitState({ streamingThinking: current + chunk });
               } else {
+                streamedContent += chunk;
                 const current = ctx.getState().streamingContent;
                 ctx.emitState({ streamingContent: current + chunk });
               }
@@ -135,7 +137,8 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
 
             case "step_complete": {
               const data = (event.data ?? event) as Record<string, unknown>;
-              resultContent = (data.content as string) || resultContent;
+              resultContent =
+                (data.content as string) || resultContent || streamedContent;
               resultCost = (data.costUsd as number) || resultCost;
               resultDuration = (data.durationMs as number) || resultDuration;
               ctx.emitState({ isRunning: false, streamingContent: "", streamingThinking: "" });
@@ -160,6 +163,15 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
 
       if (resultError) {
         return { stepId, status: "failed", error: resultError, timestamp: new Date().toISOString() };
+      }
+
+      if (!resultContent.trim()) {
+        return {
+          stepId,
+          status: "failed",
+          error: `${stepId} returned empty content`,
+          timestamp: new Date().toISOString(),
+        };
       }
 
       return {

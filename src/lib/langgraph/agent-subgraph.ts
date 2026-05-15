@@ -144,10 +144,30 @@ const RALPH_FAILED_RE = /<promise>TASK_FAILED:\s*([\s\S]*?)<\/promise>/;
  */
 const FRONTEND_IMPORT_RULES = `
 ## Frontend import path rules
-- Read the provided \`vite.config.ts\` / \`tsconfig.json\` context before writing imports.
-- If those files show \`@\` mapped to \`./src\`, use the \`@/\` alias for cross-directory imports.
-- If no alias is configured, use normal relative imports and do NOT invent \`@/\`.
+- ALWAYS call \`read_file("frontend/vite.config.ts")\` before writing any import that uses the \`@/\` alias.
+- Only use \`@/\` imports if \`vite.config.ts\` already contains a \`resolve.alias\` block mapping \`@\` to \`./src\` (or similar).
+- If \`@/\` alias is NOT yet configured in \`vite.config.ts\`, you MUST add it before (or in the same write-batch as) any file that uses it:
+  \`\`\`ts
+  import path from "path";
+  // inside defineConfig:
+  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  \`\`\`
+  Also ensure \`tsconfig.app.json\` (or \`tsconfig.json\`) has \`"paths": { "@/*": ["src/*"] }\` under \`compilerOptions\`.
+- If no alias exists and you cannot update the config, fall back to relative imports and do NOT invent \`@/\`.
 - If the project includes a shared package, import it using the package name defined in its \`package.json\` (for example \`@project/shared\`), never via deep relative paths into another package.
+`;
+
+const TESTID_CONTRACT_RULES = `
+## data-testid contract (HARD RULE — required for E2E tests to pass)
+If a \`UI_CONTRACT.md\` file exists at the project root, read it BEFORE writing any component.
+It lists every required \`data-testid\` attribute and the exact DOM element it belongs to.
+
+Even without a contract file, follow these conventions unconditionally:
+- Every significant UI region (display area, keypad container, app title, footer hint, overlay) MUST carry \`data-testid\` on its outermost element.
+- Interactive elements (buttons, inputs) MUST carry \`data-testid\` derived from their visible label or id.
+- Button testids follow the pattern \`<feature>-btn-<label>\` using the **raw visible character** as label (e.g. \`calc-btn-.\` for the decimal button, NOT \`calc-btn-Decimal\`).
+- When a button's \`aria-label\` would differ from the visible symbol (e.g. "Decimal" vs "."), do NOT override with a word alias — keep \`aria-label\` equal to the symbol so role-based Playwright queries still work.
+- Do not remove or rename existing testids; only add new ones.
 `;
 
 const WORKER_READONLY_TOOLS_GUIDE = `
@@ -278,6 +298,7 @@ Generate React + TypeScript + Tailwind code for the assigned task.
 - For email+password projects (no \`auth-*\` optional applied): the base \`LoginModal.tsx\` is an email+password form. Implement \`POST /api/auth/login\` flow that returns a JWT and call \`useAuth().login(jwt)\` from the landing page.
 
 ${FRONTEND_IMPORT_RULES}
+${TESTID_CONTRACT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.
@@ -354,6 +375,29 @@ When the resource-detector emitted \`LLM_PROVIDER\` + \`LLM_API_KEY\` + \`LLM_BA
 
 If you're tempted to import \`OpenAI\` from \`"openai"\` inside a service file, STOP — go through \`llmService\` instead. The tests / repair gates check for direct vendor imports and will fail.
 
+**API routes manifest (HARD RULE — required whenever this task adds or changes HTTP routes):**
+After all your code files, emit ONE manifest declaring every endpoint you implemented in THIS task. Path: \`_meta/routes/<feature-slug>.json\` at the **project root** (NOT inside \`backend/\`). \`<feature-slug>\` is a kebab-case slug for your domain — pick \`auth.json\`, \`tasks-crud.json\`, \`feeds-stream.json\`, whatever uniquely identifies this task. Different tasks must use different slugs (collisions silently overwrite).
+
+The manifest is a JSON array; each entry:
+\`\`\`json
+{
+  "service": "auth",
+  "method": "POST",
+  "endpoint": "/api/auth/login",
+  "requestFields": "{ email: string; password: string }",
+  "responseFields": "{ token: string; user: { id: string; email: string } }",
+  "authType": "none",
+  "description": "log in with email + password"
+}
+\`\`\`
+- \`endpoint\` is the FULL path the frontend will call, including any \`/api\` mount prefix.
+- \`method\` is uppercase: \`GET\` | \`POST\` | \`PUT\` | \`PATCH\` | \`DELETE\`.
+- \`requestFields\` / \`responseFields\` are TypeScript type literals copied verbatim from your handler's actual types — NOT prose. Use \`"none"\` if the body / response is empty.
+- \`authType\` is \`"none"\` | \`"bearer"\` | \`"session"\`.
+- If the task implements zero HTTP routes (pure internal services), skip the manifest.
+
+The frontend agent reads this file as the source of truth for API calls. Declaring an endpoint you didn't implement → runtime 404. Implementing routes but skipping the manifest → frontend guesses paths and field names, usually wrong.
+
 ${WORKER_READONLY_TOOLS_GUIDE}
 
 You may write a brief plan (≤10 lines) before outputting files.
@@ -367,6 +411,13 @@ Generate comprehensive test suites: unit, integration, e2e.
 Frameworks: Vitest, @testing-library/react, Playwright, k6.
 
 Read the Project Convention Card in context for project-specific paths before writing any imports.
+
+**E2E selector rules (HARD RULE — selector mismatches cause every test to fail):**
+- Before writing any Playwright selector, check whether a \`UI_CONTRACT.md\` exists at the project root and read it.
+- Always use primary \`data-testid\` selectors (e.g. \`[data-testid='calc-btn-.']\`) as the first choice.
+- Role/text-based selectors are acceptable ONLY as secondary fallback via \`.or()\`, with the testid selector as primary.
+- If a required \`data-testid\` is missing from the component, ADD it to the component AND document it in \`UI_CONTRACT.md\` in the same task. Never write a test that relies on a testid that does not yet exist in the source.
+- Button testids follow the pattern \`<feature>-btn-<label>\` where label is the **raw visible character** (e.g. \`calc-btn-.\` for the decimal key). Do NOT use the word alias (e.g. \`calc-btn-Decimal\` is wrong).
 
 ${FRONTEND_IMPORT_RULES}
 ${WORKER_READONLY_TOOLS_GUIDE}
@@ -577,14 +628,50 @@ export async function buildProjectConventionCard(
         "- **Sequelize migration RULE (CRITICAL)**: If your task modifies any " +
           "file under `backend/src/models/` (add/remove column, change type, " +
           "change association, change index), you MUST also write a NEW " +
-          "migration under `backend/src/migrations/NNNN_<short-desc>.ts`. " +
+          "migration under `backend/src/database/migrations/NNNN_<short-desc>.ts`. " +
           "NNNN is one greater than the highest existing migration number. " +
           "Export both `async up({ context: queryInterface })` and " +
           "`async down({ context: queryInterface })` covering every change. " +
           "Do NOT modify existing migrations — always add a new file. The " +
           "post-task migration-coverage check will flag missing migrations " +
-          "and create a repair task.",
+          "and create a repair task. The umzug runner in `src/database/runMigrations.ts` " +
+          "applies these on backend startup.",
       );
+
+      // ── TimescaleDB safety RULE ─────────────────────────────────────────
+      // Fires when the project references TimescaleDB anywhere — db.ts
+      // helper, PRD/TRD mention, or existing migrations. Raw
+      // `CREATE EXTENSION timescaledb` in migrations is the single most
+      // common reason an M-tier backend won't start on a fresh Postgres.
+      const timescaleHelper = await fsRead(
+        "backend/src/utils/timescale.ts",
+        outputDir,
+      );
+      const dbInit = await fsRead("backend/src/db.ts", outputDir);
+      const usesTimescale =
+        (!timescaleHelper.startsWith("FILE_NOT_FOUND") &&
+          !timescaleHelper.startsWith("REJECTED")) ||
+        (!dbInit.startsWith("FILE_NOT_FOUND") &&
+          /timescale|TIMESCALE_DISABLED|hypertable/i.test(dbInit));
+      if (usesTimescale) {
+        lines.push(
+          "- **TimescaleDB safety RULE (CRITICAL)**: TimescaleDB is NOT part " +
+            "of stock PostgreSQL — Homebrew, Docker dev images, CI runners, " +
+            "and most cloud preview DBs do not have it. Calling " +
+            "`CREATE EXTENSION timescaledb` or `create_hypertable` directly " +
+            "in any migration's `up()` body will THROW and kill backend " +
+            "startup. Use the helpers in `backend/src/utils/timescale.ts` " +
+            "instead — they respect `TIMESCALE_DISABLED=1` (set in `.env.example`) " +
+            "and silently fall back to plain Postgres tables when the " +
+            "extension is unavailable. Specifically: " +
+            "(a) `enableTimescaleExtension(sequelize)` for CREATE EXTENSION; " +
+            "(b) `createHypertableIfPossible(queryInterface, 'table', 'time_col')` " +
+            "for hypertable conversion; " +
+            "(c) `runTimescaleQuery(sequelize, sql, 'description')` for " +
+            "compression / retention / continuous aggregate SQL. " +
+            "NEVER inline raw Timescale SQL in a migration's up() body.",
+        );
+      }
     }
   }
 
@@ -1855,6 +1942,15 @@ async function generateCode(state: WorkerState) {
       task.subSteps && task.subSteps.length > 0
         ? `\n\nPre-defined sub-steps:\n${task.subSteps.map((s) => `${s.step}. ${s.action}: ${s.detail}`).join("\n")}`
         : "";
+    const tddPlanHint =
+      task.tddPlan?.tests && task.tddPlan.tests.length > 0
+        ? `\n\nTDD seed tests this implementation must satisfy:\n${task.tddPlan.tests
+            .map(
+              (test) =>
+                `- ${test.id} [${test.priority}/${test.type}] ${test.file}\n  command: ${test.command}\n  RED: ${test.expectedRed}\n  GREEN: ${test.expectedGreen}\n  Write this test file before the production implementation when it is part of this task's file plan.`,
+            )
+            .join("\n")}`
+        : "";
 
     const multiRoundInstruction = CODEGEN_MULTI_ROUND_ENABLED
       ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
@@ -1862,7 +1958,7 @@ async function generateCode(state: WorkerState) {
 
     messages.push({
       role: "user",
-      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
+      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
     });
 
     const startMs = Date.now();
@@ -1900,6 +1996,11 @@ async function generateCode(state: WorkerState) {
             tokenBudget: getInjectTokenBudgetForRole(state.role),
           }
         : undefined;
+
+    // Snapshot the initial context length so we can trim round-accumulated
+    // messages (tool results, assistant file blocks) between multi-rounds.
+    // Without this, context grows from ~15 K → 80 K+ over 8 rounds.
+    const initialMessagesLength = messages.length;
 
     while (rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS) {
       rounds += 1;
@@ -1988,6 +2089,13 @@ async function generateCode(state: WorkerState) {
         .slice(-40)
         .map((f) => `- ${f}`)
         .join("\n");
+      // Compress messages accumulated during this round back to the initial
+      // context snapshot.  This prevents the prompt from growing linearly
+      // with the number of rounds (15 K → 86 K+).  All tool call results and
+      // large assistant file-block messages are dropped; the continuation
+      // message below re-injects the file list so the model retains awareness
+      // of what has already been written.
+      messages.splice(initialMessagesLength);
       messages.push({
         role: "user",
         content: [

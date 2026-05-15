@@ -24,6 +24,21 @@ import type {
 import { DEFAULT_RALPH_CONFIG } from "@/lib/pipeline/types";
 import type { AuditEntry, AuditTaskSummary } from "./feature-checklist-audit";
 import type { RepairEmitter } from "./events";
+import {
+  type AttemptTracker,
+  type AttemptScope,
+  missingIdsScopeKey,
+} from "./attempt-tracker";
+
+function dispatchScope(
+  role: CodingAgentRole,
+  entries: AuditEntry[],
+): AttemptScope {
+  return {
+    stage: "post-gen-audit",
+    scopeKey: `${role}:${missingIdsScopeKey(entries.map((e) => e.id))}`,
+  };
+}
 
 const FRONTEND_ID_PREFIX = /^(PAGE|CMP|IC)-/i;
 
@@ -44,6 +59,11 @@ export interface AuditRepairDispatchInput {
   ralphConfig?: RalphConfig;
   sessionId?: string;
   emitter: RepairEmitter;
+  /** Cross-invocation attempt counter — per role (frontend / backend). When
+   *  a role has been dispatched ≥ threshold times in this session without
+   *  closing its uncovered set, the dispatcher skips the worker subgraph
+   *  for that role and emits a circuit_open event for escalation. */
+  attemptTracker?: AttemptTracker;
 }
 
 export interface AuditRepairDispatchResult {
@@ -54,6 +74,7 @@ export interface AuditRepairDispatchResult {
   repairTasks: CodingTask[];
   repairTaskResults: AuditTaskSummary[];
   costUsd: number;
+  circuitOpenRoles?: CodingAgentRole[];
 }
 
 export async function dispatchAuditRepair(
@@ -69,6 +90,7 @@ export async function dispatchAuditRepair(
     ralphConfig,
     sessionId,
     emitter,
+    attemptTracker,
   } = input;
 
   const result: AuditRepairDispatchResult = {
@@ -109,13 +131,45 @@ export async function dispatchAuditRepair(
   const workerGraph = createWorkerSubGraph();
   const config = ralphConfig ?? { ...DEFAULT_RALPH_CONFIG };
 
-  if (backendEntries.length > 0) {
-    const task = buildRepairTask("backend", backendEntries);
+  async function runRole(
+    role: CodingAgentRole,
+    entries: AuditEntry[],
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const scope = dispatchScope(role, entries);
+
+    if (attemptTracker?.isCircuitOpen(scope)) {
+      const record = attemptTracker.getRecord(scope);
+      result.circuitOpenRoles = [
+        ...(result.circuitOpenRoles ?? []),
+        role,
+      ];
+      emitter({
+        stage: "post-gen-audit",
+        event: "circuit_open",
+        attempt: record?.attempts,
+        circuitOpen: true,
+        missingIds: entries.map((e) => e.id),
+        details: {
+          role,
+          reason: "Audit-repair dispatch has exhausted its retry budget for this uncovered-id set; skipping worker subgraph and escalating.",
+          lastOutcome: record?.lastOutcome,
+        },
+      });
+      return;
+    }
+
+    if (attemptTracker) {
+      await attemptTracker.noteStart(scope);
+    }
+
+    const task = buildRepairTask(role, entries);
     result.repairTasks.push(task);
+    let writtenFiles: string[] = [];
     try {
       const res = await workerGraph.invoke(
         buildWorkerInput({
-          role: "backend",
+          role,
           task,
           outputDir,
           projectContext,
@@ -128,74 +182,56 @@ export async function dispatchAuditRepair(
         { recursionLimit: 60 },
       );
       const ws = res as WorkerState;
-      result.ranBackend = true;
-      result.backendGeneratedFiles = collectFilesFromWorkerResult(ws);
+      writtenFiles = collectFilesFromWorkerResult(ws);
+      if (role === "backend") {
+        result.ranBackend = true;
+        result.backendGeneratedFiles = writtenFiles;
+      } else {
+        result.ranFrontend = true;
+        result.frontendGeneratedFiles = writtenFiles;
+      }
       result.repairTaskResults.push(buildRepairTaskSummary(task, ws));
       result.costUsd += ws.workerCostUsd ?? 0;
       emitter({
         stage: "post-gen-audit",
         event: "repair_dispatch_role_done",
         details: {
-          role: "backend",
-          filesWritten: result.backendGeneratedFiles.length,
+          role,
+          filesWritten: writtenFiles.length,
           taskId: task.id,
         },
       });
+      if (attemptTracker) {
+        // We can't independently verify the gaps actually closed — only the
+        // next audit run can. Files-written > 0 is our best proxy for
+        // "progress was made"; the next audit re-establishes truth.
+        if (writtenFiles.length > 0) {
+          await attemptTracker.noteOutcome(
+            scope,
+            "repaired",
+            entries.map((e) => e.id),
+          );
+        } else {
+          await attemptTracker.noteOutcome(scope, "still_missing");
+        }
+      }
     } catch (err) {
       emitter({
         stage: "post-gen-audit",
         event: "repair_dispatch_role_failed",
         details: {
-          role: "backend",
+          role,
           error: err instanceof Error ? err.message : String(err),
         },
       });
+      if (attemptTracker) {
+        await attemptTracker.noteOutcome(scope, "errored");
+      }
     }
   }
 
-  if (frontendEntries.length > 0) {
-    const task = buildRepairTask("frontend", frontendEntries);
-    result.repairTasks.push(task);
-    try {
-      const res = await workerGraph.invoke(
-        buildWorkerInput({
-          role: "frontend",
-          task,
-          outputDir,
-          projectContext,
-          fileRegistrySnapshot,
-          apiContractsSnapshot,
-          scaffoldProtectedPaths,
-          ralphConfig: config,
-          sessionId,
-        }),
-        { recursionLimit: 60 },
-      );
-      const ws = res as WorkerState;
-      result.ranFrontend = true;
-      result.frontendGeneratedFiles = collectFilesFromWorkerResult(ws);
-      result.repairTaskResults.push(buildRepairTaskSummary(task, ws));
-      result.costUsd += ws.workerCostUsd ?? 0;
-      emitter({
-        stage: "post-gen-audit",
-        event: "repair_dispatch_role_done",
-        details: {
-          role: "frontend",
-          filesWritten: result.frontendGeneratedFiles.length,
-          taskId: task.id,
-        },
-      });
-    } catch (err) {
-      emitter({
-        stage: "post-gen-audit",
-        event: "repair_dispatch_role_failed",
-        details: {
-          role: "frontend",
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
-  }
+  await runRole("backend", backendEntries);
+  await runRole("frontend", frontendEntries);
 
   emitter({
     stage: "post-gen-audit",

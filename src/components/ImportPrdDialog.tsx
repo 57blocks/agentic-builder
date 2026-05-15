@@ -315,15 +315,15 @@ export default function ImportPrdDialog({
                   ) : (
                     <span>
                       Drop a{" "}
-                      <span className="font-mono text-[11px]">
+                      <span className="font-mono text-[11px] text-[#475569]">
                         .md / .markdown / .txt / .pdf
                       </span>{" "}
-                      file here or
+                      file here, or
                     </span>
                   )}
                 </div>
                 <label
-                  className={`cursor-pointer rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 ${parsingPdf ? "pointer-events-none opacity-50" : ""}`}
+                  className={`cursor-pointer rounded-lg border border-[#e2e8f0] bg-white px-3 py-1.5 text-[11px] font-medium text-[#475569] shadow-sm transition-colors hover:bg-[#f8f9ff] hover:text-[#0b1c30] ${parsingPdf ? "pointer-events-none opacity-50" : ""}`}
                 >
                   Choose file
                   <input
@@ -384,8 +384,9 @@ export default function ImportPrdDialog({
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50 px-6 py-3">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            {/* ── Footer ── */}
+            <div className="flex items-center justify-between gap-2 border-t border-[#e2e8f0] bg-[#fafbfc] px-6 py-3">
+              <div className="flex items-center gap-2 text-[11px] text-[#94a3b8]">
                 {parsingPdf && (
                   <Loading size="sm" text="Extracting text from PDF..." />
                 )}

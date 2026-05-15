@@ -17,6 +17,9 @@ import {
   normalizeOriginalTaskBreakdown,
 } from "@/lib/pipeline/kickoff-task-breakdown.server";
 import type { RepairEmitter } from "./events";
+import type { AttemptTracker } from "./attempt-tracker";
+
+const PHASE_REPAIR_SCOPE = { stage: "phase-gate" as const, scopeKey: "backend" };
 
 export interface PhaseRepairInput {
   existingTasks: KickoffWorkItem[];
@@ -32,6 +35,10 @@ export interface PhaseRepairInput {
   uncoveredIds?: string[];
   sessionId?: string;
   emitter: RepairEmitter;
+  /** Cross-invocation attempt counter. When omitted, no circuit breaker is
+   *  applied (legacy behaviour). When provided, the function returns early
+   *  without running the LLM or synthesising a task once attempts ≥ threshold. */
+  attemptTracker?: AttemptTracker;
 }
 
 export interface PhaseRepairResult {
@@ -40,6 +47,9 @@ export interface PhaseRepairResult {
   synthetic: KickoffWorkItem | null;
   costUsd: number;
   durationMs: number;
+  /** True when the call was short-circuited because the per-session attempt
+   *  counter exceeded the circuit-breaker threshold. */
+  circuitOpen?: boolean;
 }
 
 const MAX_ATTEMPTS = 1;
@@ -59,6 +69,7 @@ export async function repairMissingBackendPhase(
     uncoveredIds,
     sessionId,
     emitter,
+    attemptTracker,
   } = input;
 
   const out: PhaseRepairResult = {
@@ -75,10 +86,32 @@ export async function repairMissingBackendPhase(
       ? uncoveredIds.slice(0, 25)
       : deriveBackendAnchorIds(prd);
 
+  if (attemptTracker?.isCircuitOpen(PHASE_REPAIR_SCOPE)) {
+    out.circuitOpen = true;
+    const record = attemptTracker.getRecord(PHASE_REPAIR_SCOPE);
+    emitter({
+      stage: "phase-gate",
+      event: "circuit_open",
+      attempt: record?.attempts,
+      circuitOpen: true,
+      missingIds: targetIds,
+      details: {
+        missingPhase: "Backend Services",
+        reason: "Backend phase repair has exhausted its retry budget for this session; escalating instead of synthesising another placeholder task.",
+        lastOutcome: record?.lastOutcome,
+      },
+    });
+    return out;
+  }
+
+  const attemptNumber = attemptTracker
+    ? await attemptTracker.noteStart(PHASE_REPAIR_SCOPE)
+    : 1;
+
   emitter({
     stage: "phase-gate",
     event: "repair_start",
-    attempt: 1,
+    attempt: attemptNumber,
     missingIds: targetIds,
     details: { missingPhase: "Backend Services" },
   });
@@ -115,21 +148,29 @@ export async function repairMissingBackendPhase(
         const normalized = normalizeOriginalTaskBreakdown(backendTasks, prd);
         out.addedByLlm = normalized;
         out.tasks = [...existingTasks, ...normalized];
+        const repairedIds = normalized.flatMap(
+          (t) => t.coversRequirementIds ?? [],
+        );
         emitter({
           stage: "phase-gate",
           event: "repair_done",
-          attempt: 1,
-          repairedIds: normalized.flatMap(
-            (t) => t.coversRequirementIds ?? [],
-          ),
+          attempt: attemptNumber,
+          repairedIds,
           details: { addedByLlm: normalized.length },
         });
+        if (attemptTracker) {
+          await attemptTracker.noteOutcome(
+            PHASE_REPAIR_SCOPE,
+            "repaired",
+            repairedIds.length > 0 ? repairedIds : ["__backend_phase__"],
+          );
+        }
         return out;
       }
       emitter({
         stage: "phase-gate",
         event: "repair_no_backend_produced",
-        attempt: 1,
+        attempt: attemptNumber,
         details: {
           parseFailed: parsed.parseFailed,
           totalParsed: parsed.tasks.length,
@@ -139,11 +180,14 @@ export async function repairMissingBackendPhase(
       emitter({
         stage: "phase-gate",
         event: "repair_llm_failed",
-        attempt: 1,
+        attempt: attemptNumber,
         details: {
           error: err instanceof Error ? err.message : String(err),
         },
       });
+      if (attemptTracker) {
+        await attemptTracker.noteOutcome(PHASE_REPAIR_SCOPE, "errored");
+      }
     }
   }
 
@@ -180,7 +224,7 @@ export async function repairMissingBackendPhase(
   emitter({
     stage: "phase-gate",
     event: "synthetic_task_inserted",
-    attempt: 1,
+    attempt: attemptNumber,
     repairedIds: synthetic.coversRequirementIds ?? [],
     files: [...(synthetic.files as { creates: string[] }).creates],
     details: {
@@ -188,6 +232,12 @@ export async function repairMissingBackendPhase(
         "LLM did not produce a Backend Services task within the repair budget — inserting a placeholder task to guarantee backend generation runs.",
     },
   });
+
+  // Synthetic fallback is a degraded outcome, not a real fix — record it so
+  // the next invocation moves closer to the circuit breaker.
+  if (attemptTracker) {
+    await attemptTracker.noteOutcome(PHASE_REPAIR_SCOPE, "still_missing");
+  }
 
   return out;
 }

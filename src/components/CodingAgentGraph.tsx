@@ -6,6 +6,7 @@ import {
   useCodingStore,
   type IntegrationVerifyState,
   type E2EVerifyState,
+  type PendingHumanDecision,
 } from "@/store/coding-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import Loading from "@/components/Loading";
@@ -177,6 +178,8 @@ export default function CodingAgentGraph() {
     integrationVerify,
     e2eVerify,
     supervisorLogs,
+    pendingHumanDecision,
+    submitHumanDecision,
   } = useCodingStore();
   const codeOutputDir = usePipelineStore((s) => s.codeOutputDir);
   const intentStep = usePipelineStore((s) => s.steps.intent);
@@ -503,6 +506,16 @@ export default function CodingAgentGraph() {
         onClose={() => setReportOpen(false)}
         outputDir={codeOutputDir}
       />
+
+      {/* Human-in-the-loop decision overlay */}
+      <AnimatePresence>
+        {pendingHumanDecision && (
+          <HumanDecisionOverlay
+            decision={pendingHumanDecision}
+            onSubmit={submitHumanDecision}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -822,6 +835,140 @@ function E2EVerifyCard({
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+// ─── Human-in-the-loop decision overlay ───────────────────────────────────
+
+function HumanDecisionOverlay({
+  decision,
+  onSubmit,
+}: {
+  decision: PendingHumanDecision;
+  onSubmit: (decisionId: string) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Math.floor((new Date(decision.expiresAt).getTime() - Date.now()) / 1000)),
+  );
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const secs = Math.max(
+        0,
+        Math.floor((new Date(decision.expiresAt).getTime() - Date.now()) / 1000),
+      );
+      setRemaining(secs);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [decision.expiresAt]);
+
+  async function handlePick(id: string) {
+    setSubmitting(id);
+    await onSubmit(id);
+    setSubmitting(null);
+  }
+
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const countdown = `${minutes}:${String(seconds).padStart(2, "0")}`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 12 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 12 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-lg rounded-2xl border border-amber-500/30 bg-zinc-900 shadow-2xl"
+      >
+        <div className="flex items-start gap-3 border-b border-zinc-800 p-5">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-base text-amber-400">
+            ⚠
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-amber-400">
+              Human decision needed
+            </p>
+            <h2 className="mt-0.5 text-sm font-semibold text-zinc-100">
+              Integration fix is stuck — please choose an action
+            </h2>
+          </div>
+          <span className="shrink-0 rounded-full bg-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-400">
+            {countdown}
+          </span>
+        </div>
+
+        <div className="border-b border-zinc-800 px-5 py-3">
+          <pre className="whitespace-pre-wrap font-mono text-[10px] leading-5 text-zinc-400">
+            {decision.context}
+          </pre>
+        </div>
+
+        <div className="flex flex-col gap-2 p-5">
+          {decision.options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={submitting !== null}
+              onClick={() => handlePick(opt.id)}
+              className={[
+                "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all duration-150",
+                opt.id === "abort"
+                  ? "border-red-500/25 bg-red-950/30 hover:border-red-500/50 hover:bg-red-950/50"
+                  : "border-zinc-700 bg-zinc-800/60 hover:border-zinc-500 hover:bg-zinc-800",
+                submitting === opt.id ? "cursor-wait opacity-70" : "cursor-pointer",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <span
+                className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${opt.id === "abort" ? "bg-red-400" : "bg-sky-400"}`}
+              />
+              <div className="min-w-0">
+                <p
+                  className={`text-[12px] font-semibold ${opt.id === "abort" ? "text-red-300" : "text-zinc-100"}`}
+                >
+                  {opt.label}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-5 text-zinc-400">
+                  {opt.description}
+                </p>
+              </div>
+              {submitting === opt.id && (
+                <span className="ml-auto shrink-0">
+                  <svg
+                    className="h-4 w-4 animate-spin text-zinc-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      className="opacity-25"
+                    />
+                    <path
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      className="opacity-75"
+                    />
+                  </svg>
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </motion.div>
     </motion.div>
   );
 }

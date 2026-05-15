@@ -47,6 +47,10 @@ export interface RepairEvent {
   stillMissing?: string[];
   /** Files touched by the event (creates / modifies / discards). */
   files?: string[];
+  /** True when the event represents a tripped circuit breaker (≥3 attempts
+   *  on the same scope without progress). Consumers use this to drive
+   *  escalation (stagnation-replan, human-decision gate). */
+  circuitOpen?: boolean;
   /** Free-form structured payload. Keep it JSON-serialisable. */
   details?: Record<string, unknown>;
 }

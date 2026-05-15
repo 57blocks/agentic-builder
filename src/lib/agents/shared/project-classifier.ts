@@ -25,7 +25,9 @@ export interface ProjectClassification {
   durationMs: number;
 }
 
-export function normalizeProjectTier(_tier?: string | null): ProjectTier {
+export function normalizeProjectTier(tier?: string | null): ProjectTier {
+  const t = (tier ?? "M").toUpperCase();
+  if (t === "S" || t === "M" || t === "L") return t as ProjectTier;
   return "M";
 }
 
@@ -214,11 +216,24 @@ async function runClassifierLLM(
   ];
 
   const startMs = Date.now();
-  const response = await chatCompletion(messages, {
-    model,
-    temperature: 0.1,
-    max_tokens: 256,
-  });
+  let response;
+  try {
+    response = await chatCompletion(messages, {
+      model,
+      temperature: 0.1,
+      max_tokens: 4096,
+      response_format: { type: "json_object" },
+    });
+  } catch (err) {
+    console.warn(
+      "[ProjectClassifier] LLM classification failed, using heuristic fallback:",
+      err instanceof Error ? err.message : err,
+    );
+    return {
+      classification: fallbackClassification(featureBrief, 0, Date.now() - startMs),
+      didFallback: true,
+    };
+  }
   const durationMs = Date.now() - startMs;
 
   const raw = response.choices[0]?.message?.content ?? "";

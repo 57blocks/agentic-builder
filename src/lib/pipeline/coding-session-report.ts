@@ -5,6 +5,10 @@ import { promisify } from "util";
 import type { GeneratedFile } from "@/lib/langgraph/state";
 import type { AuditTaskSummary, FeatureChecklistAuditResult } from "@/lib/pipeline/self-heal";
 import { saveCodingSessionReport } from "@/lib/db/coding-session-report.repo";
+import {
+  readTddEvidenceSummary,
+  type TddEvidenceSummary,
+} from "@/lib/pipeline/tdd-evidence";
 
 const execFileAsync = promisify(execFile);
 
@@ -2020,6 +2024,7 @@ function formatMarkdownReport(input: {
   e2eVerifyErrors?: string;
   preflightLedger: PreflightAutomationLedger;
   defectCategories: DefectCategory[];
+  tddEvidenceSummary: TddEvidenceSummary;
   scaffoldFixAttempts?: number;
   integrationFixAttempts?: number;
   gatesExecuted?: {
@@ -2065,6 +2070,7 @@ function formatMarkdownReport(input: {
     `- Runtime readiness: ${readinessHeader}`,
     `- Started at: ${input.startedAt}`,
     `- Ended at: ${input.endedAt}`,
+    `- Total duration: ${formatDuration(Date.parse(input.endedAt) - Date.parse(input.startedAt))}`,
     `- Generator git: \`${input.generatorGitSha ?? "(unknown)"}\``,
     `- Scaffold fix attempts: ${input.scaffoldFixAttempts ?? 0}`,
     `- Integration fix attempts: ${input.integrationFixAttempts ?? 0}`,
@@ -2087,7 +2093,7 @@ function formatMarkdownReport(input: {
     lines.push("## Migration Coverage");
     lines.push(
       "Per-task check that any change under `backend/src/models/` is " +
-        "accompanied by a new migration under `backend/src/migrations/`. Full " +
+        "accompanied by a new migration under `backend/src/database/migrations/`. Full " +
         "report: `.ralph/migration-coverage.json`.",
     );
     lines.push("");
@@ -2375,6 +2381,69 @@ function formatMarkdownReport(input: {
   );
   lines.push("");
 
+  lines.push("## TDD Gate");
+  const tdd = input.tddEvidenceSummary;
+  if (!tdd.manifestPresent && !tdd.evidencePresent) {
+    lines.push(
+      "- Not run yet. No `.ralph/test-manifest.json` or `.ralph/tdd-evidence.jsonl` was found.",
+      "",
+    );
+  } else {
+    const p0 = tdd.byPriority.P0;
+    const p1 = tdd.byPriority.P1;
+    const p2 = tdd.byPriority.P2;
+    lines.push(`- Manifest: ${tdd.manifestPresent ? "present" : "missing"}`);
+    lines.push(`- Evidence events: ${tdd.totalEvidenceEvents}`);
+    lines.push(
+      `- RED evidence: ${tdd.redValid}/${tdd.totalManifestTests || tdd.totalEvidenceEvents}`,
+    );
+    lines.push(
+      `- GREEN passed: ${tdd.greenPassed}/${tdd.totalManifestTests || tdd.totalEvidenceEvents}`,
+    );
+    lines.push(
+      `- Priority coverage: P0 ${p0.greenPassed}/${p0.total}, P1 ${p1.greenPassed}/${p1.total}, P2 ${p2.greenPassed}/${p2.total}`,
+    );
+    lines.push(
+      `- Reviewer: ${tdd.reviewPresent ? `${tdd.reviewFindingCount} finding(s), ${tdd.reviewP0ErrorCount} P0 error(s)` : "not run"}`,
+    );
+    if (tdd.p0BlockingFailures.length > 0) {
+      lines.push(
+        `- Blocking P0 TDD gaps: ${tdd.p0BlockingFailures.slice(0, 12).join(", ")}`,
+      );
+    } else if (tdd.totalManifestTests > 0) {
+      lines.push("- Blocking P0 TDD gaps: none");
+    }
+    if (tdd.missingRedEvidence.length > 0) {
+      lines.push(
+        `- Missing RED evidence: ${tdd.missingRedEvidence.slice(0, 12).join(", ")}`,
+      );
+    }
+    if (tdd.missingGreenEvidence.length > 0) {
+      lines.push(
+        `- Missing GREEN evidence: ${tdd.missingGreenEvidence.slice(0, 12).join(", ")}`,
+      );
+    }
+    if (tdd.p0Details.length > 0) {
+      lines.push("");
+      lines.push("### P0 TDD Evidence");
+      lines.push("| Test | Task | Requirements | RED | GREEN | Command | Evidence |");
+      lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+      for (const detail of tdd.p0Details.slice(0, 20)) {
+        const evidence = (detail.failureExcerpt ?? "")
+          .replace(/\|/g, "\\|")
+          .replace(/\s+/g, " ")
+          .slice(0, 180);
+        lines.push(
+          `| \`${detail.id}\` | ${detail.taskId ? `\`${detail.taskId}\`` : ""} | ${detail.requirementIds.join(", ") || ""} | ${detail.redStatus ?? ""} | ${detail.greenStatus ?? ""} | \`${(detail.command ?? "").replace(/\|/g, "\\|")}\` | ${evidence} |`,
+        );
+      }
+      if (tdd.p0Details.length > 20) {
+        lines.push(`_… (+${tdd.p0Details.length - 20} more P0 tests)_`);
+      }
+    }
+    lines.push("");
+  }
+
   if (input.integrationErrors?.trim()) {
     lines.push("### Integration Errors", "```", input.integrationErrors.trim(), "```", "");
   }
@@ -2632,7 +2701,7 @@ function formatMarkdownReport(input: {
       stagnationFallbackInjectedCount === 0
     ) {
       lines.push(
-        "> Worker stagnated but the fallback retry was not triggered — verify `MAX_INTEGRATION_VERIFY_FIX_ITERATIONS` / abort threshold; or check whether the abort happened mid-iteration.",
+        "> Worker stagnated but the fallback retry was not triggered — verify the integration stagnation abort threshold; or check whether the abort happened mid-iteration.",
         "",
       );
     }
@@ -2715,6 +2784,7 @@ export async function writeCodingSessionReport(
   );
   const runtimeReadiness = await readRuntimeReadinessSummary(input.outputDir);
   const migrationCoverage = await readMigrationCoverageSummary(input.outputDir);
+  const tddEvidenceSummary = await readTddEvidenceSummary(input.outputDir);
   const stageUsage = aggregateStageUsage({
     usage,
     repairSummary,
@@ -2733,7 +2803,13 @@ export async function writeCodingSessionReport(
     integrationErrors: input.integrationErrors,
     runtimeVerifyErrors: input.runtimeVerifyErrors,
     e2eVerifyErrors: input.e2eVerifyErrors,
-    uncoveredCount: input.finalAudit?.uncovered.length ?? 0,
+    // IC-xx items are soft interaction spec warnings that do not block the gate.
+    // Use only hard-uncovered ids (non IC-xx) for the scoring deduction so that
+    // soft warnings do not inflate the penalty.
+    uncoveredCount: input.finalAudit
+      ? (input.finalAudit.hardUncovered?.length
+          ?? input.finalAudit.uncovered.filter((e) => !/^IC-\d+$/i.test(e.id)).length)
+      : 0,
     taskResults: input.taskResults,
     repairSummary,
   });
@@ -2831,6 +2907,7 @@ export async function writeCodingSessionReport(
     repairSummary,
     runtimeReadiness,
     migrationCoverage,
+    tddEvidenceSummary,
     preflightLedger,
     defectCategories,
     finalAudit: input.finalAudit ?? null,
@@ -2853,6 +2930,7 @@ export async function writeCodingSessionReport(
     repairSummary,
     runtimeReadiness,
     migrationCoverage,
+    tddEvidenceSummary,
     finalAudit: input.finalAudit,
     fatalError: input.fatalError,
     suggestions,
