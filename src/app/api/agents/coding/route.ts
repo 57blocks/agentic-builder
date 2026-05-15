@@ -646,6 +646,7 @@ export async function POST(request: NextRequest) {
     databaseUrl: databaseUrlBody,
     prd: prdBody,
     retryFailedTaskIds,
+    projectId,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -662,6 +663,8 @@ export async function POST(request: NextRequest) {
      * Used for "retry failed tasks only" workflows.
      */
     retryFailedTaskIds?: string[];
+    /** Optional project linkage for the persisted coding-session report. */
+    projectId?: string;
   };
 
   const ralphConfig: RalphConfig = {
@@ -1448,6 +1451,7 @@ export async function POST(request: NextRequest) {
         try {
           await writeCodingSessionReport({
             sessionId,
+            projectId: projectId ?? null,
             outputDir: outputRoot,
             startedAt,
             endedAt: new Date().toISOString(),

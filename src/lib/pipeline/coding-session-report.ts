@@ -4,6 +4,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import type { GeneratedFile } from "@/lib/langgraph/state";
 import type { AuditTaskSummary, FeatureChecklistAuditResult } from "@/lib/pipeline/self-heal";
+import { saveCodingSessionReport } from "@/lib/db/coding-session-report.repo";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,6 +102,11 @@ const EMPTY_RUNTIME_READINESS: RuntimeReadinessSummary = {
 
 export interface WriteCodingSessionReportInput {
   sessionId: string;
+  /**
+   * Optional — when provided, the report row is associated with this project
+   * so it can be queried by project. NULL means "no project linkage yet".
+   */
+  projectId?: string | null;
   outputDir: string;
   startedAt: string;
   endedAt: string;
@@ -2921,4 +2927,47 @@ export async function writeCodingSessionReport(
     migrationCoverageTasksWithGaps: migrationCoverage.tasksWithGaps,
     migrationCoverageTasksTouched: migrationCoverage.tasksTouchedModels,
   });
+
+  // Persist to DB alongside the on-disk report. Best-effort: never let a DB
+  // outage break the coding session — the filesystem copy remains authoritative
+  // for the read API today.
+  try {
+    const totalCalls = modelUsage.reduce((sum, item) => sum + item.calls, 0);
+    const totalTokens = modelUsage.reduce(
+      (sum, item) => sum + item.totalTokens,
+      0,
+    );
+    const totalCostUsd = modelUsage.reduce(
+      (sum, item) => sum + item.costUsd,
+      0,
+    );
+    const durationMs = Math.max(
+      0,
+      Date.parse(input.endedAt) - Date.parse(input.startedAt),
+    );
+    await saveCodingSessionReport({
+      sessionId:       input.sessionId,
+      projectId:       input.projectId ?? null,
+      outputDir:       input.outputDir,
+      status:          input.status,
+      score:           score.score,
+      grade:           score.grade,
+      primaryModel:
+        modelPerformance[0]?.model ?? modelUsage[0]?.model ?? null,
+      totalCalls,
+      totalTokens,
+      totalCostUsd,
+      durationMs,
+      startedAt:       new Date(input.startedAt),
+      endedAt:         new Date(input.endedAt),
+      generatorGitSha: generatorGitSha ?? null,
+      payload:         jsonPayload,
+      markdown,
+    });
+  } catch (err) {
+    console.warn(
+      `[coding-session-report] DB persist failed for session ${input.sessionId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
