@@ -329,6 +329,12 @@ Field rules:
   - "reads": files this task only imports or references without editing.
   - CRITICAL: A file that appears in any other task's "creates" MUST appear in this task's "modifies" or "reads", NEVER in "creates" again. No file path may appear in "creates" across more than one task.
 - **dependencies**: array of task IDs that must be done first (e.g. ["T-001"]).
+  - Prefer a **single direct dependency** (the immediate predecessor). Only list multiple
+    dependencies when the task truly cannot start before **multiple independent** predecessors
+    are all complete.
+  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002,
+    and T-002 depends on T-001, T-003 should NOT also list T-001 — the dependency chain is
+    implicit through T-002.
 - **priority**: "P0" (must have), "P1" (should have), "P2" (nice to have).
 - **subSteps**: array of 2-6 concrete implementation steps. Each step has:
   - "step": sequential number (1, 2, 3...)
