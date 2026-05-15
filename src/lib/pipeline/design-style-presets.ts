@@ -105,13 +105,20 @@ export const DESIGN_STYLE_PRESETS: DesignStylePreset[] = [
   },
 ];
 
-const DEFAULT_STYLE: DesignStyleId = "glass_dark_saas";
+const DEFAULT_STYLE: DesignStyleId = "minimal_light";
 
 export function getDesignStylePreset(
   id: string | undefined | null,
 ): DesignStylePreset {
   const found = DESIGN_STYLE_PRESETS.find((p) => p.id === id);
   return found ?? DESIGN_STYLE_PRESETS.find((p) => p.id === DEFAULT_STYLE)!;
+}
+
+/** Returns the preset only when `id` exactly matches a known preset id. Returns null for AI-generated style ids (e.g. "style-1"). */
+export function findDesignStylePreset(
+  id: string | undefined | null,
+): DesignStylePreset | null {
+  return DESIGN_STYLE_PRESETS.find((p) => p.id === id) ?? null;
 }
 
 export function defaultDesignStyleId(): DesignStyleId {
