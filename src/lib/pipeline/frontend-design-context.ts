@@ -86,7 +86,7 @@ export async function buildPublicDesignAssetsBlock(
     "## Design assets on disk (Pencil / exports)",
     "",
     "Vite serves `frontend/public/` at the site root. Use `src=\"/design/...\"` for files listed below.",
-    "Match layout and visual hierarchy from **Design Specification** and any dimensions/colors stated above.",
+    "Match layout and visual hierarchy from the Stitch UI Design reference above.",
     "",
     ...lines,
     more,
@@ -101,6 +101,12 @@ export async function readStitchDesignHtml(outputRoot: string): Promise<string> 
   } catch {
     return "";
   }
+}
+
+export interface StitchDesignMeta {
+  projectId: string;
+  screenId: string;
+  projectUrl: string;
 }
 
 /** Read Pencil markdown from root (canonical) or legacy nested paths. */
@@ -145,29 +151,61 @@ function prepareStitchHtmlForCodegen(raw: string): string {
 
 /**
  * Single place to assemble what the supervisor passes as `frontendDesignContext`:
- * DesignSpec + Stitch design HTML + optional public/design file list.
- * Pencil is replaced by Stitch for UI fidelity.
+ * Stitch UI design (primary) + DesignSpec (secondary) + optional public/design assets.
+ *
+ * Priority:
+ *   1. Stitch UI Design — the MCP-generated high-fidelity design is the PRIMARY
+ *      reference for reproducing the UI. Coding agents must match the Stitch
+ *      output exactly (layout, colors, spacing, component hierarchy).
+ *   2. Design Specification — used as supplementary reference only when the
+ *      Stitch design lacks sufficient detail.
  */
 export async function buildFrontendDesignContextForCodegen(
   outputRoot: string,
   designSpecDoc: string,
   pencilDesignRaw: string,
+  stitchMeta?: StitchDesignMeta,
 ): Promise<string> {
-  const pencil = preparePencilDesignForCodegen(pencilDesignRaw);
   const stitchRaw = await readStitchDesignHtml(outputRoot);
   const stitchText = prepareStitchHtmlForCodegen(stitchRaw);
   const assets = await buildPublicDesignAssetsBlock(outputRoot);
-  return [
-    designSpecDoc.trim()
-      ? `## Design Specification\n\n${designSpecDoc}`
-      : "",
-    stitchText
-      ? `## Stitch UI Design (source of truth for visual layout)\n\nThe following is the extracted text content from a high-fidelity UI design exported from Google Stitch. Treat every component name, layout section, and design token mentioned here as the **source of truth** for the frontend implementation. Match colors, component hierarchy, and spacing exactly using Tailwind arbitrary values.\n\n${stitchText}`
-      : pencil
-        ? `## Pencil design (implementation summary)\n\n${pencil}`
-        : "",
-    assets,
-  ]
+
+  // Log the Stitch project URL for debugging
+  if (stitchMeta?.projectUrl) {
+    console.log(`[FrontendDesignContext] Stitch UI Design available at: ${stitchMeta.projectUrl}`);
+  } else if (stitchText) {
+    console.log("[FrontendDesignContext] StitchDesign.html found on disk but no project URL in metadata (legacy session).");
+  }
+
+  const stitchBlock = stitchText
+    ? [
+        "## (PRIMARY) Stitch UI Design — source of truth for visual layout",
+        "",
+        "The following is the extracted text content from a high-fidelity UI design exported from Google Stitch.",
+        stitchMeta?.projectUrl
+          ? `Stitch project URL: ${stitchMeta.projectUrl}`
+          : "",
+        "",
+        "**THIS IS THE PRIMARY DESIGN REFERENCE.** You MUST reproduce the UI exactly as shown in the Stitch design.",
+        "Match every component, layout section, color, spacing, and design token precisely using Tailwind arbitrary values.",
+        "Do NOT deviate from the Stitch design unless the Design Specification explicitly contradicts it.",
+        "",
+        stitchText,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
+  const designSpecBlock = designSpecDoc.trim()
+    ? `## (SECONDARY) Design Specification\n\nUse as supplementary reference only when the Stitch design lacks sufficient detail. Component behavior specifications, data-display logic, and edge cases described here should be applied on top of the Stitch visual layout.\n\n${designSpecDoc}`
+    : "";
+
+  const pencil = preparePencilDesignForCodegen(pencilDesignRaw);
+  const pencilBlock = (!stitchText && pencil)
+    ? `## Pencil design (implementation summary) — fallback when no Stitch design\n\n${pencil}`
+    : "";
+
+  return [stitchBlock, designSpecBlock, pencilBlock, assets]
     .filter(Boolean)
     .join("\n\n---\n\n");
 }
