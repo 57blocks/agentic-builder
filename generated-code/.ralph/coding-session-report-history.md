@@ -1,30 +1,48 @@
 # Coding Session Report History
 
-- Total archived reports: 15
+- Total archived reports: 21
 
 ## Sessions
 ## Compare Table
 
-| Ended At | Status | Score | Runtime | Duration | Calls | Tokens | Cost | Primary Model | Model Score | Report |
-| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
-| 2026-05-09T08:11:03.039Z | ABORTED | 56/100 (F) | 1 (0E/1W) | 6m 3s | 15 | 393336 | $0.0306 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-05-09T08-11-03-039Z.03c00a1d-0d78-4b82-8de1-6ed4cea6e926.md) |
-| 2026-04-29T12:09:22.007Z | FAIL | 38/100 (F) | n/a | 147m 16s | 345 | 10952879 | $4.4443 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T12-09-22-007Z.95b01ba1-a282-46de-a7d0-cc27a08246d1.md) |
-| 2026-04-29T11:58:24.061Z | FAIL | 34/100 (F) | n/a | 122m 26s | 180 | 3428043 | $1.6800 | deepseek/deepseek-v4-pro-20260423 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T11-58-24-061Z.44fb392e-79c5-4cb3-9fc2-14362d8584ba.md) |
-| 2026-04-29T06:50:35.667Z | FAIL | 38/100 (F) | n/a | 187m 5s | 386 | 13269261 | $4.2783 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T06-50-35-667Z.dfdf2753-a3eb-428e-9e78-d08982d8163f.md) |
-| 2026-04-28T12:45:11.101Z | FAIL | 58/100 (F) | n/a | 138m 5s | 351 | 11994558 | $4.0887 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-28T12-45-11-101Z.52851b86-63eb-4e90-a9c2-5f99fe94a9bd.md) |
-| 2026-04-27T10:34:58.772Z | FAIL | 29/100 (F) | n/a | 81m 15s | 221 | 6884233 | $1.2405 | deepseek-v4-pro | 88/100 (B) | [view](./report-history/coding-session-report.2026-04-27T10-34-58-772Z.2c0034f3-ad9f-41e1-8558-dd1071123ad7.md) |
-| 2026-04-27T06:35:46.637Z | FAIL | 29/100 (F) | n/a | 156m 5s | 193 | 3913112 | $4.5467 | openai/gpt-5.3-codex-20260224 | 88.8/100 (B) | [view](./report-history/coding-session-report.2026-04-27T06-35-46-637Z.a5c1d064-9745-45b0-8224-f983d0bb8371.md) |
-| 2026-04-24T00:41:23.684Z | FAIL | 56/100 (F) | n/a | 14m 21s | 121 | 1751797 | $1.6542 | anthropic/claude-4-sonnet-20250522 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-24T00-41-23-684Z.0524f962-5ea4-45f1-90ce-c47061eabbc2.md) |
-| 2026-04-23T16:21:07.469Z | FAIL | 50/100 (F) | n/a | 49m 15s | 262 | 6412315 | $5.7360 | anthropic/claude-4-sonnet-20250522 | 79.1/100 (C) | [view](./report-history/coding-session-report.2026-04-23T16-21-07-469Z.0d99a553-8917-4f4d-aa79-099574b2a21f.md) |
-| 2026-04-23T08:57:08.691Z | FAIL | 46/100 (F) | n/a | 106m 29s | 186 | 5351976 | $13.1156 | openai/gpt-5.3-codex-20260224 | 96.9/100 (A) | [view](./report-history/coding-session-report.2026-04-23T08-57-08-691Z.840ed1f7-158d-422f-b4ca-d4a7e674fa68.md) |
-| 2026-04-23T08:36:03.911Z | FAIL | 44/100 (F) | n/a | 95m 46s | 221 | 5473835 | $12.9467 | openai/gpt-5.3-codex-20260224 | 94.6/100 (A) | [view](./report-history/coding-session-report.2026-04-23T08-36-03-911Z.76bcb02e-0b86-4a34-b905-9ebc48518046.md) |
-| 2026-04-22T15:03:38.630Z | FAIL | 54/100 (F) | n/a | 50m 12s | 192 | 3664215 | $8.9928 | openai/gpt-5.3-codex-20260224 | 95.2/100 (A) | [view](./report-history/coding-session-report.2026-04-22T15-03-38-630Z.58ab2bd3-b264-4eab-bfb0-181c94fac089.md) |
-| 2026-04-22T10:21:47.979Z | FAIL | 54/100 (F) | n/a | 76m 50s | 201 | 4308385 | $10.2356 | openai/gpt-5.3-codex-20260224 | 95.3/100 (A) | [view](./report-history/coding-session-report.2026-04-22T10-21-47-979Z.010817af-0f82-4cd8-aea2-970b227075fa.md) |
-| 2026-04-22T07:56:34.466Z | ABORTED | 56/100 (F) | n/a | 12m 40s | 9 | 171427 | $0.0564 | moonshotai/kimi-k2.6-20260420 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-22T07-56-34-466Z.a1243654-aed0-45be-b668-f6e5ba8c5a64.md) |
-| 2026-04-21T13:21:19.776Z | FAIL | 19/100 (F) | n/a | 42m 57s | 120 | 1886257 | $0.0000 | openai/gpt-5.3-codex-20260224 | 0/100 (N/A) | [view](./report-history/coding-session-report.2026-04-21T13-21-19-776Z.05231d7c-b20a-4b93-a052-abb96e447c80.md) |
+| Ended At | Status | Score | Runtime | Migrations | Duration | Calls | Tokens | Cost | Primary Model | Model Score | Report |
+| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| 2026-05-15T06:21:12.927Z | ABORTED | 50/100 (F) | 1 (0E/1W) | 16 gap (3/3 task) | 143m 17s | 183 | 6754907 | $0.2916 | deepseek/deepseek-v4-pro-20260423 | 100/100 (A) | [view](./report-history/coding-session-report.2026-05-15T06-21-12-927Z.e2174db1-2f7a-4cc0-a3f9-c85b8ad34d82.md) |
+| 2026-05-12T11:14:18.489Z | FAIL | 60/100 (D) | n/a | n/a | 105m 15s | 152 | 4722501 | $0.6263 | deepseek-v4-pro | 92/100 (A) | [view](./report-history/coding-session-report.2026-05-12T11-14-18-489Z.7fa59ca0-0d5f-4ba3-994f-279dbac88d4a.md) |
+| 2026-05-12T08:47:34.795Z | FAIL | 32/100 (F) | n/a | n/a | 99m 40s | 177 | 6636514 | $1.3631 | deepseek-v4-pro | 92/100 (A) | [view](./report-history/coding-session-report.2026-05-12T08-47-34-795Z.a871d877-b633-4bc2-9eac-f212b0348344.md) |
+| 2026-05-12T04:38:38.450Z | FAIL | 48/100 (F) | n/a | n/a | 83m 29s | 162 | 5557274 | $1.0763 | deepseek-v4-pro | 92/100 (A) | [view](./report-history/coding-session-report.2026-05-12T04-38-38-450Z.53326d59-a98c-4727-a96d-1074f48ecb40.md) |
+| 2026-05-09T08:11:03.039Z | ABORTED | 56/100 (F) | n/a | n/a | 6m 3s | 15 | 393336 | $0.0306 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-05-09T08-11-03-039Z.03c00a1d-0d78-4b82-8de1-6ed4cea6e926.md) |
+| 2026-05-07T08:18:05.938Z | FAIL | 40/100 (F) | n/a | n/a | 112m 44s | 274 | 6484800 | $3.4047 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-05-07T08-18-05-938Z.77db6cd6-d801-4b91-9526-4092d5c61532.md) |
+| 2026-05-06T07:03:17.873Z | ABORTED | 60/100 (D) | n/a | n/a | 6m 7s | 18 | 573667 | $0.0000 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-05-06T07-03-17-873Z.cea3f7a8-3092-4ce2-aefc-4df022c565ea.md) |
+| 2026-04-29T12:09:22.007Z | FAIL | 38/100 (F) | n/a | n/a | 147m 16s | 345 | 10952879 | $4.4443 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T12-09-22-007Z.95b01ba1-a282-46de-a7d0-cc27a08246d1.md) |
+| 2026-04-29T11:58:24.061Z | FAIL | 34/100 (F) | n/a | n/a | 122m 26s | 180 | 3428043 | $1.6800 | deepseek/deepseek-v4-pro-20260423 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T11-58-24-061Z.44fb392e-79c5-4cb3-9fc2-14362d8584ba.md) |
+| 2026-04-29T06:50:35.667Z | FAIL | 38/100 (F) | n/a | n/a | 187m 5s | 386 | 13269261 | $4.2783 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-29T06-50-35-667Z.dfdf2753-a3eb-428e-9e78-d08982d8163f.md) |
+| 2026-04-28T12:45:11.101Z | FAIL | 58/100 (F) | n/a | n/a | 138m 5s | 351 | 11994558 | $4.0887 | deepseek-v4-pro | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-28T12-45-11-101Z.52851b86-63eb-4e90-a9c2-5f99fe94a9bd.md) |
+| 2026-04-27T10:34:58.772Z | FAIL | 29/100 (F) | n/a | n/a | 81m 15s | 221 | 6884233 | $1.2405 | deepseek-v4-pro | 88/100 (B) | [view](./report-history/coding-session-report.2026-04-27T10-34-58-772Z.2c0034f3-ad9f-41e1-8558-dd1071123ad7.md) |
+| 2026-04-27T06:35:46.637Z | FAIL | 29/100 (F) | n/a | n/a | 156m 5s | 193 | 3913112 | $4.5467 | openai/gpt-5.3-codex-20260224 | 88.8/100 (B) | [view](./report-history/coding-session-report.2026-04-27T06-35-46-637Z.a5c1d064-9745-45b0-8224-f983d0bb8371.md) |
+| 2026-04-24T00:41:23.684Z | FAIL | 56/100 (F) | n/a | n/a | 14m 21s | 121 | 1751797 | $1.6542 | anthropic/claude-4-sonnet-20250522 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-24T00-41-23-684Z.0524f962-5ea4-45f1-90ce-c47061eabbc2.md) |
+| 2026-04-23T16:21:07.469Z | FAIL | 50/100 (F) | n/a | n/a | 49m 15s | 262 | 6412315 | $5.7360 | anthropic/claude-4-sonnet-20250522 | 79.1/100 (C) | [view](./report-history/coding-session-report.2026-04-23T16-21-07-469Z.0d99a553-8917-4f4d-aa79-099574b2a21f.md) |
+| 2026-04-23T08:57:08.691Z | FAIL | 46/100 (F) | n/a | n/a | 106m 29s | 186 | 5351976 | $13.1156 | openai/gpt-5.3-codex-20260224 | 96.9/100 (A) | [view](./report-history/coding-session-report.2026-04-23T08-57-08-691Z.840ed1f7-158d-422f-b4ca-d4a7e674fa68.md) |
+| 2026-04-23T08:36:03.911Z | FAIL | 44/100 (F) | n/a | n/a | 95m 46s | 221 | 5473835 | $12.9467 | openai/gpt-5.3-codex-20260224 | 94.6/100 (A) | [view](./report-history/coding-session-report.2026-04-23T08-36-03-911Z.76bcb02e-0b86-4a34-b905-9ebc48518046.md) |
+| 2026-04-22T15:03:38.630Z | FAIL | 54/100 (F) | n/a | n/a | 50m 12s | 192 | 3664215 | $8.9928 | openai/gpt-5.3-codex-20260224 | 95.2/100 (A) | [view](./report-history/coding-session-report.2026-04-22T15-03-38-630Z.58ab2bd3-b264-4eab-bfb0-181c94fac089.md) |
+| 2026-04-22T10:21:47.979Z | FAIL | 54/100 (F) | n/a | n/a | 76m 50s | 201 | 4308385 | $10.2356 | openai/gpt-5.3-codex-20260224 | 95.3/100 (A) | [view](./report-history/coding-session-report.2026-04-22T10-21-47-979Z.010817af-0f82-4cd8-aea2-970b227075fa.md) |
+| 2026-04-22T07:56:34.466Z | ABORTED | 56/100 (F) | n/a | n/a | 12m 40s | 9 | 171427 | $0.0564 | moonshotai/kimi-k2.6-20260420 | 100/100 (A) | [view](./report-history/coding-session-report.2026-04-22T07-56-34-466Z.a1243654-aed0-45be-b668-f6e5ba8c5a64.md) |
+| 2026-04-21T13:21:19.776Z | FAIL | 19/100 (F) | n/a | n/a | 42m 57s | 120 | 1886257 | $0.0000 | openai/gpt-5.3-codex-20260224 | 0/100 (N/A) | [view](./report-history/coding-session-report.2026-04-21T13-21-19-776Z.05231d7c-b20a-4b93-a052-abb96e447c80.md) |
 
+- [2026-05-15T06:21:12.927Z | ABORTED | 50/100 (F)](./report-history/coding-session-report.2026-05-15T06-21-12-927Z.e2174db1-2f7a-4cc0-a3f9-c85b8ad34d82.md)
+  duration=143m 17s, calls=183, tokens=6754907, cost=$0.2916, primaryModel=deepseek/deepseek-v4-pro-20260423 100/100 (A), session=`e2174db1-2f7a-4cc0-a3f9-c85b8ad34d82`
+- [2026-05-12T11:14:18.489Z | FAIL | 60/100 (D)](./report-history/coding-session-report.2026-05-12T11-14-18-489Z.7fa59ca0-0d5f-4ba3-994f-279dbac88d4a.md)
+  duration=105m 15s, calls=152, tokens=4722501, cost=$0.6263, primaryModel=deepseek-v4-pro 92/100 (A), session=`7fa59ca0-0d5f-4ba3-994f-279dbac88d4a`
+- [2026-05-12T08:47:34.795Z | FAIL | 32/100 (F)](./report-history/coding-session-report.2026-05-12T08-47-34-795Z.a871d877-b633-4bc2-9eac-f212b0348344.md)
+  duration=99m 40s, calls=177, tokens=6636514, cost=$1.3631, primaryModel=deepseek-v4-pro 92/100 (A), session=`a871d877-b633-4bc2-9eac-f212b0348344`
+- [2026-05-12T04:38:38.450Z | FAIL | 48/100 (F)](./report-history/coding-session-report.2026-05-12T04-38-38-450Z.53326d59-a98c-4727-a96d-1074f48ecb40.md)
+  duration=83m 29s, calls=162, tokens=5557274, cost=$1.0763, primaryModel=deepseek-v4-pro 92/100 (A), session=`53326d59-a98c-4727-a96d-1074f48ecb40`
 - [2026-05-09T08:11:03.039Z | ABORTED | 56/100 (F)](./report-history/coding-session-report.2026-05-09T08-11-03-039Z.03c00a1d-0d78-4b82-8de1-6ed4cea6e926.md)
   duration=6m 3s, calls=15, tokens=393336, cost=$0.0306, primaryModel=deepseek-v4-pro 100/100 (A), session=`03c00a1d-0d78-4b82-8de1-6ed4cea6e926`
+- [2026-05-07T08:18:05.938Z | FAIL | 40/100 (F)](./report-history/coding-session-report.2026-05-07T08-18-05-938Z.77db6cd6-d801-4b91-9526-4092d5c61532.md)
+  duration=112m 44s, calls=274, tokens=6484800, cost=$3.4047, primaryModel=deepseek-v4-pro 100/100 (A), session=`77db6cd6-d801-4b91-9526-4092d5c61532`
+- [2026-05-06T07:03:17.873Z | ABORTED | 60/100 (D)](./report-history/coding-session-report.2026-05-06T07-03-17-873Z.cea3f7a8-3092-4ce2-aefc-4df022c565ea.md)
+  duration=6m 7s, calls=18, tokens=573667, cost=$0.0000, primaryModel=deepseek-v4-pro 100/100 (A), session=`cea3f7a8-3092-4ce2-aefc-4df022c565ea`
 - [2026-04-29T12:09:22.007Z | FAIL | 38/100 (F)](./report-history/coding-session-report.2026-04-29T12-09-22-007Z.95b01ba1-a282-46de-a7d0-cc27a08246d1.md)
   duration=147m 16s, calls=345, tokens=10952879, cost=$4.4443, primaryModel=deepseek-v4-pro 100/100 (A), session=`95b01ba1-a282-46de-a7d0-cc27a08246d1`
 - [2026-04-29T11:58:24.061Z | FAIL | 34/100 (F)](./report-history/coding-session-report.2026-04-29T11-58-24-061Z.44fb392e-79c5-4cb3-9fc2-14362d8584ba.md)
