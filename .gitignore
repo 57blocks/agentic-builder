@@ -31,10 +31,10 @@ example
 /dist/
 
 # env files
-.env
-.env.local
-.env*.local
-.env.parallel
+/.env
+/.env.local
+/.env*.local
+/.env.parallel
 
 # testing
 /coverage
