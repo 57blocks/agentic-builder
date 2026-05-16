@@ -177,15 +177,42 @@ function isFrontendOnly(state: SupervisorState): boolean {
 const ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC =
   process.env.BLUEPRINT_INCREMENTAL_CONTEXT_SYNC !== "0";
 
+// P0 parallel-coding flag.
+//   "0" or unset → legacy single-worker behaviour (default; preserves the
+//                  strict incremental-context guarantee for in-flight runs).
+//   "auto"       → derive worker count from task count via the heuristic
+//                  below, but still respect file-conflict groups.
+//   <integer>    → explicit upper bound on workers per coding role.
+const PARALLEL_CODING_WORKERS_RAW = (
+  process.env.BLUEPRINT_PARALLEL_CODING_WORKERS ?? "auto"
+).trim();
+const ENABLE_PARALLEL_CODING_WORKERS =
+  PARALLEL_CODING_WORKERS_RAW !== "" && PARALLEL_CODING_WORKERS_RAW !== "0";
+
+function parsedWorkerLimit(): number | "auto" {
+  if (PARALLEL_CODING_WORKERS_RAW === "auto") return "auto";
+  const n = Number.parseInt(PARALLEL_CODING_WORKERS_RAW, 10);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return n;
+}
+
 function workersForRole(role: CodingAgentRole, count: number): number {
   if (role === "architect" || role === "test") return 1;
   // Strict context mode: keep one worker per coding role so each task sees
   // the latest outputs from previous tasks within the same role.
+  // Disabled automatically when the operator opts in to parallel coding.
   if (
     ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC &&
+    !ENABLE_PARALLEL_CODING_WORKERS &&
     (role === "backend" || role === "frontend")
   ) {
     return 1;
+  }
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    const limit = parsedWorkerLimit();
+    const auto = count <= 3 ? 1 : count <= 8 ? 2 : 3;
+    if (limit === "auto") return Math.min(auto, count);
+    return Math.min(limit, count);
   }
   if (count <= 3) return 1;
   if (count <= 8) return 2;
@@ -197,6 +224,136 @@ function chunkTasks<T>(tasks: T[], chunks: number): T[][] {
   const result: T[][] = Array.from({ length: chunks }, () => []);
   tasks.forEach((t, i) => result[i % chunks].push(t));
   return result.filter((c) => c.length > 0);
+}
+
+// ─── Conflict-aware chunking (P0) ─────────────────────────────────────────
+//
+// Splits tasks into groups that are SAFE to run in parallel. Two tasks land
+// in the same group when ANY of these holds:
+//   1. one declares the other (transitively) in `dependencies`
+//   2. task A's `files.creates` overlaps task B's `files.reads | modifies`
+//      (i.e. B consumes a file that A is about to produce)
+//   3. they declare overlapping `files.modifies` paths (write-write conflict)
+//
+// Tasks inside a group MUST execute serially within the same worker so the
+// "incremental context sync" invariant is preserved for true dependencies.
+// Different groups are guaranteed file-disjoint and dependency-disjoint, so
+// they can be fanned out to separate workers.
+
+function collectTaskFiles(task: CodingTask): {
+  creates: string[];
+  modifies: string[];
+  reads: string[];
+} {
+  const out = {
+    creates: [] as string[],
+    modifies: [] as string[],
+    reads: [] as string[],
+  };
+  const files = task.files;
+  if (!files) return out;
+  if (Array.isArray(files)) {
+    // Legacy flat shape: treat as "creates" so we err on the side of caution.
+    for (const f of files) {
+      if (typeof f === "string" && f.trim()) out.creates.push(f.trim());
+    }
+    return out;
+  }
+  const rec = files as unknown as Record<string, unknown>;
+  for (const key of ["creates", "modifies", "reads"] as const) {
+    const arr = rec[key];
+    if (Array.isArray(arr)) {
+      for (const f of arr) {
+        if (typeof f === "string" && f.trim()) out[key].push(f.trim());
+      }
+    }
+  }
+  return out;
+}
+
+function chunkTasksByFileConflict(
+  tasks: CodingTask[],
+  maxChunks: number,
+): CodingTask[][] {
+  if (tasks.length === 0) return [];
+  if (maxChunks <= 1) return [tasks];
+
+  // Union-find over task indices.
+  const parent = tasks.map((_, i) => i);
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  const idByTaskId = new Map<string, number>();
+  tasks.forEach((t, i) => idByTaskId.set(t.id, i));
+
+  const fileSets = tasks.map(collectTaskFiles);
+
+  // 1. Dependency edges keep dependents on the same chunk as their parents.
+  tasks.forEach((t, i) => {
+    if (!t.dependencies) return;
+    for (const dep of t.dependencies) {
+      const j = idByTaskId.get(dep);
+      if (j !== undefined) union(i, j);
+    }
+  });
+
+  // 2 & 3. File-overlap edges (creates vs reads/modifies, modifies vs modifies).
+  for (let i = 0; i < tasks.length; i++) {
+    for (let j = i + 1; j < tasks.length; j++) {
+      const a = fileSets[i];
+      const b = fileSets[j];
+      const overlap =
+        hasOverlap(a.creates, b.reads) ||
+        hasOverlap(a.creates, b.modifies) ||
+        hasOverlap(b.creates, a.reads) ||
+        hasOverlap(b.creates, a.modifies) ||
+        hasOverlap(a.modifies, b.modifies);
+      if (overlap) union(i, j);
+    }
+  }
+
+  // Bucket by component root, preserving the original task order inside each
+  // group so dependency execution order is naturally maintained.
+  const groups = new Map<number, CodingTask[]>();
+  tasks.forEach((t, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r)!.push(t);
+  });
+
+  let chunks = Array.from(groups.values());
+
+  // Cap to maxChunks: merge the smallest chunks together so we never exceed
+  // the operator-configured worker budget. Merging cannot violate safety
+  // because every chunk is already self-contained.
+  if (chunks.length > maxChunks) {
+    chunks.sort((a, b) => a.length - b.length);
+    while (chunks.length > maxChunks) {
+      const a = chunks.shift()!;
+      const b = chunks.shift()!;
+      chunks.unshift([...a, ...b]);
+      chunks.sort((x, y) => x.length - y.length);
+    }
+  }
+
+  return chunks;
+}
+
+function hasOverlap(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+  const set = new Set(a);
+  for (const x of b) if (set.has(x)) return true;
+  return false;
 }
 
 function isToolSequenceValidationError(message: string): boolean {
@@ -1500,8 +1657,9 @@ async function collectConventionViolations(
 
       // Detect placeholder antd <Result> used in lieu of real view components.
       // Each view file that exists under views/ must be rendered directly in the route, not wrapped by a Result placeholder.
-      const resultPlaceholderInRouter =
-        /<Result\b[^>]*status\s*=/.test(routerContent);
+      const resultPlaceholderInRouter = /<Result\b[^>]*status\s*=/.test(
+        routerContent,
+      );
       if (resultPlaceholderInRouter) {
         violations.push(
           `[CONVENTION] ${routerPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
@@ -1513,8 +1671,13 @@ async function collectConventionViolations(
       // Also check App.tsx when it doubles as the route registry.
       const appPath = "frontend/src/App.tsx";
       const appContent = await fsRead(appPath, outputDir);
-      if (!appContent.startsWith("FILE_NOT_FOUND") && !appContent.startsWith("REJECTED")) {
-        const resultPlaceholderInApp = /<Result\b[^>]*status\s*=/.test(appContent);
+      if (
+        !appContent.startsWith("FILE_NOT_FOUND") &&
+        !appContent.startsWith("REJECTED")
+      ) {
+        const resultPlaceholderInApp = /<Result\b[^>]*status\s*=/.test(
+          appContent,
+        );
         if (resultPlaceholderInApp && viewFiles.length > 0) {
           violations.push(
             `[CONVENTION] ${appPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
@@ -1589,12 +1752,16 @@ async function collectConventionViolations(
     ];
     for (const dbPath of dbCandidates) {
       const dbContent = await fsRead(dbPath, outputDir);
-      if (dbContent.startsWith("FILE_NOT_FOUND") || dbContent.startsWith("REJECTED")) {
+      if (
+        dbContent.startsWith("FILE_NOT_FOUND") ||
+        dbContent.startsWith("REJECTED")
+      ) {
         continue;
       }
       const hasHardTimescale =
-        /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?timescaledb/i.test(dbContent) &&
-        !/TIMESCALE_DISABLED|process\.env\.TIMESCALE/i.test(dbContent);
+        /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?timescaledb/i.test(
+          dbContent,
+        ) && !/TIMESCALE_DISABLED|process\.env\.TIMESCALE/i.test(dbContent);
       if (hasHardTimescale) {
         violations.push(
           `[CONVENTION] ${dbPath}: Unconditional "CREATE EXTENSION timescaledb" will crash on standard PostgreSQL installs. ` +
@@ -1791,11 +1958,11 @@ async function auditBackendHealthRoute(
   ) {
     return null;
   }
-  const apiIndex = await fsRead(
-    "backend/src/api/modules/index.ts",
-    outputDir,
-  );
-  if (apiIndex.startsWith("FILE_NOT_FOUND") || apiIndex.startsWith("REJECTED")) {
+  const apiIndex = await fsRead("backend/src/api/modules/index.ts", outputDir);
+  if (
+    apiIndex.startsWith("FILE_NOT_FOUND") ||
+    apiIndex.startsWith("REJECTED")
+  ) {
     return "backend/src/api/modules/index.ts is missing — the e2e webServer health probe at /api/health will fail.";
   }
   if (!/registerHealthRoutes\s*\(/.test(apiIndex)) {
@@ -3188,7 +3355,14 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
   const sends: Send[] = [];
 
   const beCount = workersForRole("backend", state.backendTasks.length);
-  const beChunks = chunkTasks(state.backendTasks, beCount);
+  const beChunks = ENABLE_PARALLEL_CODING_WORKERS
+    ? chunkTasksByFileConflict(state.backendTasks, beCount)
+    : chunkTasks(state.backendTasks, beCount);
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    console.log(
+      `[Supervisor] Backend dispatch (parallel): ${state.backendTasks.length} tasks → ${beChunks.length} conflict-free chunk(s).`,
+    );
+  }
   beChunks.forEach((tasks, i) => {
     sends.push(
       new Send("be_worker", {
@@ -3274,7 +3448,14 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   }
 
   const feCount = workersForRole("frontend", state.frontendTasks.length);
-  const feChunks = chunkTasks(state.frontendTasks, feCount);
+  const feChunks = ENABLE_PARALLEL_CODING_WORKERS
+    ? chunkTasksByFileConflict(state.frontendTasks, feCount)
+    : chunkTasks(state.frontendTasks, feCount);
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    console.log(
+      `[Supervisor] Frontend dispatch (parallel): ${state.frontendTasks.length} tasks → ${feChunks.length} conflict-free chunk(s).`,
+    );
+  }
 
   // state.apiContracts is the append-merged union of:
   //   1. generate_api_contracts (PRD-inferred, speculative — feeds BE as spec)
@@ -3401,10 +3582,7 @@ async function readRoutesManifest(
   let parsedFiles = 0;
 
   for (const fname of jsonFiles) {
-    const raw = await fsRead(
-      path.join("_meta", "routes", fname),
-      outputDir,
-    );
+    const raw = await fsRead(path.join("_meta", "routes", fname), outputDir);
     if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
       continue;
     }
@@ -3430,8 +3608,7 @@ async function readRoutesManifest(
       const r = item as Record<string, unknown>;
       const method =
         typeof r.method === "string" ? r.method.toUpperCase().trim() : "";
-      const endpoint =
-        typeof r.endpoint === "string" ? r.endpoint.trim() : "";
+      const endpoint = typeof r.endpoint === "string" ? r.endpoint.trim() : "";
       if (!method || !endpoint) continue;
       const key = `${method} ${endpoint}`;
       if (seen.has(key)) continue;
@@ -3503,10 +3680,7 @@ async function verifyManifestAgainstSource(
   const dropped: ApiContract[] = [];
   for (const c of manifest) {
     // Look for either `.get(`/`.post(` etc. OR decorator-style `@Get(`/`@Post(`.
-    const verbRe = new RegExp(
-      `(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`,
-      "i",
-    );
+    const verbRe = new RegExp(`(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`, "i");
     if (verbRe.test(haystack)) {
       verified.push(c);
     } else {
@@ -4850,7 +5024,9 @@ async function phaseVerifyAndFix(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
-        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        console.warn(
+          `${label}: context limit hit; compacted once and retrying.`,
+        );
         continue;
       }
       console.error(`${label}: LLM call failed: ${msg}`);
@@ -6570,7 +6746,9 @@ async function tddTestWriterAndRed(
     outputDir: state.outputDir,
     emitter,
   });
-  console.log(`[Supervisor] TDD Review (pre-implementation): ${review.summary}`);
+  console.log(
+    `[Supervisor] TDD Review (pre-implementation): ${review.summary}`,
+  );
 
   const red = await runTddRuntimePhase({
     outputDir: state.outputDir,
@@ -7007,7 +7185,9 @@ async function buildComponentInterfaceReference(
       // Derive component name from Props name (strip trailing "Props")
       const componentName = propsName.replace(/Props$/, "");
       const relPath = path.relative(path.join(outputDir, "frontend"), filePath);
-      entries.push(`- **${componentName}** (\`${relPath}\`): ${fields.join(", ")}`);
+      entries.push(
+        `- **${componentName}** (\`${relPath}\`): ${fields.join(", ")}`,
+      );
     }
   }
 
@@ -7156,7 +7336,9 @@ export async function auditApiRouteRegistration(
     const mountMatch = content.match(mountPrefixRe);
     // Fall back to constructor-based prefix when the .use("/prefix", ...) form
     // is absent — i.e. the sub-router was created with `new Router({ prefix })`.
-    const ctorPrefixMatch = mountMatch ? null : content.match(routerCtorPrefixRe);
+    const ctorPrefixMatch = mountMatch
+      ? null
+      : content.match(routerCtorPrefixRe);
     const endpoints: Array<{ method: string; endpoint: string }> = [];
     const seen = new Set<string>();
     const pushEndpoint = (method: string, endpoint: string): void => {
@@ -7391,11 +7573,12 @@ function normaliseApiPath(p: string): string {
 const CONTRACT_AUDIT_EXEMPT_ENDPOINTS: ReadonlyArray<{
   method: string;
   pathRe: RegExp;
-}> = [
-  { method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ },
-];
+}> = [{ method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ }];
 
-export function isContractAuditExempt(method: string, endpoint: string): boolean {
+export function isContractAuditExempt(
+  method: string,
+  endpoint: string,
+): boolean {
   const m = method.toUpperCase();
   const p = normaliseApiPath(endpoint);
   return CONTRACT_AUDIT_EXEMPT_ENDPOINTS.some(
@@ -7963,7 +8146,9 @@ async function integrationVerifyAndFix(
   // implementations" and wedging the verify-fix worker in a stagnation loop.
   // The audit also produces `pendingRepairTasks` for the worker to consume
   // as deterministic instructions (CODEGEN_HARDENING_PLAN.md §7.2).
-  let coverageResult: Awaited<ReturnType<typeof runContractUsageCoverage>> | null = null;
+  let coverageResult: Awaited<
+    ReturnType<typeof runContractUsageCoverage>
+  > | null = null;
   try {
     coverageResult = await runContractUsageCoverage({
       outputDir: state.outputDir,
@@ -8452,7 +8637,7 @@ async function integrationVerifyAndFix(
     "- Registration closure is mandatory: treat missing registrations in `frontend/src/router.tsx`, `backend/src/api/modules/index.ts`, and `backend/src/app.ts` as top-priority integration defects.",
     "- Do not stop after making pages/controllers/middlewares exist on disk; they must be wired into the actual router/module/app entrypoints.",
     "- When a shared module imports a named route registrar or app helper, verify the source file exports that exact symbol; import/export name mismatches are runtime blockers.",
-    "- **Dangling import protocol** — when the route audit reports `index.ts imports \"registerXRoutes\" but no routes.ts defines that export`, follow this exact 3-step procedure:",
+    '- **Dangling import protocol** — when the route audit reports `index.ts imports "registerXRoutes" but no routes.ts defines that export`, follow this exact 3-step procedure:',
     "    1. Read the actual routes.ts file for that module (e.g. `backend/src/api/modules/users/users.routes.ts`) to find its real export name.",
     "    2. Choose ONE of: (a) rename the `export function register*Routes` in routes.ts to match what index.ts expects, OR (b) fix the import line in index.ts to match the actual export name in routes.ts.",
     "    3. Never add a new import to index.ts for a registrar function unless you simultaneously verify OR create that exact export name in the corresponding routes.ts.",
@@ -8483,8 +8668,7 @@ async function integrationVerifyAndFix(
   let coverageBlock = "";
   if (coverageResult) {
     const { totals, pruned, pendingRepairTasks } = coverageResult;
-    const noiseFree =
-      pruned.length === 0 && pendingRepairTasks.length === 0;
+    const noiseFree = pruned.length === 0 && pendingRepairTasks.length === 0;
     if (!noiseFree) {
       const lines: string[] = ["", "## Contract usage coverage"];
       lines.push(
@@ -8499,7 +8683,9 @@ async function integrationVerifyAndFix(
           lines.push(`  - PRUNED: ${p.method} ${p.endpoint}`);
         }
         if (pruned.length > 12) {
-          lines.push(`  - … (+${pruned.length - 12} more, full list in .ralph/contract-usage-coverage.json)`);
+          lines.push(
+            `  - … (+${pruned.length - 12} more, full list in .ralph/contract-usage-coverage.json)`,
+          );
         }
       }
       if (pendingRepairTasks.length > 0) {
@@ -8518,7 +8704,9 @@ async function integrationVerifyAndFix(
             `**Case (1) Frontend wiring missing — execute these (${wiring.length}):**`,
           );
           for (const t of wiring.slice(0, 10)) {
-            lines.push(`  - [frontend] ${t.method} ${t.endpoint} — ${t.directive}`);
+            lines.push(
+              `  - [frontend] ${t.method} ${t.endpoint} — ${t.directive}`,
+            );
           }
           if (wiring.length > 10) {
             lines.push(`  - … (+${wiring.length - 10} more)`);
@@ -8988,7 +9176,9 @@ async function integrationVerifyAndFix(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
-        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        console.warn(
+          `${label}: context limit hit; compacted once and retrying.`,
+        );
         continue;
       }
       console.error(`${label}: LLM call failed: ${msg}`);
@@ -9041,7 +9231,11 @@ async function integrationVerifyAndFix(
         // before it is allowed to claim a passing integration.
         if (reportedStatus === "pass" && validationStale) {
           const buildCmd =
-            pm === "yarn" ? "yarn run build" : pm === "npm" ? "npm run build" : "pnpm run build";
+            pm === "yarn"
+              ? "yarn run build"
+              : pm === "npm"
+                ? "npm run build"
+                : "pnpm run build";
           const rejectionMsg = [
             "REJECTED: report_done(pass) is not allowed — validation results are STALE.",
             `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
@@ -9503,7 +9697,10 @@ async function integrationVerifyAndFix(
         getRepairEmitter(state.sessionId)({
           stage: "integration-gate",
           event: "human_decision_received",
-          details: { decisionId: humanDecision, triggeredAtIteration: iterations },
+          details: {
+            decisionId: humanDecision,
+            triggeredAtIteration: iterations,
+          },
         });
 
         if (humanDecision === "abort" || humanDecision === "timeout") {
@@ -9517,7 +9714,9 @@ async function integrationVerifyAndFix(
           ]
             .filter(Boolean)
             .join("\n");
-          console.warn(`${label}: aborting on human decision (${humanDecision}).`);
+          console.warn(
+            `${label}: aborting on human decision (${humanDecision}).`,
+          );
           break;
         }
 
@@ -9692,7 +9891,9 @@ async function integrationVerifyAndFix(
       });
       if (!smoke.pass) {
         finalStatus = "fail";
-        const top = smoke.failures.slice(0, 6).map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
+        const top = smoke.failures
+          .slice(0, 6)
+          .map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
         finalSummary = [
           finalSummary,
           "Runtime smoke gate failed:",
@@ -9815,9 +10016,9 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     }
   };
 
-  const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as
-    | { tasks?: Array<{ instruction?: string }> }
-    | null;
+  const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as {
+    tasks?: Array<{ instruction?: string }>;
+  } | null;
   if (tsc?.tasks && Array.isArray(tsc.tasks)) {
     out.tscErrors = tsc.tasks
       .map((t) => (typeof t?.instruction === "string" ? t.instruction : null))
@@ -9825,27 +10026,30 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
       .slice(0, 10);
   }
 
-  const coverage = (await tryReadJson(".ralph/contract-usage-coverage.json")) as
-    | {
-        pendingRepairTasks?: Array<{
-          method?: string;
-          endpoint?: string;
-          directive?: string;
-        }>;
-      }
-    | null;
-  if (coverage?.pendingRepairTasks && Array.isArray(coverage.pendingRepairTasks)) {
+  const coverage = (await tryReadJson(
+    ".ralph/contract-usage-coverage.json",
+  )) as {
+    pendingRepairTasks?: Array<{
+      method?: string;
+      endpoint?: string;
+      directive?: string;
+    }>;
+  } | null;
+  if (
+    coverage?.pendingRepairTasks &&
+    Array.isArray(coverage.pendingRepairTasks)
+  ) {
     out.contractCoverageGaps = coverage.pendingRepairTasks
       .slice(0, 10)
-      .map((t) => `${t.method ?? "?"} ${t.endpoint ?? "?"} — ${t.directive ?? ""}`);
+      .map(
+        (t) => `${t.method ?? "?"} ${t.endpoint ?? "?"} — ${t.directive ?? ""}`,
+      );
   }
 
-  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as
-    | {
-        unregisteredModules?: string[];
-        unresolvedRegistrations?: string[];
-      }
-    | null;
+  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as {
+    unregisteredModules?: string[];
+    unresolvedRegistrations?: string[];
+  } | null;
   if (routeAudit) {
     const lines: string[] = [];
     for (const m of routeAudit.unregisteredModules ?? []) {
@@ -9857,17 +10061,15 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
   }
 
-  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as
-    | {
-        tasks?: Record<
-          string,
-          {
-            ok?: boolean;
-            gaps?: Array<{ modelPath?: string; modelName?: string }>;
-          }
-        >;
+  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
+    tasks?: Record<
+      string,
+      {
+        ok?: boolean;
+        gaps?: Array<{ modelPath?: string; modelName?: string }>;
       }
-    | null;
+    >;
+  } | null;
   if (migration?.tasks) {
     const lines: string[] = [];
     for (const entry of Object.values(migration.tasks)) {
@@ -9951,10 +10153,7 @@ export function createSupervisorGraph() {
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
     .addEdge("generate_api_contracts", "tdd_test_writer")
-    .addConditionalEdges(
-      "tdd_test_writer",
-      dispatchBackendAndTestWorkers,
-    )
+    .addConditionalEdges("tdd_test_writer", dispatchBackendAndTestWorkers)
     .addEdge("be_worker", "be_phase_verify")
     .addEdge("be_phase_verify", "extract_real_contracts")
     .addEdge("extract_real_contracts", "fe_dispatch_gate")

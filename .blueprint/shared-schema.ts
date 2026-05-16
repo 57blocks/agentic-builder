@@ -2,251 +2,257 @@
 // frontend AND backend code both touch. Both sides MUST import from this
 // module rather than redefine. No `any`. ISO 8601 strings for timestamps.
 
-// ==========================
-// Generic identifiers
-// ==========================
-export type StablecoinId = string;
-export type VariableId = string;
-export type Dimension = "RQ" | "MC" | "OC" | "SE";
-export type RiskLevel = "Normal" | "Elevated" | "High-Risk" | "Critical";
-export type DataMode = "demo" | "live";
+export type UserId = string;
+export type ProjectId = string;
+export type ProjectMembershipKey = string;
+export type TaskId = string;
+export type InviteTokenId = string;
+export type AuditLogId = string;
 
-// ==========================
-// Core entities (matching DB tables)
-// ==========================
-export interface Stablecoin {
-  id: StablecoinId;
-  symbol: string;
+export type ProjectStatus = "active" | "archived";
+export type MembershipRole = "owner" | "member";
+export type TaskPriority = "low" | "medium" | "high";
+export type TaskStatus = "to-do" | "in-progress" | "done";
+
+export interface User {
+  id: UserId;
   name: string;
-  coingeckoId: string;
-  chain: string;
-  createdAt: string; // ISO 8601
-}
-
-export interface DataSource {
-  id: string;
-  name: string;
-  type: "market" | "onchain" | "sentiment";
-  config: Record<string, unknown>; // JSON object
-}
-
-export interface RawMetric {
-  id: string;
-  stablecoinId: StablecoinId;
-  variableId: VariableId;
-  dataSourceId: string;
-  value: number;
-  observedAt: string;
-}
-
-export interface ScoringVariable {
-  id: string;
-  stablecoinId: StablecoinId;
-  variableId: VariableId;
-  normalizedScore: number;
-  rawMetricId: string | null;
-  isCarryForward: boolean;
-  scoredAt: string;
-}
-
-export interface DimensionScore {
-  id: string;
-  stablecoinId: StablecoinId;
-  dimension: Dimension;
-  score: number;
-  scoredAt: string;
-}
-
-export interface CompositeScore {
-  id: string;
-  stablecoinId: StablecoinId;
-  score: number;
-  riskLevel: RiskLevel;
-  scoredAt: string;
-}
-
-export interface VariableWeight {
-  id: string;
-  variableId: VariableId;
-  weight: number;
-  updatedAt: string;
-}
-
-export interface Alert {
-  id: string;
-  stablecoinId: StablecoinId | null;
-  type: "risk_change" | "rapid_mover" | "system";
-  severity: "info" | "warning" | "critical";
-  message: string;
-  createdAt: string;
-}
-
-export interface RapidMover {
-  id: string;
-  scoringVariableId: string;
-  delta: number;
-  previousScore: number;
-  currentScore: number;
-  scoredAt: string;
-}
-
-export interface ReserveReview {
-  id: string;
-  stablecoinId: StablecoinId;
-  sourceUrl: string;
-  suggestedRq1: number;
-  suggestedRq3: number;
-  suggestedRq4: number;
-  status: "pending" | "approved" | "manual_required";
-  reviewerId: string | null;
-  finalRq1: number | null;
-  finalRq3: number | null;
-  finalRq4: number | null;
-  diffNotes: string | null;
+  email: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ReserveAuditLog {
-  id: string;
-  reserveReviewId: string;
-  actorId: string;
-  action: "extracted" | "reviewed" | "published" | "rejected";
-  diffSummary: string | null;
+export interface AuthSession {
+  token: string;
+  user: User;
+}
+
+export interface RegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface RegisterResponse {
+  user: User;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
+export interface LogoutRequest {
+  token?: string;
+}
+
+export interface LogoutResponse {
+  success: true;
+}
+
+export interface MeResponse {
+  user: User;
+}
+
+export interface UpdateMeRequest {
+  name?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}
+
+export interface UpdateMeResponse {
+  user: User;
+}
+
+export interface Project {
+  id: ProjectId;
+  name: string;
+  description: string;
+  startDate: string | null;
+  endDate: string | null;
+  status: ProjectStatus;
+  ownerId: UserId;
   createdAt: string;
+  updatedAt: string;
 }
 
-// ==========================
-// Aggregated view models (for API responses)
-// ==========================
-export interface StablecoinCardData {
-  stablecoin: Stablecoin;
-  compositeScore: number;
-  riskLevel: RiskLevel;
-  dimensionScores: { dimension: Dimension; score: number }[];
-  rapidMover: boolean;
-  isStale: boolean;
-  lastUpdated: string;
-  pendingReviewCount: number;
+export interface ProjectMember {
+  projectId: ProjectId;
+  userId: UserId;
+  role: MembershipRole;
+  joinedAt: string;
+  user?: User;
 }
 
-export interface MonitorOverviewResponse {
-  version: "1.0";
-  stablecoins: StablecoinCardData[];
-  totals: {
-    totalCoins: number;
-    activeAlerts: number;
-    rapidMovers: number;
+export interface ProjectSummary {
+  project: Project;
+  memberCount: number;
+  totalTaskCount: number;
+  completedTaskCount: number;
+  completionPercent: number;
+  lastUpdatedAt: string;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface CreateProjectResponse {
+  project: Project;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface UpdateProjectResponse {
+  project: Project;
+}
+
+export interface ArchiveProjectResponse {
+  project: Project;
+}
+
+export interface DeleteProjectResponse {
+  success: true;
+}
+
+export interface ProjectListResponse {
+  projects: ProjectSummary[];
+}
+
+export interface ProjectDetailResponse {
+  project: Project;
+  members: ProjectMember[];
+  taskCounts: {
+    total: number;
+    todo: number;
+    inProgress: number;
+    done: number;
   };
-  refreshedAt: string;
 }
 
-export interface TrendDataPoint {
-  timestamp: string;
-  compositeScore: number;
-  dimensionScores: { dimension: Dimension; score: number }[];
-}
-export interface TrendResponse {
-  version: "1.0";
-  stablecoinSymbol: string;
-  points: TrendDataPoint[];
-  timeRange: "24h" | "7d" | "30d";
+export interface InviteProjectMemberRequest {
+  email: string;
+  role?: MembershipRole;
 }
 
-export interface AlertItem extends Alert {
-  stablecoinSymbol?: string;
+export interface InviteProjectMemberResponse {
+  membership: ProjectMember;
 }
 
-export interface AlertsResponse {
-  version: "1.0";
-  alerts: AlertItem[];
+export interface UpdateProjectMemberRequest {
+  role: MembershipRole;
 }
 
-export interface VariableExplanation {
-  variableId: VariableId;
-  name: string;
-  rawValue: number;
-  normalizedScore: number;
-  ruleSummary: string;
-  source: string;
+export interface UpdateProjectMemberResponse {
+  membership: ProjectMember;
+}
+
+export interface RemoveProjectMemberResponse {
+  success: true;
+}
+
+export interface Task {
+  id: TaskId;
+  projectId: ProjectId;
+  title: string;
+  description: string;
+  assigneeId: UserId | null;
+  dueDate: string | null;
+  priority: TaskPriority;
+  status: TaskStatus;
+  createdBy: UserId;
+  createdAt: string;
   updatedAt: string;
-  explanation: string;
 }
 
-export interface ReserveReviewStatusBlock {
-  latestReview: {
-    status: ReserveReview["status"];
-    reviewerId: string | null;
-    timestamp: string;
-    sourceUrl: string;
-  } | null;
+export interface TaskSummary {
+  task: Task;
+  projectName: string;
+  assignee?: User;
 }
 
-export interface StablecoinDetailResponse {
-  version: "1.0";
-  stablecoin: Stablecoin;
-  compositeScore: number;
-  riskLevel: RiskLevel;
-  isStale: boolean;
-  lastUpdated: string;
-  topDrivers: VariableExplanation[];
-  dimensionScores: { dimension: Dimension; score: number }[];
-  reserveReviewStatus: ReserveReviewStatusBlock;
+export interface TaskListFilters {
+  projectId?: ProjectId;
+  status?: TaskStatus;
+  assigneeId?: UserId;
+  priority?: TaskPriority;
+  sortBy?: "dueDate" | "createdAt" | "updatedAt";
+  sortOrder?: "asc" | "desc";
 }
 
-export interface StablecoinTrendsResponse extends TrendResponse {
-  // inherited `points` and `timeRange`
+export interface TaskListResponse {
+  tasks: TaskSummary[];
 }
 
-export interface StablecoinAlertsResponse extends AlertsResponse {
-  // filtered for that coin
+export interface CreateTaskRequest {
+  projectId: ProjectId;
+  title: string;
+  description: string;
+  assigneeId?: UserId | null;
+  dueDate?: string | null;
+  priority: TaskPriority;
+  status?: TaskStatus;
 }
 
-export interface QueueItem {
-  id: string;
-  stablecoinSymbol: string;
-  status: ReserveReview["status"];
-  sourceUrl: string;
-  submittedAt: string;
+export interface CreateTaskResponse {
+  task: Task;
 }
 
-export interface ReserveReviewQueueResponse {
-  version: "1.0";
-  items: QueueItem[];
+export interface UpdateTaskRequest {
+  title?: string;
+  description?: string;
+  assigneeId?: UserId | null;
+  dueDate?: string | null;
+  priority?: TaskPriority;
+  status?: TaskStatus;
 }
 
-export interface ReserveReviewDetailResponse {
-  version: "1.0";
-  review: ReserveReview;
-  stablecoinSymbol: string;
-  evidenceUrls: string[];
-  aiConfidence: number; // placeholder, default 0.5 in demo
+export interface UpdateTaskResponse {
+  task: Task;
 }
 
-export interface ApproveReviewRequest {
-  finalRq1?: number;
-  finalRq3?: number;
-  finalRq4?: number;
-}
-export interface ApproveReviewResponse {
+export interface DeleteTaskResponse {
   success: true;
-  review: ReserveReview;
 }
 
-export interface RejectReviewRequest {
-  reason: string;
-}
-export interface RejectReviewResponse {
-  success: true;
-  review: ReserveReview;
+export interface DashboardTaskItem {
+  task: Task;
+  projectName: string;
 }
 
-export interface HealthResponse {
-  status: "ok";
-  timestamp: string;
+export interface DashboardProjectItem {
+  summary: ProjectSummary;
 }
 
-export interface TriggerScoringResponse {
-  success: true;
-  scoredAt: string;
+export interface DashboardResponse {
+  myTasks: DashboardTaskItem[];
+  myProjects: DashboardProjectItem[];
+}
+
+export interface AcceptInviteRequest {
+  token: string;
+}
+
+export interface AcceptInviteResponse {
+  membership: ProjectMember;
+}
+
+export interface ErrorResponse {
+  error: {
+    message: string;
+    code: string;
+  };
 }
