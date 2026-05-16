@@ -1,10 +1,40 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, CheckCircle2, Download, ExternalLink, ListChecks, Zap, User } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Download, GitBranch, ListChecks, Settings, Zap, User } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { getNextStep, getPrevStep } from "@/_config/pipeline-flow";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
+import type { ResourceRequirement } from "@/lib/pipeline/resource-requirements";
 import type { StepUIProps } from "../../../_shared/types";
+
+const CATEGORY_COLOR: Record<string, string> = {
+  auth: "bg-violet-100 text-violet-700",
+  payment: "bg-emerald-100 text-emerald-700",
+  email: "bg-amber-100 text-amber-700",
+  storage: "bg-sky-100 text-sky-700",
+  ai: "bg-indigo-100 text-indigo-700",
+  analytics: "bg-pink-100 text-pink-700",
+  messaging: "bg-orange-100 text-orange-700",
+  maps: "bg-teal-100 text-teal-700",
+  queue: "bg-cyan-100 text-cyan-700",
+  logging: "bg-slate-100 text-slate-600",
+  other: "bg-zinc-100 text-zinc-600",
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  auth: "Auth",
+  payment: "Payment",
+  email: "Email",
+  storage: "Storage",
+  ai: "AI / LLM",
+  analytics: "Analytics",
+  messaging: "Messaging",
+  maps: "Maps",
+  queue: "Queue",
+  logging: "Logging",
+  other: "Other",
+};
 
 const PHASE_COLORS: Record<string, string> = {
   backend: "bg-blue-50 text-blue-700",
@@ -51,10 +81,30 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
   const nextStep = getNextStep("task-breakdown", tier);
   const prevStep = getPrevStep("task-breakdown", tier);
 
-  console.log("[TaskBreakdownUI] summaryResult:", summaryResult, "taskBreakdownResult:", taskBreakdownResult);
+  const [requirements, setRequirements] = useState<ResourceRequirement[]>([]);
+  const [repoUrl, setRepoUrl] = useState<string | null>(null);
+  const [repoLoading, setRepoLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/agents/pipeline/resource-requirements")
+      .then((r) => r.json())
+      .then((data: { requirements?: ResourceRequirement[] }) => {
+        if (Array.isArray(data.requirements)) setRequirements(data.requirements);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/agents/push-generated-code")
+      .then((r) => r.json())
+      .then((data: { repo?: { htmlUrl?: string } }) => {
+        if (data.repo?.htmlUrl) setRepoUrl(data.repo.htmlUrl);
+      })
+      .catch(() => {})
+      .finally(() => setRepoLoading(false));
+  }, []);
 
   const metadata = taskBreakdownResult?.metadata ?? summaryResult?.metadata;
-  console.log("[TaskBreakdownUI] metadata:", metadata, "taskBreakdown from metadata:", metadata?.taskBreakdown);
   const tasks = parseKickoffTaskBreakdownFromMetadata(metadata);
   const isCompleted = summaryResult?.status === "completed";
   const pendingCount = tasks.filter((t) => t.executionKind === "ai_autonomous").length;
@@ -169,18 +219,32 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
           <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
             <div className="px-5 py-3 border-b border-[#f1f5f9] flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Abilities</p>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">1 Configured</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                {requirements.filter((r) => (r.value ?? "").trim()).length} Configured
+              </span>
             </div>
             <div className="px-5 py-4 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[12px] font-semibold text-[#334155] uppercase tracking-wide">Vercel Integration</p>
-                  <p className="text-[11px] text-[#94a3b8] mt-0.5">Deployment · API key configured</p>
-                </div>
-                <button className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded border border-[#e2e8f0] text-[#64748b] hover:bg-[#f8fafc] transition-colors">
-                  MANAGE
-                </button>
-              </div>
+              {requirements.length === 0 ? (
+                <p className="text-[12px] text-[#94a3b8]">No external resources configured.</p>
+              ) : (
+                requirements.map((req) => (
+                  <div key={req.envKey} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 ${CATEGORY_COLOR[req.category] ?? CATEGORY_COLOR.other}`}>
+                        {CATEGORY_LABEL[req.category] ?? "Other"}
+                      </span>
+                      <span className="text-[12px] font-mono font-medium text-[#334155] truncate">{req.envKey}</span>
+                    </div>
+                    <span className={`text-[10px] font-semibold shrink-0 ${(req.value ?? "").trim() ? "text-emerald-600" : "text-amber-600"}`}>
+                      {(req.value ?? "").trim() ? "Configured" : "Missing"}
+                    </span>
+                  </div>
+                ))
+              )}
+              <button onClick={() => onNavigate("summary")}
+                className="w-full mt-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#712ae2] bg-violet-50 px-3 py-2 rounded-lg hover:bg-violet-100 transition-colors">
+                <Settings size={12} /> Manage in Summary
+              </button>
             </div>
           </div>
 
@@ -189,13 +253,18 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
               <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Links</p>
             </div>
             <div className="px-5 py-4 space-y-3">
-              <a href="#" className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-[#712ae2] transition-colors">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" className="shrink-0"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-                GitHub Repository
-              </a>
-              <a href="#" className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-[#712ae2] transition-colors">
-                <ExternalLink size={15} className="shrink-0" /> Jira Board
-              </a>
+              {repoLoading ? (
+                <p className="text-[12px] text-[#94a3b8]">Loading…</p>
+              ) : repoUrl ? (
+                <a href={repoUrl} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-[#712ae2] transition-colors">
+                  <GitBranch size={15} className="shrink-0 text-[#334155]" /> GitHub Repository
+                </a>
+              ) : (
+                <p className="text-[12px] text-[#94a3b8]">
+                  No repository created yet. Configure deployment to create one.
+                </p>
+              )}
             </div>
           </div>
         </div>

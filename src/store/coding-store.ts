@@ -10,6 +10,10 @@ import type {
 
 import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
 
+/** AbortController for the active coding SSE fetch. Module-level so reset()
+ *  can abort the HTTP connection and signal the backend to stop processing. */
+let _codingAbortController: AbortController | null = null;
+
 export interface IntegrationVerifyState {
   status: "verifying" | "fixing" | "passed" | "failed";
   errors?: string;
@@ -134,7 +138,14 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     // doesn't show stale data while a fresh full run is in progress.
     fetch("/api/agents/coding/checkpoint", { method: "DELETE" }).catch(() => {});
 
+    // Abort any previous coding session before starting a new one.
+    _codingAbortController?.abort();
+
+    const controller = new AbortController();
+    _codingAbortController = controller;
+
     fetch("/api/agents/coding", {
+      signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent, stitchMeta }),
@@ -190,6 +201,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         if (state.status === "running") set({ status: "completed" });
       })
       .catch((err) => {
+        // Ignore intentional abort from reset() — state is already idle.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         set({
           status: "failed",
           error: err instanceof Error ? err.message : "Unknown error",
@@ -212,7 +225,14 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       pendingHumanDecision: null,
     });
 
+    // Abort any previous coding session before starting retry.
+    _codingAbortController?.abort();
+
+    const controller = new AbortController();
+    _codingAbortController = controller;
+
     fetch("/api/agents/coding", {
+      signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -275,6 +295,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         if (state.status === "running") set({ status: "completed" });
       })
       .catch((err) => {
+        // Ignore intentional abort from reset() — state is already idle.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         set({
           status: "failed",
           error: err instanceof Error ? err.message : "Unknown error",
@@ -450,6 +472,9 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   },
 
   reset: () => {
+    // Abort the backend coding session so it stops processing tasks.
+    _codingAbortController?.abort();
+    _codingAbortController = null;
     set({
       sessionId: null,
       status: "idle",
