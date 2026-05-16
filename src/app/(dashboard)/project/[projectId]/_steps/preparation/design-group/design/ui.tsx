@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Upload, X, FileImage, Code } from "lucide-react";
+import { ArrowRight, Upload, X, FileImage, Code, Link, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import type { StepId } from "@/_config/pipeline-flow";
@@ -550,6 +550,12 @@ export function DesignUI(props: StepUIProps) {
   // Custom upload files
   const [customFiles, setCustomFiles] = useState<CustomFile[]>([]);
 
+  // Custom URL reference
+  const [urlInput, setUrlInput] = useState("");
+  const [urlFetching, setUrlFetching] = useState(false);
+  const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
+  const [urlFetchedHtml, setUrlFetchedHtml] = useState<{ url: string; html: string } | null>(null);
+
   // Stitch — initialized from persisted metadata
   const [stitchResult, setStitchResult] = useState<StitchGenerateResult | null>(() => designMeta.stitchResult ?? null);
   const [stitchGenerating, setStitchGenerating] = useState(false);
@@ -727,13 +733,21 @@ export function DesignUI(props: StepUIProps) {
         designDirectionPrompt: null,
       });
     } else {
-      // Custom mode: pass first image as base64 reference, HTML content as direction prompt
+      // Custom mode: pass first image as base64 reference.
+      // For text context: merge uploaded HTML file content + fetched URL HTML (if any).
       const imageFile = customFiles.find((f) => f.kind === "image");
       const htmlFile = customFiles.find((f) => f.kind === "html");
+      const htmlParts: string[] = [];
+      if (htmlFile?.textContent) htmlParts.push(htmlFile.textContent);
+      if (urlFetchedHtml) {
+        htmlParts.push(
+          `<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`,
+        );
+      }
       setDesignContext({
         designStyleId: null,
         styleReferenceImageBase64: imageFile?.base64 ?? null,
-        designDirectionPrompt: htmlFile?.textContent ?? null,
+        designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
       });
     }
     console.log("[DesignUI] handleGenerateDesignDoc: calling executeStep, isRunning:", isRunning, "currentStep:", currentStep);
@@ -1171,6 +1185,81 @@ export function DesignUI(props: StepUIProps) {
                       ))}
                     </div>
                   )}
+
+                  {/* ── URL reference input ── */}
+                  <div className="mt-4 flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Or paste a reference URL</div>
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const trimmed = urlInput.trim();
+                        if (!trimmed) return;
+                        setUrlFetching(true);
+                        setUrlFetchError(null);
+                        setUrlFetchedHtml(null);
+                        try {
+                          const res = await fetch("/api/fetch-url-content", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ url: trimmed }),
+                          });
+                          const data = await res.json() as { html?: string; url?: string; error?: string };
+                          if (!res.ok || data.error) {
+                            setUrlFetchError(data.error ?? "Failed to fetch URL");
+                          } else {
+                            setUrlFetchedHtml({ url: data.url!, html: data.html! });
+                          }
+                        } catch (err) {
+                          setUrlFetchError(err instanceof Error ? err.message : "Network error");
+                        } finally {
+                          setUrlFetching(false);
+                        }
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <div className="flex-1 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <Link size={13} className="text-slate-400 shrink-0" />
+                        <input
+                          type="url"
+                          value={urlInput}
+                          onChange={(e) => {
+                            setUrlInput(e.target.value);
+                            setUrlFetchError(null);
+                            if (urlFetchedHtml) setUrlFetchedHtml(null);
+                          }}
+                          placeholder="https://example.com/design-reference"
+                          className="flex-1 text-[12px] text-slate-700 placeholder-slate-400 outline-none bg-transparent min-w-0"
+                        />
+                        {urlFetchedHtml && (
+                          <button type="button" onClick={() => { setUrlFetchedHtml(null); setUrlInput(""); }} className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors">
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!urlInput.trim() || urlFetching}
+                        className="px-3 py-2 text-[12px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                      >
+                        {urlFetching ? <Loader2 size={13} className="animate-spin" /> : "Fetch"}
+                      </button>
+                    </form>
+                    {urlFetchError && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-red-600">
+                        <AlertCircle size={12} className="shrink-0" />
+                        {urlFetchError}
+                      </div>
+                    )}
+                    {urlFetchedHtml && (
+                      <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                        <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-medium text-emerald-800 truncate">{urlFetchedHtml.url}</p>
+                          <p className="text-[10px] text-emerald-600">{(urlFetchedHtml.html.length / 1024).toFixed(1)} KB fetched · Ready as reference</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               </div>
@@ -1181,7 +1270,8 @@ export function DesignUI(props: StepUIProps) {
                   onClick={handleGenerateDesignDoc}
                   disabled={
                     (designSourceMode === "ai" && !selectedStyleId) ||
-                    (designSourceMode === "custom" && customFiles.length === 0) ||
+                    (designSourceMode === "custom" && customFiles.length === 0 && !urlFetchedHtml) ||
+                    urlFetching ||
                     isDesignRunning
                   }
                   className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"

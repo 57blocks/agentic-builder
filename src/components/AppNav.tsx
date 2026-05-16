@@ -188,7 +188,7 @@ export default function AppNav() {
               Agentic Builder
             </span>
             <span className="text-xs uppercase text-slate-600 leading-3.75 font-space-grotesk">
-              V1.0.4
+              V{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.1.0"}
             </span>
           </div>
         </div>
