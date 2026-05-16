@@ -90,7 +90,7 @@ export default function AppNav() {
       style={dragStyle}
     >
       {/* Logo & Brand */}
-      <div className="px-6 pb-8" style={noDragStyle}>
+      <div className="px-6 pb-8 pt-[30px]" style={noDragStyle}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-slate-900 rounded-xs flex items-center justify-center shrink-0">
             <svg width="10.5" height="11.667" viewBox="0 0 12 14" fill="white" aria-hidden>

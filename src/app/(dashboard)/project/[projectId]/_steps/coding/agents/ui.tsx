@@ -204,6 +204,12 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // ── Data from step-store (pre-hydrated by parent page) ─────────────────────
   const prdContent = steps.prd?.content ?? "";
 
+  const designMeta = steps.design?.metadata as Record<string, unknown> | undefined;
+  const stitchMeta = designMeta?.stitchResult as
+    | { projectId: string; screenId: string; projectUrl: string; screenshotUrl?: string | null; htmlDownloadUrl?: string | null }
+    | null
+    | undefined;
+
   const taskMeta = useMemo(
     () =>
       (steps["task-breakdown"]?.metadata ??
@@ -294,8 +300,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   const handleStart = useCallback(() => {
     if (!isIdle || kickoffTasks.length === 0) return;
-    startCoding(runId, kickoffTasks, codeOutputDir, projectTier, prdContent);
-  }, [isIdle, kickoffTasks, runId, codeOutputDir, projectTier, prdContent, startCoding]);
+    startCoding(runId, kickoffTasks, codeOutputDir, projectTier, prdContent, stitchMeta ?? undefined);
+  }, [isIdle, kickoffTasks, runId, codeOutputDir, projectTier, prdContent, stitchMeta, startCoding]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (isIdle && kickoffTasks.length === 0) {

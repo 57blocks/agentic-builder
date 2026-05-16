@@ -50,10 +50,35 @@ function TypingDots() {
 
 // ── User Message ───────────────────────────────────────────────────────────
 function UserMessage({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (el) setOverflowing(el.scrollHeight > el.clientHeight);
+  }, [text]);
+
   return (
     <div className="flex gap-3 items-end justify-end">
       <div className="bg-slate-900 text-white rounded-xl rounded-br-none px-5 py-3 max-w-sm lg:max-w-md shadow-md hover:shadow-lg transition-shadow">
-        <p className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{text}</p>
+        <div
+          ref={contentRef}
+          className={`relative overflow-hidden ${expanded ? "" : "max-h-52"}`}
+        >
+          <p className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{text}</p>
+          {!expanded && overflowing && (
+            <div className="absolute bottom-0 left-0 right-0 h-12 bg-linear-to-t from-slate-900 to-transparent pointer-events-none" />
+          )}
+        </div>
+        {overflowing && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="mt-1 text-xs text-slate-300 hover:text-white font-medium transition-colors"
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        )}
       </div>
       <div className="shrink-0 w-8 h-8 rounded-full bg-linear-to-br from-slate-700 to-slate-800 flex items-center justify-center flex-none shadow-sm">
         <User size={16} className="text-white" />

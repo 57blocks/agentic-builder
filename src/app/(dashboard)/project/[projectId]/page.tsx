@@ -176,17 +176,22 @@ export default function ProjectPage() {
     };
   }, [stepEntry, stepResults, activeStep, stepConfig, loading, projectId, handleStepChange]);
 
+  const dragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "drag" };
+  const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "no-drag" };
+
   return (
     <div className="flex flex-col min-h-screen h-screen! relative bg-[#f8f9ff]">
       {/* ── Header with Breadcrumb ── */}
-      <header className="flex shrink-0 items-start justify-between border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-4 relative z-10">
-        <PipelineBreadcrumb
-          activeStep={activeStep}
-          onStepChange={handleStepChange}
-          tier={tier}
-          stepStates={stepStates}
-        />
-        <div className="flex items-center gap-1 pt-3 pr-2 shrink-0">
+      <header className="flex shrink-0 items-start justify-between border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-4 relative z-10" style={dragStyle}>
+        <div style={noDragStyle}>
+          <PipelineBreadcrumb
+            activeStep={activeStep}
+            onStepChange={handleStepChange}
+            tier={tier}
+            stepStates={stepStates}
+          />
+        </div>
+        <div className="flex items-center gap-1 pt-3 pr-2 shrink-0" style={noDragStyle}>
           <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
             <Monitor className="size-4" />
           </Button>
