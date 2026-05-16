@@ -71,6 +71,52 @@ import {
   recallDesignContext,
 } from "@/lib/memory/preparation-recall";
 import {
+  formatClarificationContext,
+  type ClarificationAnswer,
+  type IntentResult,
+} from "@/lib/agents/intent";
+import {
+  applyPrdPatches,
+  type PrdPatch,
+} from "@/lib/agents/pm/prd-patch";
+
+interface PatchAgentResponse {
+  summary?: string;
+  fullRewrite?: boolean;
+  patches: PrdPatch[];
+}
+
+function parsePrdPatchResponse(raw: string): PatchAgentResponse | null {
+  if (!raw) return null;
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const patches: PrdPatch[] = Array.isArray(obj.patches)
+    ? (obj.patches as unknown[])
+        .map((p) => {
+          if (!p || typeof p !== "object") return null;
+          const o = p as Record<string, unknown>;
+          if (typeof o.heading !== "string" || typeof o.newBody !== "string") {
+            return null;
+          }
+          return { heading: o.heading, newBody: o.newBody } satisfies PrdPatch;
+        })
+        .filter((p): p is PrdPatch => p !== null)
+    : [];
+  return {
+    summary: typeof obj.summary === "string" ? obj.summary : undefined,
+    fullRewrite: Boolean(obj.fullRewrite),
+    patches,
+  };
+}
+import {
   parseMemoryCites,
   recordMemoryCites,
   stripMemoryCites,
@@ -105,6 +151,21 @@ export interface ExecutePipelineOptions {
   prdEditInstruction?: string;
   /** The existing PRD markdown to be edited. Required when prdEditInstruction is set. */
   existingPrd?: string;
+  /**
+   * User-confirmed product clarifications gathered via the PRD Intent agent
+   * before PRD generation. When supplied, these are prepended to the PRD
+   * agent's additionalContext as binding requirements.
+   *
+   * Shape: { result, answers }
+   * - `result` is the full IntentResult returned by `/api/agents/prd-intent`
+   *   (contains the original questions so the engine can resolve answer
+   *   values to labels for readable output).
+   * - `answers` is the user's submissions, keyed by `questionId`.
+   */
+  prdIntent?: {
+    result: IntentResult;
+    answers: ClarificationAnswer[];
+  };
 }
 
 /**
@@ -204,6 +265,23 @@ export class PipelineEngine {
       content: run.featureBrief,
     });
 
+    // Stash PRD intent clarifications (questions + user answers gathered via
+    // /api/agents/prd-intent) onto the intent step metadata so the UI and
+    // downstream introspection can see what was confirmed before PRD writing.
+    const prdIntentPayload = options.prdIntent;
+    if (prdIntentPayload) {
+      run.steps.intent = {
+        ...run.steps.intent,
+        metadata: {
+          ...(run.steps.intent.metadata ?? {}),
+          prdIntent: {
+            result: prdIntentPayload.result,
+            answers: prdIntentPayload.answers,
+          },
+        },
+      };
+    }
+
     // ── Classify project complexity (lightweight LLM call, ~200 tokens) ──
     let classification: ProjectClassification | null = null;
     let tier: ProjectTier = "M";
@@ -247,20 +325,9 @@ export class PipelineEngine {
     if (options.prdEditInstruction && options.existingPrd) {
       const editInstruction = options.prdEditInstruction;
       const existingPrd = options.existingPrd;
+
       run = await this.executeStep(run, "prd", () =>
-        pmAgent.generatePRDEditStreaming(
-          existingPrd,
-          editInstruction,
-          (chunk, chunkType) => {
-            this.emit({
-              type: "step_stream",
-              runId: run.id,
-              stepId: "prd",
-              data: { chunk, chunkType },
-            });
-          },
-          run.sessionId,
-        ),
+        this.runPrdEdit(run, pmAgent, existingPrd, editInstruction),
       );
       if (run.status === "failed") return run;
 
@@ -317,7 +384,22 @@ export class PipelineEngine {
         tier,
         projectType: classification?.type,
       });
-      const prdAdditionalContext = prdRecall.contextChunk || undefined;
+
+      // Format user-confirmed intent clarifications. These are treated as
+      // binding requirements and placed FIRST so the model sees them before
+      // any retrieved memory context.
+      const intentContext = prdIntentPayload
+        ? formatClarificationContext(
+            prdIntentPayload.result,
+            prdIntentPayload.answers,
+            { stage: "prd" },
+          )
+        : "";
+
+      const prdAdditionalContext =
+        [intentContext, prdRecall.contextChunk]
+          .filter((s) => s && s.trim())
+          .join("\n\n") || undefined;
 
       run = await this.executeStep(run, "prd", () =>
         pmAgent.generatePRDStreaming(
@@ -1509,6 +1591,87 @@ export class PipelineEngine {
     });
 
     return run;
+  }
+
+  /**
+   * Run a PRD edit. Tries section-level patches first (fast, surgical,
+   * highlights only what changed); falls back to a full regenerate-and-stream
+   * if the patch agent's JSON can't be parsed, no headings match, or the
+   * agent reports `fullRewrite: true`.
+   */
+  private async runPrdEdit(
+    run: PipelineRun,
+    pmAgent: PMAgent,
+    existingPrd: string,
+    editInstruction: string,
+  ): Promise<AgentResult> {
+    // ── 1. Try patch path ───────────────────────────────────────────────
+    let patchResult: AgentResult | null = null;
+    try {
+      patchResult = await pmAgent.generatePRDPatchStreaming(
+        existingPrd,
+        editInstruction,
+        // Swallow chunks — JSON tokens are not useful to display.
+        () => {},
+        run.sessionId,
+      );
+    } catch (err) {
+      console.warn(
+        "[engine] PRD patch agent failed, falling back to full regenerate:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    if (patchResult?.content) {
+      const parsed = parsePrdPatchResponse(patchResult.content);
+      if (parsed && !parsed.fullRewrite && parsed.patches.length > 0) {
+        const applied = applyPrdPatches(existingPrd, parsed.patches);
+        // Successful patch: at least one heading matched and the changed
+        // footprint is below the "may as well full-rewrite" threshold.
+        const overhalf =
+          applied.originalLineCount > 0 &&
+          applied.changedLineCount / applied.originalLineCount > 0.5;
+        if (applied.applied.length > 0 && !overhalf) {
+          // Emit the final content as a single stream chunk so the UI's
+          // streamingContent matches step.content when complete.
+          this.emit({
+            type: "step_stream",
+            runId: run.id,
+            stepId: "prd",
+            data: { chunk: applied.content, chunkType: "content" },
+          });
+
+          return {
+            ...patchResult,
+            content: applied.content,
+          };
+        }
+        // Fall through to full rewrite.
+        console.info(
+          "[engine] PRD patch did not apply cleanly (applied=%d, skipped=%d, overhalf=%s) — falling back",
+          applied.applied.length,
+          applied.skipped.length,
+          overhalf,
+        );
+      } else if (parsed?.fullRewrite) {
+        console.info("[engine] PRD patch agent reported fullRewrite=true — using full regenerate path");
+      }
+    }
+
+    // ── 2. Fall back to full streaming regenerate ──────────────────────
+    return pmAgent.generatePRDEditStreaming(
+      existingPrd,
+      editInstruction,
+      (chunk, chunkType) => {
+        this.emit({
+          type: "step_stream",
+          runId: run.id,
+          stepId: "prd",
+          data: { chunk, chunkType },
+        });
+      },
+      run.sessionId,
+    );
   }
 
   private async executeStep(

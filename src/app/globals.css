@@ -63,3 +63,57 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* ── PRD targeted-edit highlight ─────────────────────────────────────────
+   When the PRD edit agent returns a section-level patch (see
+   src/lib/agents/pm/prd-patch.ts), the patched section's body is wrapped
+   in <div class="prd-changed-section">. The wrapper briefly highlights
+   the new content with a soft yellow background, then fades to
+   transparent. The fade is one-shot per render — re-emitting the
+   markdown re-triggers it, which is what we want on every new edit. */
+@keyframes prdChangedFade {
+  0% {
+    background-color: rgba(253, 230, 138, 0.55); /* amber-200 @ 55% */
+    border-color: rgba(217, 119, 6, 0.45);       /* amber-600 @ 45% */
+    box-shadow: 0 0 0 3px rgba(253, 230, 138, 0.35);
+  }
+  60% {
+    background-color: rgba(253, 230, 138, 0.35);
+    border-color: rgba(217, 119, 6, 0.30);
+    box-shadow: 0 0 0 2px rgba(253, 230, 138, 0.18);
+  }
+  100% {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.prd-changed-section {
+  display: block;
+  position: relative;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem -0.75rem;
+  border-left: 3px solid transparent;
+  border-radius: 0.375rem;
+  background-color: transparent;
+  animation: prdChangedFade 6s ease-out forwards;
+}
+
+.prd-changed-section::before {
+  content: "Edited";
+  position: absolute;
+  top: -0.65rem;
+  left: 0.5rem;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #92400e;          /* amber-800 */
+  background: #fef3c7;     /* amber-100 */
+  border: 1px solid #fcd34d; /* amber-300 */
+  padding: 1px 6px;
+  border-radius: 9999px;
+  opacity: 1;
+  animation: prdChangedFade 6s ease-out forwards;
+}

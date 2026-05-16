@@ -31,7 +31,9 @@ export type StepId =
   | "agents"
   // preview
   | "serve"
-  | "e2e";
+  | "e2e"
+  // deploy
+  | "deploy";
 
 export type GroupId =
   | "input"
@@ -44,9 +46,10 @@ export type GroupId =
   | "summary"
   | "agents"
   | "server"
-  | "testing";
+  | "testing"
+  | "deployment";
 
-export type StageId = "preparation" | "kickoff" | "coding" | "preview";
+export type StageId = "preparation" | "kickoff" | "coding" | "preview" | "deploy";
 
 // ── Flow Node ─────────────────────────────────────────────────────────────────
 export type UiKind = "doc-viewer" | "agent-log" | "chat" | "panel" | "custom";
@@ -282,6 +285,31 @@ export const PIPELINE_FLOW: FlowNode[] = [
       },
     ],
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEPLOY
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    id: "deploy",
+    label: "Deploy",
+    level: 1,
+    dependsOn: ["preview"],
+    children: [
+      {
+        id: "deployment",
+        label: "Deployment",
+        level: 2,
+        children: [
+          {
+            id: "deploy",
+            label: "Deploy",
+            level: 3,
+            stepConfig: { uiKind: "custom" },
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 // ── Derived Helpers ───────────────────────────────────────────────────────────
@@ -467,6 +495,7 @@ export const STEP_LABELS: Record<StepId, string> = {
   agents: "Agents",
   serve: "Dev Server",
   e2e: "E2E",
+  deploy: "Deploy",
 };
 
 export const GROUP_LABELS: Record<GroupId, string> = {
@@ -481,11 +510,13 @@ export const GROUP_LABELS: Record<GroupId, string> = {
   agents: "Agents",
   server: "Server",
   testing: "Testing",
+  deployment: "Deployment",
 };
 
 export const STAGE_LABELS: Record<StageId, { num: string; name: string }> = {
   preparation: { num: "01", name: "Preparation" },
-  kickoff: { num: "02", name: "Kick-off" },
-  coding: { num: "03", name: "Coding" },
-  preview: { num: "04", name: "Preview" },
+  kickoff:     { num: "02", name: "Kick-off" },
+  coding:      { num: "03", name: "Coding" },
+  preview:     { num: "04", name: "Preview" },
+  deploy:      { num: "05", name: "Deploy" },
 };

@@ -4,6 +4,10 @@ import path from "path";
 import { PipelineEngine } from "@/lib/pipeline/engine";
 import type { PipelineEvent } from "@/lib/pipeline/types";
 import { wrapPipelineEventHandler } from "@/lib/memory/event-bridge";
+import type {
+  ClarificationAnswer,
+  IntentResult,
+} from "@/lib/agents/intent";
 
 export const maxDuration = 300;
 
@@ -17,6 +21,7 @@ export async function POST(request: NextRequest) {
     sessionId,
     prdEditInstruction,
     existingPrd,
+    prdIntent,
   } = body as {
     featureBrief?: string;
     codeOutputDir?: string;
@@ -27,6 +32,12 @@ export async function POST(request: NextRequest) {
     sessionId?: string;
     prdEditInstruction?: string;
     existingPrd?: string;
+    /** User-confirmed answers to PRD intent clarifications. Optional —
+     *  when present, the engine prepends them to the PRD agent context. */
+    prdIntent?: {
+      result?: IntentResult;
+      answers?: ClarificationAnswer[];
+    };
   };
 
   const featureBrief =
@@ -70,6 +81,16 @@ export async function POST(request: NextRequest) {
           existingPrd:
             typeof existingPrd === "string" && existingPrd.trim()
               ? existingPrd.trim()
+              : undefined,
+          prdIntent:
+            prdIntent &&
+            prdIntent.result &&
+            Array.isArray(prdIntent.answers) &&
+            prdIntent.answers.length > 0
+              ? {
+                  result: prdIntent.result,
+                  answers: prdIntent.answers,
+                }
               : undefined,
         });
 

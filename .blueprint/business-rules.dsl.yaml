@@ -1,46 +1,121 @@
 version: 1
 rules:
-  # Risk Level Classification — enforced on every composite score
-  - id: RISK-LEVEL-1
-    name: "Composite score to risk level"
-    description: "Deterministic mapping from composite score (0-100) to risk label."
+  - id: SCORE-RQ1
+    name: "Reserve Ratio normalization"
+    description: "Higher reserve ratio lowers risk; maps ratio to 0-100."
+    type: piecewise-linear
+    inputUnit: "ratio"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 1.0, outputFrom: 100, outputTo: 0 }
+
+  - id: SCORE-RQ3
+    name: "Asset Composition Quality normalization"
+    description: "Higher HQLA percentage lowers risk; maps HQLA share to 0-100."
+    type: piecewise-linear
+    inputUnit: "hqla_percentage"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 100.0, outputFrom: 100, outputTo: 0 }
+
+  - id: SCORE-RQ4
+    name: "Custodian & Jurisdictional Risk normalization"
+    description: "Lower risk rating is safer; maps 1-5 rating to 0-100."
+    type: piecewise-linear
+    inputUnit: "rating"
+    outputRange: [0, 100]
+    segments:
+      - { from: 1.0, to: 5.0, outputFrom: 0, outputTo: 100 }
+
+  - id: SCORE-MC1
+    name: "Market Cap Change normalization"
+    description: "Sharp market cap decline raises risk; clamps score to 0-100."
+    type: piecewise-linear
+    inputUnit: "percent_change"
+    outputRange: [0, 100]
+    segments:
+      - { from: -10.0, to: 5.0, outputFrom: 100, outputTo: 0 }
+
+  - id: SCORE-MC5
+    name: "Price Deviation from Peg normalization"
+    description: "Larger deviation from peg increases risk; requires 7 days of history."
+    type: piecewise-linear
+    inputUnit: "usd_deviation"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 0.5, outputFrom: 0, outputTo: 100 }
+
+  - id: SCORE-MC8
+    name: "Trading Volume Anomaly normalization"
+    description: "Higher z-score indicates unusual trading activity and higher risk; requires 30 days of history."
+    type: piecewise-linear
+    inputUnit: "z_score"
+    outputRange: [0, 100]
+    segments:
+      - { from: -2.0, to: 3.0, outputFrom: 0, outputTo: 100 }
+
+  - id: SCORE-OC1
+    name: "Net Redemption Activity normalization"
+    description: "Large net redemptions indicate stress and raise risk."
+    type: piecewise-linear
+    inputUnit: "percent_of_supply"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 10.0, outputFrom: 0, outputTo: 100 }
+
+  - id: SCORE-OC2
+    name: "Holder Concentration normalization"
+    description: "Higher supply concentration raises risk."
+    type: piecewise-linear
+    inputUnit: "concentration_pct"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 100.0, outputFrom: 0, outputTo: 100 }
+
+  - id: SCORE-SE1
+    name: "Social Sentiment normalization"
+    description: "Negative sentiment increases risk."
+    type: piecewise-linear
+    inputUnit: "sentiment_score"
+    outputRange: [0, 100]
+    segments:
+      - { from: -100.0, to: 100.0, outputFrom: 100, outputTo: 0 }
+
+  - id: SCORE-SE2
+    name: "News Volume & Sentiment normalization"
+    description: "Higher negative news intensity raises risk."
+    type: piecewise-linear
+    inputUnit: "composite_news_score"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0.0, to: 100.0, outputFrom: 0, outputTo: 100 }
+
+  - id: RISK-LEVEL
+    name: "Composite SPRI to risk level mapping"
+    description: "Maps composite score into Normal, Elevated, High Risk, or Critical."
     type: decision-table
     inputs:
       - { name: compositeScore, type: number }
     output: { name: riskLevel, type: string }
     cases:
-      - when: { compositeScore: "<=25" }
-        then: "Normal"
-      - when: { compositeScore: "<=50" }
-        then: "Elevated"
-      - when: { compositeScore: "<=75" }
-        then: "High-Risk"
-      - when: { }
-        then: "Critical"
+      - when: { compositeScore: ">=76" }
+        then: "critical"
+      - when: { compositeScore: ">=51" }
+        then: "high_risk"
+      - when: { compositeScore: ">=26" }
+        then: "elevated"
+      - when: { compositeScore: ">=0" }
+        then: "normal"
 
-  # Rapid Mover Detection — evaluated per variable per cycle
-  - id: RAPID-MOVER-1
-    name: "Rapid mover flag"
-    description: "If a variable's normalized score increases by >= 25 points from the previous cycle, flag as rapid mover."
+  - id: RAPID-MOVER
+    name: "Rapid mover detection"
+    description: "Flags a variable when the normalized score increases by at least 25 points in a scoring cycle."
     type: decision-table
     inputs:
-      - { name: scoreDelta, type: number }
-    output: { name: isRapidMover, type: boolean }
+      - { name: deltaNormalizedScore, type: number }
+    output: { name: rapidMover, type: boolean }
     cases:
-      - when: { scoreDelta: ">=25" }
+      - when: { deltaNormalizedScore: ">=25" }
         then: true
       - when: { }
         then: false
-
-  # NOTE: Variable normalization rules (e.g., NORM-V1 through NORM-V9) must be added
-  # from the scoring specification. Each will be a piecewise-linear rule mapping
-  # raw value to normalized 0-100 score. Example placeholder:
-  # - id: NORM-V1
-  #   name: "Price deviation for USDC"
-  #   description: "Maps absolute deviation from $1 (pips) to risk score."
-  #   type: piecewise-linear
-  #   inputUnit: "pips"
-  #   outputRange: [0, 100]
-  #   segments:
-  #     - { from: 0, to: 5,  outputFrom: 0,  outputTo: 10 }
-  #     - { from: 5, to: 100, outputFrom: 10, outputTo: 100 }

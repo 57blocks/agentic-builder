@@ -5,6 +5,15 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { StepId, ProjectTier } from "@/_config/pipeline-flow";
 import { getNodePath } from "@/_config/pipeline-flow";
 import type { StepResultData, StepSnapshot, SnapshotData } from "@/app/(dashboard)/project/[projectId]/_steps/_shared/types";
+import type {
+  ClarificationAnswer,
+  IntentResult,
+} from "@/lib/agents/intent/types";
+
+export interface PrdIntentSubmission {
+  result: IntentResult;
+  answers: ClarificationAnswer[];
+}
 
 // ── DB Sync ───────────────────────────────────────────────────────────────────
 let _stepProjectSlug = "";
@@ -90,6 +99,12 @@ export interface StepStoreState {
   intentMessages: unknown[];
   intentEnrichedBrief: string;
 
+  // ── PRD Intent (gap-detector clarifications) ──
+  /** Cached set of clarification questions + user answers for the current
+   *  feature brief. Null until the user finishes (or skips) the intent
+   *  form. Not persisted to localStorage — re-asked on full reload. */
+  prdIntent: PrdIntentSubmission | null;
+
   // ── Kickoff ──
   kickoffSessionId: string | null;
 
@@ -106,6 +121,9 @@ export interface StepStoreState {
   setStepResult: (stepId: StepId, result: StepResultData) => void;
   /** Merge extra metadata into a step without touching status/content/cost */
   patchStepMeta: (stepId: StepId, meta: Record<string, unknown>) => void;
+  /** Overwrite a step's `content` only (cost / status / timing untouched).
+   *  Used by manual editors so totalCostUsd isn't inflated. */
+  setStepContent: (stepId: StepId, content: string) => void;
   /** Mark a step as running */
   setStepRunning: (stepId: StepId) => void;
   /** Append streaming content to step (debounced snapshot save) */
@@ -127,6 +145,9 @@ export interface StepStoreState {
 
   /** Save intent conversation snapshot */
   saveIntentSnapshot: (messages: unknown[], enrichedBrief: string) => void;
+
+  /** Set or clear the PRD intent submission (questions + user answers). */
+  setPrdIntent: (intent: PrdIntentSubmission | null) => void;
 
   /** Start the full pipeline (preparation → kickoff) */
   startPipeline: (featureBrief: string) => void;
@@ -152,6 +173,7 @@ export const useStepStore = create<StepStoreState>()(
       tier: "M",
       intentMessages: [],
       intentEnrichedBrief: "",
+      prdIntent: null,
       kickoffSessionId: null,
       isHydrated: false,
 
@@ -170,6 +192,25 @@ export const useStepStore = create<StepStoreState>()(
           steps: { ...s.steps, [stepId]: result },
           totalCostUsd: s.totalCostUsd + (result.costUsd ?? 0),
         }));
+        saveStepSnapshot(get, stepId);
+      },
+
+      setStepContent: (stepId, content) => {
+        set((s) => {
+          const existing = s.steps[stepId];
+          if (!existing) return s;
+          return {
+            steps: {
+              ...s.steps,
+              [stepId]: {
+                ...existing,
+                content,
+                // Bump timestamp so downstream "what changed" diffing works.
+                timestamp: new Date().toISOString(),
+              },
+            },
+          };
+        });
         saveStepSnapshot(get, stepId);
       },
 
@@ -325,6 +366,8 @@ export const useStepStore = create<StepStoreState>()(
         }
       },
 
+      setPrdIntent: (intent) => set({ prdIntent: intent }),
+
       saveIntentSnapshot: (messages, enrichedBrief) => {
         // Update step-store's own intent state
         set({ intentMessages: messages, intentEnrichedBrief: enrichedBrief });
@@ -396,6 +439,7 @@ export const useStepStore = create<StepStoreState>()(
             tier: s.tier,
             sessionId,
             editInstruction,
+            prdIntent: s.prdIntent,
             emitState: (update: Partial<import("@/app/(dashboard)/project/[projectId]/_steps/_shared/types").StepAgentState>) => {
               if (update.streamingContent !== undefined) {
                 const current = get().streamingContent;
@@ -481,6 +525,7 @@ export const useStepStore = create<StepStoreState>()(
           kickoffSessionId: null,
           intentMessages: [],
           intentEnrichedBrief: "",
+          prdIntent: null,
         });
       },
     }),

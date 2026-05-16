@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import { useCodingStore } from "@/store/coding-store";
+import type { CodingSessionSnapshot } from "@/store/coding-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import type { KickoffWorkItem, StepResult } from "@/lib/pipeline/types";
 import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
@@ -34,6 +35,9 @@ export function useKickoffStepData(
   const codingStatus = useCodingStore((s) => s.status);
   const startCoding = useCodingStore((s) => s.startCoding);
   const retryFailedTasks = useCodingStore((s) => s.retryFailedTasks);
+  const hydrateFromCheckpoint = useCodingStore((s) => s.hydrateFromCheckpoint);
+  const hydrateFromSnapshot = useCodingStore((s) => s.hydrateFromSnapshot);
+  const projectId = useCodingStore((s) => s.projectId);
   const codeOutputDir = usePipelineStore((s) => s.codeOutputDir);
   const steps = usePipelineStore((s) => s.steps);
   const updateSteps = usePipelineStore((s) => s.updateSteps);
@@ -65,6 +69,7 @@ export function useKickoffStepData(
 
   // ─── Local UI state ──────────────────────────────────────────────────────
   const [checkpoint, setCheckpoint] = useState<SessionCheckpoint | null>(null);
+  const [rawSnapshot, setRawSnapshot] = useState<CodingSessionSnapshot | null>(null);
   const [retryingBreakdown, setRetryingBreakdown] = useState(false);
   const [retryBreakdownError, setRetryBreakdownError] = useState<string | null>(
     null,
@@ -85,15 +90,89 @@ export function useKickoffStepData(
     // result.timestamp + suggestions.length form a sufficient invalidation key.
   }, [result.timestamp, reviewSuggestions.length]);
 
-  // Load last session checkpoint to enable "Retry Failed Tasks".
+  // Load last session checkpoint — prefer DB (project_step_snapshot) so state
+  // survives across devices; fall back to the local file checkpoint.
   useEffect(() => {
-    fetch("/api/agents/coding/checkpoint")
-      .then((r) => r.json())
-      .then((data: { checkpoint: SessionCheckpoint | null }) => {
-        setCheckpoint(data.checkpoint);
-      })
-      .catch(() => setCheckpoint(null));
-  }, []);
+    if (!projectId) return;
+
+    const loadFromDb = async () => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/project-step-snapshot?stepId=coding-session`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const data = (await res.json()) as {
+            snapshot: CodingSessionSnapshot | null;
+          };
+          if (data.snapshot?.sessionId) {
+            // Convert DB snapshot → file-checkpoint shape so hydrateFromCheckpoint works
+            const snap = data.snapshot;
+            // Keep raw snapshot so hydrateFromSnapshot can include E2E extra tasks
+            setRawSnapshot(snap);
+            const syntheticCheckpoint: SessionCheckpoint = {
+              sessionId: snap.sessionId,
+              savedAt: snap.savedAt,
+              completedTaskIds: snap.tasks
+                .filter(
+                  (t) =>
+                    t.codingStatus === "completed" ||
+                    t.codingStatus === "completed_with_warnings",
+                )
+                .map((t) => t.id),
+              failedTaskIds: snap.tasks
+                .filter(
+                  (t) =>
+                    t.codingStatus === "failed" ||
+                    t.codingStatus === "pending",
+                )
+                .map((t) => t.id),
+              taskResults: Object.fromEntries(
+                snap.tasks.map((t) => [
+                  t.id,
+                  {
+                    status:
+                      t.codingStatus === "completed" ||
+                      t.codingStatus === "completed_with_warnings"
+                        ? t.codingStatus
+                        : t.codingStatus === "failed"
+                          ? "failed"
+                          : "unknown",
+                    generatedFiles: t.generatedFiles,
+                  },
+                ]),
+              ),
+            };
+            setCheckpoint(syntheticCheckpoint);
+            return;
+          }
+        }
+      } catch {
+        // fall through to file checkpoint
+      }
+
+      // File-based fallback
+      fetch("/api/agents/coding/checkpoint")
+        .then((r) => r.json())
+        .then((data: { checkpoint: SessionCheckpoint | null }) => {
+          setCheckpoint(data.checkpoint);
+        })
+        .catch(() => setCheckpoint(null));
+    };
+
+    loadFromDb();
+  }, [projectId]);
+
+  // Hydrate coding-store from checkpoint so task statuses survive page refresh.
+  useEffect(() => {
+    if (tasks.length === 0) return;
+    if (rawSnapshot) {
+      // Use hydrateFromSnapshot so E2E / server-injected tasks are also included
+      hydrateFromSnapshot(rawSnapshot, tasks);
+    } else if (checkpoint) {
+      hydrateFromCheckpoint(checkpoint, tasks);
+    }
+  }, [checkpoint, rawSnapshot, tasks, hydrateFromCheckpoint, hydrateFromSnapshot]);
 
   // ─── Derived stats ───────────────────────────────────────────────────────
   const totalHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
@@ -125,7 +204,7 @@ export function useKickoffStepData(
   const hasFailedTasks =
     checkpoint !== null &&
     matchingFailedIds.length > 0 &&
-    (codingStatus === "completed" || codingStatus === "failed");
+    codingStatus !== "running";
 
   // ─── Handlers ────────────────────────────────────────────────────────────
   const handleConfirmAndCode = useCallback(() => {

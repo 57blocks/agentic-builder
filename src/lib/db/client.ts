@@ -19,12 +19,16 @@ function createPool(): Pool {
   try {
     const u = new URL(connStr);
     const socketHost = u.searchParams.get("host");
+    const host = socketHost ?? (u.hostname || "127.0.0.1");
     poolOpts = {
       user:     u.username || "postgres",
       password: u.password || undefined,
-      host:     socketHost ?? (u.hostname || "127.0.0.1"),
+      host,
       port:     u.port ? Number(u.port) : undefined,
       database: u.pathname.replace(/^\//, "") || "agentic_builder",
+      ...(host.includes("rds.amazonaws.com") && {
+        ssl: { rejectUnauthorized: false },
+      }),
     };
   } catch {
     poolOpts = { connectionString: connStr };

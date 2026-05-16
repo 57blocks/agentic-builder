@@ -21,11 +21,13 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { Play, Clock } from "lucide-react";
+import { Play, Clock, RotateCcw, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import { useCodingStore } from "@/store/coding-store";
+import type { CodingSessionSnapshot } from "@/store/coding-store";
 import { useStepStore } from "@/store/step-store";
+import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
 import type { CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
@@ -180,8 +182,14 @@ function useMergedTasks(
 ): (KickoffWorkItem | CodingTask)[] {
   return useMemo(() => {
     if (codingTasks.length === 0) return kickoffTasks;
-    const map = new Map(codingTasks.map((t) => [t.id, t]));
-    return kickoffTasks.map((t) => map.get(t.id) ?? t);
+    const codingMap = new Map(codingTasks.map((t) => [t.id, t]));
+    const kickoffIds = new Set(kickoffTasks.map((t) => t.id));
+    // Merge kickoff tasks with live coding status
+    const merged = kickoffTasks.map((t) => codingMap.get(t.id) ?? t);
+    // Append extra tasks injected server-side (e.g. E2E scaffold tasks)
+    // that are not part of the original kickoff breakdown
+    const extra = codingTasks.filter((t) => !kickoffIds.has(t.id));
+    return [...merged, ...extra];
   }, [kickoffTasks, codingTasks]);
 }
 
@@ -193,7 +201,20 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   const setStepResult = useStepStore((s) => s.setStepResult);
 
   const codingState = useCodingStore();
-  const { startCoding } = useCodingStore();
+  const { startCoding, retryFailedTasks, hydrateFromSnapshot } = useCodingStore();
+  const projectId = useStageStore((s) => s.projectId);
+
+  // Track whether this mount is a "return visit" (component unmounted and remounted)
+  // so we can show a "session still in progress" banner instead of a blank start state.
+  const [isReturnVisit, setIsReturnVisit] = useState(false);
+  useEffect(() => {
+    // On first mount: if there's already an active/completed session in the store,
+    // this is a return visit (user navigated away and came back).
+    if (codingState.status !== "idle") {
+      setIsReturnVisit(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isIdle = codingState.status === "idle";
   const isRunning = codingState.status === "running";
@@ -203,6 +224,12 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   // ── Data from step-store (pre-hydrated by parent page) ─────────────────────
   const prdContent = steps.prd?.content ?? "";
+
+  const designMeta = steps.design?.metadata as Record<string, unknown> | undefined;
+  const stitchMeta = designMeta?.stitchResult as
+    | { projectId: string; screenId: string; projectUrl: string; screenshotUrl?: string | null; htmlDownloadUrl?: string | null }
+    | null
+    | undefined;
 
   const taskMeta = useMemo(
     () =>
@@ -226,6 +253,56 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     | { classification?: { tier?: string } }
     | undefined;
   const projectTier = intentMeta?.classification?.tier;
+
+  // ── Hydrate coding state from DB when the page opens in idle state ─────────
+  useEffect(() => {
+    if (!projectId || codingState.status !== "idle" || kickoffTasks.length === 0) return;
+
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/project-step-snapshot?stepId=coding-session`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { snapshot: CodingSessionSnapshot | null };
+        if (!data.snapshot?.sessionId) return;
+
+        const snap = data.snapshot;
+        // hydrateFromSnapshot correctly includes E2E / server-injected extra
+        // tasks that live in the DB snapshot but are absent from kickoffTasks.
+        hydrateFromSnapshot(snap, kickoffTasks);
+      } catch {
+        // silently ignore — user can still start fresh
+      }
+    };
+    load();
+  // Run once when kickoffTasks become available and we're still idle
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, kickoffTasks.length]);
+
+  // ── Failed task IDs (for "Retry Failed" bar button) ────────────────────────
+  const failedTaskIds = useMemo(
+    () =>
+      codingState.tasks
+        .filter((t) => t.codingStatus === "failed")
+        .map((t) => t.id),
+    [codingState.tasks],
+  );
+
+  // ── Retry a single task ────────────────────────────────────────────────────
+  const handleRetryTask = useCallback(
+    (taskId: string) => {
+      retryFailedTasks(runId, kickoffTasks, [taskId], codeOutputDir, projectTier, prdContent);
+    },
+    [retryFailedTasks, runId, kickoffTasks, codeOutputDir, projectTier, prdContent],
+  );
+
+  // ── Retry all failed tasks ─────────────────────────────────────────────────
+  const handleRetryAllFailed = useCallback(() => {
+    if (failedTaskIds.length === 0) return;
+    retryFailedTasks(runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent);
+  }, [retryFailedTasks, runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent]);
 
   // ── Merge kickoff + live coding tasks ──────────────────────────────────────
   const mergedTasks = useMergedTasks(kickoffTasks, codingState.tasks);
@@ -294,8 +371,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   const handleStart = useCallback(() => {
     if (!isIdle || kickoffTasks.length === 0) return;
-    startCoding(runId, kickoffTasks, codeOutputDir, projectTier, prdContent);
-  }, [isIdle, kickoffTasks, runId, codeOutputDir, projectTier, prdContent, startCoding]);
+    startCoding(runId, kickoffTasks, codeOutputDir, projectTier, prdContent, stitchMeta ?? undefined);
+  }, [isIdle, kickoffTasks, runId, codeOutputDir, projectTier, prdContent, stitchMeta, startCoding]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (isIdle && kickoffTasks.length === 0) {
@@ -386,7 +463,31 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           </button>
         )}
 
-        {isDone && (
+        {/* Running: live indicator */}
+        {isRunning && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-violet-200 bg-violet-50">
+            <motion.span
+              className="w-2 h-2 rounded-full bg-violet-500"
+              animate={{ opacity: [1, 0.3, 1] }}
+              transition={{ duration: 1.2, repeat: Infinity }}
+            />
+            <span className="text-[12px] font-semibold text-violet-700">
+              {isReturnVisit ? "Session in progress — reconnected" : "Coding in progress…"}
+            </span>
+          </div>
+        )}
+
+        {(isDone || isFailed) && failedTaskIds.length > 0 && (
+          <button
+            onClick={handleRetryAllFailed}
+            className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+          >
+            <RotateCcw size={13} />
+            Retry Failed ({failedTaskIds.length})
+          </button>
+        )}
+
+        {isDone && failedTaskIds.length === 0 && (
           <button
             onClick={() => onNavigate("serve")}
             className="flex items-center gap-2 px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-bold rounded-lg transition-colors"
@@ -447,6 +548,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                   allAgentLogs={allAgentLogs}
                   supervisorLogs={codingState.supervisorLogs}
                   onClose={() => setSelectedTaskId(null)}
+                  onRetry={!isRunning ? handleRetryTask : undefined}
                 />
               </div>
             </motion.div>
@@ -459,6 +561,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         isRunning={isRunning}
         isCompleted={isDone}
         isFailed={isFailed}
+        isReturnVisit={isReturnVisit}
         onAbort={() => codingState.reset()}
       />
     </div>

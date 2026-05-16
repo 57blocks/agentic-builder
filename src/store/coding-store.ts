@@ -10,6 +10,12 @@ import type {
 
 import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
 
+/** AbortController for the active coding SSE fetch. Module-level so reset()
+ *  can abort the HTTP connection and signal the backend to stop processing. */
+let _codingAbortController: AbortController | null = null;
+
+import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
+
 export interface IntegrationVerifyState {
   status: "verifying" | "fixing" | "passed" | "failed";
   errors?: string;
@@ -37,6 +43,7 @@ export interface PendingHumanDecision {
 
 interface CodingState {
   sessionId: string | null;
+  projectId: string | null;
   status: "idle" | "running" | "completed" | "failed";
   agents: CodingAgentInstance[];
   tasks: CodingTask[];
@@ -56,7 +63,11 @@ interface CodingState {
     codeOutputDir: string,
     projectTier?: string,
     prdContent?: string,
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
+  /** Set by the project page on mount so the store can persist session state
+   *  to the DB keyed by project. */
+  setProjectId: (id: string) => void;
   /** Re-run only the tasks that failed in the last session. */
   retryFailedTasks: (
     runId: string,
@@ -65,6 +76,7 @@ interface CodingState {
     codeOutputDir: string,
     projectTier?: string,
     prdContent?: string,
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
   retryIntegrationVerify: (
     runId: string,
@@ -79,11 +91,77 @@ interface CodingState {
   selectAgent: (agentId: string | null) => void;
   /** Called by the decision UI when the user picks an option. */
   submitHumanDecision: (decisionId: string) => Promise<void>;
+  /** Rebuild task list and session status from a persisted checkpoint.
+   *  Called on page load so the user sees last-session results without waiting
+   *  for a re-run. Safe to call when status is "idle" or "failed". */
+  hydrateFromCheckpoint: (
+    checkpoint: SessionCheckpoint,
+    taskItems: KickoffWorkItem[],
+  ) => void;
+  /** Rebuild task list directly from a DB CodingSessionSnapshot.
+   *  Unlike hydrateFromCheckpoint, this correctly includes E2E / extra tasks
+   *  that were injected server-side and are not present in kickoffItems.
+   *  kickoffItems is used to fill in full metadata for regular tasks. */
+  hydrateFromSnapshot: (
+    snapshot: CodingSessionSnapshot,
+    kickoffItems: KickoffWorkItem[],
+  ) => void;
   reset: () => void;
+}
+
+/** Snapshot structure persisted to project_step_snapshot (stepId = "coding-session"). */
+export interface CodingSessionSnapshot {
+  sessionId: string;
+  status: "completed" | "failed";
+  savedAt: string;
+  tasks: Array<{
+    id: string;
+    title: string;
+    phase: string;
+    codingStatus: CodingTask["codingStatus"];
+    generatedFiles: string[];
+    error?: string;
+    taskCostUsd?: number;
+  }>;
+  totalCostUsd: number;
+}
+
+/** Persist the current session state to `project_step_snapshot` (stepId "coding-session"). */
+function persistSessionSnapshot(
+  projectId: string,
+  state: Pick<CodingState, "sessionId" | "status" | "tasks" | "totalCostUsd">,
+): void {
+  if (!projectId || !state.sessionId) return;
+  if (state.status !== "completed" && state.status !== "failed") return;
+
+  const snapshot: CodingSessionSnapshot = {
+    sessionId: state.sessionId,
+    status: state.status,
+    savedAt: new Date().toISOString(),
+    tasks: state.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      phase: t.phase,
+      codingStatus: t.codingStatus,
+      generatedFiles: t.generatedFiles ?? [],
+      error: t.error,
+      taskCostUsd: t.taskCostUsd,
+    })),
+    totalCostUsd: state.totalCostUsd,
+  };
+
+  fetch(`/api/projects/${projectId}/project-step-snapshot`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stepId: "coding-session", snapshot }),
+  }).catch((e) =>
+    console.warn("[coding-store] Failed to persist session snapshot:", e),
+  );
 }
 
 export const useCodingStore = create<CodingState>()((set, get) => ({
   sessionId: null,
+  projectId: null,
   status: "idle",
   agents: [],
   tasks: [],
@@ -95,6 +173,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   gapAnalysis: null,
   supervisorLogs: [],
   pendingHumanDecision: null,
+
+  setProjectId: (id) => set({ projectId: id }),
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
@@ -113,7 +193,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     }
   },
 
-  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent) => {
+  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent, stitchMeta) => {
     set({
       status: "running",
       error: null,
@@ -132,10 +212,17 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     // doesn't show stale data while a fresh full run is in progress.
     fetch("/api/agents/coding/checkpoint", { method: "DELETE" }).catch(() => {});
 
+    // Abort any previous coding session before starting a new one.
+    _codingAbortController?.abort();
+
+    const controller = new AbortController();
+    _codingAbortController = controller;
+
     fetch("/api/agents/coding", {
+      signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent }),
+      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent, stitchMeta }),
     })
       .then(async (resp) => {
         if (!resp.ok) {
@@ -186,21 +273,58 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
         const state = get();
         if (state.status === "running") set({ status: "completed" });
+        const finalState = get();
+        persistSessionSnapshot(finalState.projectId ?? "", finalState);
       })
       .catch((err) => {
+        // Ignore intentional abort from reset() — state is already idle.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         set({
           status: "failed",
           error: err instanceof Error ? err.message : "Unknown error",
         });
+        const s = get();
+        persistSessionSnapshot(s.projectId ?? "", s);
       });
   },
 
-  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent) => {
+  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+    const retrySet = new Set(failedTaskIds);
+    const existingTasks = get().tasks;
+
+    // Preserve already-completed tasks; only reset the tasks being retried to
+    // "pending" so the progress bar stays accurate and the user can see which
+    // tasks are being re-run vs. which already succeeded.
+    const initialTasks: CodingTask[] =
+      existingTasks.length > 0
+        ? existingTasks.map((t) =>
+            retrySet.has(t.id)
+              ? {
+                  ...t,
+                  codingStatus: "pending" as const,
+                  error: undefined,
+                  errorPreview: undefined,
+                  verifyErrors: undefined,
+                  startedAt: undefined,
+                  completedAt: undefined,
+                  generatedFiles: [],
+                }
+              : t,
+          )
+        : tasks.map((t) => ({
+            ...t,
+            assignedAgentId: null,
+            codingStatus: retrySet.has(t.id)
+              ? ("pending" as const)
+              : ("completed" as const),
+            generatedFiles: [],
+          }));
+
     set({
       status: "running",
       error: null,
       agents: [],
-      tasks: [],
+      tasks: initialTasks,
       selectedAgentId: null,
       totalCostUsd: 0,
       sessionId: null,
@@ -210,7 +334,14 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       pendingHumanDecision: null,
     });
 
+    // Abort any previous coding session before starting retry.
+    _codingAbortController?.abort();
+
+    const controller = new AbortController();
+    _codingAbortController = controller;
+
     fetch("/api/agents/coding", {
+      signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -219,6 +350,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         codeOutputDir,
         projectTier,
         prd: prdContent,
+        stitchMeta,
         retryFailedTaskIds: failedTaskIds,
       }),
     })
@@ -270,12 +402,18 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
         const state = get();
         if (state.status === "running") set({ status: "completed" });
+        const finalState = get();
+        persistSessionSnapshot(finalState.projectId ?? "", finalState);
       })
       .catch((err) => {
+        // Ignore intentional abort from reset() — state is already idle.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         set({
           status: "failed",
           error: err instanceof Error ? err.message : "Unknown error",
         });
+        const s = get();
+        persistSessionSnapshot(s.projectId ?? "", s);
       });
   },
 
@@ -446,7 +584,102 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       });
   },
 
+  hydrateFromCheckpoint: (checkpoint, taskItems) => {
+    // Only hydrate if we're not currently running a session.
+    if (get().status === "running") return;
+
+    const statusMap: Record<string, CodingTask["codingStatus"]> = {};
+    for (const [id, entry] of Object.entries(checkpoint.taskResults)) {
+      if (entry.status === "completed" || entry.status === "completed_with_warnings") {
+        statusMap[id] = entry.status;
+      } else {
+        statusMap[id] = "failed";
+      }
+    }
+
+    const tasks: CodingTask[] = taskItems.map((item) => ({
+      ...item,
+      assignedAgentId: null,
+      codingStatus: statusMap[item.id] ?? "pending",
+      generatedFiles: checkpoint.taskResults[item.id]?.generatedFiles ?? [],
+    }));
+
+    const allDone = tasks.every(
+      (t) =>
+        t.codingStatus === "completed" ||
+        t.codingStatus === "completed_with_warnings",
+    );
+    const hasFailed = tasks.some((t) => t.codingStatus === "failed");
+
+    set({
+      sessionId: checkpoint.sessionId,
+      status: allDone ? "completed" : hasFailed ? "failed" : "completed",
+      tasks,
+      agents: [],
+      error: null,
+      integrationVerify: null,
+      e2eVerify: null,
+      supervisorLogs: [],
+      pendingHumanDecision: null,
+    });
+  },
+
+  hydrateFromSnapshot: (snapshot, kickoffItems) => {
+    if (get().status === "running") return;
+
+    // Build a lookup map for full metadata from kickoff tasks
+    const kickoffMap = new Map(kickoffItems.map((k) => [k.id, k]));
+
+    // Rebuild all tasks from snapshot (including E2E / server-injected extra tasks)
+    const tasks: CodingTask[] = snapshot.tasks.map((t) => {
+      const kickoff = kickoffMap.get(t.id);
+      return {
+        id: t.id,
+        title: t.title,
+        phase: t.phase,
+        description: kickoff?.description ?? "",
+        estimatedHours: kickoff?.estimatedHours ?? 0,
+        executionKind: kickoff?.executionKind ?? "ai_autonomous",
+        files: kickoff?.files,
+        dependencies: kickoff?.dependencies,
+        priority: kickoff?.priority,
+        subSteps: kickoff?.subSteps,
+        tokenEstimate: kickoff?.tokenEstimate,
+        acceptanceCriteria: kickoff?.acceptanceCriteria,
+        coversRequirementIds: kickoff?.coversRequirementIds,
+        tddPlan: kickoff?.tddPlan,
+        assignedAgentId: null,
+        codingStatus: t.codingStatus,
+        generatedFiles: t.generatedFiles,
+        error: t.error,
+      };
+    });
+
+    const allDone = tasks.every(
+      (t) =>
+        t.codingStatus === "completed" ||
+        t.codingStatus === "completed_with_warnings",
+    );
+    const hasFailed = tasks.some((t) => t.codingStatus === "failed");
+
+    set({
+      sessionId: snapshot.sessionId,
+      status: allDone ? "completed" : hasFailed ? "failed" : "completed",
+      tasks,
+      totalCostUsd: snapshot.totalCostUsd,
+      agents: [],
+      error: null,
+      integrationVerify: null,
+      e2eVerify: null,
+      supervisorLogs: [],
+      pendingHumanDecision: null,
+    });
+  },
+
   reset: () => {
+    // Abort the backend coding session so it stops processing tasks.
+    _codingAbortController?.abort();
+    _codingAbortController = null;
     set({
       sessionId: null,
       status: "idle",
@@ -480,11 +713,18 @@ function handleCodingEvent(
   const { type } = payload;
 
   if (type === "session_start") {
-    const initialTasks = (payload.data?.tasks as CodingTask[] | undefined) ?? [];
-    set({
-      sessionId: payload.sessionId,
-      tasks: initialTasks,
-    });
+    const incomingTasks = (payload.data?.tasks as CodingTask[] | undefined) ?? [];
+    const existingTasks = get().tasks;
+
+    if (existingTasks.length > 0) {
+      // Retry mode: tasks were already initialised by retryFailedTasks() with
+      // preserved completed statuses. Only update sessionId; overwriting tasks
+      // here would reset completed tasks back to pending and kill the progress bar.
+      set({ sessionId: payload.sessionId });
+    } else {
+      // Fresh session: populate tasks from the server's session_start payload.
+      set({ sessionId: payload.sessionId, tasks: incomingTasks });
+    }
     return;
   }
 

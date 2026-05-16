@@ -31,7 +31,7 @@ function scheduleStageSync(getState: () => StageStoreState) {
 
 // ─── Stage Types ─────────────────────────────────────────────────────────────
 
-export type StageId = "preparation" | "kickoff" | "coding" | "preview";
+export type StageId = "preparation" | "kickoff" | "coding" | "preview" | "deploy";
 
 export type StageStatus = "idle" | "active" | "completed" | "error";
 
@@ -69,12 +69,16 @@ export type PreviewSubStageId =
   | "serve"  // dev-server startup
   | "e2e";   // e2e smoke test
 
+export type DeploySubStageId =
+  | "deploy"; // deploy to Dokploy
+
 /** Discriminated union of all sub-stage IDs. */
 export type SubStageId =
   | PreparationSubStageId
   | KickoffSubStageId
   | CodingSubStageId
-  | PreviewSubStageId;
+  | PreviewSubStageId
+  | DeploySubStageId;
 
 export interface SubStageMeta {
   label: string;
@@ -89,6 +93,7 @@ export const SUB_STAGE_ORDER: Record<StageId, SubStageId[]> = {
   kickoff:     ["env-setup", "summary", "task-breakdown"],
   coding:      ["agents"],
   preview:     ["serve", "e2e"],
+  deploy:      ["deploy"],
 };
 
 export const SUB_STAGE_META: Record<SubStageId, SubStageMeta> = {
@@ -117,17 +122,20 @@ export const SUB_STAGE_META: Record<SubStageId, SubStageMeta> = {
   // preview
   serve:        { label: "Dev Server",       desc: "Start preview server" },
   e2e:          { label: "E2E",              desc: "End-to-end smoke test" },
+  // deploy
+  deploy:       { label: "Deploy",           desc: "Deploy to Dokploy" },
 };
 
 // ─── Stage Constants ──────────────────────────────────────────────────────────
 
-export const STAGE_ORDER: StageId[] = ["preparation", "kickoff", "coding", "preview"];
+export const STAGE_ORDER: StageId[] = ["preparation", "kickoff", "coding", "preview", "deploy"];
 
 export const STAGE_META: Record<StageId, StageMeta> = {
   preparation: { id: "01", name: "Preparation", desc: "Resource mapping & logic flow" },
   kickoff:     { id: "02", name: "Kick-off",    desc: "Environment spinning" },
   coding:      { id: "03", name: "Coding",      desc: "Autonomous logic generation" },
   preview:     { id: "04", name: "Preview",     desc: "Final testing & verification" },
+  deploy:      { id: "05", name: "Deploy",      desc: "Deploy to production" },
 };
 
 /** Pipeline step IDs that belong to the preparation stage (excludes "initial" which is UI-only). */
@@ -142,6 +150,7 @@ const DEFAULT_SUB_STAGES: Record<StageId, SubStageId> = {
   kickoff:     "summary",
   coding:      "agents",
   preview:     "serve",
+  deploy:      "deploy",
 };
 
 // ─── Store Interface ──────────────────────────────────────────────────────────

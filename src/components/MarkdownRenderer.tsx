@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -232,6 +233,48 @@ interface MarkdownRendererProps {
   variant?: "default" | "prd";
 }
 
+/**
+ * Split content by <div class="prd-changed-section">...</div> markers emitted
+ * by the PRD patch path (see src/lib/agents/pm/prd-patch.ts). Each plain
+ * chunk and each changed chunk is rendered as its own ReactMarkdown block;
+ * the changed chunks get a wrapper div with the `prd-changed-section` class
+ * so CSS in globals.css can highlight + fade them.
+ *
+ * This avoids needing rehype-raw to allow inline HTML through react-markdown.
+ */
+const CHANGED_SECTION_REGEX =
+  /<div class="prd-changed-section">([\s\S]*?)<\/div>/g;
+
+interface ContentChunk {
+  kind: "plain" | "changed";
+  text: string;
+}
+
+function splitChangeMarkers(content: string): ContentChunk[] {
+  // Fast path — no markers present.
+  if (!content.includes('class="prd-changed-section"')) {
+    return [{ kind: "plain", text: content }];
+  }
+  const parts: ContentChunk[] = [];
+  let lastIdx = 0;
+  CHANGED_SECTION_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CHANGED_SECTION_REGEX.exec(content)) !== null) {
+    if (m.index > lastIdx) {
+      const plain = content.slice(lastIdx, m.index);
+      if (plain.trim().length > 0) parts.push({ kind: "plain", text: plain });
+    }
+    const inner = m[1].replace(/^\n+|\n+$/g, "");
+    if (inner.length > 0) parts.push({ kind: "changed", text: inner });
+    lastIdx = CHANGED_SECTION_REGEX.lastIndex;
+  }
+  if (lastIdx < content.length) {
+    const tail = content.slice(lastIdx);
+    if (tail.trim().length > 0) parts.push({ kind: "plain", text: tail });
+  }
+  return parts;
+}
+
 export default function MarkdownRenderer({
   content,
   className = "",
@@ -244,11 +287,29 @@ export default function MarkdownRenderer({
     variant === "prd"
       ? "prose prose-slate max-w-none prose-headings:font-semibold prose-headings:text-[#1f2328] prose-p:text-[#1f2328] prose-li:text-[#1f2328]"
       : "prose prose-sm prose-zinc max-w-none";
+
+  const chunks = splitChangeMarkers(content);
+
   return (
     <div className={`${proseClass} ${className}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
-      </ReactMarkdown>
+      {chunks.map((chunk, idx) => {
+        const md = (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={components}
+          >
+            {chunk.text}
+          </ReactMarkdown>
+        );
+        if (chunk.kind === "changed") {
+          return (
+            <div key={idx} className="prd-changed-section">
+              {md}
+            </div>
+          );
+        }
+        return <React.Fragment key={idx}>{md}</React.Fragment>;
+      })}
     </div>
   );
 }

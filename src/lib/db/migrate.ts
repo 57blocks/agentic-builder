@@ -34,10 +34,11 @@ function maintenancePoolOpts(): ConstructorParameters<typeof Pool>[0] {
     const u = new URL(connStr);
     const socketHost = u.searchParams.get("host");
     return {
-      // No user/password — connect as the OS user (superuser on dev machines)
       host:     socketHost ?? (u.hostname || "localhost"),
       port:     u.port ? Number(u.port) : 5432,
       database: "postgres", // maintenance DB — always exists
+      user:     u.username || undefined,
+      password: u.password || undefined,
       connectionTimeoutMillis: 5_000,
     };
   } catch {
@@ -131,8 +132,15 @@ export async function ensureDatabase(): Promise<void> {
 }
 
 export async function runMigrations(): Promise<void> {
-  // Ensure the database exists before attempting to connect / migrate.
-  await ensureDatabase();
+  // On managed Postgres (e.g. AWS RDS) the role/database already exist and
+  // we lack superuser to create them — skip the ensureDatabase() bootstrap.
+  const connStr = process.env.DATABASE_URL ?? "";
+  const isManagedPg = connStr.includes("rds.amazonaws.com");
+  if (!isManagedPg) {
+    await ensureDatabase();
+  } else {
+    console.log("[migrate] Managed Postgres detected — skipping ensureDatabase().");
+  }
   // Nothing to do if the migrations directory doesn't exist yet.
   if (!fs.existsSync(migrationsDir)) {
     console.warn("[migrate] Migrations directory not found, skipping:", migrationsDir);
