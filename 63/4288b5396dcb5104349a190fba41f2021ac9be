@@ -1,0 +1,698 @@
+src/lib/langgraph/supervisor/e2e/triage-helpers.ts
+  ebd93aab546d771c 1-63 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,63]}]}]}
+src/lib/langgraph/supervisor/shared/llm-call.ts
+  ebd93aab546d771c 1-80 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,80]}]}]}
+src/lib/langgraph/supervisor/verify-tools/scoped-validation.ts
+  ebd93aab546d771c 1-85 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,85]}]}]}
+src/lib/langgraph/supervisor/usage-tracking.ts
+  ebd93aab546d771c 1-50 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,50]}]}]}
+src/lib/langgraph/supervisor/shared/output-fs.ts
+  ebd93aab546d771c 1-14 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,14]}]}]}
+scripts/replay-route-audit.ts
+  ebd93aab546d771c 30 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Single":30}]}]}
+src/lib/langgraph/supervisor.ts
+  ebd93aab546d771c 57,90-179 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Single":57},{"Range":[90,179]}]}]}
+src/lib/langgraph/supervisor/verify-tools/definitions.ts
+  ebd93aab546d771c 1-119 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,119]}]}]}
+src/lib/langgraph/supervisor/routing.ts
+  ebd93aab546d771c 1-62 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,62]}]}]}
+src/lib/langgraph/supervisor/role-mapping.ts
+  ebd93aab546d771c 1-41 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,41]}]}]}
+src/lib/langgraph/supervisor/verify-tools/command-classifier.ts
+  ebd93aab546d771c 1-96 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,96]}]}]}
+src/lib/langgraph/supervisor/shared/task-chunking.ts
+  ebd93aab546d771c 1-139 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,139]}]}]}
+src/lib/langgraph/supervisor/normalizers/frontend.ts
+  ebd93aab546d771c 1-783 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,783]}]}]}
+src/lib/langgraph/supervisor/audits/route-registration.ts
+  ebd93aab546d771c 1-840 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,840]}]}]}
+src/lib/langgraph/supervisor/normalizers/backend.ts
+  ebd93aab546d771c 1-227 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,227]}]}]}
+src/lib/langgraph/supervisor/shared/task-breakdown.ts
+  ebd93aab546d771c 1-110 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,110]}]}]}
+src/lib/langgraph/supervisor/db-setup/prisma.ts
+  ebd93aab546d771c 1-411 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,411]}]}]}
+src/lib/langgraph/supervisor/nodes/tdd.ts
+  ebd93aab546d771c 1-90 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,90]}]}]}
+src/lib/langgraph/supervisor/verify-tools/executor.ts
+  ebd93aab546d771c 1-129 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,129]}]}]}
+src/lib/langgraph/supervisor/shared/component-interface.ts
+  ebd93aab546d771c 1-86 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,86]}]}]}
+src/lib/langgraph/supervisor/config.ts
+  ebd93aab546d771c 1-60 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a081646963593f7fd5d4714","tool_type":"agent","tool_id":"SearchReplace","line_ranges":[{"Range":[1,60]}]}]}
+scaffolds/m-tier/frontend/src/api/client.ts
+  4cafdc83cd44a0e2 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "634288b5396dcb5104349a190fba41f2021ac9be",
+  "prompts": {
+    "4cafdc83cd44a0e2": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-004ff226-7227-4d0c-b3ce-af20042b8052",
+        "model": "default"
+      },
+      "human_author": "fangxiaolin <fangxiaolin@bytedance.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "ebd93aab546d771c": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a080742963593f7fd5d44a5",
+        "model": "openrouter-2o__dev"
+      },
+      "human_author": "fangxiaolin <fangxiaolin@bytedance.com>",
+      "messages": [],
+      "total_additions": 3586,
+      "total_deletions": 583,
+      "accepted_lines": 3577,
+      "overriden_lines": 0
+    }
+  },
+  "attestation_metadata": {
+    "scripts/replay-route-audit.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Single": 30
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Single": 30
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Single": 57
+          },
+          {
+            "Range": [
+              90,
+              179
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Single": 57
+              },
+              {
+                "Range": [
+                  90,
+                  179
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/audits/route-registration.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              840
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  840
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/config.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              60
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  60
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/db-setup/prisma.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              411
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  411
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/e2e/triage-helpers.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              63
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  63
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/nodes/tdd.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              90
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  90
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/normalizers/backend.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              227
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  227
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/normalizers/frontend.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              783
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  783
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/role-mapping.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              41
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  41
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/routing.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              62
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  62
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/shared/component-interface.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              86
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  86
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/shared/llm-call.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              80
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  80
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/shared/output-fs.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              14
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  14
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/shared/task-breakdown.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              110
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  110
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/shared/task-chunking.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              139
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  139
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/usage-tracking.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              50
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  50
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/verify-tools/command-classifier.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              96
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  96
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/verify-tools/definitions.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              119
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  119
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/verify-tools/executor.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              129
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  129
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "src/lib/langgraph/supervisor/verify-tools/scoped-validation.ts": [
+      {
+        "hash": "ebd93aab546d771c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              85
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a081646963593f7fd5d4714",
+            "tool_type": "agent",
+            "tool_id": "SearchReplace",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  85
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "ebd93aab546d771c": {
+      "tool": "trae",
+      "conversation_id": "6a080742963593f7fd5d44a5",
+      "session_id": "6a080742963593f7fd5d44a5",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
