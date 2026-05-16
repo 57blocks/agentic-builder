@@ -1003,7 +1003,11 @@ export async function POST(request: NextRequest) {
   }
 
   // Run installs for every package root present in the scaffold.
-  const installTargets = tier === "M" ? ["frontend", "backend"] : [""];
+  // M and L tiers both ship the same flat `frontend/` + `backend/` layout, so
+  // both install in those subdirectories. S-tier installs in the project root
+  // (single Vite app, no nested package roots).
+  const installTargets =
+    tier === "M" || tier === "L" ? ["frontend", "backend"] : [""];
   for (const relTarget of installTargets) {
     const targetDir = relTarget ? path.join(outputRoot, relTarget) : outputRoot;
     const hasPkg = await fs
@@ -1086,19 +1090,25 @@ export async function POST(request: NextRequest) {
     /* sidecar missing — proceed without it */
   }
   const pencilDesignDoc = await readPencilDesignDoc(outputRoot);
-  const scaffoldReadmePath = path.resolve(
-    process.cwd(),
-    "scaffolds",
-    "m-tier",
-    "README.md",
-  );
+  // Both M and L tiers ship a comprehensive README that documents the
+  // scaffold's conventions (api/modules layout, middlewares folder, workers,
+  // etc.). Inject it into project context so coding agents follow the
+  // conventions instead of guessing. S-tier's README is too thin to bother.
   const scaffoldReadmeDoc =
-    tier === "M"
+    tier === "M" || tier === "L"
       ? await fs
-          .readFile(scaffoldReadmePath, "utf-8")
+          .readFile(
+            path.resolve(
+              process.cwd(),
+              "scaffolds",
+              `${tier.toLowerCase()}-tier`,
+              "README.md",
+            ),
+            "utf-8",
+          )
           .then((raw) =>
             raw.length > 12000
-              ? `${raw.slice(0, 12000)}\n\n[m-tier README truncated]`
+              ? `${raw.slice(0, 12000)}\n\n[${tier.toLowerCase()}-tier README truncated]`
               : raw,
           )
           .catch(() => "")

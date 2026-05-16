@@ -11,7 +11,8 @@
  *   S → src/shared/schema.ts            (single-app)
  *   M → frontend/src/shared/schema.ts   (split monolith)
  *       backend/src/shared/schema.ts
- *   L → packages/shared/src/schema.ts   (already a workspace package)
+ *   L → frontend/src/shared/schema.ts   (same flat layout as M — no monorepo)
+ *       backend/src/shared/schema.ts
  *
  * Pure I/O helper: never throws on missing source (TRD may have been
  * skipped, or §6 may have been omitted). Caller decides what to do with
@@ -33,7 +34,9 @@ const DAG_BLUEPRINT_REL = ".blueprint/pipeline-dag.yaml";
 const TARGETS_BY_TIER: Readonly<Record<SharedSchemaTier, readonly string[]>> = {
   S: ["src/shared/schema.ts"],
   M: ["frontend/src/shared/schema.ts", "backend/src/shared/schema.ts"],
-  L: ["packages/shared/src/schema.ts"],
+  // L-tier now uses the same flat frontend/+backend/ layout as M (no monorepo,
+  // no packages/shared), so the shared schema fans out identically.
+  L: ["frontend/src/shared/schema.ts", "backend/src/shared/schema.ts"],
 };
 
 /** DAG lives at outputDir/.blueprint/pipeline-dag.yaml regardless of tier —

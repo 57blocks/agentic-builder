@@ -13,6 +13,10 @@ interface UseProjectsReturn {
    * Inserted at the front of the list so it appears first in the sidebar.
    */
   addLocalProject: (name?: string) => Project;
+  /** Rename a project. Optimistic — reverts on failure. */
+  renameProject: (id: string, name: string) => Promise<void>;
+  /** Delete a project. Optimistic — re-inserts on failure. */
+  deleteProject: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -91,5 +95,91 @@ export function useProjects(): UseProjectsReturn {
     return project;
   }, []);
 
-  return { projects, loading, createProject, addLocalProject, refresh };
+  const renameProject = useCallback(
+    async (id: string, name: string): Promise<void> => {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error("Project name is required.");
+
+      // Optimistic update — snapshot previous name for rollback.
+      let previous = "";
+      setProjects((prev) => {
+        return prev.map((p) => {
+          if (p.id !== id) return p;
+          previous = p.name;
+          return { ...p, name: trimmed };
+        });
+      });
+
+      try {
+        const res = await fetch(`/api/projects/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: trimmed }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as {
+            message?: string;
+          };
+          throw new Error(body.message ?? `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        // Roll back optimistic update.
+        setProjects((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, name: previous } : p)),
+        );
+        throw err instanceof Error
+          ? err
+          : new Error("Failed to rename project.");
+      }
+    },
+    [],
+  );
+
+  const deleteProject = useCallback(
+    async (id: string): Promise<void> => {
+      // Optimistic remove — snapshot for rollback.
+      let removed: Project | undefined;
+      let removedIndex = -1;
+      setProjects((prev) => {
+        removedIndex = prev.findIndex((p) => p.id === id);
+        removed = removedIndex >= 0 ? prev[removedIndex] : undefined;
+        return prev.filter((p) => p.id !== id);
+      });
+
+      try {
+        const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as {
+            message?: string;
+          };
+          throw new Error(body.message ?? `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        // Roll back: re-insert at original position.
+        if (removed) {
+          const restored = removed;
+          const idx = removedIndex;
+          setProjects((prev) => {
+            const next = [...prev];
+            next.splice(Math.max(0, idx), 0, restored);
+            return next;
+          });
+        }
+        throw err instanceof Error
+          ? err
+          : new Error("Failed to delete project.");
+      }
+    },
+    [],
+  );
+
+  return {
+    projects,
+    loading,
+    createProject,
+    addLocalProject,
+    renameProject,
+    deleteProject,
+    refresh,
+  };
 }

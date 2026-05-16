@@ -8,18 +8,6 @@ const LOCKFILE_NAMES = new Set([
   "yarn.lock",
 ]);
 
-/** Injected into tier L SCAFFOLD_SPEC.md and task-breakdown scaffold block. */
-const MONOREPO_SHARED_IMPORTS_AND_ZOD = [
-  "## Imports and Zod (monorepo)",
-  "",
-  "- Import shared types and schemas using the **workspace package name** from `packages/shared/package.json` (default **`@project/shared`**), e.g. `@project/shared/types/auth`, `@project/shared/schemas/auth`.",
-  "- **Never** use `@shared/`, bare `shared/`, or other aliases unless this repo already defines them in `tsconfig.json` / `vite.config.ts`.",
-  "- **Zod**: export runtime validators as **camelCase** + `Schema` (`loginSchema`, `registerSchema`). Export inferred value types as **`LoginInput`**, **`RegisterInput`** (PascalCase + `Input`).",
-  "- Do **not** use a type name that only differs from the schema by capitalization (avoid `registerSchema` + exported type `RegisterSchema`).",
-  '- In UI code: call `registerSchema.safeParse(...)` or `.parse(...)`; use `import type { RegisterInput } from "@project/shared/schemas/auth"` for form state.',
-  "",
-].join("\n");
-
 function shouldOmitFromPathSummary(rel: string): boolean {
   const base = rel.split("/").pop() ?? rel;
   if (LOCKFILE_NAMES.has(base)) return true;
@@ -66,12 +54,15 @@ function tierScaffoldBrief(tier: ScaffoldTier): string {
       ].join("\n");
     case "L":
       return [
-        "- **pnpm workspace**: root `package.json` + `pnpm-workspace.yaml`.",
-        "- **`apps/web`**: **Next.js** App Router (`app/`, `layout.tsx`, `page.tsx`), Tailwind.",
-        "- **`apps/api`**: **Fastify** HTTP API (`src/index.ts` and routes).",
-        "- **`packages/shared`**: shared types and utilities consumed via `workspace:*`.",
-        "- Shared imports: `@project/shared/types/...`, `@project/shared/schemas/...` only (never `@shared/`). Zod: `fooSchema` + type `FooInput`.",
-        "- Run from root: `pnpm dev` (parallel dev), `pnpm build`, `pnpm test`.",
+        "- Root layout: `frontend/`, `backend/`, `_optional/`, `docker-compose.yml`, `PRD.md`, `README.md`.",
+        "- **`frontend/`**: Vite + React + TypeScript + React Router + Tailwind CSS (same stack as M).",
+        "- **`backend/`**: Koa + TypeScript + Sequelize + PostgreSQL (same stack as M) PLUS **L-tier-only** layers:",
+        "  - `src/workers/` + `src/queue/inProcessQueue.ts` — background-job queue + worker bootstrap (`startAllWorkers()` called from `server.ts` before `listen()`).",
+        "  - `src/config/logger.ts` — pino structured logger; per-request child logger attached to `ctx.state.log` by `requestLoggerMiddleware`.",
+        "  - `src/middlewares/requestLogger.ts` + `src/middlewares/rateLimit.ts` — request-level structured logging and window-based rate limiting.",
+        "- **`docker-compose.yml`**: brings up Postgres + Redis by default; `--profile full` also builds backend/frontend images.",
+        "- Frontend API requests use `/api`; Vite dev server proxies `/api` to `http://localhost:4000`.",
+        "- Run apps separately: `cd frontend && pnpm dev`, `cd backend && pnpm dev` (same as M).",
       ].join("\n");
     default:
       return "";
@@ -91,7 +82,7 @@ export function buildTaskBreakdownScaffoldBlock(
       ? 'The template already ships a runnable Vite app. **Do not** plan a greenfield "create Vite from zero" task unless the PRD requires replacing the stack. Plan Frontend tasks to implement the actual product features (do not add phase "Testing" tasks — automated tests are not scheduled in the pipeline yet).'
       : tier === "M"
         ? 'The template already ships a runnable **frontend/backend split skeleton** (`frontend/`, `backend/`, base configs, health route, router shell). **Do not** recreate that structure. You **MUST** still plan Backend Services tasks (to implement real API routes/logic in `backend/src`) and Frontend tasks (to implement real pages/flows in `frontend/src`) — the scaffold ships shells, not product features. Do not add phase "Testing" tasks until the pipeline runs test workers.'
-        : 'The template already ships the monorepo **skeleton** (`pnpm-workspace.yaml`, empty `apps/web`, empty `apps/api`). **Do not** recreate that skeleton structure. You **MUST** still plan Backend Services tasks (to implement API routes/logic in `apps/api/src`) — the scaffold ships empty shells, not implemented features. Do not add phase "Testing" tasks until the pipeline runs test workers.';
+        : 'The template already ships a runnable **frontend/backend split skeleton PLUS L-tier production layers** (`src/workers/`, `src/queue/inProcessQueue.ts`, `src/config/logger.ts`, `src/middlewares/requestLogger.ts`, `src/middlewares/rateLimit.ts`, `docker-compose.yml` with postgres + redis). **Do not** recreate any of that. You **MUST** still plan Backend Services tasks (to implement real API routes/logic in `backend/src/api/modules`) and Frontend tasks (to implement real pages/flows in `frontend/src/views`) on top of the L scaffold. Background-job features MUST register their worker in `backend/src/workers/index.ts` and use `enqueueJob` / `registerWorker` from `backend/src/queue/inProcessQueue.ts`. Do not add phase "Testing" tasks until the pipeline runs test workers.';
 
   return [
     `## Pipeline coding tier: **${tier}**`,
@@ -102,7 +93,6 @@ export function buildTaskBreakdownScaffoldBlock(
     "",
     "### Layout (abbrev.)",
     tierScaffoldBrief(tier),
-    ...(tier === "L" ? ["", MONOREPO_SHARED_IMPORTS_AND_ZOD] : []),
     "",
     "### Representative template paths (lockfiles omitted)",
     "```text",
@@ -183,29 +173,44 @@ export function getTierScaffoldSpecMarkdown(tier: ScaffoldTier): string {
       return [
         "# Scaffold specification (tier L)",
         "",
-        "This project was bootstrapped from the **L-tier** scaffold: **pnpm monorepo** with **Next.js** web + **Fastify** API + shared package.",
+        "This project was bootstrapped from the **L-tier** scaffold: same `frontend/` + `backend/` flat layout as M-tier (Vite + React on the front, Koa + Sequelize + PostgreSQL on the back), with **production-grade additions baked in**:",
+        "- background-job queue + worker bootstrap",
+        "- pino structured logger with per-request correlation",
+        "- request-logger and rate-limit middlewares",
+        "- docker-compose that stands up Postgres + Redis for local dev",
         "",
         "## Layout",
         brief,
         "",
         "## Where to implement",
-        "- **Shared contracts**: `packages/shared/src`.",
-        "- **Backend**: `apps/api/src` (Fastify plugins, routes, services).",
-        "- **Frontend**: `apps/web/app` (App Router), components colocated or under `components/`, shared UI utilities as needed.",
+        "- **Backend**: `backend/src` for Koa app assembly, API modules, models, DB config, middleware, services, **and background workers under `src/workers/`**.",
+        "- **Backend routing policy**: register API resources under `backend/src/api/modules/<feature>/<feature>.routes.ts`, then wire them through `backend/src/api/modules/index.ts` and `backend/src/app.ts`.",
+        "- **Backend middleware folder**: the canonical directory is `backend/src/middlewares` (plural). Do NOT create files in `backend/src/middleware` (singular).",
+        "- **Background jobs**: every queue MUST register its worker in `backend/src/workers/index.ts` via `registerWorker(...)`. Use `enqueueJob` / `registerWorker` from `backend/src/queue/inProcessQueue.ts`. `startAllWorkers()` is called from `server.ts` BEFORE `app.listen(...)` — never enqueue work that depends on an unregistered queue.",
+        "- **Logging**: use `ctx.state.log` inside HTTP handlers and `childLogger({ ... })` inside workers. Never `console.log` in feature code; tests scan log files for run progress.",
+        "- **Frontend**: `frontend/src` for routes, page-level views, reusable components, API client helpers, and state.",
+        "- **Frontend page policy**: prefer page-level screens under `frontend/src/views`; keep route registration in `frontend/src/router.tsx`.",
+        "- **Frontend null-safe arrays**: any API-sourced list MUST go through `safeArray(...)` / `mapSafe(...)` from `frontend/src/api/safeArray.ts` before `.map` / spread.",
         "",
-        "## Commands (from repository root)",
-        "- `pnpm install`",
-        "- `pnpm dev` — parallel dev for web and api.",
-        "- `pnpm build` — recursive build.",
-        "- `pnpm test` — recursive tests.",
+        "## Canonical scaffold utilities — DO NOT recreate",
+        "- `frontend/src/api/client.ts` — the **only** HTTP client. NEVER create a parallel wrapper.",
+        "- `frontend/src/api/safeArray.ts` — null-safe array helpers. Use these instead of inlining `(arr ?? []).map(...)` everywhere.",
+        "- `backend/src/types/koa.d.ts` / `backend/src/types/koa.ts` — global `koa` module augmentation and `AppKoaContext`. Re-use; never redeclare.",
+        "- `backend/src/utils/jwt.ts` — canonical `signJwt` / `verifyJwt`. Feature code MUST import from here.",
+        "- `backend/src/utils/narrow.ts` — `parseEnumLiteral` / `asRecord` helpers.",
+        "- `backend/src/middlewares/{cors,errorHandler,requestLogger,rateLimit}.ts` — already wired in `app.ts`. Do not redeclare.",
+        "- `backend/src/config/logger.ts` — pino instance + `childLogger()`. Use `ctx.state.log` inside handlers.",
+        "- `backend/src/queue/inProcessQueue.ts` — queue API matching BullMQ shape. `runId` prefixed `inproc:*` MUST be threaded end-to-end; the worker never calls `randomUUID()` to overwrite it.",
         "",
-        "## Workspace",
-        "- Package names: `@project/web`, `@project/api`, `@project/shared` (match `package.json`).",
+        "## Commands",
+        "- `docker compose up -d` — start Postgres + Redis (host-mapped on 5432 / 6379).",
+        "- `cd backend && pnpm install && pnpm migrate && pnpm dev`",
+        "- `cd frontend && pnpm install && pnpm dev`",
+        "- `docker compose --profile full up --build` — production-shaped full-stack sanity check.",
         "",
-        MONOREPO_SHARED_IMPORTS_AND_ZOD,
         "## Protected / prebuilt files",
-        "- Prefer extending Next.js and Fastify app structure rather than regenerating from scratch.",
-        "- See `ARCHITECTURE_SCAFFOLD.md` for the file registry for this run.",
+        "- Config, middlewares, queue, and worker bootstrap from the scaffold should be **extended**, not replaced wholesale.",
+        "- See `ARCHITECTURE_SCAFFOLD.md` for the concrete file list registered for this run.",
         "",
       ].join("\n");
     default:

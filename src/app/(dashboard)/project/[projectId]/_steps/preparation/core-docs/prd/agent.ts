@@ -16,6 +16,11 @@ export const prdAgent: StepAgent = createPipelineSseAgent({
       prdEditInstruction: ctx.editInstruction,
       existingPrd: ctx.previousSteps.prd?.content ?? "",
     } : {}),
+    // Forward user-confirmed clarifications when present and we are not
+    // in edit-only mode (edits bypass the intent gate).
+    ...(!ctx.editInstruction && ctx.prdIntent
+      ? { prdIntent: ctx.prdIntent }
+      : {}),
   }),
   onCustomEvent: (event) => {
     // Extract tier from the intent step_complete event that the pipeline emits

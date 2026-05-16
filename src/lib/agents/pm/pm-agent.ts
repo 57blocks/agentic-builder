@@ -511,4 +511,67 @@ export class PMAgent extends BaseAgent {
     );
     return result;
   }
+
+  /**
+   * Targeted (section-level) PRD edit.
+   *
+   * The LLM is asked to identify ONLY the headings whose body needs to change
+   * and emit each new body verbatim, as JSON:
+   *   { summary, patches: [{ heading, newBody }, ...] }
+   *
+   * The caller (engine) parses this output, applies each patch to the
+   * existing PRD via {@link applyPrdPatches}, and falls back to a full
+   * re-generation if the JSON is unparseable or the patches don't apply.
+   *
+   * Streaming note: because the output is JSON, intermediate chunks are not
+   * human-readable. The caller may show a "Applying targeted edits…"
+   * indicator instead of streaming text live.
+   */
+  async generatePRDPatchStreaming(
+    existingPrd: string,
+    editInstruction: string,
+    onChunk: (chunk: string, type: "thinking" | "content") => void,
+    sessionId?: string,
+  ) {
+    const userMsg = `You are editing an existing PRD with a SURGICAL patch — not a full rewrite.
+
+Identify ONLY the smallest set of Markdown sections whose body must change to satisfy the instruction. For each such section, output:
+  - "heading": the EXACT heading line as it appears in the PRD (including all leading "#" characters, e.g. "### 5.1 Monitor Dashboard"). Do NOT invent new headings. Do NOT change the heading text.
+  - "newBody": the COMPLETE new content that should go UNDER that heading, up to (but not including) the next heading of the same or higher level. Include any nested subsections.
+
+Rules:
+- Touch as FEW sections as possible. If only one paragraph changes, patch the smallest enclosing section.
+- Never output unrelated sections. Never echo the whole PRD.
+- If you would need to patch more than 4 distinct top-level sections, return an empty patches array and set "fullRewrite": true so the caller can fall back to a full regeneration.
+- The "summary" field is a single sentence describing what changed.
+
+## Existing PRD
+
+${existingPrd}
+
+## Edit instruction
+
+${editInstruction}
+
+## Output — STRICT JSON, no markdown fences, no commentary
+
+{
+  "summary": "one sentence",
+  "fullRewrite": false,
+  "patches": [
+    { "heading": "### 5.1 Monitor Dashboard", "newBody": "...new content under this heading..." }
+  ]
+}
+
+If no change is needed, return { "summary": "...", "fullRewrite": false, "patches": [] }.`;
+
+    const result = await this.streamRun(
+      userMsg,
+      onChunk,
+      undefined,
+      "step-prd-patch",
+      sessionId,
+    );
+    return result;
+  }
 }

@@ -49,6 +49,13 @@ export interface StepAgentContext {
   sessionId: string;
   /** Optional edit instruction for re-run flows */
   editInstruction?: string;
+  /** User-confirmed PRD clarifications (questions + answers).
+   *  Forwarded to /api/agents/pipeline by the PRD step agent so the
+   *  pipeline engine can prepend them to the PRD prompt context. */
+  prdIntent?: {
+    result: import("@/lib/agents/intent/types").IntentResult;
+    answers: import("@/lib/agents/intent/types").ClarificationAnswer[];
+  } | null;
   emitState: (update: Partial<StepAgentState>) => void;
   getState: () => StepAgentState;
 }
