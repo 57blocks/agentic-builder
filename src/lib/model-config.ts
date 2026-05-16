@@ -22,6 +22,23 @@
 const DEEPSEEK_DIRECT_MODEL = "deepseek-v4-pro";
 const DEEPSEEK_DIRECT_CHAIN = [DEEPSEEK_DIRECT_MODEL] as const;
 
+// Direct connection first, then OpenRouter as fallback for fix/verify phases
+const DEEPSEEK_CODEFX_CHAIN = [
+  DEEPSEEK_DIRECT_MODEL,
+  "openai/gpt-5.3-codex",
+  "claude-sonnet-4",
+  "qwen/qwen3.6-plus",
+  "deepseek/deepseek-v3.2",
+] as const;
+
+const DEEPSEEK_VERIFYFX_CHAIN = [
+  DEEPSEEK_DIRECT_MODEL,
+  "openai/gpt-5.3-codex",
+  "claude-sonnet-4",
+  "qwen/qwen3.6-plus",
+  "deepseek/deepseek-v3.2",
+] as const;
+
 const OPENROUTER_MODEL_CONFIG = {
   // ── Preparation phase ──────────────────────────────────────────────────────
 
@@ -60,6 +77,7 @@ const OPENROUTER_MODEL_CONFIG = {
 
   /** Error-fix pass: cheaper models suffice for targeted tsc/build fixes. */
   codeFix: [
+    "deepseek/deepseek-v4-pro",
     "openai/gpt-5.3-codex",
     "claude-sonnet-4",
     "qwen/qwen3.6-plus",
@@ -72,6 +90,7 @@ const OPENROUTER_MODEL_CONFIG = {
    * Needs strong tool-use / function-calling capability.
    */
   phaseVerifyFix: [
+    "deepseek/deepseek-v4-pro",
     "openai/gpt-5.3-codex",
     "claude-sonnet-4",
     "qwen/qwen3.6-plus",
@@ -109,8 +128,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   taskBreakdown: DEEPSEEK_DIRECT_CHAIN,
   taskBreakdownReview: DEEPSEEK_DIRECT_CHAIN,
   codeGen: DEEPSEEK_DIRECT_CHAIN,
-  codeFix: DEEPSEEK_DIRECT_CHAIN,
-  phaseVerifyFix: DEEPSEEK_DIRECT_CHAIN,
+  codeFix: DEEPSEEK_CODEFX_CHAIN,
+  phaseVerifyFix: DEEPSEEK_VERIFYFX_CHAIN,
   e2eGen: DEEPSEEK_DIRECT_CHAIN,
 } as const satisfies Record<
   keyof typeof OPENROUTER_MODEL_CONFIG,
