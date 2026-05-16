@@ -684,6 +684,7 @@ export async function POST(request: NextRequest) {
     prd: prdBody,
     retryFailedTaskIds,
     projectId,
+    stitchMeta,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -702,6 +703,8 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds?: string[];
     /** Optional project linkage for the persisted coding-session report. */
     projectId?: string;
+    /** Stitch design metadata (projectId, screenId, projectUrl) persisted from the design step. */
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string } | null;
   };
 
   const ralphConfig: RalphConfig = {
@@ -1172,10 +1175,16 @@ export async function POST(request: NextRequest) {
           .filter(Boolean)
           .join("\n\n---\n\n");
 
+  // Log Stitch design URL when available
+  if (stitchMeta?.projectUrl) {
+    console.log(`[CodingAPI] Stitch UI Design project URL: ${stitchMeta.projectUrl}`);
+  }
+
   const frontendDesignContext = await buildFrontendDesignContextForCodegen(
     outputRoot,
     designSpecDoc,
     pencilDesignDoc,
+    stitchMeta ?? undefined,
   );
 
   const normalizedTasks = [...tasksToRun, ...preparedE2e.extraTasks];
