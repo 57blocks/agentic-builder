@@ -1,11 +1,13 @@
 "use client";
 
 import { Pause, StopCircle } from "lucide-react";
+import { motion } from "motion/react";
 
 interface StatusBarProps {
   isRunning: boolean;
   isCompleted: boolean;
   isFailed: boolean;
+  isReturnVisit?: boolean;
   onPause?: () => void;
   onAbort?: () => void;
 }
@@ -14,6 +16,7 @@ export function StatusBar({
   isRunning,
   isCompleted,
   isFailed,
+  isReturnVisit,
   onPause,
   onAbort,
 }: StatusBarProps) {
@@ -22,7 +25,7 @@ export function StatusBar({
     : isCompleted
       ? "COMPLETE"
       : isRunning
-        ? "STABLE"
+        ? "RUNNING"
         : "IDLE";
 
   const dotColor = isFailed
@@ -30,30 +33,39 @@ export function StatusBar({
     : isCompleted
       ? "bg-green-500"
       : isRunning
-        ? "bg-green-500 animate-pulse"
+        ? "bg-violet-500"
         : "bg-slate-300";
+
+  const labelColor = isFailed
+    ? "text-red-600"
+    : isCompleted
+      ? "text-green-600"
+      : isRunning
+        ? "text-violet-600"
+        : "text-slate-500";
 
   return (
     <div className="shrink-0 flex items-center justify-between px-6 py-2.5 bg-white border-t border-slate-200">
       {/* System status */}
       <div className="flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+        {isRunning ? (
+          <motion.span
+            className={`w-2 h-2 rounded-full ${dotColor}`}
+            animate={{ opacity: [1, 0.3, 1] }}
+            transition={{ duration: 1.2, repeat: Infinity }}
+          />
+        ) : (
+          <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+        )}
         <span className="text-[11px] font-semibold text-slate-600 tracking-wide">
           SYSTEM STATUS:{" "}
-          <span
-            className={
-              isFailed
-                ? "text-red-600"
-                : isCompleted
-                  ? "text-green-600"
-                  : isRunning
-                    ? "text-green-600"
-                    : "text-slate-500"
-            }
-          >
-            {systemStatus}
-          </span>
+          <span className={labelColor}>{systemStatus}</span>
         </span>
+        {isRunning && isReturnVisit && (
+          <span className="ml-2 text-[10px] font-medium text-violet-400 italic">
+            — reconnected to live session
+          </span>
+        )}
       </div>
 
       {/* Actions */}

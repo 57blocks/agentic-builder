@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
+import { motion } from "motion/react";
 import {
   Clock,
   RefreshCw,
@@ -238,45 +239,56 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
     <div
       className={`
         relative rounded-xl border border-slate-200 border-l-4 shadow-sm
-        transition-all duration-300 cursor-pointer
+        transition-colors duration-300 cursor-pointer overflow-visible
         ${bgCls} ${ringCls}
         ${isFailed ? "border-red-200" : ""}
       `}
       style={{
         ...borderStyle,
         ...(selected ? { ringColor: phase.accent } : {}),
-        // Glowing box-shadow for active nodes
-        ...(isActive
-          ? {
-              boxShadow: `0 0 0 2px ${phase.accent}33, 0 4px 16px ${phase.accent}22`,
-            }
-          : {}),
       }}
     >
-      {/* ── Animated outer glow ring (active only) ────────────────────── */}
+      {/* ── Breathing glow ring (active only) — motion版 ──────────────── */}
       {isActive && (
-        <span
-          className="pointer-events-none absolute inset-0 rounded-xl animate-pulse"
-          style={{
-            boxShadow: `0 0 0 3px ${phase.accent}55`,
+        <motion.span
+          className="pointer-events-none absolute inset-0 rounded-xl"
+          animate={{
+            boxShadow: [
+              `0 0 0 2px ${phase.accent}44, 0 0 12px 4px ${phase.accent}22`,
+              `0 0 0 4px ${phase.accent}77, 0 0 24px 8px ${phase.accent}44`,
+              `0 0 0 2px ${phase.accent}44, 0 0 12px 4px ${phase.accent}22`,
+            ],
           }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
 
-      {/* ── Breathing indicator (active only) ─────────────────────────────── */}
+      {/* ── Top scan line (active only) ────────────────────────────────── */}
       {isActive && (
-        <span
-          className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 z-10"
-        >
+        <motion.span
+          className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-t-xl z-10"
+          style={{ top: 0, backgroundColor: phase.accent }}
+          animate={{ opacity: [0.4, 1, 0.4] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+
+      {/* ── Breathing corner dot (active only) ────────────────────────── */}
+      {isActive && (
+        <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 z-10">
           {/* Ping ring */}
-          <span
-            className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+          <motion.span
+            className="absolute inline-flex h-full w-full rounded-full"
             style={{ backgroundColor: phase.accent }}
+            animate={{ scale: [1, 2.2, 1], opacity: [0.7, 0, 0.7] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
           />
           {/* Solid dot */}
-          <span
+          <motion.span
             className="relative inline-flex rounded-full h-3.5 w-3.5 border-2 border-white"
             style={{ backgroundColor: phase.accent }}
+            animate={{ scale: [1, 1.15, 1] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
           />
         </span>
       )}
@@ -284,9 +296,25 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
       {/* ── Completed check mark ──────────────────────────────────────────── */}
       {isCompleted && (
         <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 z-10 items-center justify-center">
-          <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
+          <motion.span
+            className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center"
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+          >
             <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
               <path d="M1 3.5L2.8 5.5L6 1.5" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </motion.span>
+        </span>
+      )}
+
+      {/* ── Failed X mark ─────────────────────────────────────────────────── */}
+      {isFailed && (
+        <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 z-10 items-center justify-center">
+          <span className="w-3.5 h-3.5 rounded-full bg-red-500 border-2 border-white flex items-center justify-center">
+            <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+              <path d="M1.5 1.5L5.5 5.5M5.5 1.5L1.5 5.5" stroke="white" strokeWidth="1.2" strokeLinecap="round"/>
             </svg>
           </span>
         </span>
@@ -332,13 +360,18 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
           {/* Right side: timing */}
           <div className="flex items-center gap-1 text-[10px] text-slate-400">
             {isActive ? (
-              <span className="font-medium" style={{ color: phase.accent }}>
+              <motion.span
+                className="font-semibold"
+                style={{ color: phase.accent }}
+                animate={{ opacity: [1, 0.5, 1] }}
+                transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+              >
                 {progressStage === "verifying"
                   ? "Verifying…"
                   : progressStage === "fixing"
                     ? "Fixing…"
                     : "Running…"}
-              </span>
+              </motion.span>
             ) : isFailed ? (
               <>
                 <RefreshCw size={9} className="text-red-400" />
