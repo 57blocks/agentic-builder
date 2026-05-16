@@ -43,6 +43,10 @@ export async function writeSessionCheckpoint(
   projectRoot: string,
   sessionId: string,
   taskResults: Map<string, TaskCheckpointEntry>,
+  /** Full list of task IDs for this session. Any ID not present in taskResults
+   *  (i.e. never started) is treated as unknown/failed so it appears in the
+   *  "Retry Failed Tasks" flow. */
+  allTaskIds?: string[],
 ): Promise<void> {
   const completedTaskIds: string[] = [];
   const failedTaskIds: string[] = [];
@@ -54,6 +58,17 @@ export async function writeSessionCheckpoint(
       failedTaskIds.push(id);
     } else {
       completedTaskIds.push(id);
+    }
+  }
+
+  // Tasks that were planned but never started (e.g. session aborted early)
+  // must also land in failedTaskIds so the Retry button surfaces them.
+  if (allTaskIds) {
+    for (const id of allTaskIds) {
+      if (!taskResults.has(id)) {
+        failedTaskIds.push(id);
+        taskResultsObj[id] = { status: "unknown", generatedFiles: [] };
+      }
     }
   }
 

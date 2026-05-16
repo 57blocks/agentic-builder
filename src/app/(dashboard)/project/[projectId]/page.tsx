@@ -9,6 +9,7 @@ import { STEP_REGISTRY } from "./_steps/step-registry";
 import { getStepConfig } from "@/_config/pipeline-flow";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
+import { useCodingStore } from "@/store/coding-store";
 import { loadAllStepSnapshots } from "./_steps/_shared/snapshot-context";
 import type { StepId, ProjectTier } from "@/_config/pipeline-flow";
 import type { StepUIProps } from "./_steps/_shared/types";
@@ -96,6 +97,8 @@ export default function ProjectPage() {
 
     // Hydrate the step-navigation store
     useStepNavigationStore.getState().loadFromServer(projectId);
+    // Inform coding-store which project is active so it can persist sessions to DB
+    useCodingStore.getState().setProjectId(projectId);
     // Init step-store project slug (hydration happens via step-specific snapshot)
     useStepStore.getState().setProjectSlug(projectId);
 
