@@ -67,13 +67,20 @@ const TIER_CODING_STYLE: Record<ProjectTier, string> = {
 
   M: `Pipeline tier **M** (split frontend/backend app): stack is \`frontend/\` (**Vite + React + React Router + Ant Design**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**). **NEVER use Next.js for M-tier.** The scaffold is prebuilt and already copied; **do not plan a Scaffolding task that recreates the repo structure**. Keep backend/data tasks reasonably broad; split **frontend by page or major flow** when the PRD lists multiple surfaces — first an **app shell/layout** task, then page-level tasks. Add an **early contracts/client** task so API shapes and the web client stay aligned with PRD requirement IDs. Coding tasks should implement pages, API modules, and middleware files, but final registration closure is handled later by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\`.`,
 
-  L: `Pipeline tier **L** (broad product): expect **thorough** coverage across phases the PRD actually requires — scaffolding, data, auth, backend services, frontend, integration, infrastructure — but **only** where the documents call for them; still derive *how many* tasks from requirement breadth, not from a quota.`,
+  L: `Pipeline tier **L** (production-grade full-stack): same stack as M — \`frontend/\` (**Vite + React + React Router + Tailwind**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**, NOT Fastify, NOT a pnpm monorepo). **NEVER use Next.js or Fastify for L-tier.** L tier additionally ships **production layers** that M does not: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue with BullMQ-shaped API and in-process fallback), \`backend/src/config/logger.ts\` (pino) + \`backend/src/middlewares/requestLogger.ts\`, \`backend/src/middlewares/rateLimit.ts\`, and a \`docker-compose.yml\` that brings up postgres + redis by default. Expect **thorough** coverage across phases the PRD actually requires — scaffolding, data, auth, backend services, **background workers**, frontend, integration, infrastructure — but only where the documents call for them; derive *how many* tasks from requirement breadth, not a quota. Any background-job / async-pipeline feature MUST register its worker through \`backend/src/workers/index.ts\` and use \`enqueueJob\` / \`registerWorker\` from \`backend/src/queue/inProcessQueue.ts\`; do NOT plan a task that introduces a parallel queue or worker bootstrap. Reuse the M-tier coarse-grained task shape (one Data Layer task, one Backend Services task per bounded context, app-shell + page-level frontend tasks); do not split per endpoint or per tiny component. Final registration closure is still handled by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\` — same as M.`,
 };
 
-function mTierPhaseGuide(): string {
+/**
+ * Phase + canonical-file guide shared by M and L tiers. They share the same
+ * stack (Vite + React + Koa + Sequelize + Postgres) and the same flat
+ * `frontend/` + `backend/` layout, so the task-shape rules are identical;
+ * L-tier additional layers (workers, queue, pino logger, rate limit) are
+ * appended via `lTierAddendum()` below.
+ */
+function flatStackPhaseGuide(): string {
   return `
 
-## Tier M — phases and task shape
+## Tier M / L — phases and task shape
 Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase** labels (merge if empty):
 - **Scaffolding** — Only if the PRD needs **extra** tooling not already in the template; otherwise **omit** or fold into **Integration**. Never plan \"greenfield\" recreation of \`frontend/\` or \`backend/\`.
 - **Data Layer** — Prefer **one** broad task: Sequelize models, migrations/bootstrap SQL if needed, request validation, and persistence wiring in \`backend/src\`.
@@ -92,16 +99,16 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
 - **Integration** — **Optional** single task: Vite proxy assumptions, Koa CORS/auth headers, frontend API client error handling, and env/config alignment between frontend and backend.
 - **Testing** — **Do not** add separate tasks with phase "Testing". Instead, every P0/P1 implementation task MUST include an embedded \`tddPlan.tests[]\` array so Test Writer / Runtime Executor can create RED/GREEN evidence for that task.
 
-**Bad for M:**
+**Bad for M / L:**
 - separate tasks per endpoint or per tiny UI component, or \"create frontend/package.json from scratch\";
 - bundling a multi-venue / multi-API pipeline (e.g. \"Implement feed aggregation pipeline and APIs\" doing HackerNews + Google News + Jina + OpenAI + Polymarket + HyperLiquid + Deribit + BullMQ + SSE + REST routes all in one task — this MUST be split, see External API complexity split rule).
 
-**Good for M:**
+**Good for M / L:**
 - one contracts/client task, one app-shell/layout task, one broad backend services task, then page-level tasks like "Implement Dashboard view" and "Implement Project detail flow";
 - when a multi-API pipeline exists, split it into 3 tasks like "Build external API clients for {services}", "Implement {pipeline-name} orchestration", "Add {pipeline-name} HTTP routes + SSE streaming".
 
-## Tier M — scaffold utilities are CANONICAL (do not re-plan)
-The M-tier scaffold already provides the following files. NEVER plan a task whose subSteps create or "redesign" these — feature tasks must \`reads\` / \`modifies\` them only.
+## Tier M / L — scaffold utilities are CANONICAL (do not re-plan)
+The scaffold already provides the following files. NEVER plan a task whose subSteps create or "redesign" these — feature tasks must \`reads\` / \`modifies\` them only.
 - \`frontend/src/api/client.ts\` — the ONLY HTTP client. Never plan \`frontend/src/utils/apiClient.ts\`, \`frontend/src/utils/api.ts\`, \`frontend/src/lib/http.ts\`, or any other parallel HTTP wrapper.
 - \`backend/src/types/koa.d.ts\` — global \`koa\` module augmentation that types \`ctx.request.body\`. Never plan a duplicate augmentation file in feature scope.
 - \`backend/src/utils/jwt.ts\` — canonical \`signJwt\` / \`verifyJwt\`. Never plan a custom JWT helper file in feature tasks.
@@ -112,9 +119,36 @@ When a task needs JWT, body parsing, narrowing, or HTTP requests, list the relev
 `;
 }
 
+/**
+ * L-tier ONLY supplement: workers, queue, pino logger, rate limit, docker.
+ * Appended after `flatStackPhaseGuide()` so the LLM treats them as additional
+ * deliverables on top of the shared M/L base.
+ */
+function lTierAddendum(): string {
+  return `
+
+## Tier L — production layers (in addition to the M / L base above)
+The L-tier scaffold ships these files. NEVER plan a task whose subSteps recreate them.
+
+- \`backend/src/config/logger.ts\` — pino instance + \`childLogger({ requestId, ... })\`. Feature code MUST use \`ctx.state.log\` inside HTTP handlers and \`childLogger(...)\` inside workers. Do NOT add \`console.log\` to feature code.
+- \`backend/src/middlewares/requestLogger.ts\` — generates / propagates \`requestId\`, attaches a child logger to \`ctx.state.log\`, logs request completion. Already wired in \`app.ts\` first.
+- \`backend/src/middlewares/rateLimit.ts\` — \`createRateLimit({ windowMs, max })\`. Apply per-route via \`router.use(createRateLimit({...}))\` inside a module's routes file. Do NOT plan a parallel rate-limit helper.
+- \`backend/src/queue/inProcessQueue.ts\` — \`enqueueJob<TInput, TOutput>(queueName, payload)\` returns a \`runId\`. \`registerWorker(queueName, handler, options?)\` registers a worker. Worker bootstrap lives in \`backend/src/workers/index.ts\` — \`startAllWorkers()\` is invoked by \`server.ts\` **before** \`app.listen(...)\`.
+- \`backend/src/workers/index.ts\` — central worker registry. Any new background-job feature MUST register its worker here. Do NOT plan a separate worker bootstrap file.
+- \`docker-compose.yml\` — brings up \`postgres\` + \`redis\` (host-mapped 5432 / 6379). \`--profile full\` additionally builds backend + frontend images. Feature tasks should NOT plan a parallel \`docker-compose.yml\`.
+- \`frontend/src/api/safeArray.ts\` — \`safeArray()\` / \`mapSafe()\` / \`hasItems()\`. Frontend page tasks MUST use these when rendering API-sourced lists; do NOT inline \`(data?.items ?? []).map(...)\` repeatedly.
+
+### L-tier specific task-shape requirements
+- **Background job task** = ONE task that delivers ALL of: (a) the worker file under \`backend/src/workers/<feature>Worker.ts\`, (b) the worker registration line in \`backend/src/workers/index.ts\`, (c) the public enqueue + status endpoint in \`backend/src/api/modules/<feature>/\`, (d) the SSE / polling consumer in \`frontend/src\`, (e) the structured \`logger.info({ ... }, "<event>")\` lines at start / external-call / success / fail / complete, (f) the \`inproc:*\` runId pass-through in the response. Do NOT split (a)-(f) across tasks — they are tightly coupled.
+- **Auth / rate limiting**: protect mutating routes by composing \`createRateLimit(...)\` with the auth middleware in the module's routes file; do NOT wrap them in a new top-level middleware.
+`;
+}
+
 function buildSystemPrompt(tier: ProjectTier, scaffoldBlock?: string): string {
   const tierStyle = TIER_CODING_STYLE[tier];
-  const mGuide = tier === "M" ? mTierPhaseGuide() : "";
+  const phaseGuide =
+    tier === "M" || tier === "L" ? flatStackPhaseGuide() : "";
+  const lAddendum = tier === "L" ? lTierAddendum() : "";
   const scaffoldSection =
     scaffoldBlock && scaffoldBlock.trim().length > 0
       ? `\n${scaffoldBlock.trim()}\n`
@@ -140,20 +174,15 @@ Before generating tasks, analyze the PRD to determine the project type:
    → Do NOT generate "Data Layer", "Backend Services", "Auth & Gateway", "Infrastructure", or "Integration" tasks.
    → Do NOT use Prisma, API routes, Docker, Kubernetes, or any server-side technology.
 
-2. **Full-stack with SSR/API** — The PRD explicitly requires server-side rendering, API routes, or Next.js features.
-   → **This type is ONLY allowed for L-tier projects.** For S-tier and M-tier, ALWAYS use type 3 below instead.
-   → Use **Next.js + TypeScript + Tailwind CSS** (L-tier only).
-   → All phases are allowed.
-
-3. **Full-stack with separate backend** — The PRD requires persistence, APIs, user data, or a separate backend service.
+2. **Full-stack with separate backend** — The PRD requires persistence, APIs, user data, or a separate backend service.
    → **S-tier**: Vite + React frontend with Express/Node backend in a single repo.
    → **M-tier**: **Koa + Sequelize** backend in \`backend/\`, **Vite + React** frontend in \`frontend/\`. **NEVER use Next.js for M-tier.** **NEVER use Prisma** — Prisma's binary footprint and separate migration runner are not supported here. All persistence goes through Sequelize models, associations, and migrations.
-   → **L-tier**: Falls here only if SSR is NOT required; otherwise use type 2.
+   → **L-tier**: **same stack as M-tier** (Koa + Sequelize backend in \`backend/\`, Vite + React frontend in \`frontend/\`) PLUS production layers: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue, BullMQ-shaped, with in-process fallback), pino logger (\`backend/src/config/logger.ts\`) wired via \`requestLoggerMiddleware\`, \`createRateLimit\` middleware, and \`docker-compose.yml\` running postgres + redis. **NEVER use Next.js, Fastify, or a pnpm monorepo for L-tier** — that is the old layout and no longer exists. **NEVER use Prisma** at any tier.
    → All phases are allowed except **Testing** (do not emit phase "Testing"). Backend Services phase is **mandatory** — see rule below.
 
 ## CRITICAL: Mandatory phases for full-stack projects
-For any full-stack project (types 2 or 3 above), the output MUST contain:
-- At least **one task with phase "Backend Services"** — implementing the actual API routes, controllers, and domain logic in the backend source tree (\`backend/src\`, \`apps/api/src\`, or equivalent for the selected tier). The scaffold ships starter shells; your task adds the feature code.
+For any full-stack full-stack project, the output MUST contain:
+- At least **one task with phase "Backend Services"** — implementing the actual API routes, controllers, and domain logic in \`backend/src\`. The scaffold ships starter shells; your task adds the feature code.
 
 ## CRITICAL: OAuth / social-login wiring (scaffold ships SDK; you wire it)
 The scaffold's optional-feature layer (\`scaffolds/<tier>/_optional/auth-*\`) is automatically copied into the project when the kickoff resource detector declares a matching trigger env (e.g. \`VITE_PRIVY_APP_ID\` → \`auth-privy\`). When applied, the scaffold has ALREADY shipped:
@@ -223,7 +252,7 @@ Each split task should typically create **2–4 files**. Use \`dependencies\` to
 
 The same split applies to the Markets scanner pipeline (Twitter API + Jina + OpenAI + 3 venues). If both Feed and Markets pipelines exist in the PRD, the **client layer task can be shared** between them (one task creates the clients, both pipeline tasks read them).
 
-**The scaffold does NOT implement your features.** The scaffold only provides the project skeleton (package.json, tsconfig, app shell). Every endpoint, every business rule, every page must be coded in Backend Services or Frontend tasks. Do not omit Backend Services because the scaffold already has \`backend/\`, \`frontend/\`, \`apps/api\`, or \`apps/web\` — those are starter shells, not implemented features.
+**The scaffold does NOT implement your features.** The scaffold only provides the project skeleton (package.json, tsconfig, app shell, and at L-tier the queue / logger / rate-limit infrastructure). Every endpoint, every business rule, every page must be coded in Backend Services or Frontend tasks. Do not omit Backend Services because the scaffold already has \`backend/\` and \`frontend/\` — those are starter shells, not implemented features.
 
 ## TDD seed plan — REQUIRED for P0/P1 tasks
 Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in each P0/P1 task:
@@ -259,7 +288,7 @@ Example \`tddPlan\`:
 
 ## Project tier hint (style only — not task count)
 ${tierStyle}
-${mGuide}${scaffoldSection}
+${phaseGuide}${lAddendum}${scaffoldSection}
 ## Output Format — strict JSON array
 
 You MUST output ONLY a JSON array (no markdown fences, no explanation, no preamble).
@@ -329,6 +358,12 @@ Field rules:
   - "reads": files this task only imports or references without editing.
   - CRITICAL: A file that appears in any other task's "creates" MUST appear in this task's "modifies" or "reads", NEVER in "creates" again. No file path may appear in "creates" across more than one task.
 - **dependencies**: array of task IDs that must be done first (e.g. ["T-001"]).
+  - Prefer a **single direct dependency** (the immediate predecessor). Only list multiple
+    dependencies when the task truly cannot start before **multiple independent** predecessors
+    are all complete.
+  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002,
+    and T-002 depends on T-001, T-003 should NOT also list T-001 — the dependency chain is
+    implicit through T-002.
 - **priority**: "P0" (must have), "P1" (should have), "P2" (nice to have).
 - **subSteps**: array of 2-6 concrete implementation steps. Each step has:
   - "step": sequential number (1, 2, 3...)
@@ -356,22 +391,15 @@ Field rules:
 The scaffold is **already copied** from a prebuilt template before coding begins.
 - **Do NOT generate a Scaffolding task** that recreates the project from scratch — the skeleton already exists.
 - If a Scaffolding task is needed at all, it should ONLY make small alignment changes (e.g. add env files, adjust scripts) on top of the existing skeleton.
-- **M-tier** uses \`frontend/\` (**React + Vite**) and \`backend/\` (**Koa + Sequelize**). **NEVER use Next.js** for M-tier projects. **NEVER introduce Prisma** — use Sequelize models and migrations only.
-- **L-tier** uses **Next.js** for frontend and **Fastify** for backend in a pnpm monorepo.
+- **M-tier and L-tier BOTH use the same stack and layout**: \`frontend/\` (**React + Vite + React Router + Tailwind**) and \`backend/\` (**Koa + Sequelize + PostgreSQL**). **NEVER use Next.js, Fastify, or pnpm monorepo** for M or L. **NEVER introduce Prisma** — use Sequelize models and migrations only.
+- The only difference: L-tier additionally ships \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue), pino logger + request logger middleware, rate-limit middleware, and a richer \`docker-compose.yml\` (postgres + redis by default). Treat those as **already shipped** — never plan a task that recreates them.
 
 ### For S-tier (single app) projects:
 The scaffold is also prebuilt (Vite + React + TypeScript + Tailwind CSS). If a Scaffolding task exists, it should only extend the existing template.
 - **Build tool**: Vite with @vitejs/plugin-react. NEVER use create-react-app, react-scripts, or Next.js.
 - **Import convention** (applies to ALL subsequent tasks): all cross-directory imports inside \`src/\` use \`@/\` alias (e.g. \`import Button from '@/components/Button'\`), never relative \`../\` paths.
 
-### For Next.js projects (ONLY L-tier or when SSR is explicitly required):
-- **Build tool**: Next.js
-- **package.json**: scripts: { "dev": "next dev", "build": "next build", "start": "next start" }
-- **next.config.mjs** or **next.config.ts**
-- **src/app/layout.tsx** and **src/app/page.tsx** (App Router)
-- **Tailwind CSS**: setup with postcss
-
-If a scaffolding task is generated, its acceptanceCriteria MUST include: "npm install && npm run build succeeds without errors" and "npm run dev starts the dev server".
+If a scaffolding task is generated, its acceptanceCriteria MUST include: "pnpm install && pnpm build succeeds without errors" and "pnpm dev starts the dev server".
 
 ## CRITICAL: Route / Module / Middleware Registration Ownership
 Coding tasks should **implement feature files**, but they should **not** perform the final shared-entry registration closure.
@@ -385,7 +413,7 @@ Coding tasks should **implement feature files**, but they should **not** perform
 - Do **NOT** require \`frontend/src/router.tsx\` in \`files.modifies\` for page registration.
 - Implement the page/view/component files and any local navigation UI, but defer final route registration to \`integrationVerifyAndFix\`.
 - acceptanceCriteria should verify the page/component implementation itself, not final path reachability through the global router.
-- **Directory convention (M-tier)**: All page-level view files MUST be placed under \`frontend/src/views/\` with a **flat** structure (e.g. \`frontend/src/views/LoginPage.tsx\`, \`frontend/src/views/DashboardPage.tsx\`). NEVER use \`frontend/src/pages/\` — that is a Next.js convention. NEVER nest into subdirectories like \`frontend/src/views/auth/\`; keep every page file directly under \`frontend/src/views/\`.
+- **Directory convention (M-tier and L-tier)**: All page-level view files MUST be placed under \`frontend/src/views/\` with a **flat** structure (e.g. \`frontend/src/views/LoginPage.tsx\`, \`frontend/src/views/DashboardPage.tsx\`). NEVER use \`frontend/src/pages/\` — that is a Next.js convention. NEVER nest into subdirectories like \`frontend/src/views/auth/\`; keep every page file directly under \`frontend/src/views/\`.
 
 **Final registration closure owner:**
 - \`integrationVerifyAndFix\` is responsible for scanning and registering:
@@ -438,7 +466,7 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
   - Prefer tasks that create **≤ 4 files** in \`files.creates\`. Tasks with 5–8 creates are acceptable only if all files belong to the same narrow domain (e.g. a controller + routes + service + validation quartet for one module). If a task would create 5+ files spanning multiple domains (e.g. a job worker + external API clients + an SSE controller + a DB model), split it.
 - Frontend task granularity:
   - Create one **app shell/layout** frontend task first (app shell, navigation/layout wiring).
-  - Do not assign final edits to shared route registries (\`frontend/src/router.tsx\`, \`apps/web/src/App.tsx\`, or \`src/routes.tsx\`) to Coding tasks; \`integrationVerifyAndFix\` handles final registration closure.
+  - Do not assign final edits to shared route registries (\`frontend/src/router.tsx\` or \`src/routes.tsx\`) to Coding tasks; \`integrationVerifyAndFix\` handles final registration closure.
   - Then split frontend implementation by **page/flow** (one task per page), not by tiny component.
 - **Frontend API binding (CRITICAL)**: Every frontend page task that renders data from the backend MUST:
   1. List in its \`description\` the specific API endpoints it consumes (e.g. \`GET /api/users\`, \`POST /api/orders\`).

@@ -6,6 +6,7 @@ import { usePipelineStore } from "@/store/pipeline-store";
 import type { StepResult } from "@/lib/pipeline/types";
 
 import PushGeneratedCodeSection from "./PushGeneratedCodeSection";
+import DeploySection from "./DeploySection";
 import type { KickoffStepData } from "./types";
 
 interface Props {
@@ -143,6 +144,9 @@ export default function KickoffSummaryView({
 
       {/* ─── Push generated code to GitHub ─── */}
       <PushGeneratedCodeSection codeOutputDir={codeOutputDir} />
+
+      {/* ─── Auto deploy to Dokploy ─── */}
+      <DeploySection codeOutputDir={codeOutputDir} />
     </div>
   );
 }

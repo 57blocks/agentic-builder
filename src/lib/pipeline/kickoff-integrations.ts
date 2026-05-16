@@ -4,6 +4,7 @@ import {
   type WebhookCallResult,
 } from "./kickoff-webhooks";
 import { saveKickoffRepoMetadata } from "./push-kickoff-repo";
+import { createKickoffDatabase } from "./kickoff-database";
 
 const API_TIMEOUT_MS = 45_000;
 
@@ -293,6 +294,34 @@ export async function runKickoffIntegrations(params: {
       "",
     );
     metadata.git = { skipped: true };
+  }
+
+  // Provision a per-app database in the shared PostgreSQL instance
+  const sharedPgConn = process.env.SHARED_PG_CONNECTION_STRING?.trim();
+  if (sharedPgConn) {
+    const dbAppName = slugForGithubRepo(params.featureBrief, params.runId);
+    const dbResult = await createKickoffDatabase({
+      projectRoot: process.cwd(),
+      appName: dbAppName,
+      connectionString: sharedPgConn,
+    });
+    metadata.database = dbResult.ok
+      ? { ok: true, appName: dbAppName }
+      : { ok: false, error: dbResult.error };
+    lines.push("### Database (shared PostgreSQL)");
+    if (dbResult.ok) {
+      lines.push(`- Provisioned database \`${dbAppName}\` (connection saved to \`.blueprint/kickoff-database.json\`)`);
+    } else {
+      lines.push(`- Failed: ${dbResult.error ?? "unknown"}`);
+    }
+    lines.push("");
+  } else {
+    lines.push(
+      "### Database",
+      "_Skipped — set `SHARED_PG_CONNECTION_STRING` to provision a per-app database._",
+      "",
+    );
+    metadata.database = { skipped: true };
   }
 
   const jiraEnabled = process.env.PROJECT_KICKOFF_JIRA_ENABLED === "true";

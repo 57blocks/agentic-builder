@@ -42,6 +42,8 @@ type Props = {
   implguideContent?: string;
   /** Optional id of the current pipeline run, threaded into the LLM session id. */
   runId?: string;
+  /** When true and no saved requirements exist yet, auto-trigger detection on mount. */
+  autoDetect?: boolean;
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -52,6 +54,7 @@ export default function ResourceRequirementsPanel({
   sysdesignContent,
   implguideContent,
   runId,
+  autoDetect,
 }: Props) {
   const [items, setItems] = useState<ResourceRequirement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +89,14 @@ export default function ResourceRequirementsPanel({
       cancelled = true;
     };
   }, []);
+
+  // Auto-trigger detection when no saved requirements exist and autoDetect is on.
+  useEffect(() => {
+    if (!autoDetect || detecting || loading || items.length > 0) return;
+    if (!prdContent.trim()) return;
+    void handleDetect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDetect, loading]);
 
   const handleDetect = useCallback(async () => {
     if (detecting || !prdContent.trim()) return;

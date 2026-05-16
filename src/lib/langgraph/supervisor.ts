@@ -1385,8 +1385,7 @@ async function scaffoldFix(state: SupervisorState) {
       content: `You are a Senior Software Architect. Fix the build errors below so that "npm install && npm run build" succeeds.
 Rules:
 - NEVER use create-react-app or react-scripts.
-- For M-tier split projects: frontend is Vite + React in frontend/, backend is Koa + TypeScript in backend/. NEVER introduce Next.js.
-- For L-tier monorepo projects: frontend is Next.js (apps/web), backend is Fastify (apps/api).
+- For M-tier and L-tier projects (same stack): frontend is Vite + React in frontend/, backend is Koa + TypeScript in backend/. NEVER introduce Next.js or Fastify. L-tier additionally ships backend/src/workers/, backend/src/queue/inProcessQueue.ts, pino logger, requestLogger + rateLimit middlewares.
 - For Vite projects: index.html must be in the project root, src/main.tsx is the entry point.
 - Output ONLY corrected/new files using \`\`\`file:<relative-path>\n<contents>\n\`\`\` format.
 - Output ALL files that need changes, not just the ones with errors.`,

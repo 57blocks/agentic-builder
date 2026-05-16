@@ -9,6 +9,7 @@ import { STEP_REGISTRY } from "./_steps/step-registry";
 import { getStepConfig } from "@/_config/pipeline-flow";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
+import { useCodingStore } from "@/store/coding-store";
 import { loadAllStepSnapshots } from "./_steps/_shared/snapshot-context";
 import type { StepId, ProjectTier } from "@/_config/pipeline-flow";
 import type { StepUIProps } from "./_steps/_shared/types";
@@ -96,6 +97,8 @@ export default function ProjectPage() {
 
     // Hydrate the step-navigation store
     useStepNavigationStore.getState().loadFromServer(projectId);
+    // Inform coding-store which project is active so it can persist sessions to DB
+    useCodingStore.getState().setProjectId(projectId);
     // Init step-store project slug (hydration happens via step-specific snapshot)
     useStepStore.getState().setProjectSlug(projectId);
 
@@ -176,17 +179,22 @@ export default function ProjectPage() {
     };
   }, [stepEntry, stepResults, activeStep, stepConfig, loading, projectId, handleStepChange]);
 
+  const dragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "drag" };
+  const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "no-drag" };
+
   return (
     <div className="flex flex-col min-h-screen h-screen! relative bg-[#f8f9ff]">
       {/* ── Header with Breadcrumb ── */}
-      <header className="flex shrink-0 items-start justify-between border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-4 relative z-10">
-        <PipelineBreadcrumb
-          activeStep={activeStep}
-          onStepChange={handleStepChange}
-          tier={tier}
-          stepStates={stepStates}
-        />
-        <div className="flex items-center gap-1 pt-3 pr-2 shrink-0">
+      <header className="flex shrink-0 items-start justify-between border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-4 relative z-10" style={dragStyle}>
+        <div style={noDragStyle}>
+          <PipelineBreadcrumb
+            activeStep={activeStep}
+            onStepChange={handleStepChange}
+            tier={tier}
+            stepStates={stepStates}
+          />
+        </div>
+        <div className="flex items-center gap-1 pt-3 pr-2 shrink-0" style={noDragStyle}>
           <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
             <Monitor className="size-4" />
           </Button>

@@ -48,9 +48,10 @@ describe("plannedSharedSchemaPaths", () => {
     ]);
   });
 
-  it("L-tier maps to packages/shared", () => {
+  it("L-tier maps to frontend and backend (same flat layout as M)", () => {
     expect(plannedSharedSchemaPaths("L")).toEqual([
-      "packages/shared/src/schema.ts",
+      "frontend/src/shared/schema.ts",
+      "backend/src/shared/schema.ts",
     ]);
   });
 });
@@ -90,18 +91,26 @@ describe("distributeSharedSchema — happy paths", () => {
     expect(fe).toBe(be);
   });
 
-  it("L-tier writes to packages/shared/src/schema.ts", async () => {
+  it("L-tier writes identical copies to frontend and backend (same as M)", async () => {
     await seedSchema(SCHEMA);
     const r = await distributeSharedSchema("L", outputDir, {
       sourceDir: agenticRoot,
     });
     expect(r.found).toBe(true);
-    expect(r.written).toEqual(["packages/shared/src/schema.ts"]);
-    const written = await fs.readFile(
-      path.join(outputDir, "packages/shared/src/schema.ts"),
+    expect(r.written).toEqual([
+      "frontend/src/shared/schema.ts",
+      "backend/src/shared/schema.ts",
+    ]);
+    const fe = await fs.readFile(
+      path.join(outputDir, "frontend/src/shared/schema.ts"),
       "utf8",
     );
-    expect(written).toBe(SCHEMA);
+    const be = await fs.readFile(
+      path.join(outputDir, "backend/src/shared/schema.ts"),
+      "utf8",
+    );
+    expect(fe).toBe(SCHEMA);
+    expect(be).toBe(SCHEMA);
   });
 
   it("creates intermediate directories if missing", async () => {

@@ -1,0 +1,85 @@
+# L-tier docker-compose
+#
+# Two modes:
+#   1. **Local dev** (`docker compose up`):
+#      Brings up Postgres + Redis only — run backend/frontend natively
+#      (`pnpm dev`) so you keep hot reload. This is the recommended flow.
+#
+#   2. **Full stack** (`docker compose --profile full up`):
+#      Builds and runs backend + frontend images too. Matches the production
+#      shape so you can sanity-check the image before pushing.
+#
+# Why Redis is included by default: L-tier projects routinely run BullMQ-backed
+# background pipelines (aggregators, scanners, digest builders). The
+# `USE_REDIS_QUEUE=1` env flag in backend tells `src/queue/` to route through
+# Redis instead of the in-process EventEmitter. Without Redis in compose,
+# every dev would have to spin one up by hand → friction.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    profiles: ["full"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+      USE_REDIS_QUEUE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

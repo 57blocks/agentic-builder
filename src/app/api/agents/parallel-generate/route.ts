@@ -9,7 +9,7 @@ import {
   VerifierAgent,
 } from "@/lib/agents";
 import type { AgentResult } from "@/lib/agents";
-import { getDesignStylePreset } from "@/lib/pipeline/design-style-presets";
+import { findDesignStylePreset } from "@/lib/pipeline/design-style-presets";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
@@ -189,14 +189,18 @@ export async function POST(request: NextRequest) {
   const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
   const tierConstraint =
     TIER_STACK_CONSTRAINT[effectiveTier] ?? TIER_STACK_CONSTRAINT.M;
-  const stylePreset = getDesignStylePreset(designStyleId);
+  // Only inject a preset prompt when the id matches a known hardcoded preset.
+  // AI-generated style ids (e.g. "style-1") intentionally do NOT match, so we
+  // fall through to an empty string and let the DesignAgent SYSTEM_PROMPT
+  // default to its light-mode aesthetic.
+  const stylePreset = findDesignStylePreset(designStyleId);
   // designDirectionPrompt overrides the preset's designSpecPrompt when provided
   const designDirectionPrompt = typeof (body as Record<string, unknown>).designDirectionPrompt === "string"
     ? (body as Record<string, unknown>).designDirectionPrompt as string
     : undefined;
   const agentMap = buildAgentMap(
     tierConstraint,
-    designDirectionPrompt ?? stylePreset.designSpecPrompt,
+    designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
     styleReferenceImageBase64,
   );
 
@@ -262,7 +266,7 @@ export async function POST(request: NextRequest) {
       const hasSysDesign = selectedDocs.includes("sysdesign");
       const hasImplGuide = selectedDocs.includes("implguide");
       const hasPencil = selectedDocs.includes("pencil");
-      const pencilStyleAugment = stylePreset.pencilPrompt;
+      const pencilStyleAugment = stylePreset?.pencilPrompt ?? "";
 
       // Phase A: independent docs (trd, design, qa, verify can all run in parallel)
       const phaseA = selectedDocs.filter(
