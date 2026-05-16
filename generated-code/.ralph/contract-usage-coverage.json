@@ -1,34 +1,56 @@
 {
   "policy": "prune",
   "totals": {
-    "contractEntries": 41,
+    "contractEntries": 7,
     "frontendCalls": 0,
     "consistent": 0,
     "surplus": 0,
-    "frontendWiringMissing": 19,
+    "frontendWiringMissing": 6,
     "contractGap": 0,
     "frontendRogue": 0,
-    "adminSkipped": 22
+    "adminSkipped": 1
   },
   "classifications": [
     {
       "case": "frontend-wiring-missing",
       "contract": {
         "method": "POST",
-        "endpoint": "/api/auth/login",
+        "endpoint": "/api/sessions",
         "audience": "user",
-        "prdJustification": "All functional pages require authentication. Unauthenticated users see only login, access request, pending approval, and help pages."
+        "prdJustification": "FR-AP01 (P0): Endpoint to create a new session record (POST /api/sessions)."
       },
       "prdJustified": true,
-      "reason": "prdJustification-quote-found"
+      "reason": "prd-keyword-hit:sessions"
+    },
+    {
+      "case": "frontend-wiring-missing",
+      "contract": {
+        "method": "GET",
+        "endpoint": "/api/sessions",
+        "audience": "user",
+        "prdJustification": "FR-AP02 (P0): Endpoint to list sessions with pagination and optional filters (GET /api/sessions)."
+      },
+      "prdJustified": true,
+      "reason": "prd-keyword-hit:sessions"
+    },
+    {
+      "case": "admin-audience-skipped",
+      "contract": {
+        "method": "GET",
+        "endpoint": "/api/health",
+        "audience": "admin",
+        "prdJustification": "GET /api/health service readiness/liveness for deployment checks"
+      },
+      "prdJustified": true,
+      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
     },
     {
       "case": "frontend-wiring-missing",
       "contract": {
         "method": "POST",
-        "endpoint": "/api/auth/logout",
+        "endpoint": "/api/auth/login",
         "audience": "user",
-        "prdJustification": "Session management: Rotate session on login, logout invalidation, TTL, and device-aware revocation support."
+        "prdJustification": "BASELINE — implicit infrastructure for any authenticated backend (login/refresh/logout/me). Not enumerated in PRD prose but required for every user flow that hits a bearer-guarded route."
       },
       "prdJustified": true,
       "reason": "prd-keyword-hit:auth"
@@ -36,409 +58,13 @@
     {
       "case": "frontend-wiring-missing",
       "contract": {
-        "method": "GET",
-        "endpoint": "/api/auth/session",
-        "audience": "user",
-        "prdJustification": "All functional pages require authentication. Unauthenticated users see only login, access request, pending approval, and help pages."
-      },
-      "prdJustified": true,
-      "reason": "prdJustification-quote-found"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
         "method": "POST",
-        "endpoint": "/api/auth/request-access",
+        "endpoint": "/api/auth/logout",
         "audience": "user",
-        "prdJustification": "Account registration collects name, company, work email, and access purpose; email domain checked against allowlist to route to pending approval or manual review."
+        "prdJustification": "BASELINE — implicit infrastructure for any authenticated backend (login/refresh/logout/me). Not enumerated in PRD prose but required for every user flow that hits a bearer-guarded route."
       },
       "prdJustified": true,
-      "reason": "prdJustification-quote-found"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/auth/pending-status",
-        "audience": "user",
-        "prdJustification": "Unauthenticated users see only login, access request, pending approval, and help pages."
-      },
-      "prdJustified": true,
-      "reason": "prdJustification-quote-found"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/monitor/summary",
-        "audience": "user",
-        "prdJustification": "Open monitor | target: /monitor | assert: Dashboard loads and internal-only navigation entries are not visible"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:monitor"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/monitor/trend",
-        "audience": "user",
-        "prdJustification": "Open monitor | target: /monitor | assert: Dashboard loads and internal-only navigation entries are not visible"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:monitor"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/monitor/alerts-feed",
-        "audience": "user",
-        "prdJustification": "Open monitor | target: /monitor | assert: Dashboard loads and internal-only navigation entries are not visible"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:monitor"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/stablecoins/:symbol/detail",
-        "audience": "user",
-        "prdJustification": "Open stablecoin detail | target: /stablecoins/USDC | assert: Reserve Review Status module is not rendered for enterprise role"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:stablecoins"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/stablecoins/:symbol/history",
-        "audience": "user",
-        "prdJustification": "Switch historical tabs | target: Historical contribution and SPRI range tabs | assert: Charts update to selected period and data points change"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:stablecoins"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/stablecoins/:symbol/variables",
-        "audience": "user",
-        "prdJustification": "Expand variable details | target: Variable row, Expand All, Collapse All | assert: Expanded rows show definition, raw value, normalized score, rule summary, source, and updated time"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:stablecoins"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/stablecoins/:symbol/alerts",
-        "audience": "user",
-        "prdJustification": "Open alert timeline entry | target: Alert timeline item | assert: Related context is highlighted or scrolled into view"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:stablecoins"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/stablecoins/:symbol/review-status",
-        "audience": "user",
-        "prdJustification": "Open stablecoin detail | target: /stablecoins/USDC | assert: Reserve Review Status module is not rendered for enterprise role"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:stablecoins"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/scoring/run-cycle",
-        "audience": "admin",
-        "prdJustification": "POST /run-cycle"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/scoring/cycles/latest",
-        "audience": "admin",
-        "prdJustification": "GET /cycles/latest"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/scoring/variables",
-        "audience": "admin",
-        "prdJustification": "GET /variables"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/scoring/dimensions",
-        "audience": "admin",
-        "prdJustification": "GET /dimensions"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/reserve-review/queue",
-        "audience": "admin",
-        "prdJustification": "GET /queue"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/reserve-review/items/:id",
-        "audience": "admin",
-        "prdJustification": "GET /items/:id"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/reserve-review/items/:id/approve",
-        "audience": "admin",
-        "prdJustification": "POST /items/:id/approve"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/reserve-review/items/:id/edit-approve",
-        "audience": "admin",
-        "prdJustification": "POST /items/:id/edit-approve"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/reserve-review/items/:id/reject",
-        "audience": "admin",
-        "prdJustification": "POST /items/:id/reject"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/reserve-review/audit-trail",
-        "audience": "admin",
-        "prdJustification": "GET /audit-trail"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/datafeed/summary",
-        "audience": "admin",
-        "prdJustification": "GET /summary"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/datafeed/sources",
-        "audience": "admin",
-        "prdJustification": "GET /sources"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/datafeed/refresh-all",
-        "audience": "admin",
-        "prdJustification": "POST /refresh-all"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/feedback/mine",
-        "audience": "user",
-        "prdJustification": "GET /mine"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:feedback"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/feedback",
-        "audience": "user",
-        "prdJustification": "POST /"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:feedback"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "PATCH",
-        "endpoint": "/api/feedback/:id/status",
-        "audience": "admin",
-        "prdJustification": "PATCH /:id/status"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/admin/accounts/summary",
-        "audience": "admin",
-        "prdJustification": "Open account management | target: /admin/accounts | assert: Admin-only tabs for pending approvals, enterprise users, internal team, and domains are visible"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/admin/accounts/requests",
-        "audience": "admin",
-        "prdJustification": "Approve one request and reject another | target: Pending approvals actions | assert: User statuses update immediately and records move to correct lists"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/admin/accounts/requests/:id/approve",
-        "audience": "admin",
-        "prdJustification": "Approve one request and reject another | target: Pending approvals actions | assert: User statuses update immediately and records move to correct lists"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/admin/accounts/requests/:id/reject",
-        "audience": "admin",
-        "prdJustification": "Approve one request and reject another | target: Pending approvals actions | assert: User statuses update immediately and records move to correct lists"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/admin/accounts/invites",
-        "audience": "admin",
-        "prdJustification": "Invite a new user | target: Invite User action | assert: Invitation confirmation is shown for selected role"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "POST",
-        "endpoint": "/api/admin/accounts/domains",
-        "audience": "admin",
-        "prdJustification": "Add and remove domain with validation | target: Domain allowlist controls | assert: Valid domain changes persist; invalid domain input is blocked with validation message"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "DELETE",
-        "endpoint": "/api/admin/accounts/domains/:id",
-        "audience": "admin",
-        "prdJustification": "Add and remove domain with validation | target: Domain allowlist controls | assert: Valid domain changes persist; invalid domain input is blocked with validation message"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "admin-audience-skipped",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/admin/accounts/users",
-        "audience": "admin",
-        "prdJustification": "Open account management | target: /admin/accounts | assert: Admin-only tabs for pending approvals, enterprise users, internal team, and domains are visible"
-      },
-      "prdJustified": true,
-      "reason": "audience=admin — internal endpoint, frontend call coverage is not required"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/help/access-guidance",
-        "audience": "user",
-        "prdJustification": "Open access help | target: Enterprise Access Help Link | assert: Help overlay or /access-help page is displayed"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:help"
-    },
-    {
-      "case": "frontend-wiring-missing",
-      "contract": {
-        "method": "GET",
-        "endpoint": "/api/help/support",
-        "audience": "user",
-        "prdJustification": "GET /support"
-      },
-      "prdJustified": true,
-      "reason": "prd-keyword-hit:help"
+      "reason": "prd-keyword-hit:auth"
     },
     {
       "case": "frontend-wiring-missing",
