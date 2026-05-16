@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, History, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import StageInputBar from "@/components/StageInputBar";
+import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
 
@@ -140,6 +141,7 @@ export function PrdUI(props: StepUIProps) {
   const executeStep = useStepStore((s) => s.executeStep);
   const kickoffSessionId = useStepStore((s) => s.kickoffSessionId);
   const intentMeta = useStepStore((s) => s.steps.intent?.metadata as { classification?: { type?: string } } | undefined);
+  const setStepContent = useStepStore((s) => s.setStepContent);
   // Navigation
   const tier = useStepNavigationStore((s) => s.tier);
   const nextStep = getNextStep("prd", tier);
@@ -148,6 +150,13 @@ export function PrdUI(props: StepUIProps) {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSavingDoc, setIsSavingDoc] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
+  // ── Manual edit mode (raw markdown textarea) ──────────────────────────
+  const [isManualEditing, setIsManualEditing] = useState(false);
+  const [manualDraft, setManualDraft] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const manualTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   const prdHistoryRef = useRef<PrdSnapshot[]>(_prdHistoryStore);
   const prevIsDoneRef = useRef(false);
   const autoStartedRef = useRef(false);
@@ -207,7 +216,9 @@ export function PrdUI(props: StepUIProps) {
   useEffect(() => {
     const justCompleted = isDone && !prevIsDoneRef.current;
     if (justCompleted) {
-      const finalContent = step?.content ?? "";
+      // Strip the patch-highlight markers before persisting to history so
+      // the version diff stays clean.
+      const finalContent = stripChangeMarkers(step?.content ?? "");
       if (finalContent) {
         const versionNum = prdHistoryRef.current.length + 1;
         prdHistoryRef.current = [...prdHistoryRef.current, { content: finalContent, savedAt: new Date(), label: versionNum === 1 ? `v${versionNum} · Initial` : `v${versionNum} · Edited` }];
@@ -254,7 +265,13 @@ export function PrdUI(props: StepUIProps) {
     fetch("/api/agents/save-doc", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docId: "prd", content: step.content, codeOutputDir }),
+      // Strip the patch-highlight wrapper from the file written to disk —
+      // the markers are UI-only.
+      body: JSON.stringify({
+        docId: "prd",
+        content: stripChangeMarkers(step.content),
+        codeOutputDir,
+      }),
     })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
       .then((data) => { console.log("[PrdUI] PRD.md saved to generated-code", data); })
@@ -265,6 +282,100 @@ export function PrdUI(props: StepUIProps) {
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone]);
+
+  // ── Manual edit handlers ────────────────────────────────────────────
+  const startManualEdit = () => {
+    if (!isDone || isThisRunning || isSavingDoc) return;
+    // Strip change-highlight markers so the user edits clean markdown.
+    setManualDraft(stripChangeMarkers(step?.content ?? ""));
+    setManualError(null);
+    setShowDiff(false);
+    setIsManualEditing(true);
+    // Focus + scroll the textarea into view on next paint.
+    requestAnimationFrame(() => {
+      manualTextareaRef.current?.focus();
+      manualTextareaRef.current?.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
+    });
+  };
+
+  const cancelManualEdit = () => {
+    if (manualSaving) return;
+    if (manualDraft !== stripChangeMarkers(step?.content ?? "")) {
+      const ok = window.confirm("Discard your unsaved changes?");
+      if (!ok) return;
+    }
+    setIsManualEditing(false);
+    setManualDraft("");
+    setManualError(null);
+  };
+
+  const commitManualEdit = async () => {
+    const draft = manualDraft;
+    if (!draft.trim()) {
+      setManualError("PRD content cannot be empty.");
+      return;
+    }
+    setManualSaving(true);
+    setManualError(null);
+    try {
+      // 1. Update in-memory store immediately so the renderer reflects edits.
+      setStepContent("prd", draft);
+
+      // 2. Persist to disk (.blueprint/PRD.md or codeOutputDir).
+      const codeOutputDir = useStepStore.getState().codeOutputDir;
+      const res = await fetch("/api/agents/save-doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: "prd", content: draft, codeOutputDir }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // 3. Push a manual-edit snapshot into version history.
+      const versionNum = prdHistoryRef.current.length + 1;
+      prdHistoryRef.current = [
+        ...prdHistoryRef.current,
+        { content: draft, savedAt: new Date(), label: `v${versionNum} · Manual edit` },
+      ];
+
+      // 4. Sync tier badge if the user added/changed it.
+      const tierMatch = draft.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+      if (tierMatch) {
+        const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
+        const navStore = useStepNavigationStore.getState();
+        if (navStore.tier !== parsedTier) {
+          navStore.setTier(parsedTier);
+          const slug = props.projectSlug;
+          if (slug) {
+            fetch(`/api/projects/${slug}/step-navigation`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tier: parsedTier }),
+            }).catch(() => {});
+          }
+        }
+      }
+
+      setIsManualEditing(false);
+      setManualDraft("");
+    } catch (err) {
+      setManualError(err instanceof Error ? err.message : "Failed to save.");
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
+  // Warn before navigating away with unsaved edits.
+  useEffect(() => {
+    if (!isManualEditing) return;
+    const dirty = manualDraft !== stripChangeMarkers(step?.content ?? "");
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isManualEditing, manualDraft, step?.content]);
 
   const handleDownloadPdf = () => {
     if (!content || isPrinting) return;
@@ -309,12 +420,45 @@ export function PrdUI(props: StepUIProps) {
                 {isDone && <div className="flex items-center gap-4 mt-1">{step?.costUsd != null && <span className="text-[11px] text-[#94a3b8]">Cost: <span className="font-medium text-[#64748b]">${step.costUsd.toFixed(4)}</span></span>}</div>}
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {prdHistoryRef.current.length > 1 && <button onClick={() => setShowDiff(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1" title="View version history & diff"><History size={13} />{prdHistoryRef.current.length} versions</button>}
-                <button onClick={handleDownloadPdf} disabled={!isDone || isPrinting} className="flex items-center justify-center p-1.5 rounded-md text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Download PDF">{isPrinting ? <SpinnerIcon /> : <DownloadIcon />}</button>
+                {prdHistoryRef.current.length > 1 && <button onClick={() => setShowDiff(true)} disabled={isManualEditing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1 disabled:opacity-40" title="View version history & diff"><History size={13} />{prdHistoryRef.current.length} versions</button>}
+                {!isManualEditing && (
+                  <button
+                    onClick={startManualEdit}
+                    disabled={!isDone || isThisRunning || isSavingDoc}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Edit raw markdown"
+                  >
+                    <Pencil size={12} /> Edit
+                  </button>
+                )}
+                <button onClick={handleDownloadPdf} disabled={!isDone || isPrinting || isManualEditing} className="flex items-center justify-center p-1.5 rounded-md text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Download PDF">{isPrinting ? <SpinnerIcon /> : <DownloadIcon />}</button>
               </div>
             </div>
             <div className="p-8">
-              {error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
+              {isManualEditing ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between text-[12px] text-slate-500">
+                    <span className="flex items-center gap-1.5">
+                      <Pencil size={12} className="text-[#712ae2]" />
+                      Editing raw markdown — changes are saved to <code className="px-1 py-[1px] rounded bg-slate-100 text-slate-700">PRD.md</code> on Save.
+                    </span>
+                    <span className="text-[11px] text-slate-400">{manualDraft.length.toLocaleString()} chars</span>
+                  </div>
+                  <textarea
+                    ref={manualTextareaRef}
+                    value={manualDraft}
+                    onChange={(e) => setManualDraft(e.target.value)}
+                    spellCheck={false}
+                    disabled={manualSaving}
+                    className="w-full min-h-[60vh] resize-y font-mono text-[13px] leading-[1.6] text-[#1f2328] bg-white border border-slate-200 rounded-md p-4 focus:outline-none focus:border-[#712ae2] focus:ring-1 focus:ring-[#712ae2] disabled:bg-slate-50"
+                  />
+                  {manualError && (
+                    <div className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
+                      {manualError}
+                    </div>
+                  )}
+                </div>
+              ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
               : <MarkdownRenderer content={content} variant="prd" />}
@@ -325,13 +469,37 @@ export function PrdUI(props: StepUIProps) {
         </div>
       </div>
 
+      {isManualEditing ? (
+        <div className="flex items-center justify-end gap-3 px-8 py-4 border-t border-slate-200 bg-white">
+          <span className="text-[12px] text-slate-500 mr-auto">
+            {manualSaving ? "Saving…" : manualDraft !== stripChangeMarkers(step?.content ?? "") ? "Unsaved changes" : "No changes"}
+          </span>
+          <button
+            type="button"
+            onClick={cancelManualEdit}
+            disabled={manualSaving}
+            className="px-4 h-10 rounded-lg text-[#475569] hover:bg-slate-100 text-sm font-medium disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void commitManualEdit()}
+            disabled={manualSaving || !manualDraft.trim() || manualDraft === stripChangeMarkers(step?.content ?? "")}
+            className="flex items-center gap-2 px-4 h-10 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Check size={14} />
+            {manualSaving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      ) : (
       <StageInputBar
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
         actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => {
           // Fire-and-forget memory capture before navigating
-          const finalContent = step?.content ?? "";
+          const finalContent = stripChangeMarkers(step?.content ?? "");
           if (finalContent && kickoffSessionId) {
             const originalContent = prdHistoryRef.current[0]?.content ?? finalContent;
             fetch("/api/memory/prd/capture", {
@@ -349,6 +517,7 @@ export function PrdUI(props: StepUIProps) {
           if (nextStep) props.onNavigate(nextStep);
         }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
       />
+      )}
     </div>
   );
 }

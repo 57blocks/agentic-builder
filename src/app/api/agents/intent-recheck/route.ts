@@ -2,7 +2,13 @@ import { NextRequest } from "next/server";
 import { streamChatCompletion, resolveModel } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { classifyProject } from "@/lib/agents/shared/project-classifier";
+import { PRD_DIMENSIONS } from "@/lib/agents/intent/gap-checklist";
 import { fallbackIntentForm } from "./intent-fallback";
+
+// Generous timeout — 10-dim + per-concept prompt + json_object on a stream
+// can take longer than the default 30s, especially when many concepts are
+// drilled into. Setting this avoids the route being killed mid-response.
+export const maxDuration = 180;
 
 /**
  * POST /api/agents/intent-recheck
@@ -15,59 +21,71 @@ import { fallbackIntentForm } from "./intent-fallback";
  * { project_name, summary, gathered, questions }
  */
 
-const INTENT_RECHECK_SYSTEM_PROMPT = `You are a senior product analyst in a multi-turn clarification loop. Your goal is to ensure all 6 required items are fully understood before engineering begins.
+function buildSystemPrompt(): string {
+  const dimList = PRD_DIMENSIONS.map(
+    (d, i) =>
+      `  ${String.fromCharCode(65 + i)}. ${d.id} — ${d.title}. ${d.llmHint}`,
+  ).join("\n");
 
-## Required items (same as before)
-  A. core_goal      — The specific problem or need this product solves.
-  B. target_users   — Who the primary users are.
-  C. pain_points    — Frustrations, inefficiencies, or gaps this product eliminates.
-  D. mobile_support — Deployment target: web-only / mobile-responsive.
-  E. auth_method    — How users authenticate (or no login needed).
-  F. need_backend   — Whether a real backend is needed, or mock/static data is sufficient. This determines whether TRD and backend code will be generated. Ask this LAST.
+  const dimIds = PRD_DIMENSIONS.map((d) => `"${d.id}"`).join(" | ");
 
-## Your task
-You will receive the original project brief and the full Q&A conversation so far.
-1. Re-evaluate ALL 6 items considering every piece of information provided (brief + all answers).
-2. Mark each item as KNOWN or MISSING/AMBIGUOUS.
-3. For any item still MISSING or where the answer was vague/contradictory, generate a follow-up question.
-4. IMPORTANT: Always ask about \`need_backend\` LAST — first gather core_goal, target_users, pain_points, mobile_support, and auth_method.
-5. If ALL 6 items are clearly covered, return an empty questions array and set \`all_clear: true\`.
+  return `You are a senior product analyst in a clarification loop. The loop MUST converge — never let it run forever. Your output controls whether the user keeps answering or moves on to PRD generation.
 
-## Question format (same types as before)
-- radio   → exactly one answer (best for A: need_backend, E: mobile_support)
-- checkbox → one or more answers (best for F: auth_method providers)
-- text    → free-form (best for B, C, D when still unclear)
+## Required cross-cutting dimensions (Pass A — must be answered)
 
-For D: use radio with options ["Web only", "Mobile-responsive web"].
-For E: use checkbox with options ["Email / Password", "GitHub", "No login needed"].
-For F: use radio with options ["Yes, need a real backend (API + database)", "No, mock data is sufficient (frontend only)"].
+${dimList}
 
-## Output format (STRICT — return ONLY valid JSON, no prose outside the object)
+## Your task — strict convergence rules
+
+You will receive the original project brief and the full Q&A conversation so far. Count completed rounds = number of [USER] turns in the conversation (0 on first call, increases by 1 each subsequent call).
+
+### PASS A — Coverage (priority 1)
+Re-evaluate ALL ${PRD_DIMENSIONS.length} dimensions. For each, decide KNOWN or MISSING/AMBIGUOUS based on the entire conversation so far. Emit at most ONE question per dimension that is still MISSING.
+
+### PASS B — Per-concept drill-down (priority 2, BUDGETED)
+On rounds 0 and 1 ONLY, identify named atomic concepts in the brief (variables like "MC-1" / "RQ-3", entities, roles, named vendors, specific KPIs). For each, check whether PROVENANCE / CREDENTIAL / CADENCE is specified. Emit specific questions for the 3-5 most blocking concepts only.
+
+### Convergence rules (ENFORCE STRICTLY)
+- Total questions per round: **≤ 8**. If you have more candidate questions than 8, drop the least consequential. Pass A always wins over Pass B.
+- After round 2 (i.e. when conversation has ≥ 2 user turns) you MUST stop emitting Pass B questions. Only Pass A items still genuinely MISSING can appear.
+- After round 3 (≥ 3 user turns) set \`all_clear: true\` regardless of remaining gaps. The user will refine in PRD review.
+- If Pass A has no MISSING items AND you're already at round ≥ 1, set \`all_clear: true\` even if Pass B drill-downs remain — those are optional.
+
+## Question style
+
+- Use the SAME DOMAIN WORDS as the brief ("stablecoin" not "asset"; "RQ-1" if mentioned).
+- type "radio" → one answer | "checkbox" → multiple | "text" → free-form.
+- For provenance: radio with ["Public API (no key)", "Third-party API (needs key)", "Manual operator entry", "Scraped / parsed from document", "Computed from other variables", "Not yet decided"].
+- For credentials: radio with ["Yes — we already have a key", "Yes — customer must supply", "No — public endpoint", "Not yet decided"].
+- For cadence: radio with ["Real-time / streaming", "Every minute", "Hourly", "Daily", "On-demand only"].
+
+## Output (STRICT JSON — no markdown, no prose)
 
 {
   "project_name": "Short, memorable product name (2–5 words, title case)",
   "all_clear": true | false,
-  "summary": "1–2 sentences summarising what is now understood.",
+  "summary": "1 sentence describing what is now understood.",
   "gathered": [
-    "A: <confirmed extraction>",
-    ...only items that are now KNOWN
+    "users-and-roles: confirmed — internal team",
+    "..."
   ],
   "questions": [
     {
-      "id": "core_goal" | "target_users" | "pain_points" | "mobile_support" | "auth_method" | "need_backend",
+      "id": ${dimIds} | "concept:<short-slug>",
       "type": "radio" | "checkbox" | "text",
-      "label": "Concise follow-up question (≤ 15 words)",
-      "options": ["..."]   // omit for type "text"
-    },
-    ...only items still MISSING or ambiguous — max 6 total, need_backend always last if missing
+      "label": "Concise question",
+      "options": ["..."]
+    }
   ]
 }
 
-Rules:
-- project_name should incorporate any new information from the answers (refine if needed).
-- Be strict: if an answer was vague or incomplete, keep that item as a question.
-- Be lenient: if the answer is reasonable and actionable, mark it as KNOWN.
-- Output ONLY the JSON object — no markdown fences, no explanation.`;
+Hard rules:
+- Pass A ids MUST match dimension ids verbatim. Pass B ids MUST start with "concept:".
+- "options" must be omitted when type is "text".
+- Output ONLY the JSON object — no markdown fences, no commentary.`;
+}
+
+const INTENT_RECHECK_SYSTEM_PROMPT = buildSystemPrompt();
 
 export async function POST(request: NextRequest) {
   try {
@@ -149,8 +167,10 @@ export async function POST(request: NextRequest) {
         try {
           llmStream = await streamChatCompletion(messages, {
             model,
-            temperature: 0.3,
-            max_tokens: 4096,
+            temperature: 0.2,
+            // 10 dimensions + up to 15 questions/round with rationale &
+            // options needs more headroom than the legacy 6-item prompt.
+            max_tokens: 8192,
             response_format: { type: "json_object" },
           });
         } catch (err) {

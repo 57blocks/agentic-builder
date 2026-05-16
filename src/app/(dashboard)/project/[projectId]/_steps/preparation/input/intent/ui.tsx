@@ -259,8 +259,8 @@ function AIMessage({
 
 export function IntentUI(props: StepUIProps) {
   const isRunning = useStepStore((s) => s.isRunning);
-  const executeStep = useStepStore((s) => s.executeStep);
   const featureBrief = useStepStore((s) => s.featureBrief);
+  const setFeatureBrief = useStepStore((s) => s.setFeatureBrief);
   const tier = useStepNavigationStore((s) => s.tier);
   const nextStep = getNextStep("intent", tier);
   const setProjectName = useStepNavigationStore((s) => s.setProjectName);
@@ -407,9 +407,15 @@ export function IntentUI(props: StepUIProps) {
   async function handleStartGeneration(questions: IntentQuestion[], answers: Record<string, string | string[]>) {
     const hasAnswers = Object.keys(answers).length > 0;
     if (hasAnswers && questions.length > 0) await handleFormSubmit(questions, answers);
-    // Start the next step's execution (e.g., PRD) via step-store
+    // Promote the enriched brief (original + Q&A) to the step-store's
+    // featureBrief so the PRD agent actually sees the user's clarifications.
+    // Without this, the chat answers were captured locally but never
+    // reached PRD generation.
+    const enriched = enrichedBriefRef.current.trim();
+    if (enriched && enriched !== featureBrief.trim()) {
+      setFeatureBrief(enriched);
+    }
     if (nextStep) {
-      void executeStep(nextStep);
       props.onNavigate(nextStep);
     }
   }
@@ -452,7 +458,7 @@ export function IntentUI(props: StepUIProps) {
 
   return (
     <div className="flex flex-col w-full flex-1 min-h-0 bg-linear-to-br from-slate-50 via-slate-50 to-slate-100 rounded-2xl overflow-hidden shadow-lg">
-      <div className="shrink-0 flex items-center px-8 py-6 bg-white/60 backdrop-blur-md border-b border-white/40">
+      <div className="shrink-0 flex items-center justify-between px-8 py-6 bg-white/60 backdrop-blur-md border-b border-white/40">
         <div>
           <h2 className="text-lg font-bold text-slate-900 leading-6">Project Intent Refinement</h2>
           <div className="flex items-center gap-2 mt-1">
@@ -460,7 +466,19 @@ export function IntentUI(props: StepUIProps) {
             <span className="text-xs text-slate-600 font-medium">{isRechecking ? "Analyzing…" : intentAllClear ? "Ready to generate" : "Describe your project"}</span>
           </div>
         </div>
-        </div>
+        {/* Always-available escape hatch — works even mid-analysis. */}
+        {(messages.length > 0 || isRechecking) && featureBrief.trim() && nextStep && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleStartGeneration([], {})}
+            className="text-xs font-medium"
+            title="Skip remaining clarifications and continue to PRD"
+          >
+            Skip to PRD <ArrowRight size={12} />
+          </Button>
+        )}
+      </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8 space-y-6">
         {isEmpty && (

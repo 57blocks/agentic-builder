@@ -84,6 +84,22 @@ export async function updateProjectName(projectId: string, name: string): Promis
     .where(eq(projects.id, projectId));
 }
 
+/**
+ * Delete a project. FK cascades on child tables (project_stage_state,
+ * project_step_snapshot, memory rows with this projectId, etc.) handle
+ * cleanup, so a single DELETE on `projects` is sufficient.
+ *
+ * Returns true when a row was deleted, false when no project with that id
+ * existed (idempotent caller behavior).
+ */
+export async function deleteProject(projectId: string): Promise<boolean> {
+  const rows = await db
+    .delete(projects)
+    .where(eq(projects.id, projectId))
+    .returning({ id: projects.id });
+  return rows.length > 0;
+}
+
 // ─── Stage State ──────────────────────────────────────────────────────────────
 
 export interface StageStateRow {

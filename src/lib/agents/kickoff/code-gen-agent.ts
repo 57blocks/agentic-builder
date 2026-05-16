@@ -79,12 +79,12 @@ If the project context includes **Design Tokens**, you MUST faithfully reproduce
 - Zustand for state
 - TanStack Query for server state
 
-## Monorepo (when packages/shared exists)
+## Shared schemas and TypeScript hygiene
 - Zod: use \`loginSchema.parse(...)\`; types for form values: \`import type { LoginInput }\` from the schemas module. Do **not** export or import a **value** named \`LoginSchema\` next to \`loginSchema\`.
 - In React/TSX files, do NOT write bare \`JSX.Element\` return types. Prefer inferred component return types; if an explicit annotation is required, use \`React.JSX.Element\`.
 - For auth/session API types, never alias DTOs directly to broad model/entity types like \`User\`. Define a narrow DTO shape so frontend auth flows do not inherit unrelated model-only unions.
 
-## CRITICAL: Single canonical API client (M-tier)
+## CRITICAL: Single canonical API client (M-tier and L-tier)
 - The scaffold ships exactly ONE HTTP client at \`frontend/src/api/client.ts\` exporting \`apiClient\` with methods \`get / post / put / patch / delete\` and an options bag \`{ auth?, headers?, query?, signal? }\`.
 - Feature code MUST import from \`./client\`, \`../api/client\`, or \`@/api/client\`. NEVER create \`frontend/src/utils/apiClient.ts\`, \`frontend/src/utils/api.ts\`, \`frontend/src/lib/http.ts\`, \`frontend/src/services/http.ts\`, or any other parallel HTTP wrapper class/object.
 - Pass query params via \`apiClient.get(path, { query: { foo: 1 } })\`. Do NOT stringify queries into the path. Do NOT add a second positional \`auth\` argument; auth is read from \`opts.auth\` (defaults to true).
