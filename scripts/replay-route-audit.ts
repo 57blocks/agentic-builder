@@ -27,7 +27,7 @@ import {
   auditApiRouteRegistration,
   autoRepairRouteRegistration,
   type RouteRegistrationAudit,
-} from "../src/lib/langgraph/supervisor";
+} from "../src/lib/langgraph/supervisor/audits/route-registration";
 
 const C = {
   reset: "\x1b[0m",

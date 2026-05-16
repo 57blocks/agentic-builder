@@ -191,7 +191,8 @@ function collectTaskResultsFromChunk(
       : files;
     out.set(taskId, {
       id: taskId,
-      title: meta?.title ?? (typeof rec.title === "string" ? rec.title : taskId),
+      title:
+        meta?.title ?? (typeof rec.title === "string" ? rec.title : taskId),
       coversRequirementIds: meta?.coversRequirementIds ?? [],
       generatedFiles: mergedFiles,
       status,
@@ -355,7 +356,9 @@ function collectSupervisorGateStateFromChunk(
   }
 }
 
-function summarizeBlockingGateErrors(snapshot: SupervisorGateSnapshot): string[] {
+function summarizeBlockingGateErrors(
+  snapshot: SupervisorGateSnapshot,
+): string[] {
   const failures: string[] = [];
   if (snapshot.integrationErrors.trim()) {
     failures.push(
@@ -417,9 +420,7 @@ function formatResourceRequirementsPromptBlock(
       // Non-secret config values (LLM_PROVIDER="gemini", USE_REDIS_QUEUE="0", …)
       // are surfaced inline so workers can branch on them at code-gen time.
       // Secret values are NEVER shown — only the env var name + description.
-      const inlineValue = r.isConfig
-        ? ` = \`${(r.value ?? "").trim()}\``
-        : "";
+      const inlineValue = r.isConfig ? ` = \`${(r.value ?? "").trim()}\`` : "";
       lines.push(
         `- **\`${r.envKey}\`**${inlineValue} (${r.category}${reqMark}): ${r.description}`,
       );
@@ -428,11 +429,15 @@ function formatResourceRequirementsPromptBlock(
   }
 
   if (unfilled.length > 0) {
-    lines.push("### Declared but NOT yet configured (treat the corresponding feature as disabled / stubbed)");
+    lines.push(
+      "### Declared but NOT yet configured (treat the corresponding feature as disabled / stubbed)",
+    );
     lines.push("");
     for (const r of unfilled) {
       const reqMark = r.required ? " — required" : " — optional";
-      lines.push(`- \`${r.envKey}\` (${r.category}${reqMark}): ${r.description}`);
+      lines.push(
+        `- \`${r.envKey}\` (${r.category}${reqMark}): ${r.description}`,
+      );
     }
     lines.push("");
     lines.push(
@@ -479,7 +484,10 @@ function formatResourceRequirementsPromptBlock(
     const coveredByScaffold: OauthProviderInfo[] = [];
     const needsManualWiring: OauthProviderInfo[] = [];
     for (const m of oauthMatches) {
-      if (m.optionalScaffoldFeature && appliedSet.has(m.optionalScaffoldFeature)) {
+      if (
+        m.optionalScaffoldFeature &&
+        appliedSet.has(m.optionalScaffoldFeature)
+      ) {
         coveredByScaffold.push(m);
       } else {
         needsManualWiring.push(m);
@@ -668,7 +676,9 @@ async function resolveTier(
   } catch {
     // PRD.md may not exist yet; fall through to default
   }
-  console.warn("[CodingAPI] projectTier not provided and PRD.md has no tier badge — defaulting to M");
+  console.warn(
+    "[CodingAPI] projectTier not provided and PRD.md has no tier badge — defaulting to M",
+  );
   return "M";
 }
 
@@ -704,7 +714,11 @@ export async function POST(request: NextRequest) {
     /** Optional project linkage for the persisted coding-session report. */
     projectId?: string;
     /** Stitch design metadata (projectId, screenId, projectUrl) persisted from the design step. */
-    stitchMeta?: { projectId: string; screenId: string; projectUrl: string } | null;
+    stitchMeta?: {
+      projectId: string;
+      screenId: string;
+      projectUrl: string;
+    } | null;
   };
 
   const ralphConfig: RalphConfig = {
@@ -731,9 +745,10 @@ export async function POST(request: NextRequest) {
   // All other tasks are considered already-completed and pre-populated
   // into collectedTaskResults as "completed_with_warnings" so the rest of
   // the pipeline (audit, scoring, reports) still sees them.
-  const retrySet = retryFailedTaskIds && retryFailedTaskIds.length > 0
-    ? new Set(retryFailedTaskIds)
-    : null;
+  const retrySet =
+    retryFailedTaskIds && retryFailedTaskIds.length > 0
+      ? new Set(retryFailedTaskIds)
+      : null;
   const tasksToRun = retrySet
     ? tasksAfterStrip.filter((t) => retrySet.has(t.id))
     : tasksAfterStrip;
@@ -752,7 +767,10 @@ export async function POST(request: NextRequest) {
 
   // Pencil exports live under frontend/public/design; cleanup removes `frontend/`. Stash PNGs
   // so they survive scaffold refresh (markdown stays at repo root via KEEP_MD).
-  const pencilDesignStash = path.join(outputRoot, ".agentic-pencil-design-stash");
+  const pencilDesignStash = path.join(
+    outputRoot,
+    ".agentic-pencil-design-stash",
+  );
   const pencilDesignSrc = path.join(outputRoot, "frontend", "public", "design");
   try {
     await fs.rm(pencilDesignStash, { recursive: true, force: true });
@@ -787,24 +805,24 @@ export async function POST(request: NextRequest) {
       `[CodingAPI] Retry mode — skipping directory cleanup to preserve previously-generated code.`,
     );
   } else {
-  const entries = await fs.readdir(outputRoot).catch(() => [] as string[]);
-  let removedCount = 0;
-  for (const entry of entries) {
-    if (KEEP_ENTRIES.has(entry)) continue;
-    if (entry.endsWith(".md") && KEEP_MD.has(entry)) continue;
-    const entryPath = path.join(outputRoot, entry);
-    try {
-      await fs.rm(entryPath, { recursive: true, force: true });
-      removedCount++;
-    } catch (e) {
-      console.warn(
-        `[CodingAPI] Could not remove ${entry}: ${e instanceof Error ? e.message : String(e)}`,
-      );
+    const entries = await fs.readdir(outputRoot).catch(() => [] as string[]);
+    let removedCount = 0;
+    for (const entry of entries) {
+      if (KEEP_ENTRIES.has(entry)) continue;
+      if (entry.endsWith(".md") && KEEP_MD.has(entry)) continue;
+      const entryPath = path.join(outputRoot, entry);
+      try {
+        await fs.rm(entryPath, { recursive: true, force: true });
+        removedCount++;
+      } catch (e) {
+        console.warn(
+          `[CodingAPI] Could not remove ${entry}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
-  }
-  console.log(
-    `[CodingAPI] Cleaned output directory: ${outputRoot} (removed ${removedCount} entries)`,
-  );
+    console.log(
+      `[CodingAPI] Cleaned output directory: ${outputRoot} (removed ${removedCount} entries)`,
+    );
   } // end else (not retry mode)
 
   const tier = await resolveTier(projectTier, outputRoot);
@@ -911,9 +929,7 @@ export async function POST(request: NextRequest) {
     const dist = await distributePipelineDag(outputRoot);
     distributedDagPath = dist.written;
     if (dist.found) {
-      console.log(
-        `[CodingAPI] Pipeline DAG distributed: ${dist.written}`,
-      );
+      console.log(`[CodingAPI] Pipeline DAG distributed: ${dist.written}`);
     } else {
       console.log(
         `[CodingAPI] Pipeline DAG not distributed: source ${dist.sourcePath} missing (TRD §8 omitted — project has no multi-step pipelines).`,
@@ -928,7 +944,11 @@ export async function POST(request: NextRequest) {
   const resolvedDbUrl = resolveBlueprintGeneratedDatabaseUrl(databaseUrlBody);
   if (resolvedDbUrl) {
     try {
-      await fs.writeFile(path.join(outputRoot, ".env"), formatGeneratedCodeDotEnv(resolvedDbUrl), "utf-8");
+      await fs.writeFile(
+        path.join(outputRoot, ".env"),
+        formatGeneratedCodeDotEnv(resolvedDbUrl),
+        "utf-8",
+      );
       console.log("[CodingAPI] Wrote generated-code .env with DATABASE_URL.");
     } catch (e) {
       console.warn(
@@ -953,14 +973,17 @@ export async function POST(request: NextRequest) {
   // Always ensure backend/.env has JWT_SECRET (and DATABASE_URL if available).
   const backendEnvPath = path.join(outputRoot, "backend", ".env");
   try {
-    const existingBackendEnv = await fs.readFile(backendEnvPath, "utf-8").catch(() => "");
+    const existingBackendEnv = await fs
+      .readFile(backendEnvPath, "utf-8")
+      .catch(() => "");
     const withDbUrl = resolvedDbUrl
       ? upsertDatabaseUrlEnv(existingBackendEnv, resolvedDbUrl)
       : existingBackendEnv;
     const withJwt = upsertJwtEnvVars(withDbUrl);
     const withPort = upsertBackendPortEnv(withJwt);
     const withResources = upsertResourceEnvVars(withPort, backendResources);
-    const privyMirror = resolvePrivyAppIdMirrorFromFilledResources(filledResources);
+    const privyMirror =
+      resolvePrivyAppIdMirrorFromFilledResources(filledResources);
     const withPrivyMirror = upsertBackendPrivyAppIdMirror(
       withResources,
       privyMirror,
@@ -1007,7 +1030,10 @@ export async function POST(request: NextRequest) {
   for (const p of distributedSharedSchemaPaths) {
     if (!scaffoldProtectedPaths.includes(p)) scaffoldProtectedPaths.push(p);
   }
-  if (distributedDagPath && !scaffoldProtectedPaths.includes(distributedDagPath)) {
+  if (
+    distributedDagPath &&
+    !scaffoldProtectedPaths.includes(distributedDagPath)
+  ) {
     scaffoldProtectedPaths.push(distributedDagPath);
   }
 
@@ -1075,7 +1101,9 @@ export async function POST(request: NextRequest) {
   if (prdBody && prdBody.trim().length > 0) {
     try {
       await fs.writeFile(path.join(outputRoot, "PRD.md"), prdBody, "utf-8");
-      console.log("[CodingAPI] PRD.md overwritten from request body (session PRD pinning).");
+      console.log(
+        "[CodingAPI] PRD.md overwritten from request body (session PRD pinning).",
+      );
     } catch (e) {
       console.warn(
         `[CodingAPI] Failed to write PRD.md from request body: ${e instanceof Error ? e.message : String(e)}`,
@@ -1171,7 +1199,7 @@ export async function POST(request: NextRequest) {
     "",
     ...(scaffoldReadmeDoc
       ? [
-          `## Scaffold README Reference (${scaffoldReadmePath})`,
+          `## Scaffold README Reference (${scaffoldReadmeDoc})`,
           "",
           scaffoldReadmeDoc,
           "",
@@ -1205,7 +1233,9 @@ export async function POST(request: NextRequest) {
 
   // Log Stitch design URL when available
   if (stitchMeta?.projectUrl) {
-    console.log(`[CodingAPI] Stitch UI Design project URL: ${stitchMeta.projectUrl}`);
+    console.log(
+      `[CodingAPI] Stitch UI Design project URL: ${stitchMeta.projectUrl}`,
+    );
   }
 
   const frontendDesignContext = await buildFrontendDesignContextForCodegen(
@@ -1281,7 +1311,8 @@ export async function POST(request: NextRequest) {
         // back to the project-card written by the pipeline/kickoff routes.
         createMemorySelfHealSink({
           outputDir: outputRoot,
-          kickoffSessionId: typeof runId === "string" && runId.length > 0 ? runId : sessionId,
+          kickoffSessionId:
+            typeof runId === "string" && runId.length > 0 ? runId : sessionId,
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
@@ -1352,7 +1383,10 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          const tddManifest = await writeTddManifestFromTasks(outputRoot, codingTasks);
+          const tddManifest = await writeTddManifestFromTasks(
+            outputRoot,
+            codingTasks,
+          );
           console.log(
             `[CodingAPI] TDD manifest written with ${tddManifest.testCount} test(s): ${tddManifest.path}`,
           );
@@ -1548,7 +1582,10 @@ export async function POST(request: NextRequest) {
           );
           if (!finalAudit.passed) {
             // Use hardUncovered to exclude IC-xx interaction specs (soft warnings).
-            const remainingIds = (finalAudit.hardUncovered ?? finalAudit.uncovered.filter((e) => !/^IC-\d+$/i.test(e.id))).map((entry) => entry.id);
+            const remainingIds = (
+              finalAudit.hardUncovered ??
+              finalAudit.uncovered.filter((e) => !/^IC-\d+$/i.test(e.id))
+            ).map((entry) => entry.id);
             blockingFailures.push(
               [
                 `Feature audit gate failed: ${remainingIds.length} requirement id(s) still unresolved.`,
@@ -1584,7 +1621,8 @@ export async function POST(request: NextRequest) {
       } finally {
         if (clientAborted && reportStatus === "fail" && !fatalError) {
           reportStatus = "aborted";
-          terminalSummary = "Client disconnected before the coding session completed.";
+          terminalSummary =
+            "Client disconnected before the coding session completed.";
           fatalError = terminalSummary;
         }
         try {
@@ -1596,7 +1634,8 @@ export async function POST(request: NextRequest) {
             endedAt: new Date().toISOString(),
             status: reportStatus,
             terminalSummary:
-              terminalSummary || "Coding session ended without an explicit summary.",
+              terminalSummary ||
+              "Coding session ended without an explicit summary.",
             integrationErrors: collectedGateSnapshot.integrationErrors,
             runtimeVerifyErrors: collectedGateSnapshot.runtimeVerifyErrors,
             e2eVerifyErrors: collectedGateSnapshot.e2eVerifyErrors,
@@ -1663,8 +1702,7 @@ export async function POST(request: NextRequest) {
             integrationPassed:
               collectedGateSnapshot.gatesExecuted.integrationVerify &&
               !collectedGateSnapshot.integrationErrors.trim(),
-            runtimeExecuted:
-              collectedGateSnapshot.gatesExecuted.runtimeVerify,
+            runtimeExecuted: collectedGateSnapshot.gatesExecuted.runtimeVerify,
             runtimePassed:
               collectedGateSnapshot.gatesExecuted.runtimeVerify &&
               !collectedGateSnapshot.runtimeVerifyErrors.trim(),
@@ -1673,8 +1711,7 @@ export async function POST(request: NextRequest) {
               collectedGateSnapshot.gatesExecuted.e2eVerify &&
               !collectedGateSnapshot.e2eVerifyErrors.trim(),
             auditPassed: finalAuditResult?.passed ?? true,
-            uncoveredRequirementCount:
-              finalAuditResult?.uncovered.length ?? 0,
+            uncoveredRequirementCount: finalAuditResult?.uncovered.length ?? 0,
             tasksTotal,
             tasksCompleted,
             tasksCompletedWithWarnings,
