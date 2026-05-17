@@ -53,6 +53,13 @@ import {
   estimateCost,
   type ChatMessage,
 } from "@/lib/openrouter";
+import {
+  chatCompletionsDeepSeekV4,
+  DEEPSEEK_V4_DEFAULT_BASE,
+  DEEPSEEK_V4_DEFAULT_MODEL,
+  isDeepSeekV4Provider,
+} from "@/lib/providers/deepseek-v4";
+import type { OpenRouterOptions, OpenRouterResponse } from "@/lib/llm-types";
 import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
 import type { CodingAgentRole, CodingTask } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
@@ -147,6 +154,7 @@ import {
 import {
   isMutatingSupervisorBashCommand,
   detectScopedValidationKind,
+  detectScopedValidationKinds,
   isValidationLikeBashCommand,
   buildIntegrationReasoningOptions,
 } from "./supervisor/verify-tools/command-classifier";
@@ -3669,6 +3677,64 @@ type PhaseVerifyAndFixOptions = {
   workerHintRoles?: CodingAgentRole[];
 };
 
+type VerifyFixLlmOptions = Omit<OpenRouterOptions, "model"> & {
+  temperature: number;
+  max_tokens: number;
+};
+
+function shouldUseDeepSeekDirectForVerifyFix(): boolean {
+  return process.env.VERIFY_FIX_PROVIDER?.trim().toLowerCase() === "deepseek";
+}
+
+async function callVerifyFixLlm(
+  label: string,
+  messages: ChatMessage[],
+  modelChain: string[],
+  options: VerifyFixLlmOptions,
+): Promise<OpenRouterResponse> {
+  if (shouldUseDeepSeekDirectForVerifyFix() && isDeepSeekV4Provider()) {
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct  stage=phase_verify_fix  model=${dsModel}  base=${dsBase}`,
+    );
+    try {
+      return await chatCompletionsDeepSeekV4(messages, options);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isToolSequenceValidationError(msg)) {
+        const removed = countRemovedOrphanToolMessages(messages);
+        console.warn(
+          `${label}: DeepSeek detected tool-call sequence error; cleaned ${removed} orphan tool message(s) and retrying once.`,
+        );
+        if (removed > 0) {
+          try {
+            return await chatCompletionsDeepSeekV4(messages, options);
+          } catch (retryErr) {
+            const retryMsg =
+              retryErr instanceof Error ? retryErr.message : String(retryErr);
+            console.warn(
+              `${label}: DeepSeek retry failed (${retryMsg.slice(0, 200)}). Falling back to OpenRouter chain.`,
+            );
+          }
+        }
+      } else {
+        console.warn(
+          `${label}: DeepSeek direct failed (${msg.slice(0, 200)}). Falling back to OpenRouter chain.`,
+        );
+      }
+    }
+  } else if (shouldUseDeepSeekDirectForVerifyFix()) {
+    console.warn(
+      `${label}: VERIFY_FIX_PROVIDER=deepseek but DEEPSEEK_API_KEY is not configured; falling back to OpenRouter chain.`,
+    );
+  }
+
+  return callWithOrphanToolRetry(label, messages, modelChain, options);
+}
+
 /**
  * Deterministic auto-fix for well-known convention violations.
  *
@@ -4132,7 +4198,7 @@ async function phaseVerifyAndFix(
 
     let resp;
     try {
-      resp = await callWithOrphanToolRetry(label, messages, modelChain, {
+      resp = await callVerifyFixLlm(label, messages, modelChain, {
         temperature: 0.2,
         max_tokens: 36000,
         tools: SUPERVISOR_VERIFY_TOOLS,
@@ -4738,6 +4804,111 @@ const INTEGRATION_STAGNATION_WARNING_BONUS_PER_PROGRESS = 1;
 /** After N total stagnation warnings without progress, inject an escalated prompt. */
 const STAGNATION_ESCALATION_WARNING_COUNT = 2;
 
+function readIntegrationVerifyFixMaxIterations(): number {
+  const raw = Number(
+    process.env.INTEGRATION_VERIFY_FIX_MAX_ITERATIONS ?? "500",
+  );
+  if (!Number.isFinite(raw)) return 500;
+  return Math.max(20, Math.min(1000, Math.floor(raw)));
+}
+
+type ParsedValidationSuiteResult = {
+  parsed: boolean;
+  pass: boolean;
+  summary: string;
+  passedSuites: ScopedValidationKind[];
+  failedSuites: string[];
+};
+
+function parseValidationSuiteResult(
+  result: string,
+): ParsedValidationSuiteResult {
+  try {
+    const jsonStart = result.indexOf("{");
+    const raw = jsonStart >= 0 ? result.slice(jsonStart) : result;
+    const data = JSON.parse(raw) as {
+      pass?: unknown;
+      results?: Array<{
+        suite?: unknown;
+        pass?: unknown;
+        skipped?: unknown;
+        output?: unknown;
+      }>;
+    };
+    const suiteResults = Array.isArray(data.results) ? data.results : [];
+    const passedSuites = suiteResults
+      .filter((suite) => suite.pass === true)
+      .map((suite) => String(suite.suite ?? ""))
+      .filter((suite): suite is ScopedValidationKind =>
+        [
+          "frontend_tsc",
+          "frontend_build",
+          "backend_tsc",
+          "backend_smoke",
+        ].includes(suite),
+      );
+    const failedSuites = suiteResults
+      .filter((suite) => suite.pass !== true)
+      .map((suite) => {
+        const name = String(suite.suite ?? "unknown");
+        const output =
+          typeof suite.output === "string" && suite.output.trim()
+            ? `: ${suite.output.slice(0, 300)}`
+            : "";
+        return `${name}${output}`;
+      });
+    const summaryLines = suiteResults.map((suite) => {
+      const name = String(suite.suite ?? "unknown");
+      const status = suite.pass === true ? "pass" : "fail";
+      const skipped = suite.skipped === true ? " (skipped)" : "";
+      return `${name}: ${status}${skipped}`;
+    });
+    return {
+      parsed: true,
+      pass: data.pass === true,
+      summary:
+        summaryLines.length > 0
+          ? summaryLines.join("\n")
+          : `validation suite pass=${data.pass === true}`,
+      passedSuites,
+      failedSuites,
+    };
+  } catch {
+    return {
+      parsed: false,
+      pass: false,
+      summary: result.slice(0, 1000),
+      passedSuites: [],
+      failedSuites: [],
+    };
+  }
+}
+
+function isIntegrationMutationTool(name: string): boolean {
+  return (
+    name === "write_file" ||
+    name === "apply_patch" ||
+    name === "delete_file" ||
+    name === "move_file"
+  );
+}
+
+function getIntegrationMutationPath(
+  name: string,
+  args: Record<string, unknown>,
+): string {
+  if (name === "move_file") {
+    return `${String(args.from ?? "")}->${String(args.to ?? "")}`;
+  }
+  return String(args.path ?? "");
+}
+
+function isForbiddenIntegrationValidationHelperPath(pathLike: string): boolean {
+  return /(^|\/)(verify-final|final-check|validation-check)\.(ts|tsx|js|jsx)$/i.test(
+    pathLike.replace(/\\/g, "/"),
+  );
+}
+
 /**
  * Merged integration verify + fix as a single agentic loop.
  *
@@ -4752,7 +4923,7 @@ async function integrationVerifyAndFix(
   const label = "[Supervisor] IntegrationVerifyFix";
 
   console.log(
-    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
+    `${label}: starting agentic loop (max ${readIntegrationVerifyFixMaxIterations()} iterations; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -5336,6 +5507,8 @@ async function integrationVerifyAndFix(
     "    3. Never add a new import to index.ts for a registrar function unless you simultaneously verify OR create that exact export name in the corresponding routes.ts.",
     "- **Component prop contract (P0 HARD FAIL)**: TypeScript error TS2322 of the form \"Property 'X' does not exist on type '...ComponentProps'. Did you mean 'Y'?\" is a P0 HARD FAIL. Read the component's Props type definition (see 'Component Interface Reference' block in the user message), use the CORRECT field name shown there, and DO NOT pass undeclared props. These errors block report_done(pass) exactly like dangling route imports.",
     "- **Stale validation rule (ENFORCED)**: After ANY write_file or mutating bash command ALL 4 scoped validation results become stale. You MUST re-run the FULL 4-command validation sequence (frontend_tsc → frontend_build → backend_tsc → backend_smoke) before calling report_done(pass). Calling report_done(pass) with stale validation will be REJECTED by the system.",
+    "- If `run_validation_suite` returns `pass=true`, STOP immediately and call `report_done(status='pass')`. Do NOT write, patch, delete, move, or create verification helper files after a passing validation suite.",
+    "- Never create source files named `verify-final.ts`, `final-check.ts`, or `validation-check.ts`; use `run_validation_suite` or scoped bash validation instead.",
     "- Run verification ONLY inside `frontend/` and `backend/`. Do not use root-level `npx tsc` against the whole generated-code tree in this phase.",
     "- Do NOT call `report_done(status='pass')` while dependency audit issues remain unresolved.",
     "- Do NOT call `report_done(status='pass')` while the 'Backend route registration audit' block lists unregistered modules, dangling register*Routes imports, or API_CONTRACTS endpoints with no matching implementation. Fix each entry (register, implement, or remove) before finishing.",
@@ -5493,6 +5666,7 @@ async function integrationVerifyAndFix(
   let totalCostUsd = 0;
   let contextCompressionUsed = false;
   const integrationReasoningOptions = buildIntegrationReasoningOptions();
+  const maxIterations = readIntegrationVerifyFixMaxIterations();
   let validationStale = true;
   let lastMutationAt: string | null = null;
   let lastMutationReason = "initial integration review";
@@ -5728,6 +5902,20 @@ async function integrationVerifyAndFix(
     );
   }
 
+  function markAllScopedValidationsFresh(reason: string): void {
+    const kinds: ScopedValidationKind[] = [];
+    if (hasFrontend) kinds.push("frontend_tsc", "frontend_build");
+    if (hasBackend) kinds.push("backend_tsc", "backend_smoke");
+    for (const kind of kinds) {
+      markScopedValidationSuccess(kind);
+    }
+    validationStale = false;
+    lastFullValidationAt = nowIso();
+    console.log(
+      `${label}: scoped validations fresh via ${reason} — frontend_tsc=${frontendTscOkAt ?? "skip"} frontend_build=${frontendBuildOkAt ?? "skip"} backend_tsc=${backendTscOkAt ?? "skip"} backend_smoke=${backendSmokeOkAt ?? "skip"}`,
+    );
+  }
+
   async function runFinalScopedValidationGates(): Promise<{
     pass: boolean;
     summary: string;
@@ -5800,8 +5988,7 @@ async function integrationVerifyAndFix(
 
     const pass = failures.length === 0;
     if (pass) {
-      validationStale = false;
-      lastFullValidationAt = nowIso();
+      markAllScopedValidationsFresh("final scoped validation gates");
     }
 
     console.log(
@@ -5855,11 +6042,24 @@ async function integrationVerifyAndFix(
     iterations++;
     console.log(`${label}: iteration ${iterations}`);
 
+    if (iterations > maxIterations) {
+      console.warn(
+        `${label}: reached max iterations (${maxIterations}); running final scoped validation before stopping.`,
+      );
+      const maxIterationGate = await runFinalScopedValidationGates();
+      finalStatus = maxIterationGate.pass ? "pass" : "fail";
+      finalSummary = [
+        `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS=${maxIterations}.`,
+        maxIterationGate.summary,
+      ].join("\n\n");
+      break;
+    }
+
     await compactMessagesIfNeeded();
 
     let resp;
     try {
-      resp = await callWithOrphanToolRetry(label, messages, modelChain, {
+      resp = await callVerifyFixLlm(label, messages, modelChain, {
         temperature: 0.2,
         max_tokens: 36000,
         tools: SUPERVISOR_VERIFY_TOOLS,
@@ -5919,28 +6119,37 @@ async function integrationVerifyAndFix(
       if (tc.function.name === "report_done") {
         const reportedStatus = (args.status as "pass" | "fail") ?? "fail";
 
-        // Guard: reject report_done(pass) when validation results are stale.
-        // The agent MUST re-run all 4 scoped validation commands after any write_file
-        // before it is allowed to claim a passing integration.
         if (reportedStatus === "pass" && validationStale) {
-          const buildCmd =
-            pm === "yarn"
-              ? "yarn run build"
-              : pm === "npm"
-                ? "npm run build"
-                : "pnpm run build";
-          const rejectionMsg = [
-            "REJECTED: report_done(pass) is not allowed — validation results are STALE.",
-            `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
-            "You MUST re-run the FULL 4-command validation sequence after your last write_file:",
-            `  1. cd frontend && npx tsc -p tsconfig.app.json --pretty false 2>&1`,
-            `  2. cd frontend && ${buildCmd} 2>&1`,
-            `  3. cd backend && npx tsc --noEmit --pretty false 2>&1`,
-            `  4. cd backend && npx tsx --eval "(async()=>{const m=await import('./src/app.ts');const f=m.createApp??m.default?.createApp??m.default;if(typeof f!=='function')throw new Error('createApp missing');const a=await f();if(!a||typeof a.callback!=='function')throw new Error('not a Koa app');console.log('backend_smoke_ok');})()" 2>&1`,
-            "All 4 must succeed (exit 0) before you may call report_done(pass).",
-          ].join("\n");
           console.log(
-            `${label}: REJECTED report_done(pass) — stale validation (lastMutation=${lastMutationAt ?? "never"})`,
+            `${label}: report_done(pass) requested while stale — running system final validation instead of rejecting.`,
+          );
+          const autoGate = await runFinalScopedValidationGates();
+          if (autoGate.pass) {
+            finalStatus = "pass";
+            finalSummary = [
+              String(args.summary ?? "").trim(),
+              "Accepted after system final scoped validation:",
+              autoGate.summary,
+            ]
+              .filter(Boolean)
+              .join("\n\n");
+            doneSignaled = true;
+            messages.push({
+              role: "tool",
+              content: "acknowledged after system final validation",
+              tool_call_id: tc.id,
+              name: "report_done",
+            });
+            break;
+          }
+          const rejectionMsg = [
+            "REJECTED: report_done(pass) is not allowed — system final validation still fails.",
+            `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
+            autoGate.summary,
+            "Fix only the failing gate(s), then run run_validation_suite once. Do not create verification helper files.",
+          ].join("\n\n");
+          console.log(
+            `${label}: REJECTED report_done(pass) — system final validation failed.`,
           );
           messages.push({
             role: "tool",
@@ -5963,9 +6172,42 @@ async function integrationVerifyAndFix(
           tool_call_id: tc.id,
           name: "report_done",
         });
+        if (doneSignaled) break;
       } else {
         const command =
           tc.function.name === "bash" ? String(args.command ?? "") : "";
+        const mutationPath = getIntegrationMutationPath(tc.function.name, args);
+        if (
+          isIntegrationMutationTool(tc.function.name) &&
+          isForbiddenIntegrationValidationHelperPath(mutationPath)
+        ) {
+          const result =
+            "REJECTED: do not create or mutate validation helper source files. Use run_validation_suite or scoped bash validation instead.";
+          console.log(
+            `${label}: rejected validation helper mutation ${tc.function.name}:${mutationPath}`,
+          );
+          messages.push({
+            role: "tool",
+            content: result,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
+        if (!validationStale && isIntegrationMutationTool(tc.function.name)) {
+          const result =
+            "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
+          console.log(
+            `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
+          );
+          messages.push({
+            role: "tool",
+            content: result,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
         if (
           tc.function.name === "bash" &&
           isValidationLikeBashCommand(command) &&
@@ -5996,16 +6238,41 @@ async function integrationVerifyAndFix(
           args,
           command,
         );
-        if (tc.function.name === "write_file") {
+        if (tc.function.name === "run_validation_suite") {
+          const parsedSuite = parseValidationSuiteResult(result);
+          if (parsedSuite.parsed) {
+            for (const kind of parsedSuite.passedSuites) {
+              if (markScopedValidationSuccess(kind)) {
+                iterationValidationProgress = true;
+                iterationProgressReasons.push(`run_validation_suite:${kind}`);
+              }
+            }
+            if (parsedSuite.pass) {
+              markAllScopedValidationsFresh("run_validation_suite pass=true");
+              finalStatus = "pass";
+              finalSummary = [
+                "run_validation_suite passed; integration verification completed by system.",
+                parsedSuite.summary,
+              ].join("\n\n");
+              doneSignaled = true;
+            } else if (parsedSuite.failedSuites.length > 0) {
+              finalSummary = parsedSuite.failedSuites.join("\n");
+            }
+          }
+        } else if (
+          isIntegrationMutationTool(tc.function.name) &&
+          /^OK:/i.test(result)
+        ) {
           iterationMutated = true;
-          markValidationStale(`write_file:${String(args.path ?? "")}`);
+          markValidationStale(`${tc.function.name}:${mutationPath}`);
         } else if (
           tc.function.name === "bash" &&
           isSuccessfulSupervisorToolResult(result)
         ) {
-          const validationKind = detectScopedValidationKind(command);
-          if (validationKind) {
-            if (markScopedValidationSuccess(validationKind)) {
+          const validationKinds = detectScopedValidationKinds(command);
+          if (validationKinds.length > 0) {
+            for (const validationKind of validationKinds) {
+              if (!markScopedValidationSuccess(validationKind)) continue;
               iterationValidationProgress = true;
               iterationProgressReasons.push(
                 `scoped_validation:${validationKind}`,
@@ -6016,15 +6283,17 @@ async function integrationVerifyAndFix(
             markValidationStale(`mutating bash:${command.slice(0, 80)}`);
           }
         } else if (tc.function.name === "bash") {
-          const validationKind = detectScopedValidationKind(command);
-          if (validationKind) {
-            const trendReason = noteValidationIssueTrend(
-              validationKind,
-              result,
-            );
-            if (trendReason) {
-              iterationValidationProgress = true;
-              iterationProgressReasons.push(trendReason);
+          const validationKinds = detectScopedValidationKinds(command);
+          if (validationKinds.length > 0) {
+            for (const validationKind of validationKinds) {
+              const trendReason = noteValidationIssueTrend(
+                validationKind,
+                result,
+              );
+              if (trendReason) {
+                iterationValidationProgress = true;
+                iterationProgressReasons.push(trendReason);
+              }
             }
           } else if (isMutatingSupervisorBashCommand(command)) {
             iterationMutated = true;
@@ -6035,7 +6304,7 @@ async function integrationVerifyAndFix(
           !iterationMutated &&
           fingerprint &&
           tc.function.name !== "report_done" &&
-          tc.function.name !== "write_file"
+          !isIntegrationMutationTool(tc.function.name)
         ) {
           iterationReadOnlyFingerprints.push(fingerprint);
         }
@@ -6048,6 +6317,7 @@ async function integrationVerifyAndFix(
           tool_call_id: tc.id,
           name: tc.function.name,
         });
+        if (doneSignaled) break;
       }
     }
 
