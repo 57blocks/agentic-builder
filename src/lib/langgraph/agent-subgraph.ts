@@ -986,7 +986,12 @@ async function executeWorkerTool(
   name: string,
   args: Record<string, unknown>,
   outputDir: string,
-  options?: { fsWriteOptions?: FsWriteOptions; workerLabel?: string },
+  options?: {
+    fsWriteOptions?: FsWriteOptions;
+    workerLabel?: string;
+    sessionId?: string;
+    taskId?: string;
+  },
 ): Promise<WorkerToolExecutionResult> {
   const label = options?.workerLabel ?? "worker";
   const startedAt = Date.now();
@@ -997,6 +1002,61 @@ async function executeWorkerTool(
   console.log(
     `[Worker:${label}] tool_result ${name} durationMs=${Date.now() - startedAt} ${summarizeWorkerToolResult(result)}`,
   );
+
+  // Emit file activity events so the UI can display real-time file I/O.
+  if (options?.sessionId && options?.taskId) {
+    const emitter = getRepairEmitter(options.sessionId);
+    if (name === "read_file") {
+      emitter({
+        stage: "worker-codegen",
+        event: "file_activity",
+        taskId: options.taskId,
+        details: {
+          operation: "read",
+          path: String(args.path ?? ""),
+        },
+      });
+    } else if (name === "read_many_files" && Array.isArray(args.paths)) {
+      for (const p of args.paths as string[]) {
+        emitter({
+          stage: "worker-codegen",
+          event: "file_activity",
+          taskId: options.taskId,
+          details: {
+            operation: "read",
+            path: String(p),
+          },
+        });
+      }
+    } else if (
+      (name === "write_file" || name === "apply_patch") &&
+      result.isWrite &&
+      !result.content.startsWith("REJECTED") &&
+      !result.content.startsWith("SKIPPED_PROTECTED")
+    ) {
+      const writtenPath = String(args.path ?? "").trim();
+      const writtenContent =
+        name === "write_file"
+          ? typeof args.content === "string"
+            ? args.content
+            : ""
+          : typeof args.newText === "string"
+            ? args.newText
+            : "";
+      emitter({
+        stage: "worker-codegen",
+        event: "file_activity",
+        taskId: options.taskId,
+        details: {
+          operation: "write",
+          path: writtenPath,
+          contentPreview: writtenContent.slice(0, 400),
+          contentLength: writtenContent.length,
+        },
+      });
+    }
+  }
+
   return result;
 }
 
@@ -1030,7 +1090,7 @@ async function runCodegenWorkerLoop(
   sessionId?: string,
   workerLabel?: string,
   recallCtx?: SecondaryRecallContext,
-  toolOptions?: { fsWriteOptions?: FsWriteOptions },
+  toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
 ): Promise<{
   content: string;
   rawContent: string;
@@ -1175,7 +1235,7 @@ async function runCodegenWorkerLoop(
         toolCall.function.name,
         args,
         outputDir,
-        { ...toolOptions, workerLabel },
+        { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId },
       );
       if (result.isWrite) {
         hadWriteTool = true;
@@ -1295,7 +1355,7 @@ async function runCodegenAgentSession(
   sessionId?: string,
   workerLabel?: string,
   recallCtx?: SecondaryRecallContext,
-  toolOptions?: { fsWriteOptions?: FsWriteOptions },
+  toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
 ): Promise<CodegenAgentSessionResult> {
   let totalCostUsd = 0;
   let promptTokens = 0;
@@ -1394,7 +1454,7 @@ async function runCodegenAgentSession(
           toolCall.function.name,
           args,
           outputDir,
-          { ...toolOptions, workerLabel },
+          { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId ?? task.id },
         );
         if (result.isWrite) {
           hadWriteTool = true;
@@ -2539,7 +2599,7 @@ async function generateCode(state: WorkerState) {
         state.sessionId,
         state.workerLabel,
         secondaryRecallCtx,
-        { fsWriteOptions: fsOpts },
+        { fsWriteOptions: fsOpts, taskId: task.id },
       );
       const content = response.content;
       totalCostUsd += response.costUsd;
@@ -2608,7 +2668,7 @@ async function generateCode(state: WorkerState) {
           state.sessionId,
           state.workerLabel,
           secondaryRecallCtx,
-          { fsWriteOptions: fsOpts },
+          { fsWriteOptions: fsOpts, taskId: task.id },
         );
         const content = response.content;
         validateCodegenFileOutput(content);

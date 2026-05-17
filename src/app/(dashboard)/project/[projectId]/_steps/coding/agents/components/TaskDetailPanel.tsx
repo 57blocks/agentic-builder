@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { X, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import type { CodingTask, KickoffWorkItem, AgentLogEntry } from "@/lib/pipeline/types";
+import { FileActivityPanel } from "./FileActivityPanel";
 
 interface TaskDetailPanelProps {
   task: CodingTask | KickoffWorkItem | null;
@@ -12,6 +14,7 @@ interface TaskDetailPanelProps {
   onRetry?: (taskId: string) => void;
 }
 
+type PanelTab = "logs" | "files";
 type LogTab = "raw" | "filtered";
 
 const LOG_TYPE_CONFIG: Record<
@@ -70,10 +73,11 @@ function getDuration(task: CodingTask | KickoffWorkItem): string | null {
 export function TaskDetailPanel({
   task,
   allAgentLogs,
-  supervisorLogs,
+  supervisorLogs: _supervisorLogs,
   onClose,
   onRetry,
 }: TaskDetailPanelProps) {
+  const [panelTab, setPanelTab] = useState<PanelTab>("logs");
   const [activeTab, setActiveTab] = useState<LogTab>("raw");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -102,8 +106,12 @@ export function TaskDetailPanel({
   const statusDot = getStatusDot(task);
   const duration = getDuration(task);
   const isFailed = "codingStatus" in task && (task as CodingTask).codingStatus === "failed";
+  const isActive = "codingStatus" in task && (task as CodingTask).codingStatus === "in_progress";
   const verifyErrors = "verifyErrors" in task ? (task as CodingTask).verifyErrors : undefined;
   const generatedFiles = "generatedFiles" in task ? (task as CodingTask).generatedFiles : undefined;
+  const fileActivities = "fileActivities" in task ? (task as CodingTask).fileActivities : undefined;
+  const fileActivityCount = fileActivities?.length ?? 0;
+  const writeCount = fileActivities?.filter((a) => a.operation === "write").length ?? 0;
 
   return (
     <div className="flex flex-col h-full w-full bg-white border-l border-slate-200 overflow-hidden">
@@ -198,92 +206,153 @@ export function TaskDetailPanel({
         </div>
       )}
 
-      {/* Logs section */}
-      <div className="flex flex-col flex-1 overflow-hidden px-5 pt-3">
-        <div className="flex items-center justify-between mb-2 shrink-0">
-          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
-            REAL-TIME LOGS
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setActiveTab("raw")}
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-colors ${
-                activeTab === "raw"
-                  ? "text-slate-800 border-b-2 border-violet-500"
-                  : "text-slate-400 hover:text-slate-600"
-              }`}
-            >
-              RAW
-            </button>
-            <button
-              onClick={() => setActiveTab("filtered")}
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-colors ${
-                activeTab === "filtered"
-                  ? "text-slate-800 border-b-2 border-violet-500"
-                  : "text-slate-400 hover:text-slate-600"
-              }`}
-            >
-              FILTERED
-            </button>
-          </div>
-        </div>
-
-        {/* Log terminal */}
-        <div
-          className="flex-1 bg-[#0d1117] rounded-lg overflow-y-auto p-3 font-mono text-[11px] leading-5"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
-            setAutoScroll(atBottom);
-          }}
+      {/* Top-level tabs: LOGS / FILES */}
+      <div className="shrink-0 flex items-center gap-0 border-b border-slate-100 px-5">
+        <button
+          onClick={() => setPanelTab("logs")}
+          className={`relative text-[10px] font-semibold px-3 py-2 transition-colors ${
+            panelTab === "logs"
+              ? "text-slate-800"
+              : "text-slate-400 hover:text-slate-600"
+          }`}
         >
-          {displayedLogs.length === 0 ? (
-            <span className="text-slate-600 italic">
-              {task && "codingStatus" in task && (task as CodingTask).codingStatus === "pending"
-                ? "Waiting to start..."
-                : "No logs yet..."}
-            </span>
-          ) : (
-            displayedLogs.map((log, i) => {
-              const cfg =
-                LOG_TYPE_CONFIG[log.type] ?? LOG_TYPE_CONFIG.info;
-              const isDone =
-                log.type === "task_complete" && log.message.toLowerCase().includes("done");
-              return (
-                <div key={i} className="flex gap-2 items-start">
-                  <span className="shrink-0 text-slate-600 w-5 text-right">
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span className={`shrink-0 w-13 ${cfg.prefixColor}`}>
-                    {cfg.prefix}
-                  </span>
-                  <span className={`${cfg.textColor} flex-1`}>
-                    {log.message}
-                    {isDone && (
-                      <span className="text-emerald-400 font-bold ml-1">
-                        DONE
-                      </span>
-                    )}
-                  </span>
-                </div>
-              );
-            })
+          REAL-TIME LOGS
+          {panelTab === "logs" && (
+            <motion.span
+              layoutId="panel-tab-indicator"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+            />
           )}
-          <div ref={bottomRef} />
-        </div>
-
-        {/* Auto-scroll indicator */}
-        <div className="flex items-center justify-between py-1.5 shrink-0">
-          <span className="text-[9px] text-slate-400">
-            AUTO-SCROLL {autoScroll ? "ENABLED" : "PAUSED"}
-          </span>
-          <div className="flex items-center gap-1">
-            <span className="text-[9px] text-emerald-500 font-semibold">
-              ● LIVESTREAM
+        </button>
+        <button
+          onClick={() => setPanelTab("files")}
+          className={`relative text-[10px] font-semibold px-3 py-2 transition-colors flex items-center gap-1 ${
+            panelTab === "files"
+              ? "text-slate-800"
+              : "text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          FILE I/O
+          {fileActivityCount > 0 && (
+            <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${
+              writeCount > 0 ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
+            }`}>
+              {fileActivityCount}
             </span>
+          )}
+          {isActive && fileActivityCount === 0 && (
+            <motion.span
+              className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+              animate={{ opacity: [1, 0.3, 1] }}
+              transition={{ duration: 1, repeat: Infinity }}
+            />
+          )}
+          {panelTab === "files" && (
+            <motion.span
+              layoutId="panel-tab-indicator"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+            />
+          )}
+        </button>
+      </div>
+
+      {/* Panel content */}
+      {panelTab === "logs" ? (
+        <div className="flex flex-col flex-1 overflow-hidden px-5 pt-3">
+          <div className="flex items-center justify-end mb-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setActiveTab("raw")}
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-colors ${
+                  activeTab === "raw"
+                    ? "text-slate-800 border-b-2 border-violet-500"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                RAW
+              </button>
+              <button
+                onClick={() => setActiveTab("filtered")}
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-colors ${
+                  activeTab === "filtered"
+                    ? "text-slate-800 border-b-2 border-violet-500"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                FILTERED
+              </button>
+            </div>
+          </div>
+
+          {/* Log terminal */}
+          <div
+            className="flex-1 bg-[#0d1117] rounded-lg overflow-y-auto p-3 font-mono text-[11px] leading-5"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+              setAutoScroll(atBottom);
+            }}
+          >
+            {displayedLogs.length === 0 ? (
+              <span className="text-slate-600 italic">
+                {task && "codingStatus" in task && (task as CodingTask).codingStatus === "pending"
+                  ? "Waiting to start..."
+                  : "No logs yet..."}
+              </span>
+            ) : (
+              displayedLogs.map((log, i) => {
+                const cfg =
+                  LOG_TYPE_CONFIG[log.type] ?? LOG_TYPE_CONFIG.info;
+                const isDone =
+                  log.type === "task_complete" && log.message.toLowerCase().includes("done");
+                return (
+                  <div key={i} className="flex gap-2 items-start">
+                    <span className="shrink-0 text-slate-600 w-5 text-right">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className={`shrink-0 w-13 ${cfg.prefixColor}`}>
+                      {cfg.prefix}
+                    </span>
+                    <span className={`${cfg.textColor} flex-1`}>
+                      {log.message}
+                      {isDone && (
+                        <span className="text-emerald-400 font-bold ml-1">
+                          DONE
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Auto-scroll indicator */}
+          <div className="flex items-center justify-between py-1.5 shrink-0">
+            <span className="text-[9px] text-slate-400">
+              AUTO-SCROLL {autoScroll ? "ENABLED" : "PAUSED"}
+            </span>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-emerald-500 font-semibold">
+                ● LIVE
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        /* File I/O panel */
+        <div className="flex-1 overflow-y-auto px-5 py-4 bg-[#0a0d12]
+          [&::-webkit-scrollbar]:w-1.5
+          [&::-webkit-scrollbar-track]:bg-transparent
+          [&::-webkit-scrollbar-thumb]:bg-slate-700
+          [&::-webkit-scrollbar-thumb]:rounded-full">
+          <FileActivityPanel
+            activities={fileActivities ?? []}
+            isActive={isActive}
+          />
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="shrink-0 flex gap-2 px-5 pb-4 pt-2">

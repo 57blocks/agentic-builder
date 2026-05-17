@@ -219,16 +219,18 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
 
   const badgeCls = sCfg.badge || (sCfg.showPhaseColor ? phase.badge : "bg-slate-100 text-slate-500");
 
-  // Card border: left-accent uses phase color, ring on selected
-  const borderStyle = selected
-    ? { borderColor: phase.accent }
-    : { borderLeftColor: phase.accent };
+  // Card border: active uses all-around colored border for visibility
+  const borderStyle = isActive
+    ? { borderColor: phase.accent, borderWidth: "2px" }
+    : selected
+      ? { borderColor: phase.accent }
+      : { borderLeftColor: phase.accent };
 
-  const ringCls = selected ? "ring-2 ring-offset-1" : "";
+  const ringCls = selected && !isActive ? "ring-2 ring-offset-1" : "";
 
-  // Subtle bg tint when active
+  // bg tint — active gets a stronger tint for visibility
   const bgCls = isActive
-    ? phase.activeBg
+    ? phase.activeBg.replace("/40", "/70")
     : isCompleted
       ? "bg-white"
       : isFailed
@@ -241,26 +243,46 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         relative rounded-xl border border-slate-200 border-l-4 shadow-sm
         transition-colors duration-300 cursor-pointer overflow-visible
         ${bgCls} ${ringCls}
+        ${isActive ? "shadow-lg" : ""}
         ${isFailed ? "border-red-200" : ""}
       `}
       style={{
         ...borderStyle,
-        ...(selected ? { ringColor: phase.accent } : {}),
+        ...(selected && !isActive ? { ringColor: phase.accent } : {}),
+        ...(isActive ? { borderWidth: "2px", borderStyle: "solid" } : { borderLeftWidth: "4px" }),
       }}
     >
-      {/* ── Breathing glow ring (active only) — motion版 ──────────────── */}
+      {/* ── Breathing glow ring (active only) ─────────────────────────── */}
       {isActive && (
         <motion.span
           className="pointer-events-none absolute inset-0 rounded-xl"
           animate={{
             boxShadow: [
-              `0 0 0 2px ${phase.accent}44, 0 0 12px 4px ${phase.accent}22`,
-              `0 0 0 4px ${phase.accent}77, 0 0 24px 8px ${phase.accent}44`,
-              `0 0 0 2px ${phase.accent}44, 0 0 12px 4px ${phase.accent}22`,
+              `0 0 0 2px ${phase.accent}88, 0 0 16px 6px ${phase.accent}44`,
+              `0 0 0 4px ${phase.accent}cc, 0 0 32px 12px ${phase.accent}66`,
+              `0 0 0 2px ${phase.accent}88, 0 0 16px 6px ${phase.accent}44`,
             ],
           }}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
         />
+      )}
+
+      {/* ── Animated gradient shimmer stripe (active only) ─────────────── */}
+      {isActive && (
+        <motion.span
+          className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden"
+          style={{ zIndex: 0 }}
+        >
+          <motion.span
+            className="absolute inset-0"
+            style={{
+              background: `linear-gradient(105deg, transparent 40%, ${phase.accent}22 50%, transparent 60%)`,
+              backgroundSize: "200% 100%",
+            }}
+            animate={{ backgroundPosition: ["200% center", "-200% center"] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
+          />
+        </motion.span>
       )}
 
       {/* ── Top scan line (active only) ────────────────────────────────── */}
@@ -268,8 +290,8 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         <motion.span
           className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-t-xl z-10"
           style={{ top: 0, backgroundColor: phase.accent }}
-          animate={{ opacity: [0.4, 1, 0.4] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+          animate={{ opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
 
@@ -331,7 +353,7 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         className="w-2! h-2! bg-slate-300! border-slate-400!"
       />
 
-      <div className="px-3 pt-2.5 pb-2.5">
+      <div className="relative z-10 px-3 pt-2.5 pb-2.5">
         {/* ── Top row: badge + task id ──────────────────────────────────── */}
         <div className="flex items-center justify-between mb-2">
           <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${badgeCls}`}>
@@ -343,7 +365,7 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         </div>
 
         {/* ── Title ─────────────────────────────────────────────────────── */}
-        <p className="text-[12px] font-semibold text-slate-800 leading-snug line-clamp-2 mb-2.5">
+        <p className={`text-[12px] font-semibold leading-snug line-clamp-2 mb-2.5 ${isActive ? "text-slate-900" : "text-slate-800"}`}>
           {task.title}
         </p>
 
