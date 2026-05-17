@@ -52,6 +52,7 @@ This is a **Tier-L monorepo** project:
 function buildAgentMap(
   tierConstraint: string,
   designStyleMarkdown: string,
+  effectiveTier: "S" | "M" | "L",
   referenceImageBase64?: string,
   designKnowledgeContext?: string,
 ): Record<string, DocAgentFn> {
@@ -62,6 +63,7 @@ function buildAgentMap(
     trd: (prd, _trd, _sys, _ds, sid, prdSpec, onChunk) =>
       new TRDAgent().generateTRD(
         `${tierConstraint}\n\n${prd}`,
+        effectiveTier,
         undefined,
         sid,
         prdSpec ?? null,
@@ -223,6 +225,7 @@ export async function POST(request: NextRequest) {
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
+    effectiveTier,
     styleReferenceImageBase64,
     designKnowledgeContext,
   );
@@ -243,6 +246,7 @@ export async function POST(request: NextRequest) {
             const variantAgentMap = buildAgentMap(
               tierConstraint,
               directionPrompt,
+              effectiveTier,
               styleReferenceImageBase64,
             );
             try {

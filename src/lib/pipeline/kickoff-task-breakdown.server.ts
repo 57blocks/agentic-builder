@@ -1,4 +1,5 @@
 import { TaskBreakdownAgent } from "@/lib/agents/task-breakdown-agent";
+import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import {
   normalizeProjectTier,
   type ProjectTier,
@@ -12,6 +13,7 @@ import {
 import { buildTaskBreakdownScaffoldBlock } from "@/lib/pipeline/scaffold-spec";
 import type { KickoffWorkItem } from "./types";
 import { stripTestingPhaseTasks } from "./strip-testing-tasks";
+import { inferTaskDependencies } from "./task-dep-inference";
 
 function isKickoffWorkItem(x: unknown): x is KickoffWorkItem {
   if (!x || typeof x !== "object") return false;
@@ -311,7 +313,36 @@ export async function buildTaskBreakdownFromDocuments(params: {
     scaffoldTier,
     templatePaths,
   );
-  const agent = new TaskBreakdownAgent(tier, scaffoldBlock);
+
+  // Load auto-applied skills for this project. Triggers (regex + LLM
+  // confirm) run against PRD + TRD and only matched skills get injected
+  // into the agent's system prompt — keeping the prompt focused on the
+  // patterns this specific project actually exhibits.
+  const skillsLoaded = await loadSkillsForAgent({
+    agent: "task-breakdown",
+    prdContent: params.prd ?? "",
+    trdContent: params.trd ?? "",
+  });
+  const skillsBlock = formatAppliedSkills(skillsLoaded);
+  if (skillsLoaded.applied.length > 0) {
+    const ids = skillsLoaded.applied
+      .map((s) => `${s.skill.id} v${s.skill.version}`)
+      .join(", ");
+    console.info(
+      `[task-breakdown] applied ${skillsLoaded.applied.length} skill(s): ${ids} (cost $${skillsLoaded.costUsd.toFixed(4)}, ${skillsLoaded.durationMs}ms)`,
+    );
+  }
+  if (skillsLoaded.skipped.length > 0) {
+    console.debug(
+      `[task-breakdown] skipped ${skillsLoaded.skipped.length} skill(s):`,
+      skillsLoaded.skipped.map((s) => ({
+        id: s.skill.id,
+        reason: s.reason,
+      })),
+    );
+  }
+
+  const agent = new TaskBreakdownAgent(tier, scaffoldBlock, skillsBlock);
 
   const prdSpecText = params.prdSpec
     ? formatPrdSpecForContext(params.prdSpec)
@@ -334,8 +365,22 @@ export async function buildTaskBreakdownFromDocuments(params: {
   const parsed = parseJsonArrayFromLlmOutput(result.content);
   const normalized = normalizeOriginalTaskBreakdown(parsed.tasks, params.prd);
 
+  // Skill-driven late-inserted tasks frequently land with `dependencies: []`.
+  // Without a DAG edge they look ready-to-run to the coding orchestrator and
+  // can start before the files they reference (models, API client, app shell)
+  // are created. Infer missing edges from `files.modifies` and a small set of
+  // foundation rules; the LLM's explicit deps are never overwritten.
+  const { tasks: withDeps, trace: depTrace } =
+    inferTaskDependencies(normalized);
+  if (depTrace.added.length > 0) {
+    console.info(
+      `[task-breakdown] inferred ${depTrace.added.length} missing dependency edge(s):`,
+      depTrace.added.map((e) => `${e.taskId}→${e.depId} (${e.reason})`),
+    );
+  }
+
   return {
-    tasks: stripTestingPhaseTasks(normalized),
+    tasks: stripTestingPhaseTasks(withDeps),
     costUsd: result.costUsd,
     durationMs: result.durationMs,
     model: result.model,
