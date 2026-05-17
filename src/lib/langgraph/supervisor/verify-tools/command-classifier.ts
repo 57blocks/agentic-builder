@@ -17,6 +17,12 @@ export function isMutatingSupervisorBashCommand(command: string): boolean {
 export function detectScopedValidationKind(
   command: string,
 ): ScopedValidationKind | null {
+  return detectScopedValidationKinds(command)[0] ?? null;
+}
+
+export function detectScopedValidationKinds(
+  command: string,
+): ScopedValidationKind[] {
   const normalized = command.replace(/\s+/g, " ").trim().toLowerCase();
   const touchesFrontend =
     normalized.includes("cd frontend") ||
@@ -27,17 +33,18 @@ export function detectScopedValidationKind(
     normalized.includes("/backend") ||
     normalized.includes(" backend/");
 
+  const kinds: ScopedValidationKind[] = [];
   if (touchesFrontend && /\b(tsc|npx tsc)\b/.test(normalized)) {
-    return "frontend_tsc";
+    kinds.push("frontend_tsc");
   }
   if (
     touchesFrontend &&
     /\b(pnpm|npm|yarn)\s+(run\s+)?build\b/.test(normalized)
   ) {
-    return "frontend_build";
+    kinds.push("frontend_build");
   }
   if (touchesBackend && /\b(tsc|npx tsc)\b/.test(normalized)) {
-    return "backend_tsc";
+    kinds.push("backend_tsc");
   }
   if (
     touchesBackend &&
@@ -45,9 +52,9 @@ export function detectScopedValidationKind(
       normalized.includes("backend_smoke_ok") ||
       normalized.includes("tsx --eval"))
   ) {
-    return "backend_smoke";
+    kinds.push("backend_smoke");
   }
-  return null;
+  return [...new Set(kinds)];
 }
 
 export function isValidationLikeBashCommand(command: string): boolean {
