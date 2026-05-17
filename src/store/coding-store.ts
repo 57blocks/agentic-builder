@@ -174,7 +174,29 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   supervisorLogs: [],
   pendingHumanDecision: null,
 
-  setProjectId: (id) => set({ projectId: id }),
+  setProjectId: (id) => {
+    const current = get();
+    if (current.projectId && current.projectId !== id) {
+      _codingAbortController?.abort();
+      _codingAbortController = null;
+      set({
+        sessionId: null,
+        projectId: id,
+        status: "idle",
+        agents: [],
+        tasks: [],
+        selectedAgentId: null,
+        totalCostUsd: 0,
+        error: null,
+        integrationVerify: null,
+        e2eVerify: null,
+        supervisorLogs: [],
+        pendingHumanDecision: null,
+      });
+      return;
+    }
+    set({ projectId: id });
+  },
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
