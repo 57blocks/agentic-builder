@@ -955,6 +955,7 @@ export class PipelineEngine {
         parseError: taskBreakdownParseError,
         rawOutput: taskBreakdownRawOutput,
         droppedFromTruncation: taskBreakdownDroppedFromTruncation,
+        skillsTrace: taskBreakdownSkillsTrace,
       } = await buildTaskBreakdownFromDocuments({
         prd: prdBody,
         trd: trdBody || undefined,
@@ -1297,6 +1298,7 @@ export class PipelineEngine {
             : {}),
           phaseRequirementGate: phaseGateReport,
           ...(phaseRepairSummary ? { phaseRepair: phaseRepairSummary } : {}),
+          taskBreakdownSkillsTrace,
         },
       });
 

@@ -1,5 +1,10 @@
 import { TaskBreakdownAgent } from "@/lib/agents/task-breakdown-agent";
-import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
+import {
+  loadSkillsForAgent,
+  formatAppliedSkills,
+  toSkillTraceRecord,
+  type SkillTraceRecord,
+} from "@/lib/agents/skills";
 import {
   normalizeProjectTier,
   type ProjectTier,
@@ -305,6 +310,10 @@ export async function buildTaskBreakdownFromDocuments(params: {
   rawOutput: string;
   droppedFromTruncation?: number;
   truncationOffset?: number;
+  /** Slim trace of which skills the loader applied/skipped this run.
+   *  Persisted on the kickoff step metadata so the UI + audit script can
+   *  show "which rules fired this run" without re-running the loader. */
+  skillsTrace: SkillTraceRecord;
 }> {
   const tier = normalizeProjectTier(params.tier ?? "M");
   const scaffoldTier = tier as ScaffoldTier;
@@ -389,5 +398,6 @@ export async function buildTaskBreakdownFromDocuments(params: {
     rawOutput: result.content,
     droppedFromTruncation: parsed.droppedCount,
     truncationOffset: parsed.truncationOffset,
+    skillsTrace: toSkillTraceRecord(skillsLoaded),
   };
 }

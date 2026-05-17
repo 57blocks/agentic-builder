@@ -103,6 +103,53 @@ export interface LoadedSkills {
   durationMs: number;
 }
 
+/** Slim, JSON-safe view of a `LoadedSkills` result for persistence into
+ *  pipeline step metadata. Drops the full skill bodies (which are 1-3 KB
+ *  of Markdown each) and keeps only the identifiers + evidence the UI
+ *  and audit script need to render the trace. */
+export interface SkillTraceRecord {
+  applied: Array<{
+    id: string;
+    version: string;
+    priority: number;
+    description?: string;
+    /** Verbatim PRD/TRD line that triggered the rule (if captured). */
+    evidence?: string;
+    /** True when an LLM confirm step actually ran (composite trigger). */
+    llmRan?: boolean;
+  }>;
+  skipped: Array<{
+    id: string;
+    version: string;
+    priority: number;
+    reason: string;
+  }>;
+  costUsd: number;
+  durationMs: number;
+}
+
+/** Project a `LoadedSkills` result into the slim persistable record. */
+export function toSkillTraceRecord(loaded: LoadedSkills): SkillTraceRecord {
+  return {
+    applied: loaded.applied.map((a) => ({
+      id: a.skill.id,
+      version: a.skill.version,
+      priority: a.skill.priority,
+      description: a.skill.description,
+      evidence: a.trigger.evidence,
+      llmRan: a.trigger.llmRan,
+    })),
+    skipped: loaded.skipped.map((s) => ({
+      id: s.skill.id,
+      version: s.skill.version,
+      priority: s.skill.priority,
+      reason: s.reason,
+    })),
+    costUsd: loaded.costUsd,
+    durationMs: loaded.durationMs,
+  };
+}
+
 /** Context fed to the loader. */
 export interface LoaderContext {
   agent: string;
