@@ -431,12 +431,33 @@ export const useStepStore = create<StepStoreState>()(
         get().setStepRunning(stepId);
 
         try {
+          // Tier resolution priority:
+          //   1. PRD's `**Project Tier: X**` badge (authoritative)
+          //   2. step-store's persisted tier
+          // This prevents every step from being stuck at the brief-only
+          // classifier output when the PRD has already declared a tier.
+          //
+          // NOTE: regex is inlined here intentionally. We cannot import the
+          // shared `parseTierFromPrd` helper because its module transitively
+          // pulls in server-only deps (memory cache → graceful-fs → "fs"),
+          // and step-store is a client component.
+          const prdContent = (s.steps.prd?.content ?? "") as string;
+          const tierMatch = prdContent.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+          const parsedTier =
+            tierMatch &&
+            (tierMatch[1].toUpperCase() === "S" ||
+              tierMatch[1].toUpperCase() === "M" ||
+              tierMatch[1].toUpperCase() === "L")
+              ? (tierMatch[1].toUpperCase() as ProjectTier)
+              : null;
+          const effectiveTier: ProjectTier = parsedTier ?? s.tier;
+
           const ctx = {
             projectSlug: _stepProjectSlug,
             featureBrief: s.featureBrief,
             codeOutputDir: s.codeOutputDir,
             previousSteps: s.steps as Partial<Record<StepId, import("@/app/(dashboard)/project/[projectId]/_steps/_shared/types").StepResultData>>,
-            tier: s.tier,
+            tier: effectiveTier,
             sessionId,
             editInstruction,
             prdIntent: s.prdIntent,

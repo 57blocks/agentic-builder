@@ -42,6 +42,9 @@ example
 .blueprint/pipeline-snapshot.json
 .blueprint/design-references/
 
+# shared-schema is generated per-project and should not be tracked
+.blueprint/shared-schema.ts
+
 # misc
 *.pem
 .DS_Store

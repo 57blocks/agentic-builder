@@ -1,2 +1,52 @@
 version: 1
-pipelines: []
+pipelines:
+  - id: market-data-ingestion
+    description: "Intraday CoinGecko ingestion for MC-1, MC-5, MC-8 plus historical backfills."
+    schedule: { cron: "2,32 * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: mark-source-stale }
+    nodes:
+      - { id: fetch-current, service: IngestionOrchestrator, function: fetchMarketCurrent }
+      - { id: fetch-7d, service: IngestionOrchestrator, function: fetchMarket7DayHistory, dependsOn: [fetch-current] }
+      - { id: fetch-30d, service: IngestionOrchestrator, function: fetchMarket30DayHistory, dependsOn: [fetch-7d] }
+      - { id: normalize, service: ScoringEngine, function: normalizeMarketMetrics, dependsOn: [fetch-30d] }
+      - { id: persist, service: API Gateway / Web App Service, function: persistSourceValues, dependsOn: [normalize] }
+
+  - id: onchain-ingestion
+    description: "Intraday Quotient ingestion for OC-7."
+    schedule: { cron: "3,18,33,48 * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: mark-source-stale }
+    nodes:
+      - { id: fetch, service: IngestionOrchestrator, function: fetchOnchainConcentration }
+      - { id: normalize, service: ScoringEngine, function: normalizeOnchainMetrics, dependsOn: [fetch] }
+      - { id: persist, service: API Gateway / Web App Service, function: persistSourceValues, dependsOn: [normalize] }
+
+  - id: sentiment-ingestion
+    description: "Intraday X + news sentiment ingestion for SE-2 and SE-4."
+    schedule: { cron: "8,23,38,53 * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: mark-source-stale }
+    nodes:
+      - { id: fetch-social, service: IngestionOrchestrator, function: fetchSocialSentiment }
+      - { id: fetch-news, service: IngestionOrchestrator, function: fetchNewsArticles, dependsOn: [fetch-social] }
+      - { id: classify, service: ScoringEngine, function: classifySentiment, dependsOn: [fetch-news] }
+      - { id: persist, service: API Gateway / Web App Service, function: persistSourceValues, dependsOn: [classify] }
+
+  - id: reserve-attestation-ingestion
+    description: "Weekly reserve attestation pipeline with on-demand operator trigger."
+    schedule: { cron: "11 3 * * 1" }
+    failure: { strategy: abort, retries: 0, compensation: keep-current-state }
+    nodes:
+      - { id: fetch-document, service: IngestionOrchestrator, function: fetchAttestationDocument }
+      - { id: extract-text, service: IngestionOrchestrator, function: extractDocumentText, dependsOn: [fetch-document] }
+      - { id: llm-extract, service: IngestionOrchestrator, function: extractStructuredValues, dependsOn: [extract-text] }
+      - { id: human-review, service: Reserve Review Service, function: queueForHumanReview, dependsOn: [llm-extract] }
+      - { id: persist, service: API Gateway / Web App Service, function: persistReserveIngestion, dependsOn: [human-review] }
+
+  - id: scoring-cycle
+    description: "Periodic composite scoring cycle and notifications."
+    schedule: { cron: "0 * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
+    nodes:
+      - { id: load-values, service: Scoring Engine, function: loadLatestValues }
+      - { id: compute-score, service: Scoring Engine, function: calculateCompositeScore, dependsOn: [load-values] }
+      - { id: persist-snapshot, service: API Gateway / Web App Service, function: persistScoreSnapshot, dependsOn: [compute-score] }
+      - { id: notify-admins, service: Notification Service, function: sendCycleSummary, dependsOn: [persist-snapshot] }
