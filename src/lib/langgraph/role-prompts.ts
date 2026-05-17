@@ -138,6 +138,135 @@ NEVER write \`defaultValue: {}\` or \`defaultValue: []\` for JSONB / JSON column
 const SYNC_VS_MIGRATIONS_RULE = `**\`sequelize.sync\` vs migrations (HARD RULE):**
 When the project owns a migrations directory (e.g. \`backend/src/database/migrations/\`), schema management belongs to the migration runner. \`syncModels()\` MUST default to \`sync({ alter: false })\` and only flip to \`alter: true\` behind an explicit \`DB_SYNC_ALTER=true\` env. \`alter: true\` reruns DDL on every boot and will surface every \`Invalid value\` / \`column does not exist\` error from the rule above.`;
 
+// ─── Backend operational invariants (HARD RULES) ──────────────────────────
+// These 7 invariants encode common production failure modes that the
+// TRD prompt cannot fully prevent. They apply to every backend task that
+// touches the corresponding pattern. Read each block CAREFULLY.
+
+const BACKEND_OPERATIONAL_INVARIANTS_RULE = `**Backend operational invariants (HARD RULES — apply WHENEVER you touch the matching pattern):**
+
+### 1. TimescaleDB hypertable creation
+If the stack includes TimescaleDB AND the table you are creating is time-series
+(\`raw_metrics\`, \`score_history\`, \`audit_logs\`, anything with a \`*_at\` time
+column and high-volume inserts), the migration MUST follow \`CREATE TABLE\`
+with \`SELECT create_hypertable('<table>', '<time_column>', if_not_exists => TRUE);\`.
+Skipping this turns the table into a regular PG table; time-range queries fall
+back to seq scans and the platform's perf targets become unachievable.
+
+Pattern:
+\`\`\`ts
+await queryInterface.createTable("raw_metrics", { ...columns });
+await queryInterface.sequelize.query(
+  \`SELECT create_hypertable('raw_metrics', 'observed_at', if_not_exists => TRUE);\`
+);
+\`\`\`
+
+### 2. Magic-link verification MUST be atomic (no race)
+A magic link is single-use. The naive \`findOne → check consumedAt → update\`
+sequence is racey: two browser tabs hitting the same link both pass the check
+and BOTH create sessions. ALWAYS use a single atomic UPDATE that returns the
+row only if it was previously unconsumed:
+
+\`\`\`ts
+const [rows] = await sequelize.query(
+  \`UPDATE magic_links
+   SET consumed_at = NOW()
+   WHERE token_hash = $1 AND consumed_at IS NULL
+   RETURNING user_id, expires_at\`,
+  { bind: [tokenHash], type: QueryTypes.SELECT, transaction: t }
+);
+if (rows.length === 0) throw new HttpError(401, "Token used or invalid");
+// THEN create the session using rows[0].user_id, inside the same transaction.
+\`\`\`
+
+### 3. RBAC enforcement: router-level, NEVER handler-level
+For any group of routes that requires the same role (\`/api/admin/*\`,
+\`/api/reserve-review/*\` for operators+), apply \`requireAuth\` + \`requireRole(role)\`
+ONCE at the router mount, not in every handler. Hand-rolled per-handler RBAC
+inevitably misses 1-2 endpoints (typically PATCH/DELETE) and creates auth
+holes:
+
+\`\`\`ts
+// RIGHT
+const adminRouter = new Router({ prefix: "/api/admin" });
+adminRouter.use(requireAuth, requireRole("admin"));
+adminRouter.get("/variables", listVariables);
+adminRouter.patch("/variables/:id", updateVariable);
+
+// WRONG
+adminRouter.get("/variables", requireAuth, requireRole("admin"), listVariables);
+adminRouter.patch("/variables/:id", requireAuth, requireRole("admin"), updateVariable);
+// (one of these will eventually be added without the middleware)
+\`\`\`
+
+### 4. Soft-delete must propagate to every list query
+When the schema has \`is_active\` / \`is_soft_deleted\` flags, every read path
+on that entity MUST filter them out. Easiest: use Sequelize \`defaultScope\`:
+
+\`\`\`ts
+Stablecoin.init({...}, {
+  sequelize,
+  defaultScope: { where: { is_active: true } },
+  scopes: { withInactive: {} },
+});
+// queries: Stablecoin.findAll() → only active
+//          Stablecoin.scope("withInactive").findAll() → all
+\`\`\`
+
+A soft-deleted stablecoin must NOT appear in \`/api/coins\`, \`/api/scoring/*\`,
+\`/api/reserve-reviews/*\`, or any join that materialises a coin. Write a test
+that calls \`softDeleteStablecoin('USDC')\` then \`GET /api/coins\` and asserts
+USDC is absent.
+
+### 5. Stale-source variables MUST be excluded BEFORE composite computation
+When the scoring service computes the composite, it MUST first JOIN against
+\`data_feeds\` (or \`source_health\`) and **filter out variables whose source
+is stale OR whose history is insufficient** before applying weights. NEVER
+weight-multiply zero — that biases the score; instead, recompute the weight
+denominator over only the included variables:
+
+\`\`\`ts
+const included = variables.filter(v => !v.is_stale && !v.insufficient_history);
+const totalWeight = included.reduce((s, v) => s + v.weight, 0);
+const composite = included.reduce((s, v) => s + (v.normalized * v.weight), 0) / totalWeight;
+\`\`\`
+
+Reflect this in §7 SCORE-1 logic on the service layer — the decision-table
+in the DSL is the contract; this is its runtime implementation.
+
+### 6. External API adapters MUST be lazy (no boot-time assertEnv)
+Do NOT block app startup on \`COINGECKO_API_KEY\` / \`QUOTIENT_API_KEY\` / etc.
+Adapters import their key inside the function that calls the API, throw a
+\`MissingCredentialError\` only when actually invoked, and the scheduler
+catches that error and marks the corresponding \`data_feeds\` row stale.
+
+This lets the backend boot in environments without all keys (CI, local dev,
+demo) and lets the operator add credentials incrementally without restarting:
+
+\`\`\`ts
+// RIGHT
+export async function fetchCoingeckoMarketCap(symbol: string) {
+  const key = process.env.COINGECKO_API_KEY;
+  if (!key) throw new MissingCredentialError("COINGECKO_API_KEY");
+  // ... actual fetch
+}
+
+// WRONG: top-of-module \`assertEnv(['COINGECKO_API_KEY'])\` in app.ts or in
+// the adapter's module body
+\`\`\`
+
+### 7. Backfill state must gate variable inclusion
+Variables that require N-day history (e.g. 7-day, 30-day window) MUST have
+an \`insufficient_history\` boolean on \`variable_values\` (or equivalent). The
+backfill job sets it to false when history reaches the required length;
+until then, scoring service treats the variable as excluded (same path as
+rule #5). A scoring cycle that runs BEFORE backfill completes does NOT
+silently emit a wrong composite — it omits the variable AND surfaces the
+state to the dashboard.
+
+The backfill job's final node MUST update this flag in the same transaction
+that persists the backfilled rows.`;
+
 // ─── Conditional rules ─────────────────────────────────────────────────────
 
 const FRONTEND_OAUTH_RULE = `**OAuth project guidance (HARD RULE — applies because an \`auth-*\` scaffold is applied):**
@@ -325,6 +454,8 @@ function buildBackendPrompt(ctx: PromptContext): string {
     `- \`validateBody(schema)\` only on POST/PUT/PATCH/DELETE — NEVER on GET routes.`,
     `- JWT helpers: \`signJwt\` / \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Never call \`jsonwebtoken\` directly in feature code.`,
     `- Every endpoint in \`API_CONTRACTS.json\` for this domain must be implemented and registered.`,
+    ``,
+    BACKEND_OPERATIONAL_INVARIANTS_RULE,
     ``,
     ...(conditional.length > 0 ? [conditional.join("\n\n"), ``] : []),
     API_ROUTES_MANIFEST_RULE,

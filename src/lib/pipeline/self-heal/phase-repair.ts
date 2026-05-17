@@ -10,6 +10,7 @@
 
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 import type { KickoffWorkItem } from "@/lib/pipeline/types";
+import { extractCreates } from "./task-coverage-repair";
 import type { ProjectTier } from "@/lib/agents";
 import { TaskBreakdownAgent } from "@/lib/agents/kickoff/task-breakdown-agent";
 import {
@@ -127,6 +128,7 @@ export async function repairMissingBackendPhase(
             id: t.id,
             phase: t.phase,
             title: t.title,
+            creates: extractCreates(t),
           })),
           startingTaskId,
           prd,

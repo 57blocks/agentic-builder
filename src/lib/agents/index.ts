@@ -14,6 +14,8 @@ export { CodeGenAgent } from "./kickoff/code-gen-agent";
 export {
   classifyProject,
   normalizeProjectTier,
+  parseTierFromPrd,
+  extractClassificationFromPrd,
   type ProjectTier,
   type ProjectClassification,
 } from "./shared/project-classifier";
