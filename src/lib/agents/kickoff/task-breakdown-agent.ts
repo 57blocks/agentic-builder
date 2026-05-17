@@ -144,7 +144,11 @@ The L-tier scaffold ships these files. NEVER plan a task whose subSteps recreate
 `;
 }
 
-function buildSystemPrompt(tier: ProjectTier, scaffoldBlock?: string): string {
+function buildSystemPrompt(
+  tier: ProjectTier,
+  scaffoldBlock?: string,
+  skillsBlock?: string,
+): string {
   const tierStyle = TIER_CODING_STYLE[tier];
   const phaseGuide =
     tier === "M" || tier === "L" ? flatStackPhaseGuide() : "";
@@ -152,6 +156,12 @@ function buildSystemPrompt(tier: ProjectTier, scaffoldBlock?: string): string {
   const scaffoldSection =
     scaffoldBlock && scaffoldBlock.trim().length > 0
       ? `\n${scaffoldBlock.trim()}\n`
+      : "";
+  // Skills auto-discovered by the loader from `.blueprint/skills/task-breakdown/`.
+  // Empty when no trigger matched — section omitted from prompt in that case.
+  const skillsSection =
+    skillsBlock && skillsBlock.trim().length > 0
+      ? `\n${skillsBlock.trim()}\n`
       : "";
 
   return `You are a senior Engineering Lead that produces detailed coding task breakdowns.
@@ -184,6 +194,16 @@ Before generating tasks, analyze the PRD to determine the project type:
 For any full-stack full-stack project, the output MUST contain:
 - At least **one task with phase "Backend Services"** — implementing the actual API routes, controllers, and domain logic in \`backend/src\`. The scaffold ships starter shells; your task adds the feature code.
 
+## TRD / PRD artifact coverage
+
+Project-specific artifact-coverage rules (TRD §3.5 CLI scripts, TRD §3.2
+data models, magic-link callback page, intermediate "waiting state" pages,
+etc.) are now declared as **skills** under \`.blueprint/skills/task-breakdown/\`.
+The applicable skills for this run are listed in the **Skills auto-applied
+to this project** section below. Each lists its hard rules + self-check
+inline — read them when present and treat them as binding.
+
+<!-- TRD/PRD artifact coverage migrated to skills system, see SKILLS block below -->
 ## CRITICAL: OAuth / social-login wiring (scaffold ships SDK; you wire it)
 The scaffold's optional-feature layer (\`scaffolds/<tier>/_optional/auth-*\`) is automatically copied into the project when the kickoff resource detector declares a matching trigger env (e.g. \`VITE_PRIVY_APP_ID\` → \`auth-privy\`). When applied, the scaffold has ALREADY shipped:
 
@@ -206,53 +226,6 @@ If the PRD describes a different OAuth provider that is NOT yet a registered \`_
 **Acceptance criterion** for any OAuth task: \"the LandingPage wires \`onLogin\` to \`useAuth().login(privyToken)\`; some top-level component calls \`usePrivyAuthBridge()\`; backend controllers do NOT call \`findByPk(ctx.state.user.id)\` directly — they resolve via \`privy_id\` first.\"
 
 This rule is **independent** of the External API split rule and the Background-job lifecycle rule below.
-
-## CRITICAL: Background-job task must include lifecycle deliverables
-Whenever a feature is implemented as a background job (queue, scheduler, worker, ingestion pipeline, anything that runs outside a user request), the SAME task description MUST include ALL of the following deliverables (do NOT split them across tasks — they are tightly coupled and break in surprising ways when shipped piecemeal):
-
-- explicit \`run_id\` produced by the enqueue function and threaded through worker → DB row → SSE / polling endpoint (the worker MUST NOT call \`randomUUID()\` to overwrite it);
-- in-process fallback that runs the job synchronously when the queue backend (Redis/BullMQ) is unavailable — controlled by an env flag like \`USE_REDIS_QUEUE\`. Default = in-process so the demo works without Redis;
-- a \`clearActiveRunsForUser(userId)\` helper invoked by the public refresh endpoint BEFORE starting a new run, so a crashed previous run never blocks the user with \`ALREADY_RUNNING\`;
-- structured file logging at every step (start, external-call, success, fail, complete) at \`<backend>/logs/<feature>.log\`;
-- the public SSE / status endpoint MUST accept BOTH UUID run-ids (DB-backed) and \`inproc:<scope>:<ts>\` run-ids (memory-backed) without 5xx — typically via an \`isUuid(runId)\` branch;
-- when the pipeline returns zero rows from all upstream sources, the run completes with \`status="completed"\` + \`item_count=0\` (NOT \`status="failed"\`); the frontend treats this as an empty state, not an error.
-
-**Concrete subStep example for a feed/aggregation task:**
-- \"Implement \`enqueueFeedAggregation(userId)\` in \`backend/src/utils/queue.ts\` returning \`run_id\`. Default branch: in-process Promise that calls the worker on next tick. Behind \`USE_REDIS_QUEUE=1\` flag: route through BullMQ.\"
-- \"Implement \`clearActiveRunsForUser\` in \`feed.service.ts\` and call it at the top of \`POST /api/feed/refresh\` (in \`feed.controller.ts\`).\"
-- \"Implement \`runFeedAggregation\` in \`feedAggregator.ts\` with structured logging to \`backend/logs/feed-aggregation.log\` at every step.\"
-- \"Empty feed = success: when both HN and Google News return 0 stories, mark run \`completed\` with \`story_count=0\` and clear user feed; do NOT throw \`NO_SOURCES\`.\"
-- \"In \`/api/feed/stream\`: detect \`inproc:\` prefix and subscribe to the in-memory event emitter; for UUID run-ids, query \`FeedAggregationRun.findByPk\`. NEVER call \`findByPk\` on an \`inproc:\` id — Postgres will throw \`invalid input syntax for type uuid\`.\"
-
-This rule is **independent** of the External API split rule (which governs splitting upstream-API client code from the orchestration code). A typical feed-aggregator task list ends up looking like:
-
-- T-x \"Build external API clients for HN / Google News / ...\" (External API split rule)
-- T-y \"Implement Feed aggregation pipeline + lifecycle (enqueue + worker + clear-stale + logging + empty-feed handling)\" (this rule — note all 6 deliverables in one task)
-- T-z \"Add Feed REST + SSE streaming routes (UUID + inproc: run-id branches)\" (External API split rule + this rule's SSE branch)
-
-Tasks T-y and T-z share the lifecycle contract. T-y owns the queue impl; T-z owns the HTTP surface.
-
-## CRITICAL: External API pipeline must be split (overrides "prefer one broad task")
-This rule **takes priority over** any "prefer one broad task" guidance below.
-
-If the PRD describes a backend pipeline that integrates **more than 3 distinct external HTTP APIs or third-party services** in one logical flow (typical examples: news/feed aggregators, market scanners, content-extraction pipelines, data ingestion pipelines), you MUST NOT emit it as a single task. The required split is:
-
-1. **External API client layer task** — wrappers/helpers for each external service (HTTP clients, auth headers, retry/timeout, typed responses). Files like \`backend/src/services/externalApis.ts\`, \`backend/src/services/twitterApi.ts\`, \`backend/src/services/jinaClient.ts\`, etc.
-2. **Pipeline orchestration task** — the multi-step business logic that calls those clients (e.g. \`backend/src/services/feedAggregator.ts\`, \`backend/src/services/marketScanner.ts\`). Reads the client files; does NOT recreate them.
-3. **HTTP / streaming layer task** — Koa controller, routes, SSE / BullMQ wiring (e.g. \`feed.controller.ts\`, \`feed.routes.ts\`, \`feedAggregationWorker.ts\`).
-
-Each split task should typically create **2–4 files**. Use \`dependencies\` to express order: orchestration depends on the client layer; the routes/streaming task depends on orchestration. \`coversRequirementIds\` should be distributed across the three tasks so coverage is preserved.
-
-**Concrete example — Capacitr-style PRD (do not literally output, but follow this shape):**
-- BAD: one task \"Implement feed aggregation pipeline and APIs\" creating \`feedAggregator.ts\` + \`externalApis.ts\` + \`feedAggregationWorker.ts\` + \`feed.controller.ts\` + \`feed.routes.ts\` + \`feed.service.ts\` + \`queue.ts\`.
-- GOOD:
-  - T-x \"Build external API clients for HackerNews / Google News / Jina / Polymarket / HyperLiquid / Deribit\" → creates \`externalApis.ts\` (or a small folder of one file per service).
-  - T-y \"Implement Feed aggregation 10-step orchestration\" → creates \`feedAggregator.ts\`, \`feedAggregationWorker.ts\`, \`queue.ts\`. Reads the client files from T-x.
-  - T-z \"Add Feed REST + SSE streaming routes\" → creates \`feed.controller.ts\`, \`feed.routes.ts\`, \`feed.service.ts\`. Reads orchestration files from T-y.
-
-The same split applies to the Markets scanner pipeline (Twitter API + Jina + OpenAI + 3 venues). If both Feed and Markets pipelines exist in the PRD, the **client layer task can be shared** between them (one task creates the clients, both pipeline tasks read them).
-
-**The scaffold does NOT implement your features.** The scaffold only provides the project skeleton (package.json, tsconfig, app shell, and at L-tier the queue / logger / rate-limit infrastructure). Every endpoint, every business rule, every page must be coded in Backend Services or Frontend tasks. Do not omit Backend Services because the scaffold already has \`backend/\` and \`frontend/\` — those are starter shells, not implemented features.
 
 ## TDD seed plan — REQUIRED for P0/P1 tasks
 Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in each P0/P1 task:
@@ -288,7 +261,7 @@ Example \`tddPlan\`:
 
 ## Project tier hint (style only — not task count)
 ${tierStyle}
-${phaseGuide}${lAddendum}${scaffoldSection}
+${phaseGuide}${lAddendum}${scaffoldSection}${skillsSection}
 ## Output Format — strict JSON array
 
 You MUST output ONLY a JSON array (no markdown fences, no explanation, no preamble).
@@ -487,7 +460,14 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
 export class TaskBreakdownAgent extends BaseAgent {
   private tier: ProjectTier;
 
-  constructor(tier: ProjectTier = "L", scaffoldBlock?: string) {
+  constructor(
+    tier: ProjectTier = "L",
+    scaffoldBlock?: string,
+    /** Pre-formatted Markdown block emitted by `formatAppliedSkills()` from
+     *  the skills loader. When present, gets injected into the system
+     *  prompt right before the Output Format section. */
+    skillsBlock?: string,
+  ) {
     const modelChain = resolveModelChain(
       MODEL_CONFIG.taskBreakdown,
       resolveModel,
@@ -495,7 +475,7 @@ export class TaskBreakdownAgent extends BaseAgent {
     super({
       name: "Task Breakdown Agent",
       role: "Engineering Lead",
-      systemPrompt: buildSystemPrompt(tier, scaffoldBlock),
+      systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock),
       defaultModel: MODEL_CONFIG.taskBreakdown,
       temperature: 0.3,
       maxTokens: 16384,

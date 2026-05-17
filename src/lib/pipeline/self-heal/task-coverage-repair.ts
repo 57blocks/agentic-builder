@@ -29,6 +29,7 @@ import {
   parseJsonArrayFromLlmOutput,
   normalizeOriginalTaskBreakdown,
 } from "@/lib/pipeline/kickoff-task-breakdown.server";
+import { inferTaskDependencies } from "@/lib/pipeline/task-dep-inference";
 import type { RepairEmitter } from "./events";
 import {
   type AttemptTracker,
@@ -282,6 +283,26 @@ export async function repairTaskCoverage(
       costUsd: result.costUsd,
     },
   });
+
+  // Supplementary tasks added during repair often lack dependency edges
+  // (the supplementary agent prompt only asks for ids it can reference, not
+  // a full DAG re-derivation). Run the dep inferrer on the merged list so
+  // newly-appended tasks pick up foundation deps that the initial pass
+  // already established. Existing non-empty deps are preserved by the
+  // inferrer.
+  if (result.tasks.length > 0) {
+    const { tasks: withDeps, trace: depTrace } = inferTaskDependencies(
+      result.tasks,
+    );
+    if (depTrace.added.length > 0) {
+      emitter({
+        stage: "coverage-gate",
+        event: "deps_inferred",
+        details: { edges: depTrace.added },
+      });
+    }
+    result.tasks = withDeps;
+  }
 
   if (attemptTracker) {
     const repairedIds = missingIds.filter(

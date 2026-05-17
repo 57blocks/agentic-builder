@@ -199,6 +199,11 @@ export function PrdUI(props: StepUIProps) {
         }).catch((err) => console.error("[PrdUI] hydration tier persist error:", err));
       }
     }
+    // Also keep step-store.tier in sync so executeStep's ctx.tier reflects
+    // the PRD-declared tier (defense in depth — engine also derives ctx.tier
+    // from PRD content directly).
+    const stepStore = useStepStore.getState();
+    if (stepStore.tier !== parsedTier) stepStore.setTier(parsedTier);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHydrated, isDone]);
 
@@ -229,6 +234,10 @@ export function PrdUI(props: StepUIProps) {
         if (tierMatch) {
           const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
           const navStore = useStepNavigationStore.getState();
+          // Keep step-store.tier in sync too — every executeStep call reads
+          // ctx.tier from there.
+          const stepStore = useStepStore.getState();
+          if (stepStore.tier !== parsedTier) stepStore.setTier(parsedTier);
           if (navStore.tier !== parsedTier) {
             navStore.setTier(parsedTier);
             // Persist to DB so the tier survives page refresh
@@ -342,6 +351,8 @@ export function PrdUI(props: StepUIProps) {
       if (tierMatch) {
         const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
         const navStore = useStepNavigationStore.getState();
+        const stepStore = useStepStore.getState();
+        if (stepStore.tier !== parsedTier) stepStore.setTier(parsedTier);
         if (navStore.tier !== parsedTier) {
           navStore.setTier(parsedTier);
           const slug = props.projectSlug;

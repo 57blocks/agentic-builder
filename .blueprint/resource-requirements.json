@@ -1,12 +1,175 @@
 [
   {
+    "envKey": "LLM_PROVIDER",
+    "label": "LLM Provider",
+    "description": "Specifies which LLM provider to use for sentiment classification and reserve attestation extraction features.",
+    "category": "ai",
+    "required": true,
+    "example": "openai",
+    "value": "openrouter"
+  },
+  {
+    "envKey": "LLM_API_KEY",
+    "label": "LLM API Key",
+    "description": "Used by all LLM features (sentiment classification, reserve attestation extraction). Provider-agnostic name so the app can swap providers without touching code.",
+    "category": "ai",
+    "required": true,
+    "example": "sk_test_...",
+    "value": ""
+  },
+  {
+    "envKey": "LLM_BASE_URL",
+    "label": "LLM Base URL",
+    "description": "Base URL for LLM API endpoints, required for some providers like Gemini or OpenAI-compatible proxies.",
+    "category": "ai",
+    "required": false,
+    "example": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "value": "https://openrouter.ai/api/v1"
+  },
+  {
+    "envKey": "LLM_MODEL",
+    "label": "LLM Model",
+    "description": "Default model ID used by the LLM abstraction for sentiment classification and structured extraction.",
+    "category": "ai",
+    "required": true,
+    "example": "gpt-4o-mini",
+    "value": "openai/gpt-5.4"
+  },
+  {
     "envKey": "COINGECKO_API_KEY",
     "label": "CoinGecko API Key",
-    "description": "Used to fetch CEX price deviation, volume anomalies, and community sentiment scores for SPRI scoring engine.",
+    "description": "API key for CoinGecko market data integration used by MC-1, MC-5, and MC-8 variables.",
     "category": "other",
     "required": true,
     "example": "CG-...",
     "docsUrl": "https://www.coingecko.com/en/api/pricing",
     "value": "G-kTrbYVt6dvB6JozyNfZY7w95"
+  },
+  {
+    "envKey": "QUOTIENT_API_KEY",
+    "label": "Quotient API Key",
+    "description": "API key for Quotient on-chain analytics service used by OC-7 holder concentration variable.",
+    "category": "other",
+    "required": true,
+    "example": "quot_...",
+    "value": ""
+  },
+  {
+    "envKey": "X_BEARER_TOKEN",
+    "label": "X (Twitter) Bearer Token",
+    "description": "Bearer token for X API v2 used by SE-2 negative sentiment volume variable.",
+    "category": "other",
+    "required": true,
+    "example": "AAAA...",
+    "docsUrl": "https://developer.twitter.com/en/docs/authentication",
+    "value": ""
+  },
+  {
+    "envKey": "JINA_API_KEY",
+    "label": "Jina Reader API Key",
+    "description": "API key for Jina Reader service used for news article fetching (SE-4) and attestation document text extraction (RQ variables).",
+    "category": "other",
+    "required": true,
+    "example": "jina_...",
+    "value": ""
+  },
+  {
+    "envKey": "SMTP_HOST",
+    "label": "SMTP Host",
+    "description": "SMTP server hostname for sending magic link emails and admin notifications.",
+    "category": "email",
+    "required": true,
+    "example": "smtp.gmail.com",
+    "value": ""
+  },
+  {
+    "envKey": "SMTP_PORT",
+    "label": "SMTP Port",
+    "description": "SMTP server port for email delivery.",
+    "category": "email",
+    "required": true,
+    "example": "587",
+    "value": ""
+  },
+  {
+    "envKey": "SMTP_USER",
+    "label": "SMTP Username",
+    "description": "SMTP authentication username for email delivery.",
+    "category": "email",
+    "required": true,
+    "example": "your-email@company.com",
+    "value": ""
+  },
+  {
+    "envKey": "SMTP_PASS",
+    "label": "SMTP Password",
+    "description": "SMTP authentication password for email delivery.",
+    "category": "email",
+    "required": true,
+    "example": "app-password",
+    "value": ""
+  },
+  {
+    "envKey": "SMTP_FROM",
+    "label": "SMTP From Address",
+    "description": "From email address used for magic links and admin notifications.",
+    "category": "email",
+    "required": true,
+    "example": "noreply@company.com",
+    "value": ""
+  },
+  {
+    "envKey": "SSO_CLIENT_ID",
+    "label": "SSO Client ID",
+    "description": "OAuth client ID for optional SSO authentication integration.",
+    "category": "auth",
+    "required": false,
+    "example": "your-client-id",
+    "value": ""
+  },
+  {
+    "envKey": "SSO_CLIENT_SECRET",
+    "label": "SSO Client Secret",
+    "description": "OAuth client secret for optional SSO authentication integration.",
+    "category": "auth",
+    "required": false,
+    "example": "your-client-secret",
+    "value": ""
+  },
+  {
+    "envKey": "SSO_ISSUER_URL",
+    "label": "SSO Issuer URL",
+    "description": "OAuth issuer URL for optional SSO authentication integration.",
+    "category": "auth",
+    "required": false,
+    "example": "https://your-provider.com",
+    "value": ""
+  },
+  {
+    "envKey": "USE_REDIS_QUEUE",
+    "label": "Use Redis Queue",
+    "description": "Set to 1 to route background jobs through BullMQ + Redis; default in-process Promise queue keeps the demo working without Redis.",
+    "category": "queue",
+    "required": false,
+    "example": "0",
+    "value": ""
+  },
+  {
+    "envKey": "DOCKERHUB_USERNAME",
+    "label": "DockerHub Username",
+    "description": "DockerHub username for deploy.sh workflow to push production images.",
+    "category": "other",
+    "required": true,
+    "example": "your-username",
+    "value": ""
+  },
+  {
+    "envKey": "DOCKERHUB_TOKEN",
+    "label": "DockerHub Access Token",
+    "description": "DockerHub access token for deploy.sh workflow authentication.",
+    "category": "other",
+    "required": true,
+    "example": "dckr_pat_...",
+    "value": ""
   }
 ]

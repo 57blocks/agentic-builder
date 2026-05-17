@@ -10,6 +10,7 @@ import { fetchStitchScreenHtml } from "@/lib/stitch-api";
 import {
   classifyProject,
   normalizeProjectTier,
+  extractClassificationFromPrd,
 } from "@/lib/agents/shared/project-classifier";
 
 export const maxDuration = 300;
@@ -209,25 +210,5 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/**
- * Extract project classification from the PRD tier badge line.
- * The PM agent injects a line like:
- *   > **Project Tier: S** — Simple (single-page / micro-tool)
- * This lets us recover the correct tier without an additional LLM call.
- * Returns null when the badge is absent or unrecognised.
- */
-function extractClassificationFromPrd(
-  prd: string,
-): { tier: ReturnType<typeof normalizeProjectTier>; type: string; needsBackend: boolean; needsDatabase: boolean; reasoning: string } | null {
-  const match = prd.match(/\*\*Project Tier:\s*([SML])\*\*/i);
-  if (!match) return null;
-  const tier = normalizeProjectTier(match[1]);
-  const needsBackend = tier === "M" || tier === "L";
-  return {
-    tier,
-    type: "app",
-    needsBackend,
-    needsDatabase: tier === "L",
-    reasoning: `Extracted from PRD tier badge: tier ${tier}`,
-  };
-}
+// PRD tier-badge extractor now lives in @/lib/agents/shared/project-classifier
+// as `extractClassificationFromPrd` (imported above).
