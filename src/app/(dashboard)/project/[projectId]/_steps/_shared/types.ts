@@ -26,6 +26,7 @@ export interface StepResultData {
   traceId?: string;
   error?: string;
   timestamp: string;
+  /** Extra structured data attached to a step result (e.g. recalled knowledge IDs). */
   metadata?: Record<string, unknown>;
 }
 

@@ -331,7 +331,7 @@ export const useStepStore = create<StepStoreState>()(
                   };
                 }
               }
-              set({ isHydrated: true });
+              set({ steps, isHydrated: true });
               return;
             }
           }
@@ -472,6 +472,9 @@ export const useStepStore = create<StepStoreState>()(
 
           if (result.status === "completed") {
             get().setStepCompleted(stepId, result.content ?? "", result.costUsd ?? 0, result.durationMs ?? 0);
+            if (result.metadata && Object.keys(result.metadata).length > 0) {
+              get().patchStepMeta(stepId, result.metadata);
+            }
           } else if (result.status === "failed") {
             get().setStepFailed(stepId, result.error ?? "Step failed");
           }
