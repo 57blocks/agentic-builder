@@ -6,7 +6,9 @@ import { useStepStore } from "@/store/step-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { ResourceRequirement } from "@/lib/pipeline/resource-requirements";
+import type { SkillTraceRecord } from "@/lib/agents/skills";
 import type { StepUIProps } from "../../_shared/types";
+import { SkillsTracePanel } from "./SkillsTracePanel";
 
 const PAGE_SIZE = 8;
 
@@ -219,6 +221,9 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const isCompleted = summaryResult?.status === "completed";
   const metadata = summaryResult?.metadata;
   const tasks = parseKickoffTaskBreakdownFromMetadata(metadata);
+  const skillsTrace = (metadata as Record<string, unknown> | undefined)?.[
+    "taskBreakdownSkillsTrace"
+  ] as SkillTraceRecord | undefined;
   const hasRunKickoff = isCompleted || isThisRunning;
 
   useEffect(() => {
@@ -702,6 +707,9 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   ))}
                 </div>
               </div>
+
+              {/* Skills trace (which auto-applied rules fired this run) */}
+              <SkillsTracePanel trace={skillsTrace} />
 
               {/* Task table */}
               <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">

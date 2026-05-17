@@ -34,7 +34,8 @@
     "memory:approve": "tsx scripts/memory-cli.ts approve",
     "memory:disapprove": "tsx scripts/memory-cli.ts disapprove",
     "memory:attribute": "tsx scripts/memory-attribute.ts",
-    "memory:ab-compare": "tsx scripts/memory-ab-compare.ts"
+    "memory:ab-compare": "tsx scripts/memory-ab-compare.ts",
+    "task:audit": "tsx scripts/task-audit.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.38",
