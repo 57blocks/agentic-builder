@@ -581,6 +581,12 @@ export class TaskBreakdownAgent extends BaseAgent {
         id: string;
         phase?: string;
         title: string;
+        /** Files this task already creates. Listed verbatim in the prompt
+         *  so supplementary tasks can REUSE these exact paths in their
+         *  own `files.modifies` instead of inventing names that drift
+         *  (e.g. `MonitorDashboard.tsx` when the real file is
+         *  `MonitorDashboardPage.tsx`). */
+        creates?: string[];
       }>;
       startingTaskId: string;
       prd: string;
@@ -592,7 +598,19 @@ export class TaskBreakdownAgent extends BaseAgent {
     sessionId?: string,
   ) {
     const summaryLines = params.existingTaskSummary
-      .map((t) => `- \`${t.id}\`${t.phase ? ` (${t.phase})` : ""}: ${t.title}`)
+      .map((t) => {
+        const head = `- \`${t.id}\`${t.phase ? ` (${t.phase})` : ""}: ${t.title}`;
+        if (!t.creates || t.creates.length === 0) return head;
+        // Cap to keep prompt size sane; the most-likely-targeted files
+        // (views, pages, controllers) tend to live at predictable paths
+        // and we expect drift mostly on those. 12 entries per task is
+        // a generous bound (the largest task in practice has ~30 creates).
+        const shown = t.creates.slice(0, 12);
+        const more = t.creates.length - shown.length;
+        const tail = shown.map((f) => `    • \`${f}\``).join("\n");
+        const overflow = more > 0 ? `\n    • …(+${more} more)` : "";
+        return `${head}\n${tail}${overflow}`;
+      })
       .join("\n");
 
     const contextSections: string[] = [];
@@ -622,8 +640,14 @@ export class TaskBreakdownAgent extends BaseAgent {
       "   Backend Services / Integration / Frontend / Testing / Infrastructure).",
       "5. For every new task declare `files.creates` / `files.modifies` that",
       "   do NOT collide with files already created by earlier tasks.",
-      "6. Dependencies may reference earlier task ids from the summary.",
-      "7. Output strict JSON: an array of task objects. No markdown fencing.",
+      "6. **CRITICAL — exact filenames**: when you need to extend behavior in",
+      "   a file created by an earlier task, copy its path **verbatim** from",
+      "   the bullet-list under that task in §Existing tasks below. Do NOT",
+      "   abbreviate or guess (e.g. NEVER write `MonitorDashboard.tsx` when",
+      "   the listed path is `MonitorDashboardPage.tsx`). A `files.modifies`",
+      "   entry that doesn't match an existing path verbatim is a defect.",
+      "7. Dependencies may reference earlier task ids from the summary.",
+      "8. Output strict JSON: an array of task objects. No markdown fencing.",
       "",
       "## Missing requirement IDs (" + params.missingIds.length + ")",
       "",
