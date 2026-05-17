@@ -1,107 +1,33 @@
 /**
  * POST /api/memory/knowledge/refresh
  *
- * Generates fresh design trend insights for one or all industry verticals
- * using an LLM call, stores them as `design-knowledge` records tagged with
- * `source:daily-refresh`, and prunes refresh records older than 30 days.
+ * Refreshes the design-knowledge base for one or all industry verticals by
+ * running the **trend capture pipeline**:
+ *
+ *   LLM-discovered URLs  →  Microlink screenshot  →  vision analyser
+ *   (StyleSpec)  →  persisted as `design-knowledge` record with
+ *   `source:trend-capture` tag (auto-pruned after 30 days).
  *
  * Query params:
- *   industry=ai|fintech-web3|saas  (omit to refresh all three)
+ *   industry=ai|fintech-web3|saas   (omit to refresh all three)
+ *   count=N                         (sites per industry, 1-10, default 5)
  *
- * Intended use: call manually or via a scheduled cron job (e.g. Vercel cron,
- * GitHub Actions schedule, or any HTTP scheduler).
+ * Each captured screenshot becomes one Style Spec record so the existing
+ * Knowledge UI renders it under "Generated Style Specs" with both Markdown
+ * summary and HTML preview, ready to be recalled into DesignAgent.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { chatCompletion, resolveModel, type ChatMessage } from "@/lib/openrouter";
-import { MODEL_CONFIG } from "@/lib/model-config";
-import { getSystemMemory } from "@/lib/memory";
 import { memoryEnabled } from "@/lib/memory/env";
 import {
   ALL_INDUSTRIES,
   type DesignIndustry,
 } from "@/lib/memory/knowledge/57b-library";
-
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-const INDUSTRY_LABELS: Record<DesignIndustry, string> = {
-  ai: "AI / Machine Learning products",
-  "fintech-web3": "FinTech, Web3 and Blockchain products",
-  saas: "SaaS and Enterprise applications",
-};
-
-function buildRefreshPrompt(industry: DesignIndustry, year: number): string {
-  return `You are a senior UI/UX design expert specialising in ${INDUSTRY_LABELS[industry]}.
-
-Generate a concise (300-500 word) markdown reference note covering the most relevant **current design trends and best practices** for ${INDUSTRY_LABELS[industry]} in ${year}.
-
-Structure your response with these exact sections:
-
-### Trending Visual Styles
-2-4 bullet points describing dominant aesthetics and visual directions.
-
-### Component & Interaction Patterns
-2-4 bullet points on UI component trends (micro-interactions, states, animation).
-
-### Typography & Color Trends
-2-3 bullet points on typography choices and color palette directions.
-
-### What to Avoid
-2-3 bullet points on patterns that look dated or that harm UX for this industry.
-
-Write as actionable guidance a UI designer would follow when starting a new project. Be specific — name real patterns (e.g. "bento grid layouts", "soft skeuomorphism", "neobrutalism"). Avoid vague generalities.`;
-}
-
-async function generateTrendNote(
-  industry: DesignIndustry,
-  year: number,
-): Promise<string | null> {
-  const messages: ChatMessage[] = [
-    {
-      role: "user",
-      content: buildRefreshPrompt(industry, year),
-    },
-  ];
-
-  try {
-    const model = resolveModel(MODEL_CONFIG.qa);
-    const response = await chatCompletion(messages, {
-      model,
-      temperature: 0.4,
-      max_tokens: 700,
-    });
-    return response.choices?.[0]?.message?.content?.trim() ?? null;
-  } catch (err) {
-    console.warn(
-      `[memory/knowledge/refresh] LLM call failed for industry=${industry}:`,
-      (err as Error).message,
-    );
-    return null;
-  }
-}
-
-async function pruneOldRefreshRecords(industry: DesignIndustry): Promise<number> {
-  const store = getSystemMemory();
-  const all = await store.list({ kind: "design-knowledge" });
-  const cutoff = Date.now() - THIRTY_DAYS_MS;
-
-  const stale = all.filter(
-    (r) =>
-      r.tags.includes(`industry:${industry}`) &&
-      r.tags.includes("source:daily-refresh") &&
-      r.createdAt < cutoff,
-  );
-
-  for (const r of stale) {
-    try {
-      await store.delete(r.id);
-    } catch {
-      // Swallow — pruning failure should not abort the refresh
-    }
-  }
-  return stale.length;
-}
+import {
+  refreshIndustryByCapture,
+  type RefreshByCaptureResult,
+} from "@/lib/memory/knowledge/trend-capture/pipeline";
 
 export async function POST(req: NextRequest) {
   if (!memoryEnabled()) {
@@ -110,72 +36,55 @@ export async function POST(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const industryParam = searchParams.get("industry") as DesignIndustry | null;
+  const countParam = Number.parseInt(searchParams.get("count") ?? "", 10);
+  const siteCount =
+    Number.isFinite(countParam) && countParam > 0
+      ? Math.min(countParam, 10)
+      : undefined;
 
   const industries: DesignIndustry[] =
     industryParam && ALL_INDUSTRIES.includes(industryParam)
       ? [industryParam]
-      : ALL_INDUSTRIES;
+      : [...ALL_INDUSTRIES];
 
   const year = new Date().getFullYear();
   const dateTag = `refreshed:${new Date().toISOString().slice(0, 10)}`;
 
-  const results: Array<{
-    industry: DesignIndustry;
-    status: "ok" | "failed";
-    id?: string;
-    pruned?: number;
-  }> = [];
-
-  const store = getSystemMemory();
+  const results: RefreshByCaptureResult[] = [];
 
   for (const industry of industries) {
     try {
-      const pruned = await pruneOldRefreshRecords(industry);
-      const trendNote = await generateTrendNote(industry, year);
-
-      if (!trendNote) {
-        results.push({ industry, status: "failed", pruned });
-        continue;
-      }
-
-      const body = [
-        `## Design Trend Insights — ${INDUSTRY_LABELS[industry]} (${year})`,
-        "",
-        trendNote,
-      ].join("\n");
-
-      const saved = await store.save({
-        id: `DK-refresh-${industry}-${Date.now()}`,
-        layer: "L1",
-        kind: "design-knowledge",
-        title: `Design Trends ${year} — ${INDUSTRY_LABELS[industry]}`,
-        body,
-        tags: [
-          `industry:${industry}`,
-          "source:daily-refresh",
-          dateTag,
-          "manual:approved",
-        ],
-        source: "distill",
-        refs: {},
-        metrics: { score: 0.75, hits: 0 },
-      });
-
-      results.push({ industry, status: "ok", id: saved.id, pruned });
+      const r = await refreshIndustryByCapture(industry, year, { siteCount });
+      results.push(r);
     } catch (err) {
       console.error(
-        `[memory/knowledge/refresh] failed for industry=${industry}:`,
+        `[memory/knowledge/refresh] capture pipeline failed for industry=${industry}:`,
         err,
       );
-      results.push({ industry, status: "failed" });
+      results.push({
+        industry,
+        discovered: 0,
+        captured: 0,
+        failed: 0,
+        pruned: 0,
+        results: [],
+      });
     }
   }
 
-  const succeeded = results.filter((r) => r.status === "ok").length;
+  const totalCaptured = results.reduce((s, r) => s + r.captured, 0);
+  const totalFailed = results.reduce((s, r) => s + r.failed, 0);
+  const totalPruned = results.reduce((s, r) => s + r.pruned, 0);
+
   return NextResponse.json({
-    ok: succeeded > 0,
+    ok: totalCaptured > 0,
     year,
     date: dateTag,
+    summary: {
+      captured: totalCaptured,
+      failed: totalFailed,
+      pruned: totalPruned,
+    },
     results,
   });
 }

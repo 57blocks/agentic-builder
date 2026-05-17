@@ -93,6 +93,9 @@ export default function ProjectPage() {
       setStepResults({});
       setLoading(true);
       prevProjectIdRef.current = projectId;
+      // Clear step-store so stale data from the previous project does not
+      // persist into the new project before DB snapshots are loaded.
+      useStepStore.getState().reset();
     }
 
     // Hydrate the step-navigation store

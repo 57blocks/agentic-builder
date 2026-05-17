@@ -24,6 +24,8 @@ import { renderMemoryContext } from "./inject";
 import { recallAndPrepareInject, type RecallContextResult } from "./recall-context";
 import type { ProjectTier } from "../agents/shared/project-classifier";
 import type { DesignIndustry } from "./knowledge/57b-library";
+import { condenseStyleSpecForRecall } from "./knowledge/style-spec/compose-body";
+import type { MemoryRecord } from "./types";
 
 export interface PreparationRecallInput {
   sessionId: string;
@@ -102,17 +104,23 @@ function wrapPatternBlock(phase: "PRD" | "Design", block: string): string {
 }
 
 /**
- * Wrap the design-knowledge block (company style library + daily trends).
+ * Wrap the design-knowledge block (company style library + Style Specs).
  */
 function wrapKnowledgeBlock(knowledgeText: string, industry: DesignIndustry | null): string {
   if (!knowledgeText.trim()) return "";
   const industryLabel = industry
     ? ` (matched industry: ${industry})`
-    : " (no industry match — using all available guides)";
+    : " (no exact industry match — using best-fit guides)";
   return [
-    `## Company Design Guidelines${industryLabel}`,
+    `## Design Knowledge Base${industryLabel}`,
     "",
-    "The following style guidelines come from the 57B design knowledge library. Apply them when generating tokens, colors, typography, and component aesthetics. These are authoritative — prioritise them over generic defaults.",
+    "The following records come from the 57B design knowledge library and from AI-analysed reference screenshots (Style Specs). Each Style Spec includes a colour palette, typography, spacing, radius, CSS variables and named UI element regions derived from a real product screenshot.",
+    "",
+    "When generating the Design System Spec:",
+    "- Use the palette hex values, font names and spacing scale from the closest-matching Style Spec as primary design tokens.",
+    "- Apply the component descriptions and layout patterns as structural guidance.",
+    "- The CSS variables block (`:root { … }`) can be used verbatim in generated CSS.",
+    "- Treat these records as **authoritative references** — override generic LLM defaults with the concrete values found here.",
     "",
     knowledgeText,
     "",
@@ -122,6 +130,8 @@ function wrapKnowledgeBlock(knowledgeText: string, industry: DesignIndustry | nu
 export interface PreparationRecallResult extends RecallContextResult {
   /** Already wrapped block (with section header + cite hint), ready to splice. */
   contextChunk: string;
+  /** IDs of design-knowledge records injected into the prompt (for UI display). */
+  recalledKnowledgeIds?: string[];
 }
 
 export async function recallPrdContext(
@@ -176,26 +186,65 @@ export async function recallDesignContext(
   });
 
   // 2. Detect industry and fetch matching design-knowledge records (57B library
-  //    + daily refresh records). These records carry `manual:approved` so they
-  //    bypass the score threshold in the normal recall path; here we query
-  //    directly to apply industry-tag filtering.
+  //    + Style Specs from vision-distill and trend-capture).
   const industry = detectIndustry(queryText);
+  console.log(
+    `[memory:design-recall] inject=${memoryInjectEnabledForDesign()} detectedIndustry=${industry ?? "none"} queryLen=${queryText.length}`,
+  );
   let knowledgeBlock = "";
+  let recalledKnowledgeIds: string[] = [];
 
   if (memoryInjectEnabledForDesign()) {
     try {
-      const knowledgeRecords = await getSystemMemory().recall({
+      // Primary pass: recall records that match the detected industry.
+      // When industry is unknown, pull records tagged `industry:generic` plus
+      // the 57B library records (which cover all three industries) rather than
+      // flooding the context with every Style Spec from every industry.
+      const primaryTags = industry
+        ? { any: [`industry:${industry}`] }
+        : { any: ["source:57b-guidelines", "industry:generic"] };
+
+      let knowledgeRecords = await getSystemMemory().recall({
         layer: "L1",
         kinds: ["design-knowledge"],
-        tags: industry ? { any: [`industry:${industry}`] } : undefined,
-        limit: 4,
+        tags: primaryTags,
+        limit: 6,
       });
 
+      // Fallback: if primary pass yields fewer than 2 records, widen to all
+      // design-knowledge (the ranking will still surface the best-scoring ones).
+      if (knowledgeRecords.length < 2) {
+        knowledgeRecords = await getSystemMemory().recall({
+          layer: "L1",
+          kinds: ["design-knowledge"],
+          limit: 6,
+        });
+      }
+
+      console.log(
+        `[memory:design-recall] recalled ${knowledgeRecords.length} design-knowledge records: [${knowledgeRecords.map((r) => r.id).join(", ")}]`,
+      );
+      recalledKnowledgeIds = knowledgeRecords.map((r) => r.id);
+
       if (knowledgeRecords.length > 0) {
-        const rendered = renderMemoryContext(knowledgeRecords, {
-          tokenBudget: 3000,
+        // Style Spec and trend-capture records embed a full HTML preview that
+        // is great for the UI but blows past the 3000-token inject budget.
+        // Replace the body with a condensed view (Markdown + CSS variables)
+        // before rendering so each record stays under ~2KB.
+        const trimmedRecords: MemoryRecord[] = knowledgeRecords.map((r) =>
+          r.tags.includes("source:vision-distill") ||
+          r.tags.includes("source:trend-capture") ||
+          r.tags.includes("source:daily-refresh")
+            ? { ...r, body: condenseStyleSpecForRecall(r.body) }
+            : r,
+        );
+        const rendered = renderMemoryContext(trimmedRecords, {
+          tokenBudget: 4000,
         });
         knowledgeBlock = wrapKnowledgeBlock(rendered.text, industry);
+        console.log(
+          `[memory:design-recall] knowledge block size=${rendered.text.length} chars`,
+        );
       }
     } catch (err) {
       console.warn(
@@ -215,5 +264,6 @@ export async function recallDesignContext(
     ...patternResult,
     block: [patternResult.block, knowledgeBlock].filter(Boolean).join("\n\n"),
     contextChunk,
+    recalledKnowledgeIds,
   };
 }
