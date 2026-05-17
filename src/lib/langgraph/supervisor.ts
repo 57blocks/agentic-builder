@@ -4302,6 +4302,9 @@ async function phaseVerifyAndFix(
       role: "assistant",
       content: choice.message.content ?? "",
       tool_calls: choice.message.tool_calls,
+      ...(choice.message.reasoning_content
+        ? { reasoning_content: choice.message.reasoning_content }
+        : {}),
     });
 
     const toolCalls = choice.message.tool_calls ?? [];
@@ -6163,6 +6166,9 @@ async function integrationVerifyAndFix(
       role: "assistant",
       content: choice.message.content ?? "",
       tool_calls: choice.message.tool_calls,
+      ...(choice.message.reasoning_content
+        ? { reasoning_content: choice.message.reasoning_content }
+        : {}),
     });
 
     const toolCalls = choice.message.tool_calls ?? [];
