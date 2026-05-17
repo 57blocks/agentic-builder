@@ -78,7 +78,10 @@ import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
 } from "@/lib/pipeline/human-decision";
-import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
+import {
+  readResourceRequirements,
+  formatUnfilledKeysForE2EPrompt,
+} from "@/lib/pipeline/resource-requirements";
 import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
@@ -1685,6 +1688,36 @@ async function detectE2eCommand(
   return null;
 }
 
+/**
+ * Extract Playwright's "N skipped" summary from raw test output, plus any
+ * skip-reason lines like `Skipped: foo` or `test.skip annotation: ...`.
+ * Returns a human-readable one-liner, or null if nothing was skipped.
+ *
+ * Used to amplify deliberate `test.skip(!process.env.X, ...)` guards so the
+ * user sees which features were de-scoped from validation due to missing
+ * env keys — instead of those skips being lost in the noise.
+ */
+function summarizeSkippedTests(output: string): string | null {
+  const m = output.match(/(\d+)\s+skipped/);
+  if (!m || Number(m[1]) === 0) return null;
+  const count = Number(m[1]);
+  // Pull up to 5 distinct skip reasons (anything matching the playwright
+  // skip annotation lines). Skipped tests typically print their reason
+  // alongside; the patterns vary by reporter so we keep this permissive.
+  const reasonSet = new Set<string>();
+  const reasonRe =
+    /(?:^|\n)\s*(?:[-•]\s*)?(?:skipped:\s*|test\.skip[^:]*:\s*|reason:\s*)([^\n]{4,120})/gi;
+  let rm: RegExpExecArray | null;
+  while ((rm = reasonRe.exec(output)) !== null && reasonSet.size < 5) {
+    reasonSet.add(rm[1]!.trim());
+  }
+  const reasons = [...reasonSet];
+  if (reasons.length === 0) {
+    return `${count} test(s) skipped (likely due to missing env keys — check playwright output above).`;
+  }
+  return `${count} test(s) skipped due to missing env keys: ${reasons.slice(0, 3).join("; ")}${reasons.length > 3 ? ` (+${reasons.length - 3} more)` : ""}`;
+}
+
 async function e2eVerifyAndFix(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
@@ -1755,6 +1788,27 @@ async function e2eVerifyAndFix(
       console.log(
         "[Supervisor] e2eVerify: no PRD-based test scripts found — generating from PRD_E2E_SPEC.md...",
       );
+      // Surface declared-but-unfilled env keys to the generator so it can
+      // wrap dependent tests in `test.skip(!process.env.X, ...)` instead of
+      // letting them fail at runtime and chew through the fix-loop budget.
+      // Tests for features whose creds aren't configured will then show up
+      // as visible "skipped" warnings in the playwright report.
+      let unfilledKeysBlock = "";
+      try {
+        const declaredResources = await readResourceRequirements(
+          process.cwd(),
+        );
+        unfilledKeysBlock = formatUnfilledKeysForE2EPrompt(declaredResources);
+        if (unfilledKeysBlock) {
+          console.log(
+            `[Supervisor] e2eVerify: injecting ${declaredResources.filter((r) => r.required && !(r.value ?? "").trim()).length} unfilled-key skip-guard hint(s) into generator prompt`,
+          );
+        }
+      } catch (resErr) {
+        console.warn(
+          `[Supervisor] e2eVerify: failed to read resource requirements (continuing without skip-guards): ${resErr instanceof Error ? resErr.message : String(resErr)}`,
+        );
+      }
       try {
         const genModelChain = resolveModelChain(
           MODEL_CONFIG.e2eGen ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
@@ -1776,6 +1830,14 @@ async function e2eVerifyAndFix(
               "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
               "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
               "- Do not re-generate smoke.spec.ts.",
+              "",
+              "## Skip tests for features with missing env keys",
+              "- If the user message contains a `## Env keys NOT configured` block,",
+              "  every test whose flow depends on one of those keys MUST start with",
+              "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
+              "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
+              "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
+              "  a hard failure the fix-loop has to keep chewing.",
               "",
               "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
               "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
@@ -1800,6 +1862,7 @@ async function e2eVerifyAndFix(
               "## PRD E2E Specification",
               e2eSpecDoc.slice(0, 12000),
               "",
+              unfilledKeysBlock,
               state.projectContext
                 ? `## Project context\n${state.projectContext.slice(0, 4000)}`
                 : "",
@@ -1852,6 +1915,14 @@ async function e2eVerifyAndFix(
   });
   const output = `${runResult.stdout}${runResult.stderr}`.trim();
   if (runResult.exitCode === 0) {
+    // Surface "X skipped" tests prominently so the user sees gaps from
+    // missing env keys (e.g. SMTP_HOST) that we deliberately skipped via
+    // `test.skip(!process.env.X, ...)` guards. Playwright already prints
+    // these — we just amplify them so they don't get lost in the log.
+    const skippedSummary = summarizeSkippedTests(output);
+    if (skippedSummary) {
+      console.warn(`[Supervisor] e2eVerify: ${skippedSummary}`);
+    }
     return {
       e2eVerifyAttempts: attempt,
       e2eVerifyErrors: "",

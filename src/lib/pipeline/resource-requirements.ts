@@ -112,6 +112,61 @@ export async function readResourceRequirements(
   }
 }
 
+/**
+ * Format the subset of declared-but-unfilled env keys as a Markdown block
+ * for injection into the E2E test generator's prompt. The intent is to
+ * have the generator wrap any test exercising a missing-key feature in
+ * `test.skip(!process.env.X, "feature X requires env Y")` so the test
+ * suite stays green for features whose external dependencies aren't
+ * configured yet — and the gaps surface as visible "skipped" warnings
+ * rather than silently-failing flaky tests.
+ *
+ * Returns an empty string when every required key is filled.
+ *
+ * Only `required` keys are included; optional keys (`SSO_*`, etc.) are
+ * assumed acceptable to lack and shouldn't gate tests.
+ */
+export function formatUnfilledKeysForE2EPrompt(
+  items: ResourceRequirement[],
+): string {
+  const unfilled = items.filter(
+    (r) => r.required && !(r.value ?? "").trim(),
+  );
+  if (unfilled.length === 0) return "";
+
+  const lines: string[] = [];
+  lines.push("## Env keys NOT configured (skip dependent tests)");
+  lines.push("");
+  lines.push(
+    "The following env vars are declared in the project but have no value. " +
+      "Any test that exercises a feature depending on one of these MUST be " +
+      "wrapped in `test.skip(!process.env.<KEY>, '<feature> requires <KEY>')` " +
+      "so the suite stays green and the gap shows up as a visible 'skipped' " +
+      "warning rather than a hard failure.",
+  );
+  lines.push("");
+  for (const r of unfilled) {
+    lines.push(
+      `- \`${r.envKey}\` (${r.category}): ${r.description}`,
+    );
+  }
+  lines.push("");
+  lines.push(
+    "Example pattern:",
+    "```ts",
+    "test('sends magic link email', async ({ page }) => {",
+    "  test.skip(!process.env.SMTP_HOST, 'magic-link email requires SMTP_HOST');",
+    "  // ... rest of test",
+    "});",
+    "```",
+    "",
+    "Group the skip-guard at the START of each `test()` (before any `page.goto`). " +
+      "If an entire `test.describe` block depends on one key, use a single " +
+      "`test.beforeAll(({}) => { test.skip(!process.env.X, '...'); })`.",
+  );
+  return lines.join("\n");
+}
+
 /** Overwrite the entire list (e.g. after detection or user save). */
 export async function writeResourceRequirements(
   projectRoot: string,
