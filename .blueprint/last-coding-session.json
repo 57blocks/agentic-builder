@@ -1,0 +1,54 @@
+{
+  "sessionId": "d0207793-6820-41a3-881c-bbfba6dbeda6",
+  "savedAt": "2026-05-16T13:35:14.907Z",
+  "completedTaskIds": [],
+  "failedTaskIds": [
+    "T-001",
+    "T-002",
+    "T-003",
+    "T-004",
+    "T-005",
+    "T-006",
+    "T-007",
+    "T-008",
+    "T-009"
+  ],
+  "taskResults": {
+    "T-001": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-002": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-003": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-004": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-005": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-006": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-007": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-008": {
+      "status": "unknown",
+      "generatedFiles": []
+    },
+    "T-009": {
+      "status": "unknown",
+      "generatedFiles": []
+    }
+  }
+}

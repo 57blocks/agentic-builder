@@ -3,9 +3,9 @@
 /.pnpm-store/
 # scaffold templates must stay source-only; local installs break copyScaffold
 scaffolds/**/node_modules
-# generated-code: ignore bulk of output; allow pipeline/session dirs to be tracked
-generated-code/*
-generated-code/.ralph
+# generated-code output and runtime artifacts
+/generated-code/*
+/generated-code/.ralph/
 example
 /.pnp
 .pnp.*
@@ -25,7 +25,6 @@ example
 
 # parallel-instance generated-code roots (kept untracked alongside generated-code/)
 /generated-code-*/
-/generated-code/*
 
 # electron
 /dist/
@@ -55,6 +54,4 @@ worklog-automation
 .memory/.lock-target
 .memory/metrics.json
 .memory/trace.jsonl
-
-/generated-code/*
 docs/superpowers
