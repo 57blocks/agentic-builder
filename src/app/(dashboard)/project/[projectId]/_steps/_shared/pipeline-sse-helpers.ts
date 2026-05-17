@@ -220,6 +220,7 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
       let resultCost = 0;
       let resultDuration = 0;
       let resultError: string | undefined;
+      let resultMeta: Record<string, unknown> | undefined;
 
       try {
         const resp = await fetch("/api/agents/parallel-generate", {
@@ -260,6 +261,10 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
                 resultContent = (event.content as string) || resultContent;
                 resultCost = (event.costUsd as number) || resultCost;
                 resultDuration = (event.durationMs as number) || resultDuration;
+                const ids = (payload as Record<string, unknown>).recalledKnowledgeIds;
+                if (Array.isArray(ids) && ids.length > 0) {
+                  resultMeta = { ...resultMeta, recalledKnowledgeIds: ids };
+                }
                 ctx.emitState({ streamingContent: "" });
               }
               break;
@@ -291,6 +296,7 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
         costUsd: resultCost,
         durationMs: resultDuration,
         timestamp: new Date().toISOString(),
+        ...(resultMeta ? { metadata: resultMeta } : {}),
       };
     },
 

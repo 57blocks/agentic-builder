@@ -50,7 +50,13 @@ async function putSnapshot(
 export async function loadAllStepSnapshots(projectSlug: string): Promise<void> {
   const all = await fetchAllSnapshots(projectSlug);
   const s = useStepStore.getState();
-  const merged = { ...s.steps } as Record<string, Record<string, unknown>>;
+  // Start from a clean slate (all steps null) so stale data from a previously
+  // loaded project does not bleed into the current one. Only DB-persisted data
+  // gets populated; steps with no snapshot stay null/pending.
+  const empty = Object.fromEntries(
+    Object.keys(s.steps).map((k) => [k, null]),
+  ) as typeof s.steps;
+  const merged = { ...empty } as unknown as Record<string, Record<string, unknown>>;
   for (const [stepId, snap] of Object.entries(all)) {
     if (!snap || (snap.content === undefined && snap.metadata === undefined)) continue;
     // A step has meaningful data if it has content OR non-empty metadata (e.g.
@@ -58,14 +64,13 @@ export async function loadAllStepSnapshots(projectSlug: string): Promise<void> {
     const hasMeta = snap.metadata != null && typeof snap.metadata === "object" && Object.keys(snap.metadata as Record<string, unknown>).length > 0;
     const hasContent = (snap.content != null && snap.content !== "") || hasMeta;
     merged[stepId] = {
-      ...(merged[stepId] ?? {}),
       ...snap,
       status: hasContent ? (snap.status ?? "pending") : "pending",
       stepId,
       timestamp: new Date().toISOString(),
     };
   }
-  useStepStore.setState({ steps: merged as typeof s.steps });
+  useStepStore.setState({ steps: merged as unknown as typeof s.steps });
 }
 
 // ── Standard per-step snapshot (saves only its own step's data) ──────────────
@@ -92,7 +97,7 @@ export function createStepDataSnapshot(stepId: StepId): StepSnapshot<Record<stri
       steps: {
         ...s.steps,
         [stepId]: {
-          ...((s.steps[stepId] as Record<string, unknown>) ?? {}),
+          ...((s.steps[stepId] as unknown as Record<string, unknown>) ?? {}),
           ...snapshot,
           stepId,
           timestamp: new Date().toISOString(),
