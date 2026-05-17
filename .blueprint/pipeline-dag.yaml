@@ -1,13 +1,2 @@
 version: 1
-pipelines:
-  - id: scoring-cycle
-    description: "Deterministic stablecoin scoring and alerting run"
-    schedule: { cron: "*/60 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
-    nodes:
-      - { id: collect_sources, service: Data Feed Monitor, function: fetchSourceHealth }
-      - { id: load_history, service: Scoring Service, function: loadHistoricalInputs, dependsOn: [collect_sources] }
-      - { id: calculate_scores, service: Scoring Service, function: calculateStablecoinScores, dependsOn: [load_history] }
-      - { id: detect_alerts, service: Alert Service, function: createAlerts, dependsOn: [calculate_scores] }
-      - { id: persist_results, service: Scoring Service, function: persistCycleResults, dependsOn: [detect_alerts] }
-      - { id: notify_clients, service: Notification Service, function: publishScoreUpdate, dependsOn: [persist_results] }
+pipelines: []
