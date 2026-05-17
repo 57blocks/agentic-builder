@@ -25,7 +25,7 @@ for a Series-B startup shipping to thousands of users.
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
 (Cover: frontend framework, rendering, state management, realtime transport, backend framework,
- primary DB, cache, object storage, search, auth, plugin/extension runtime, message queue,
+ primary DB, object storage, search, auth, plugin/extension runtime, message queue,
  CDN/edge, infrastructure, observability, CI/CD.)
 
 ## 2. Frontend Architecture
