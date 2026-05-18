@@ -329,7 +329,10 @@ Field rules:
   - Complex multi-file task (full CRUD module, several pages): **2–4h**
   - Exceptionally broad task (rare): **4–6h**
   Values over 6 are almost always wrong and should be split. This field is the AI coding time only.
-- **humanReviewHours**: number (0–2, optional, default 0), hours a human needs to review/approve the task output. Only meaningful for "human_confirm_after" tasks — typical range 0.5–1h. For "ai_autonomous" tasks, omit or set to 0.
+- **humanReviewHours**: number (0–2), hours a human needs to review/approve the task output. **REQUIRED** — you MUST set this:
+  - For \`"ai_autonomous"\`: set to **0**.
+  - For \`"human_confirm_after"\`: set to **0.5–1** (typical). NEVER set to 0.
+  Example for a human_confirm_after task: \`"humanReviewHours": 0.5\`
 - **executionKind**: "ai_autonomous" (AI can fully handle) or "human_confirm_after"
   (needs human review/approval after completion).
 - **files**: object with three sub-arrays:
