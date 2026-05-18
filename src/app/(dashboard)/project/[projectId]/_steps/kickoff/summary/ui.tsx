@@ -219,6 +219,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const isCompleted = summaryResult?.status === "completed";
   const metadata = summaryResult?.metadata;
   const tasks = parseKickoffTaskBreakdownFromMetadata(metadata);
+  console.log("[SummaryUI] tasks sample:", tasks.slice(0, 2).map((t) => ({ id: t.id, execKind: t.executionKind, hr: t.humanReviewHours })));
   const skillsTrace = (metadata as Record<string, unknown> | undefined)?.[
     "taskBreakdownSkillsTrace"
   ] as SkillTraceRecord | undefined;

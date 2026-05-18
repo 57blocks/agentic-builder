@@ -275,12 +275,12 @@ export function normalizeOriginalTaskBreakdown(
     ...t,
     dependencies: normalizeDependencyIds(t, validTaskIds),
     coversRequirementIds: normalizeCoverageIds(t, prdIds),
-    // Force human review hours for tasks that need human confirmation.
-    // Even if the LLM outputs 0, we enforce at least 0.5h for review.
+    // For EVERY task, estimate human hours (5-10x AI time). If LLM didn't provide,
+    // default to estimatedHours * 5 so human estimate is always meaningful.
     humanReviewHours:
-      t.executionKind === "human_confirm_after"
-        ? Math.max(t.humanReviewHours ?? 0.5, 0.5)
-        : 0,
+      t.humanReviewHours != null && t.humanReviewHours > 0
+        ? t.humanReviewHours
+        : Math.round(t.estimatedHours * 5 * 10) / 10,
   }));
 }
 
