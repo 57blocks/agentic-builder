@@ -217,39 +217,38 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
   const progressStage =
     "progressStage" in task ? (task as CodingTask).progressStage : undefined;
 
-  const badgeCls = sCfg.badge || (sCfg.showPhaseColor ? phase.badge : "bg-slate-100 text-slate-500");
+  // ── Color derivations ────────────────────────────────────────────────────
+  // Active:     solid accent bg + white text
+  // Otherwise:  ~10% tint accent bg + colored border
+  const cardBg     = isActive ? phase.accent : `${phase.accent}18`;
+  const cardBorder = isFailed ? "#ef4444" : phase.accent;
+  const borderW    = isActive ? "2px" : "1.5px";
 
-  // Card border: active uses all-around colored border for visibility
-  const borderStyle = isActive
-    ? { borderColor: phase.accent, borderWidth: "2px" }
-    : selected
-      ? { borderColor: phase.accent }
-      : { borderLeftColor: phase.accent };
+  // Badge ─ when active, float a semi-transparent white pill over solid bg
+  const badgeCls = isActive
+    ? ""  // handled via inline style below
+    : (sCfg.badge || (sCfg.showPhaseColor ? phase.badge : "bg-slate-100 text-slate-500"));
+  const badgeStyle = isActive
+    ? { backgroundColor: "rgba(255,255,255,0.22)", color: "#ffffff" }
+    : undefined;
 
-  const ringCls = selected && !isActive ? "ring-2 ring-offset-1" : "";
-
-  // bg tint — active gets a stronger tint for visibility
-  const bgCls = isActive
-    ? phase.activeBg.replace("/40", "/70")
-    : isCompleted
-      ? "bg-white"
-      : isFailed
-        ? "bg-red-50/20"
-        : "bg-white";
+  // Text colors ─ invert to white on solid active bg
+  const titleCls    = isActive ? "text-white"      : isCompleted ? "text-slate-800" : isFailed ? "text-red-700" : "text-slate-800";
+  const metaCls     = isActive ? "text-white/70"   : phase.iconCls;
+  const taskNumCls  = isActive ? "text-white/50"   : "text-slate-400";
+  const durationCls = isActive ? "text-white/80"   : "text-slate-400";
 
   return (
     <div
       className={`
-        relative rounded-xl border border-slate-200 border-l-4 shadow-sm
-        transition-colors duration-300 cursor-pointer overflow-visible
-        ${bgCls} ${ringCls}
+        relative rounded-xl shadow-sm
+        transition-all duration-300 cursor-pointer overflow-visible
         ${isActive ? "shadow-lg" : ""}
-        ${isFailed ? "border-red-200" : ""}
       `}
       style={{
-        ...borderStyle,
-        ...(selected && !isActive ? { ringColor: phase.accent } : {}),
-        ...(isActive ? { borderWidth: "2px", borderStyle: "solid" } : { borderLeftWidth: "4px" }),
+        backgroundColor: cardBg,
+        border: `${borderW} solid ${cardBorder}`,
+        ...(selected ? { boxShadow: `0 0 0 3px ${cardBorder}44` } : {}),
       }}
     >
       {/* ── Breathing glow ring (active only) ─────────────────────────── */}
@@ -276,7 +275,7 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
           <motion.span
             className="absolute inset-0"
             style={{
-              background: `linear-gradient(105deg, transparent 40%, ${phase.accent}22 50%, transparent 60%)`,
+              background: `linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.12) 50%, transparent 60%)`,
               backgroundSize: "200% 100%",
             }}
             animate={{ backgroundPosition: ["200% center", "-200% center"] }}
@@ -285,27 +284,15 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         </motion.span>
       )}
 
-      {/* ── Top scan line (active only) ────────────────────────────────── */}
-      {isActive && (
-        <motion.span
-          className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-t-xl z-10"
-          style={{ top: 0, backgroundColor: phase.accent }}
-          animate={{ opacity: [0.6, 1, 0.6] }}
-          transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-        />
-      )}
-
       {/* ── Breathing corner dot (active only) ────────────────────────── */}
       {isActive && (
         <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 z-10">
-          {/* Ping ring */}
           <motion.span
             className="absolute inline-flex h-full w-full rounded-full"
             style={{ backgroundColor: phase.accent }}
             animate={{ scale: [1, 2.2, 1], opacity: [0.7, 0, 0.7] }}
             transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
           />
-          {/* Solid dot */}
           <motion.span
             className="relative inline-flex rounded-full h-3.5 w-3.5 border-2 border-white"
             style={{ backgroundColor: phase.accent }}
@@ -356,16 +343,19 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
       <div className="relative z-10 px-3 pt-2.5 pb-2.5">
         {/* ── Top row: badge + task id ──────────────────────────────────── */}
         <div className="flex items-center justify-between mb-2">
-          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${badgeCls}`}>
+          <span
+            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${badgeCls}`}
+            style={badgeStyle}
+          >
             {sCfg.label}
           </span>
-          <span className="text-[9px] font-mono text-slate-400">
+          <span className={`text-[9px] font-mono ${taskNumCls}`}>
             #{`TASK-${taskNum}`}
           </span>
         </div>
 
         {/* ── Title ─────────────────────────────────────────────────────── */}
-        <p className={`text-[12px] font-semibold leading-snug line-clamp-2 mb-2.5 ${isActive ? "text-slate-900" : "text-slate-800"}`}>
+        <p className={`text-[12px] font-semibold leading-snug line-clamp-2 mb-2.5 ${titleCls}`}>
           {task.title}
         </p>
 
@@ -373,21 +363,22 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         <div className="flex items-center justify-between">
           {/* Phase icon + label */}
           <div className="flex items-center gap-1">
-            <Icon size={11} className={phase.iconCls} />
-            <span className={`text-[9px] font-semibold uppercase tracking-wide ${phase.iconCls}`}>
+            <Icon size={11} className={metaCls} />
+            <span className={`text-[9px] font-semibold uppercase tracking-wide ${metaCls}`}>
               {task.phase.length > 14 ? task.phase.slice(0, 14) + "…" : task.phase}
             </span>
           </div>
 
           {/* Right side: timing */}
-          <div className="flex items-center gap-1 text-[10px] text-slate-400">
+          <div className={`flex items-center gap-1 text-[10px] ${durationCls}`}>
             {isActive ? (
               <motion.span
-                className="font-semibold"
-                style={{ color: phase.accent }}
-                animate={{ opacity: [1, 0.5, 1] }}
+                className="font-semibold flex items-center gap-1"
+                style={{ color: "rgba(255,255,255,0.9)" }}
+                animate={{ opacity: [1, 0.6, 1] }}
                 transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
               >
+                <RefreshCw size={9} className="animate-spin" />
                 {progressStage === "verifying"
                   ? "Verifying…"
                   : progressStage === "fixing"

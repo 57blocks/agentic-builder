@@ -69,7 +69,6 @@ export default function AppNav() {
   const setProjectSlugForSync = useStageStore((s) => s.setProjectSlugForSync);
   const setProjectName = useStageStore((s) => s.setProjectName);
   const stageProjectId = useStageStore((s) => s.projectId);
-  const stageProjectName = useStageStore((s) => s.projectName);
   const activeStage = useStageStore((s) => s.activeStage);
   const resetPipeline = usePipelineStore((s) => s.reset);
   const pipelineSetProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
@@ -225,10 +224,10 @@ export default function AppNav() {
               const href = `/project/${project.id}`;
               const isActive = pathname?.startsWith(href);
               const isCurrentStageProject = isActive && stageProjectId === project.id;
-              const displayName =
-                isCurrentStageProject && stageProjectName
-                  ? stageProjectName
-                  : project.name;
+              // Use project.name from the API response as the canonical source of truth.
+              // This prevents stale localStorage data (from the persist middleware)
+              // from showing a different name than what /api/projects returns.
+              const displayName = project.name;
               const stageMeta = isCurrentStageProject
                 ? STAGE_META[activeStage as StageId]
                 : null;

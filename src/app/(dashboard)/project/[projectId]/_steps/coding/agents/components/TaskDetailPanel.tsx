@@ -2,8 +2,8 @@
 
 import { useRef, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { X, ExternalLink, RefreshCw, Terminal } from "lucide-react";
-import type { CodingTask, KickoffWorkItem, AgentLogEntry } from "@/lib/pipeline/types";
+import { X, ExternalLink, RefreshCw, CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
+import type { CodingTask, KickoffWorkItem, AgentLogEntry, TaskSubStep } from "@/lib/pipeline/types";
 import { FileActivityPanel } from "./FileActivityPanel";
 
 interface TaskDetailPanelProps {
@@ -14,8 +14,42 @@ interface TaskDetailPanelProps {
   onRetry?: (taskId: string) => void;
 }
 
-type PanelTab = "logs" | "files";
+type PanelTab = "subtasks" | "logs" | "files";
 type LogTab = "raw" | "filtered";
+
+type SubStepStatus = "pending" | "in_progress" | "completed" | "failed";
+
+/** Derive each sub-step's status from task-level status + file write records. */
+function deriveSubStepStatuses(
+  subSteps: TaskSubStep[],
+  taskStatus: CodingTask["codingStatus"],
+  fileWrites: string[],
+): SubStepStatus[] {
+  if (taskStatus === "completed" || taskStatus === "completed_with_warnings") {
+    return subSteps.map(() => "completed");
+  }
+  if (taskStatus === "pending" || taskStatus === "queued") {
+    return subSteps.map(() => "pending");
+  }
+
+  // For in_progress / failed: match file writes to each step's detail text.
+  const statuses: SubStepStatus[] = subSteps.map((s) => {
+    const haystack = `${s.action} ${s.detail}`.toLowerCase();
+    const hit = fileWrites.some((p) => {
+      const name = p.split("/").pop() ?? p;
+      return haystack.includes(name.toLowerCase()) || haystack.includes(p.toLowerCase());
+    });
+    return hit ? "completed" : "pending";
+  });
+
+  // Find the first non-completed step and mark it active/failed.
+  const firstPending = statuses.indexOf("pending");
+  if (firstPending !== -1) {
+    statuses[firstPending] = taskStatus === "failed" ? "failed" : "in_progress";
+  }
+
+  return statuses;
+}
 
 const LOG_TYPE_CONFIG: Record<
   string,
@@ -77,7 +111,7 @@ export function TaskDetailPanel({
   onClose,
   onRetry,
 }: TaskDetailPanelProps) {
-  const [panelTab, setPanelTab] = useState<PanelTab>("logs");
+  const [panelTab, setPanelTab] = useState<PanelTab>("subtasks");
   const [activeTab, setActiveTab] = useState<LogTab>("raw");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -112,6 +146,16 @@ export function TaskDetailPanel({
   const fileActivities = "fileActivities" in task ? (task as CodingTask).fileActivities : undefined;
   const fileActivityCount = fileActivities?.length ?? 0;
   const writeCount = fileActivities?.filter((a) => a.operation === "write").length ?? 0;
+
+  const subSteps = task.subSteps ?? [];
+  const fileWrites = (fileActivities ?? [])
+    .filter((a) => a.operation === "write")
+    .map((a) => a.path);
+  const taskCodingStatus = "codingStatus" in task
+    ? (task as CodingTask).codingStatus
+    : "pending";
+  const subStepStatuses = deriveSubStepStatuses(subSteps, taskCodingStatus, fileWrites);
+  const completedSubStepCount = subStepStatuses.filter((s) => s === "completed").length;
 
   return (
     <div className="flex flex-col h-full w-full bg-white border-l border-slate-200 overflow-hidden">
@@ -206,8 +250,35 @@ export function TaskDetailPanel({
         </div>
       )}
 
-      {/* Top-level tabs: LOGS / FILES */}
+      {/* Top-level tabs: SUBTASKS / LOGS / FILES */}
       <div className="shrink-0 flex items-center gap-0 border-b border-slate-100 px-5">
+        <button
+          onClick={() => setPanelTab("subtasks")}
+          className={`relative text-[10px] font-semibold px-3 py-2 transition-colors flex items-center gap-1 ${
+            panelTab === "subtasks"
+              ? "text-slate-800"
+              : "text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          SUBTASKS
+          {subSteps.length > 0 && (
+            <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${
+              completedSubStepCount === subSteps.length
+                ? "bg-green-100 text-green-700"
+                : isActive
+                ? "bg-violet-100 text-violet-700"
+                : "bg-slate-100 text-slate-500"
+            }`}>
+              {completedSubStepCount}/{subSteps.length}
+            </span>
+          )}
+          {panelTab === "subtasks" && (
+            <motion.span
+              layoutId="panel-tab-indicator"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+            />
+          )}
+        </button>
         <button
           onClick={() => setPanelTab("logs")}
           className={`relative text-[10px] font-semibold px-3 py-2 transition-colors ${
@@ -257,7 +328,71 @@ export function TaskDetailPanel({
       </div>
 
       {/* Panel content */}
-      {panelTab === "logs" ? (
+      {panelTab === "subtasks" ? (
+        <div className="flex-1 overflow-y-auto px-5 py-4
+          [&::-webkit-scrollbar]:w-1.5
+          [&::-webkit-scrollbar-track]:bg-transparent
+          [&::-webkit-scrollbar-thumb]:bg-slate-200
+          [&::-webkit-scrollbar-thumb]:rounded-full">
+          {subSteps.length === 0 ? (
+            <p className="text-[12px] text-slate-400 italic">No sub-steps defined for this task.</p>
+          ) : (
+            <ol className="relative space-y-0 before:absolute before:left-[11px] before:top-3 before:bottom-3 before:w-px before:bg-slate-200">
+              {subSteps.map((s, idx) => {
+                const status = subStepStatuses[idx];
+                return (
+                  <li key={s.step} className="relative flex gap-3 pb-5 last:pb-0">
+                    {/* Timeline icon */}
+                    <div className="shrink-0 z-10 w-[23px] h-[23px] flex items-center justify-center mt-0.5">
+                      {status === "completed" && (
+                        <CheckCircle2 size={16} className="text-green-500" />
+                      )}
+                      {status === "in_progress" && (
+                        <Loader2 size={16} className="text-violet-500 animate-spin" />
+                      )}
+                      {status === "failed" && (
+                        <AlertCircle size={16} className="text-red-400" />
+                      )}
+                      {status === "pending" && (
+                        <Circle size={16} className="text-slate-300" />
+                      )}
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                          Step {s.step}
+                        </span>
+                        {status === "completed" && (
+                          <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-green-50 text-green-600">done</span>
+                        )}
+                        {status === "in_progress" && (
+                          <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-violet-50 text-violet-600">running</span>
+                        )}
+                        {status === "failed" && (
+                          <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-red-50 text-red-500">failed</span>
+                        )}
+                      </div>
+                      <p className={`text-[12px] font-semibold leading-snug mb-1 ${
+                        status === "completed" ? "text-slate-500 line-through decoration-slate-300" :
+                        status === "in_progress" ? "text-slate-900" :
+                        status === "failed" ? "text-red-600" :
+                        "text-slate-600"
+                      }`}>
+                        {s.action}
+                      </p>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {s.detail}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      ) : panelTab === "logs" ? (
         <div className="flex flex-col flex-1 overflow-hidden px-5 pt-3">
           <div className="flex items-center justify-end mb-2 shrink-0">
             <div className="flex items-center gap-1">
@@ -354,22 +489,19 @@ export function TaskDetailPanel({
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="shrink-0 flex gap-2 px-5 pb-4 pt-2">
-        <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-[12px] font-semibold rounded-lg hover:bg-slate-800 transition-colors">
-          <Terminal size={13} />
-          Open Terminal
-        </button>
-        {isFailed && onRetry && (
+      {/* Action buttons — only shown when retry is available */}
+      {isFailed && onRetry && (
+        <div className="shrink-0 flex justify-end px-5 pb-4 pt-2">
           <button
             onClick={() => onRetry(task.id)}
-            className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 text-[12px] font-semibold transition-colors"
             title="Retry task"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={13} />
+            Retry Task
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
