@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
@@ -221,15 +222,24 @@ function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onCl
 // ---------------------------------------------------------------------------
 // Style Spec card — one per analysed image
 // ---------------------------------------------------------------------------
-function StyleSpecCard({ record, onOpen }: { record: KnowledgeRecordFull; onOpen: () => void }) {
+function StyleSpecCard({ record, onOpen, highlighted }: { record: KnowledgeRecordFull; onOpen: () => void; highlighted?: boolean }) {
   const isCapture = record.isTrendCapture;
   return (
     <motion.button
+      id={`kb-record-${record.id}`}
       whileHover={{ y: -3, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
+      animate={highlighted ? { scale: [1, 1.04, 1] } : {}}
+      transition={highlighted ? { duration: 0.5, repeat: 2 } : {}}
       onClick={onOpen}
       className={`group relative rounded-xl overflow-hidden border bg-white text-left shadow-sm transition-shadow hover:shadow-md ${
-        isCapture ? "border-amber-200" : "border-violet-200"
+        highlighted
+          ? isCapture
+            ? "border-amber-400 ring-2 ring-amber-300 ring-offset-1 shadow-amber-100 shadow-md"
+            : "border-violet-400 ring-2 ring-violet-300 ring-offset-1 shadow-violet-100 shadow-md"
+          : isCapture
+          ? "border-amber-200"
+          : "border-violet-200"
       }`}
     >
       <div className="relative w-full bg-slate-100" style={{ aspectRatio: "16/10" }}>
@@ -333,7 +343,27 @@ export default function KnowledgePage() {
   const [batchAnalysing, setBatchAnalysing] = useState(false);
   const [specModal, setSpecModal] = useState<KnowledgeRecordFull | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Read ?highlight=DK-xxx from URL and switch to the matching industry tab
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("highlight");
+    if (!id) return;
+    setHighlightId(id);
+    // Detect industry from the ID prefix and switch tab
+    if (id.startsWith("DK-57b-ai") || id.startsWith("DK-img-ai") || id.startsWith("DK-img-auto-ai")) {
+      setActiveIndustry("ai");
+    } else if (id.startsWith("DK-57b-fintech") || id.startsWith("DK-img-f") || id.startsWith("DK-img-auto-fintech")) {
+      setActiveIndustry("fintech-web3");
+    } else if (id.startsWith("DK-57b-saas") || id.startsWith("DK-img-s") || id.startsWith("DK-img-auto-saas")) {
+      setActiveIndustry("saas");
+    }
+    // Clear highlight after 4 s
+    const t = setTimeout(() => setHighlightId(null), 4000);
+    return () => clearTimeout(t);
+  }, [searchParams]);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -349,6 +379,15 @@ export default function KnowledgePage() {
   }, []);
 
   useEffect(() => { void fetchRecords(); }, [fetchRecords]);
+
+  // Scroll to and highlight the target record after records are loaded
+  useEffect(() => {
+    if (!highlightId || loading) return;
+    const el = document.getElementById(`kb-record-${highlightId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightId, loading, activeIndustry]);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -587,7 +626,12 @@ export default function KnowledgePage() {
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                     {styleSpecRecords.map((r) => (
-                      <StyleSpecCard key={r.id} record={r} onOpen={() => setSpecModal(r)} />
+                      <StyleSpecCard
+                        key={r.id}
+                        record={r}
+                        onOpen={() => setSpecModal(r)}
+                        highlighted={highlightId === r.id}
+                      />
                     ))}
                   </div>
                 )}
@@ -600,7 +644,9 @@ export default function KnowledgePage() {
                   <span className="ml-2 text-slate-400 font-normal text-xs">— injected verbatim into DesignAgent prompt</span>
                 </h2>
                 {libraryRecord ? (
-                  <StyleGuideSection record={libraryRecord} />
+                  <div id={`kb-record-${libraryRecord.id}`} className={`transition-all duration-500 rounded-xl ${highlightId === libraryRecord.id ? "ring-2 ring-violet-400 ring-offset-2 shadow-lg shadow-violet-100" : ""}`}>
+                    <StyleGuideSection record={libraryRecord} />
+                  </div>
                 ) : (
                   <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-8 text-center">
                     <p className="text-sm text-slate-500 mb-3">No 57B library record found for this industry.</p>

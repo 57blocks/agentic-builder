@@ -129,7 +129,7 @@ export interface StepStoreState {
   /** Append streaming content to step (debounced snapshot save) */
   setStepStreaming: (stepId: StepId, contentChunk: string) => void;
   /** Mark a step as completed with content */
-  setStepCompleted: (stepId: StepId, content: string, costUsd?: number, durationMs?: number) => void;
+  setStepCompleted: (stepId: StepId, content: string, costUsd?: number, durationMs?: number, metadata?: Record<string, unknown>) => void;
   /** Mark a step as failed */
   setStepFailed: (stepId: StepId, error: string) => void;
 
@@ -265,7 +265,7 @@ export const useStepStore = create<StepStoreState>()(
         }));
       },
 
-      setStepCompleted: (stepId, content, costUsd = 0, durationMs = 0) => {
+      setStepCompleted: (stepId, content, costUsd = 0, durationMs = 0, metadata) => {
         set((s) => ({
           steps: {
             ...s.steps,
@@ -276,6 +276,11 @@ export const useStepStore = create<StepStoreState>()(
               costUsd,
               durationMs,
               timestamp: new Date().toISOString(),
+              // Preserve existing metadata and merge in any newly provided metadata
+              metadata: {
+                ...(s.steps[stepId]?.metadata ?? {}),
+                ...(metadata ?? {}),
+              },
             },
           },
           totalCostUsd: s.totalCostUsd + costUsd,
@@ -492,10 +497,7 @@ export const useStepStore = create<StepStoreState>()(
           console.log("[step-store] agent.execute completed for", stepId, { status: result.status, contentLen: result.content?.length });
 
           if (result.status === "completed") {
-            get().setStepCompleted(stepId, result.content ?? "", result.costUsd ?? 0, result.durationMs ?? 0);
-            if (result.metadata && Object.keys(result.metadata).length > 0) {
-              get().patchStepMeta(stepId, result.metadata);
-            }
+            get().setStepCompleted(stepId, result.content ?? "", result.costUsd ?? 0, result.durationMs ?? 0, result.metadata ?? undefined);
           } else if (result.status === "failed") {
             get().setStepFailed(stepId, result.error ?? "Step failed");
           }
