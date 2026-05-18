@@ -1,7 +1,10 @@
+// Pipeline gates — barrel of pre-flight + post-flight invariant checks.
 export { runPrdSpecGate } from "./prd-spec-gate";
 export type { PrdSpecGateResult } from "./prd-spec-gate";
 export { runQaCoverageGate } from "./qa-coverage-gate";
 export { runTaskCoverageGate } from "./task-coverage-gate";
+export { runContractCoverageGate } from "./contract-coverage-gate";
+export type { ContractEntryLike } from "./contract-coverage-gate";
 export { runPhaseRequirementGate } from "./phase-requirement-gate";
 export type { PhaseRequirementGateInput } from "./phase-requirement-gate";
 export { runEvidenceGate, makeEvidence } from "./evidence-gate";

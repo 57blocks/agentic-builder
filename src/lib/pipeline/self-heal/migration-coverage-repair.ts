@@ -15,6 +15,8 @@ import path from "path";
 
 import type { RepairEmitter } from "./events";
 
+const MIGRATIONS_REL_DIR = "backend/src/database/migrations";
+
 interface ReportEntry {
   taskId: string;
   taskTitle: string;
@@ -47,6 +49,19 @@ export interface MigrationCoverageRepairInput {
   outputDir: string;
   emitter?: RepairEmitter | null;
   sessionId?: string;
+  /**
+   * When true, cross-reference the per-task gap list against the actual
+   * migration files in `backend/src/database/migrations/` and drop gaps
+   * whose model name appears in a migration filename. This eliminates
+   * stale gaps that an earlier task recorded but a later task resolved —
+   * without filtering, the verify-fix worker keeps being told to "write
+   * a migration for Stablecoin" even when `003-add-stablecoin-*.ts`
+   * already exists.
+   *
+   * Defaults to `false` to preserve existing test behavior (callers that
+   * want a raw per-task view, e.g. forensic audits, still get it).
+   */
+  filterByDisk?: boolean;
 }
 
 export interface MigrationCoverageRepairResult {
@@ -98,15 +113,13 @@ export async function runMigrationCoverageRepair(
     };
   }
 
-  const pendingRepairTasks: MigrationRepairTask[] = [];
-  let tasksWithGaps = 0;
+  const rawPendingRepairTasks: MigrationRepairTask[] = [];
   for (const entry of Object.values(report.tasks)) {
     if (!entry || entry.ok || !Array.isArray(entry.gaps) || entry.gaps.length === 0) {
       continue;
     }
-    tasksWithGaps++;
     for (const gap of entry.gaps) {
-      pendingRepairTasks.push({
+      rawPendingRepairTasks.push({
         id: `migration-repair-${entry.taskId}-${gap.modelName}`,
         sourceTaskId: entry.taskId,
         modelPath: gap.modelPath,
@@ -115,6 +128,20 @@ export async function runMigrationCoverageRepair(
       });
     }
   }
+
+  // Optionally drop gaps already resolved by a migration file on disk
+  // (model name appears in any `backend/src/database/migrations/*.ts`).
+  // Without this, append-only per-task reporting keeps surfacing gaps
+  // long after subsequent tasks fixed them.
+  const pendingRepairTasks = input.filterByDisk
+    ? await filterByMigrationFiles(input.outputDir, rawPendingRepairTasks)
+    : rawPendingRepairTasks;
+
+  // tasksWithGaps must reflect the FILTERED list — when filterByDisk is
+  // on, a task whose only gap got resolved should no longer count as
+  // "with gaps". Compute distinct source-task ids from the survivors.
+  const tasksWithGaps = new Set(pendingRepairTasks.map((t) => t.sourceTaskId))
+    .size;
 
   if (input.emitter && pendingRepairTasks.length > 0) {
     try {
@@ -141,6 +168,82 @@ export async function runMigrationCoverageRepair(
     pendingRepairTasks,
     reportMissing: false,
   };
+}
+
+async function filterByMigrationFiles(
+  outputDir: string,
+  gaps: MigrationRepairTask[],
+): Promise<MigrationRepairTask[]> {
+  if (gaps.length === 0) return gaps;
+  const files = await listMigrationFilesLower(outputDir);
+  if (files.length === 0) return gaps;
+  return gaps.filter(
+    (g) => !isCoveredByMigrationFile(g.modelName, files),
+  );
+}
+
+/**
+ * Cross-reference per-task gaps against the actual migration files on disk
+ * and return only the gaps that are STILL unresolved.
+ *
+ * Why this exists: `runMigrationCoverageRepair` returns whatever the
+ * per-task report says, but the report is append-only — a gap recorded
+ * by task T-005 (`Stablecoin model written without migration`) stays
+ * `ok: false` even when task T-REPAIR-BACKEND later writes
+ * `0042_stablecoin.ts`. Reading the migration directory at audit time
+ * resolves this by checking whether ANY migration file's basename
+ * mentions the model name (camel, kebab, or snake case).
+ *
+ * Returns the filtered list of `MigrationRepairTask` entries. The
+ * supervisor uses an empty result to decide whether the runtime smoke
+ * probe can safely run, or whether to short-circuit with a clear
+ * "migrations missing" failure so we don't waste cycles probing
+ * endpoints we already know will 5xx on a schema mismatch.
+ */
+export async function getUnresolvedMigrationGaps(
+  outputDir: string,
+): Promise<MigrationRepairTask[]> {
+  const repair = await runMigrationCoverageRepair({
+    outputDir,
+    filterByDisk: true,
+  });
+  return repair.pendingRepairTasks;
+}
+
+async function listMigrationFilesLower(outputDir: string): Promise<string[]> {
+  const dir = path.join(outputDir, MIGRATIONS_REL_DIR);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((f) => /\.[tj]s$/i.test(f))
+    .map((f) => f.toLowerCase());
+}
+
+function modelNameVariants(modelName: string): string[] {
+  const lower = modelName.toLowerCase();
+  const kebab = modelName
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/_/g, "-")
+    .toLowerCase();
+  const snake = modelName
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/-/g, "_")
+    .toLowerCase();
+  return Array.from(new Set([lower, kebab, snake]));
+}
+
+function isCoveredByMigrationFile(
+  modelName: string,
+  migrationFilesLowerCase: string[],
+): boolean {
+  const variants = modelNameVariants(modelName);
+  return migrationFilesLowerCase.some((file) =>
+    variants.some((v) => file.includes(v)),
+  );
 }
 
 /** Render the repair tasks as a Markdown checklist for the verify-fix

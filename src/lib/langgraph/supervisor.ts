@@ -73,7 +73,17 @@ import {
   runTscDiagnosticsAsTasks,
   runMigrationCoverageRepair,
   formatMigrationCoverageBlock,
+  repairContractCoverage,
+  getUnresolvedMigrationGaps,
 } from "@/lib/pipeline/self-heal";
+import {
+  runContractCoverageGate,
+  type ContractEntryLike,
+} from "@/lib/pipeline/gates";
+import {
+  normalizeProjectTier,
+  type ProjectTier,
+} from "@/lib/agents/shared/project-classifier";
 import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
@@ -2793,6 +2803,164 @@ async function generateApiContracts(state: SupervisorState) {
 }
 
 /**
+ * Task ↔ contract coverage gate + repair.
+ *
+ * Runs immediately after `generateApiContracts` so that any endpoint
+ * declared in `API_CONTRACTS.json` that NO existing kick-off task
+ * references gets a synthetic supplementary task injected here —
+ * BEFORE backend/frontend coding nodes start consuming the task list.
+ *
+ * Failure mode this guards against (per the session-report analysis):
+ *   • `generate_api_contracts` adds baseline endpoints (auth/refresh,
+ *     auth/me, auth/sso/callback) that PRD prose never enumerated, so
+ *     `task-breakdown-agent` (which runs BEFORE contracts and only
+ *     reads PRD/TRD) cannot have planned tasks for them.
+ *   • Same PRD line interpreted differently by contract-gen vs
+ *     task-breakdown (e.g. `/admin/score-cycles/:symbol/force` vs
+ *     `/jobs/force-scoring`) results in contract entries with no
+ *     matching task either.
+ *
+ * Without this node, the gap is only observable post-codegen via the
+ * route audit's `missingContractEndpoints`, at which point coding
+ * budget for those endpoints is already spent on unrelated work and
+ * self-heal has to iterate. Injecting tasks here closes the loop
+ * before any coding agent runs.
+ */
+async function contractTaskCoverage(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const label = "[Supervisor] ContractTaskCoverage";
+  const emit = getRepairEmitter(state.sessionId);
+
+  // ── 1. Load contracts ─────────────────────────────────────────────────
+  const contractsRaw = await fsRead("API_CONTRACTS.json", state.outputDir);
+  if (
+    contractsRaw.startsWith("FILE_NOT_FOUND") ||
+    contractsRaw.startsWith("REJECTED")
+  ) {
+    return {};
+  }
+  let contracts: ContractEntryLike[] = [];
+  try {
+    const parsed = JSON.parse(contractsRaw);
+    if (Array.isArray(parsed)) contracts = parsed as ContractEntryLike[];
+  } catch {
+    return {};
+  }
+  if (contracts.length === 0 || state.tasks.length === 0) return {};
+
+  // ── 2. Run gate ───────────────────────────────────────────────────────
+  const initialGate = runContractCoverageGate(contracts, state.tasks);
+  emit({
+    stage: "preflight-task-contract-coverage",
+    event: "task_contract_coverage_snapshot",
+    details: {
+      when: "post-contract-gen",
+      passed: initialGate.passed,
+      missingEndpoints: initialGate.missingIds,
+      contractTotal: contracts.length,
+      taskCount: state.tasks.length,
+    },
+  });
+
+  if (initialGate.passed || initialGate.missingIds.length === 0) {
+    return {};
+  }
+
+  console.warn(
+    `${label}: ${initialGate.missingIds.length} contract endpoint(s) have no referencing task; attempting supplementary task injection.`,
+  );
+
+  // ── 3. Gather PRD / TRD / SCAFFOLD context ────────────────────────────
+  const [prdRaw, trdRaw, sysDesignRaw, implGuideRaw, scaffoldSpecRaw] =
+    await Promise.all([
+      fsRead("PRD.md", state.outputDir),
+      fsRead("TRD.md", state.outputDir),
+      fsRead("SystemDesign.md", state.outputDir),
+      fsRead("ImplementationGuide.md", state.outputDir),
+      fsRead("SCAFFOLD_SPEC.md", state.outputDir),
+    ]);
+  const readable = (s: string): string | undefined =>
+    s.startsWith("FILE_NOT_FOUND") || s.startsWith("REJECTED") ? undefined : s;
+  const prd = readable(prdRaw) ?? "";
+  if (!prd) {
+    console.warn(
+      `${label}: PRD.md not found; cannot generate supplementary tasks. Skipping repair.`,
+    );
+    return {};
+  }
+  const tierMatch =
+    readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
+  const tier: ProjectTier = normalizeProjectTier(tierMatch?.[1]);
+
+  // ── 4. Repair ─────────────────────────────────────────────────────────
+  let repaired;
+  try {
+    repaired = await repairContractCoverage({
+      contracts,
+      existingTasks: state.tasks,
+      prd,
+      trd: readable(trdRaw),
+      sysDesign: readable(sysDesignRaw),
+      implGuide: readable(implGuideRaw),
+      tier,
+      sessionId: state.sessionId,
+      emitter: emit,
+    });
+  } catch (err) {
+    console.warn(
+      `${label}: repair threw — ${err instanceof Error ? err.message : String(err)}. Proceeding with original task list.`,
+    );
+    return {};
+  }
+
+  if (repaired.added.length === 0) {
+    console.log(
+      `${label}: no supplementary tasks produced (LLM declined or repair budget exhausted). ${repaired.finalMissingEndpoints.length} endpoint(s) remain uncovered.`,
+    );
+    return {};
+  }
+
+  // ── 5. Re-classify the merged task list so role buckets reflect the
+  //      newly-added supplementary tasks. The downstream nodes read
+  //      `backendTasks` / `frontendTasks` etc., not the flat `tasks`.
+  const allTasks: CodingTask[] = repaired.tasks.map((t) => {
+    // KickoffWorkItem → CodingTask via default runtime fields. Existing
+    // CodingTask entries (already in state.tasks) flow through unchanged
+    // because the spread preserves their pre-set `assignedAgentId` /
+    // `codingStatus`.
+    const asCoding = t as CodingTask;
+    return {
+      ...asCoding,
+      assignedAgentId: asCoding.assignedAgentId ?? null,
+      codingStatus: asCoding.codingStatus ?? "pending",
+    };
+  });
+  const byRole: Record<CodingAgentRole, CodingTask[]> = {
+    architect: [],
+    backend: [],
+    frontend: [],
+    test: [],
+  };
+  for (const task of allTasks) {
+    const role = inferRole(task);
+    byRole[role].push(task);
+  }
+
+  console.log(
+    `${label}: injected ${repaired.added.length} supplementary task(s); re-classified into architect=${byRole.architect.length}, backend=${byRole.backend.length}, frontend=${byRole.frontend.length}, test=${byRole.test.length}.`,
+  );
+
+  return {
+    tasks: allTasks,
+    architectTasks: byRole.architect,
+    backendTasks: byRole.backend,
+    frontendTasks: byRole.frontend,
+    testTasks: byRole.test,
+  };
+}
+
+/**
  * Bootstrap shared schemas/types/contracts BEFORE backend/frontend workers.
  * This makes downstream imports stable and reduces naming drift.
  */
@@ -3888,11 +4056,18 @@ async function autoApplyConventionFixes(outputDir: string): Promise<{
       importSegmentAfter: "/contexts/AuthContext",
     },
     {
-      canonical: "backend/src/middleware/",
-      residual: "backend/src/middlewares/",
+      // PLURAL is canonical: the M-tier / L-tier scaffolds ship
+      // `backend/src/middlewares/` (and so do all _optional/auth-*
+      // overlays). role-prompts.ts:438, scaffold-spec.ts:148/188 and
+      // task-breakdown-agent.ts:116 all repeat the plural convention.
+      // This rule was previously inverted, which caused every run to
+      // rename the correct scaffold dir into singular and rewrite ~26
+      // import paths — pure churn with no upside.
+      canonical: "backend/src/middlewares/",
+      residual: "backend/src/middleware/",
       kind: "directory",
-      importSegmentBefore: "/middlewares/",
-      importSegmentAfter: "/middleware/",
+      importSegmentBefore: "/middleware/",
+      importSegmentAfter: "/middlewares/",
     },
     {
       canonical: "backend/src/db.ts",
@@ -5126,6 +5301,10 @@ async function integrationVerifyAndFix(
       outputDir: state.outputDir,
       emitter: getRepairEmitter(state.sessionId),
       sessionId: state.sessionId,
+      // Cross-reference per-task gaps with actual migration files so the
+      // worker isn't asked to re-fix Stablecoin when 003-add-stablecoin*.ts
+      // already exists from a prior repair task.
+      filterByDisk: true,
     });
     if (migrationCoverageResult.pendingRepairTasks.length > 0) {
       console.log(
@@ -6915,6 +7094,98 @@ async function integrationVerifyAndFix(
     },
   });
 
+  // ─── Pre-gate: migration coverage must be resolved ───────────────────
+  // Probing endpoints while Sequelize models lack matching migrations is
+  // a wasted round trip: the DB schema won't have the columns the model
+  // declares, so the handler throws on first `findAll`/`create`, the
+  // smoke gate reports the resulting 5xx, and the verify-fix worker
+  // chases the wrong fix (handler logic / null guards) instead of the
+  // real cause (missing migration). Cross-references the per-task gap
+  // report against the actual `backend/src/database/migrations/`
+  // directory so a gap recorded by an early task but resolved by a
+  // later repair task no longer blocks here.
+  const unresolvedMigrationGaps = await getUnresolvedMigrationGaps(
+    state.outputDir,
+  ).catch((err) => {
+    console.warn(
+      `[supervisor] migration-coverage pre-gate check threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  });
+
+  // ─── Pre-gate: runtime-integration-audit ERROR findings block smoke ───
+  // Some audit rules (e.g. `bg-job-worker-startup`) catch silent failure
+  // modes that the HTTP smoke probe cannot observe — workers exported but
+  // never started in `server.ts` leave the API surface looking fine while
+  // every enqueued background run hangs forever. We treat any ERROR-level
+  // finding as a hard gate so the project is not silently shipped broken.
+  const runtimeAuditErrorFindings =
+    runtimeAuditResult?.findings.filter((f) => f.severity === "error") ?? [];
+  if (runtimeAuditErrorFindings.length > 0) {
+    const top = runtimeAuditErrorFindings
+      .slice(0, 6)
+      .map((f) => `- [${f.ruleId}] ${f.file}:${f.line} — ${f.reason}`);
+    finalStatus = "fail";
+    finalSummary = [
+      finalSummary,
+      "Runtime integration audit failed:",
+      `${runtimeAuditErrorFindings.length} ERROR-level finding(s) across ${new Set(runtimeAuditErrorFindings.map((f) => f.ruleId)).size} rule(s). Runtime smoke gate skipped — probing cannot detect these silent failure modes:`,
+      top.join("\n"),
+      runtimeAuditErrorFindings.length > 6
+        ? `…and ${runtimeAuditErrorFindings.length - 6} more (see .ralph/runtime-integration-audit.json).`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000);
+    getRepairEmitter(state.sessionId)({
+      stage: "integration-gate",
+      event: "runtime_audit_blocked_smoke",
+      details: {
+        errorCount: runtimeAuditErrorFindings.length,
+        sampleFindings: runtimeAuditErrorFindings.slice(0, 6).map((f) => ({
+          ruleId: f.ruleId,
+          file: f.file,
+          line: f.line,
+        })),
+      },
+    });
+  }
+
+  if (unresolvedMigrationGaps.length > 0) {
+    const top = unresolvedMigrationGaps
+      .slice(0, 6)
+      .map(
+        (g) =>
+          `- ${g.modelPath} (originating task: ${g.sourceTaskId})`,
+      );
+    finalStatus = "fail";
+    finalSummary = [
+      finalSummary,
+      "Migration coverage gate failed:",
+      `${unresolvedMigrationGaps.length} Sequelize model file(s) lack a corresponding migration. Runtime smoke gate skipped — probing would 5xx on schema mismatch. Fix migrations first:`,
+      top.join("\n"),
+      unresolvedMigrationGaps.length > 6
+        ? `…and ${unresolvedMigrationGaps.length - 6} more (see .ralph/migration-coverage.json).`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000);
+    getRepairEmitter(state.sessionId)({
+      stage: "integration-gate",
+      event: "migration_coverage_blocked_smoke",
+      details: {
+        unresolvedCount: unresolvedMigrationGaps.length,
+        sampleGaps: unresolvedMigrationGaps.slice(0, 6).map((g) => ({
+          modelPath: g.modelPath,
+          modelName: g.modelName,
+          sourceTaskId: g.sourceTaskId,
+        })),
+      },
+    });
+  }
+
   // ─── Runtime smoke gate (P0) ─────────────────────────────────────────
   // Boot the backend and prove every contract endpoint returns something
   // OTHER than 404. The whole goal is to pre-empt the "OAuth succeeds but
@@ -6922,7 +7193,11 @@ async function integrationVerifyAndFix(
   // the #1 cause of post-codegen regressions. Emits a snapshot to
   // `.ralph/runtime-smoke.json` so the verify-fix worker can read it as
   // pendingRepairTasks on the next loop.
-  if (process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1") {
+  if (
+    process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1" &&
+    unresolvedMigrationGaps.length === 0 &&
+    runtimeAuditErrorFindings.length === 0
+  ) {
     try {
       const smoke = await runRuntimeSmokeGate({
         outputDir: state.outputDir,
@@ -7165,6 +7440,7 @@ export function createSupervisorGraph() {
     .addNode("dispatch_gate", dispatchGate)
     .addNode("dependency_baseline", dependencyBaseline)
     .addNode("generate_api_contracts", generateApiContracts)
+    .addNode("contract_task_coverage", contractTaskCoverage)
     .addNode("tdd_test_writer", tddTestWriterAndRed)
     .addNode("be_worker", parallelWorkerNode)
     .addNode("be_phase_verify", (s) =>
@@ -7192,7 +7468,8 @@ export function createSupervisorGraph() {
     .addEdge("scaffold_fix", "scaffold_verify")
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
-    .addEdge("generate_api_contracts", "tdd_test_writer")
+    .addEdge("generate_api_contracts", "contract_task_coverage")
+    .addEdge("contract_task_coverage", "tdd_test_writer")
     .addConditionalEdges("tdd_test_writer", dispatchBackendAndTestWorkers)
     .addEdge("be_worker", "be_phase_verify")
     .addEdge("be_phase_verify", "extract_real_contracts")
