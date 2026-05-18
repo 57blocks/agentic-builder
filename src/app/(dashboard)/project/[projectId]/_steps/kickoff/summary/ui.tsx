@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Loader2, ChevronLeft, ChevronRight, GitBranch, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -234,6 +234,16 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
       .finally(() => setRepoLoading(false));
   }, []);
 
+  // ── Auto-run kickoff on enter if no cached result ──
+  const autoRunRef = useRef(false);
+  useEffect(() => {
+    if (autoRunRef.current) return;
+    if (isCompleted || isThisRunning) return;
+    autoRunRef.current = true;
+    void runKickoff();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const runKickoff = async () => {
     setError(null);
     useStepStore.setState((s) => ({
@@ -306,11 +316,11 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
     }
   };
 
-  const totalHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
   const aiTasks = tasks.filter((t) => t.executionKind === "ai_autonomous");
   const humanTasks = tasks.filter((t) => t.executionKind === "human_confirm_after");
-  const aiHours = aiTasks.reduce((s, t) => s + t.estimatedHours, 0);
-  const humanHours = humanTasks.reduce((s, t) => s + t.estimatedHours, 0);
+  const aiHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
+  const humanHours = tasks.reduce((s, t) => s + (t.humanReviewHours ?? 0), 0);
+  const totalHours = aiHours + humanHours;
   const efficiencyPct = tasks.length > 0 ? Math.round((aiTasks.length / tasks.length) * 100) : 0;
   const estimatedCost = (totalHours * 8.5).toFixed(0);
   const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
@@ -481,7 +491,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     </div>
                     <div className="text-[13px] font-medium text-[#334155]">{task.estimatedHours}h</div>
                     <div className="text-[13px] font-medium text-[#334155]">
-                      {task.executionKind === "human_confirm_after" ? <span>{task.estimatedHours}h</span> : <span className="text-slate-300">—</span>}
+                      {task.humanReviewHours ? `${task.humanReviewHours}h` : <span className="text-slate-300">—</span>}
                     </div>
                     <div>
                       {task.priority ? (

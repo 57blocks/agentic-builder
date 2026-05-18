@@ -97,6 +97,9 @@ export interface KickoffWorkItem {
   priority?: "P0" | "P1" | "P2";
   subSteps?: TaskSubStep[];
   tokenEstimate?: TaskTokenEstimate;
+  /** Hours for human review/confirmation (only for human_confirm_after tasks).
+   *  Typical range: 0.5–1h. When absent, assumed 0. */
+  humanReviewHours?: number;
   acceptanceCriteria?: string[];
   /** PRD requirement IDs this task implements (AC-*, FR-*), for coverage gates. */
   coversRequirementIds?: string[];
