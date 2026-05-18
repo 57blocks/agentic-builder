@@ -4937,7 +4937,7 @@ function parseValidationSuiteResult(
       const skipped = suite.skipped === true ? " (skipped)" : "";
       return `${name}: ${status}${skipped}`;
     });
-    return {
+  return {
       parsed: true,
       pass: data.pass === true,
       summary:
@@ -6363,13 +6363,13 @@ async function integrationVerifyAndFix(
           const validationKinds = detectScopedValidationKinds(command);
           if (validationKinds.length > 0) {
             for (const validationKind of validationKinds) {
-              const trendReason = noteValidationIssueTrend(
-                validationKind,
-                result,
-              );
-              if (trendReason) {
-                iterationValidationProgress = true;
-                iterationProgressReasons.push(trendReason);
+            const trendReason = noteValidationIssueTrend(
+              validationKind,
+              result,
+            );
+            if (trendReason) {
+              iterationValidationProgress = true;
+              iterationProgressReasons.push(trendReason);
               }
             }
           } else if (isMutatingSupervisorBashCommand(command)) {
@@ -7069,11 +7069,11 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   const coverage = (await tryReadJson(
     ".ralph/contract-usage-coverage.json",
   )) as {
-    pendingRepairTasks?: Array<{
-      method?: string;
-      endpoint?: string;
-      directive?: string;
-    }>;
+        pendingRepairTasks?: Array<{
+          method?: string;
+          endpoint?: string;
+          directive?: string;
+        }>;
   } | null;
   if (
     coverage?.pendingRepairTasks &&
@@ -7087,8 +7087,8 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   }
 
   const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as {
-    unregisteredModules?: string[];
-    unresolvedRegistrations?: string[];
+        unregisteredModules?: string[];
+        unresolvedRegistrations?: string[];
   } | null;
   if (routeAudit) {
     const lines: string[] = [];
@@ -7102,13 +7102,13 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   }
 
   const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
-    tasks?: Record<
-      string,
-      {
-        ok?: boolean;
-        gaps?: Array<{ modelPath?: string; modelName?: string }>;
-      }
-    >;
+        tasks?: Record<
+          string,
+          {
+            ok?: boolean;
+            gaps?: Array<{ modelPath?: string; modelName?: string }>;
+          }
+        >;
   } | null;
   if (migration?.tasks) {
     const lines: string[] = [];
