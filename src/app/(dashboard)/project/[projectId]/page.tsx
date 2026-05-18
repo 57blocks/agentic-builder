@@ -48,11 +48,16 @@ export default function ProjectPage() {
   // When intent resolves the tier (e.g. "S"), the store updates and breadcrumb re-renders immediately.
   const tier = useStepNavigationStore((s) => s.tier);
 
-  // Subscribe to step completion states so breadcrumb can show/hide tier-gated groups
-  // (e.g. Tech Docs, Quality are hidden until PRD is generated and tier is known).
-  // Only the prd status is needed — return a stable primitive to avoid re-render loops.
-  const prdStatus = useStepStore((s) => s.steps.prd?.status ?? "idle");
-  const stepStates: Partial<Record<string, { status: string } | null>> = { prd: { status: prdStatus } };
+  // Subscribe to all step states so breadcrumb can show/hide tier-gated groups
+  // and disable steps without snapshots.
+  const allSteps = useStepStore((s) => s.steps);
+  const stepStates: Partial<Record<string, { status: string } | null>> = useMemo(() => {
+    const states: Partial<Record<string, { status: string } | null>> = {};
+    for (const [stepId, result] of Object.entries(allSteps)) {
+      if (result) states[stepId] = { status: result.status ?? "idle" };
+    }
+    return states;
+  }, [allSteps]);
 
   // Track previous projectId so we can detect changes and reset
   const prevProjectIdRef = useRef<string | null>(null);

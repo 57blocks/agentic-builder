@@ -273,6 +273,7 @@ Each element has this shape:
   "title": "Initialize Vite + React project with Tailwind CSS",
   "description": "Setup package.json with Vite, vite.config.ts, index.html, src/main.tsx, Tailwind CSS config.",
   "estimatedHours": 2,
+  "humanReviewHours": 0,
   "executionKind": "ai_autonomous",
   "files": {
     "creates": ["package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/main.tsx"],
@@ -322,7 +323,13 @@ Field rules:
 - **title**: short imperative sentence (< 80 chars)
 - **description**: 1-3 sentences explaining what to build, which files to touch, and
   any relevant FR-xxx / US-xx references from the PRD.
-- **estimatedHours**: integer, realistic hours for a senior full-stack engineer.
+- **estimatedHours**: number (0.5–6, one decimal allowed), **AI agent execution hours** ONLY (not human engineer time). AI works 5-10x faster than a human. Use these reference ranges:
+  - Simple single-file task (one component, one route): **0.5–1h**
+  - Moderate multi-file feature (page + service + types): **1–2h**
+  - Complex multi-file task (full CRUD module, several pages): **2–4h**
+  - Exceptionally broad task (rare): **4–6h**
+  Values over 6 are almost always wrong and should be split. This field is the AI coding time only.
+- **humanReviewHours**: number (0–2, optional, default 0), hours a human needs to review/approve the task output. Only meaningful for "human_confirm_after" tasks — typical range 0.5–1h. For "ai_autonomous" tasks, omit or set to 0.
 - **executionKind**: "ai_autonomous" (AI can fully handle) or "human_confirm_after"
   (needs human review/approval after completion).
 - **files**: object with three sub-arrays:

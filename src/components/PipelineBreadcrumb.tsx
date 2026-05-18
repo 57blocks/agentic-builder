@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef, useEffect, useState } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import React, { useMemo, useRef, useEffect, useState, useCallback } from "react";
+import { ChevronRight } from "lucide-react";
 import {
   getStagesForTier,
   getNodePath,
@@ -25,69 +25,13 @@ function StatusDot({ status }: { status: StepStatus }) {
   return <span className={`inline-block size-2 rounded-full shrink-0 ${colors[status]}`} />;
 }
 
-// ── Dropdown ────────────────────────────────────────────────────────────────
-
-function BreadcrumbDropdown({
-  items,
-  activeId,
-  onSelect,
-  showStatus,
-}: {
-  items: { id: string; label: string; disabled?: boolean; status?: StepStatus; parallelHint?: boolean }[];
-  activeId: string;
-  onSelect: (id: string) => void;
-  showStatus?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const activeItem = items.find((i) => i.id === activeId);
-  const label = activeItem?.label ?? activeId;
-
-  return (
-    <div ref={ref} className="relative inline-flex items-center">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 px-2 py-1 -mx-1 rounded-md text-sm font-medium transition-colors hover:bg-[#f1f5f9] text-[#334155]"
-      >
-        {label}
-        <ChevronDown size={12} className={`text-[#94a3b8] transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 min-w-[180px] bg-white rounded-lg shadow-lg border border-[#e2e8f0] z-50 py-1 overflow-hidden">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={item.disabled}
-              onClick={() => { onSelect(item.id); setOpen(false); }}
-              className={[
-                "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
-                item.id === activeId
-                  ? "bg-[#4f46e5]/10 text-[#4f46e5] font-medium"
-                  : item.disabled
-                    ? "text-gray-300 cursor-not-allowed"
-                    : "text-[#334155] hover:bg-[#f8fafc]",
-              ].join(" ")}
-            >
-              {showStatus && item.status && <StatusDot status={item.status} />}
-              <span className="flex-1 truncate">{item.label}</span>
-              {item.parallelHint && <span className="text-[10px] text-[#94a3b8] shrink-0">∥</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+interface GroupItem {
+  id: string;
+  label: string;
+  status?: StepStatus;
+  disabled?: boolean;
+  meta?: { isStep?: boolean; parallelHint?: boolean };
+  children?: { id: string; label: string; status: StepStatus; disabled: boolean }[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -95,14 +39,196 @@ function BreadcrumbDropdown({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface PipelineBreadcrumbProps {
-  /** Currently active step — controlled by parent */
   activeStep: StepId;
-  /** Called when user clicks a breadcrumb item */
   onStepChange: (stepId: StepId) => void;
-  /** Project tier for filtering visible steps */
   tier: ProjectTier;
-  /** Step execution state for status dots (from pipeline-store) */
   stepStates: Partial<Record<string, { status: string } | null>>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Cascading Menu Component
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function CascadingMenu({
+  stages,
+  activeStageId,
+  activeGroupId,
+  activeStep,
+  completedStepIds,
+  tier,
+  stepStates,
+  onNavigate,
+  onClose,
+}: {
+  stages: ReturnType<typeof getStagesForTier>;
+  activeStageId: string;
+  activeGroupId: string | null;
+  activeStep: string;
+  completedStepIds: Set<string>;
+  tier: ProjectTier;
+  stepStates: Partial<Record<string, { status: string } | null>>;
+  onNavigate: (stepId: StepId) => void;
+  onClose: () => void;
+}) {
+  const [hoveredStageId, setHoveredStageId] = useState<string | null>(null);
+  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+
+  const onStageHover = useCallback((id: string | null) => {
+    setHoveredStageId(id);
+    setHoveredGroupId(null);
+  }, []);
+
+  const effectiveStageId = hoveredStageId ?? activeStageId;
+  const hoveredStage = stages.find((s) => s.id === effectiveStageId);
+
+  const noSnapshot = (id: string) => stepStates[id] == null && id !== "intent" && id !== "initial";
+
+  const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";
+  const l2Items: GroupItem[] = (hoveredStage?.children ?? [])
+    .filter((g) => g.id !== "initial")
+    .filter((g) => !g.tiers || g.tiers.includes(tier))
+    .filter((g) => !g.tiers || prdDone)
+    .map((g) => {
+      const isStandalone = !g.children || g.children.length === 0;
+      const stepResult = isStandalone ? stepStates[g.id] : null;
+      return {
+        id: g.id,
+        label: GROUP_LABELS[g.id as keyof typeof GROUP_LABELS] ?? g.label,
+        status: (stepResult as { status?: string } | null | undefined)?.status as StepStatus | undefined,
+        disabled: isStandalone
+          ? (noSnapshot(g.id) && g.id !== activeStep) || (!areDependenciesMet(g.id as StepId, completedStepIds) && g.id !== activeStep)
+          : false,
+        meta: { isStep: isStandalone, parallelHint: g.parallel && (g.children?.length ?? 0) > 1 },
+        children: isStandalone
+          ? undefined
+          : g.children
+              ?.filter((s) => !s.tiers || s.tiers.includes(tier))
+              .map((s) => {
+                const sid = s.id as StepId;
+                const result = stepStates[sid];
+                const depsMet = areDependenciesMet(sid, completedStepIds);
+                return {
+                  id: s.id,
+                  label: STEP_LABELS[sid] ?? s.label,
+                  status: ((result as { status?: string } | null)?.status ?? "idle") as StepStatus,
+                  disabled: (noSnapshot(sid) && sid !== activeStep) || (!depsMet && sid !== activeStep),
+                };
+              }),
+      };
+    });
+
+  const effectiveGroupId = hoveredGroupId ?? l2Items[0]?.id ?? null;
+  const hoveredGroup = l2Items.find((g) => g.id === effectiveGroupId);
+  const l3Items = hoveredGroup?.children ?? [];
+
+  const handleItemClick = (id: string) => {
+    onNavigate(id as StepId);
+    onClose();
+  };
+
+  const isItemDisabled = (id: string, disabled?: boolean) =>
+    disabled === true;
+
+  return (
+    <div className="flex rounded-lg shadow-lg border border-[#e2e8f0] bg-white">
+      <style>{`
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateX(-4px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        .col-enter { animation: fadeSlideIn 0.15s ease-out both; }
+      `}</style>
+      {/* Column 1: Stages */}
+      <div className="min-w-[180px] py-1 bg-white col-enter" style={{ animationDelay: "0ms" }}>
+        {stages.map((stage) => {
+          const sid = stage.id as StageId;
+          const label = `${STAGE_LABELS[sid]?.num ?? ""} ${STAGE_LABELS[sid]?.name ?? stage.label}`;
+          const isHovered = hoveredStageId === stage.id;
+          const isActive = stage.id === activeStageId && !hoveredStageId;
+          return (
+            <button
+              key={stage.id}
+              type="button"
+              onMouseEnter={() => onStageHover(stage.id)}
+              className={[
+                "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
+                isActive
+                  ? "bg-[#4f46e5]/10 text-[#4f46e5] font-medium"
+                  : isHovered
+                    ? "bg-[#f1f5f9] text-[#0b1c30]"
+                    : "text-[#334155] hover:bg-[#f8fafc]",
+              ].join(" ")}
+            >
+              <span className="flex-1 truncate">{label}</span>
+              <ChevronRight size={12} className="text-[#94a3b8] shrink-0" />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Column 2: Groups */}
+      {l2Items.length > 0 && (
+        <div className="min-w-[180px] border-l border-[#e2e8f0] py-1 bg-white col-enter" style={{ animationDelay: "60ms" }}>
+          {l2Items.map((item) => {
+            const isHovered = hoveredGroupId === item.id;
+            const isActive = item.id === activeGroupId && !hoveredGroupId && !hoveredStageId;
+            const isClickable = item.meta?.isStep;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onMouseEnter={() => setHoveredGroupId(item.id)}
+                onClick={() => !isItemDisabled(item.id, item.disabled) && isClickable && handleItemClick(item.id)}
+                className={[
+                  "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
+                  isItemDisabled(item.id, item.disabled)
+                    ? "text-[#cbd5e1] cursor-not-allowed"
+                    : isActive
+                      ? "bg-[#4f46e5]/10 text-[#4f46e5] font-medium"
+                      : isHovered
+                        ? "bg-[#f1f5f9] text-[#0b1c30]"
+                        : "text-[#334155] hover:bg-[#f8fafc]",
+                ].join(" ")}
+              >
+                <span className="flex-1 truncate">{item.label}</span>
+                {item.meta?.parallelHint && <span className="text-[10px] text-[#94a3b8] shrink-0">∥</span>}
+                {!item.meta?.isStep && (
+                  <ChevronRight size={12} className="text-[#94a3b8] shrink-0" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Column 3: Steps */}
+      {l3Items.length > 0 && (
+        <div className="min-w-[180px] border-l border-[#e2e8f0] py-1 bg-white col-enter" style={{ animationDelay: "120ms" }}>
+          {l3Items.map((item) => {
+            const isActive = item.id === activeStep && !hoveredStageId && !hoveredGroupId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => !isItemDisabled(item.id, item.disabled) && handleItemClick(item.id)}
+                className={[
+                  "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
+                  isItemDisabled(item.id, item.disabled)
+                    ? "text-[#cbd5e1] cursor-not-allowed"
+                    : isActive
+                      ? "bg-[#4f46e5]/10 text-[#4f46e5] font-medium"
+                      : "text-[#334155] hover:bg-[#f8fafc]",
+                ].join(" ")}
+              >
+                <StatusDot status={item.status} />
+                <span className="flex-1 truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -117,40 +243,23 @@ export default function PipelineBreadcrumb({
 }: PipelineBreadcrumbProps) {
   const currentPath = useMemo(() => getNodePath(activeStep), [activeStep]);
   const stages = useMemo(() => getStagesForTier(tier), [tier]);
-
-  // ── Build L1 items (stages) ──
-  const l1Items = useMemo(
-    () =>
-      stages.map((s) => ({
-        id: s.id,
-        label: `${STAGE_LABELS[s.id as StageId]?.num ?? ""} ${STAGE_LABELS[s.id as StageId]?.name ?? s.label}`,
-      })),
-    [stages],
-  );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuStageId, setMenuStageId] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   const activeStageId = currentPath?.stage.id ?? "preparation";
+  const activeGroupId = currentPath?.group.id ?? null;
 
-  // ── Build L2 items (groups) ──
-  const l2Items = useMemo(() => {
-    const stage = stages.find((s) => s.id === activeStageId);
-    if (!stage?.children) return [];
-    // PRD must be completed before tier-gated groups (Tech Docs, Quality) are visible.
-    // Until then we don't know if the project is S-tier (no TRD/QA) or M/L-tier.
-    const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";
-    return stage.children
-      .filter((g) => g.id !== "initial")
-      .filter((g) => !g.tiers || g.tiers.includes(tier))
-      .filter((g) => !g.tiers || prdDone)
-      .map((g) => ({
-        id: g.id,
-        label: GROUP_LABELS[g.id as keyof typeof GROUP_LABELS] ?? g.label,
-        parallelHint: g.parallel && (g.children?.length ?? 0) > 1,
-      }));
-  }, [stages, activeStageId, tier, stepStates]);
+  // Close on click outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
-  const activeGroupId = currentPath?.group.id ?? (l2Items[0]?.id ?? null);
-
-  // ── Build L3 items (steps) ──
   const completedStepIds = useMemo(() => {
     const ids = new Set<string>();
     for (const [id, r] of Object.entries(stepStates)) {
@@ -159,72 +268,66 @@ export default function PipelineBreadcrumb({
     return ids;
   }, [stepStates]);
 
-  const l3Items = useMemo(() => {
-    const stage = stages.find((s) => s.id === activeStageId);
-    const group = stage?.children?.find((g) => g.id === activeGroupId);
-    if (!group?.children) return [];
-    return group.children
-      .filter((s) => !s.tiers || s.tiers.includes(tier))
-      .map((s) => {
-        const stepId = s.id as StepId;
-        const result = stepStates[stepId];
-        const depsMet = areDependenciesMet(stepId, completedStepIds);
-        return {
-          id: s.id,
-          label: STEP_LABELS[stepId] ?? s.label,
-          status: ((result as { status?: string } | null)?.status ?? "idle") as StepStatus,
-          disabled: !depsMet && stepId !== activeStep,
-        };
-      });
-  }, [stages, activeStageId, activeGroupId, tier, stepStates, completedStepIds, activeStep]);
-
-  // ── Handlers ──
-  const handleL1Select = (stageId: string) => {
-    const stage = stages.find((s) => s.id === stageId);
-    const firstGroup = stage?.children?.find((g) => g.id !== "initial");
-    if (!firstGroup) return;
-    // Level-2 standalone step (e.g., initial, intent, prd, design) — use its own id
-    if (!firstGroup.children || firstGroup.children.length === 0) {
-      onStepChange(firstGroup.id as StepId);
-    } else {
-      // Group with children — use the first child step
-      const firstStep = firstGroup.children.find((s) => !s.tiers || s.tiers.includes(tier));
-      if (firstStep) onStepChange(firstStep.id as StepId);
+  // Build current path label:  Stage > Group > Step
+  const pathParts: { label: string; isCurrent: boolean }[] = [];
+  if (currentPath) {
+    const info = STAGE_LABELS[currentPath.stage.id as StageId];
+    if (info) pathParts.push({ label: `${info.num} ${info.name}`, isCurrent: false });
+    const isStandalone = currentPath.step && currentPath.step.id === currentPath.group.id;
+    if (currentPath.group.id !== "initial") {
+      // For standalone L2 steps (e.g. prd), group.id is the step id — use STEP_LABELS
+      const groupLabel = isStandalone
+        ? (STEP_LABELS[currentPath.group.id as StepId] ?? currentPath.group.id)
+        : (GROUP_LABELS[currentPath.group.id as keyof typeof GROUP_LABELS] ?? currentPath.group.id);
+      pathParts.push({ label: groupLabel, isCurrent: !!isStandalone });
     }
-  };
-
-  const handleL2Select = (groupId: string) => {
-    const stage = stages.find((s) => s.id === activeStageId);
-    const group = stage?.children?.find((g) => g.id === groupId);
-    if (!group) return;
-    // Level-2 standalone step (no children) — use its own id
-    if (!group.children || group.children.length === 0) {
-      onStepChange(group.id as StepId);
-    } else {
-      // Group with children — use the first available child
-      const firstStep = group.children.find((s) => !s.tiers || s.tiers.includes(tier));
-      if (firstStep) onStepChange(firstStep.id as StepId);
+    if (currentPath.step && !isStandalone) {
+      const stepLabel = STEP_LABELS[currentPath.step.id as StepId] ?? currentPath.step.id;
+      pathParts.push({ label: stepLabel, isCurrent: true });
     }
-  };
+  }
 
-  const handleL3Select = (stepId: string) => {
-    onStepChange(stepId as StepId);
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+    } else {
+      setMenuStageId(activeStageId);
+      setMenuOpen(true);
+    }
   };
 
   return (
-    <div className="flex items-center gap-1 text-sm py-3 select-none">
-      <BreadcrumbDropdown items={l1Items} activeId={activeStageId} onSelect={handleL1Select} />
-      {activeGroupId && l2Items.length > 0 && (
-        <>
-          <ChevronRight size={14} className="text-[#cbd5e1] shrink-0 mx-0.5" />
-          <BreadcrumbDropdown items={l2Items} activeId={activeGroupId} onSelect={handleL2Select} />
-        </>
-      )}
-      {activeStep && l3Items.length > 0 && (
-        <>
-          <ChevronRight size={14} className="text-[#cbd5e1] shrink-0 mx-0.5" />
-          <BreadcrumbDropdown items={l3Items} activeId={activeStep} onSelect={handleL3Select} showStatus />
-        </>
+    <div ref={ref} className="relative inline-flex items-center text-sm py-3 select-none">
+      <button
+        type="button"
+        onClick={toggleMenu}
+        className="inline-flex items-center gap-1 px-2 py-1 -mx-1 rounded-md transition-colors hover:bg-[#f1f5f9]"
+      >
+        {pathParts.map((part, i) => (
+          <React.Fragment key={`${part.label}-${i}`}>
+            {i > 0 && <ChevronRight size={13} className="text-[#94a3b8] shrink-0" />}
+            <span className={part.isCurrent ? "text-[#0b1c30] font-semibold" : "text-[#64748b]"}>
+              {part.label}
+            </span>
+          </React.Fragment>
+        ))}
+      </button>
+
+      {/* Cascading menu */}
+      {menuOpen && menuStageId && (
+        <div className="absolute top-full left-0 mt-1 z-50">
+          <CascadingMenu
+            stages={stages}
+            activeStageId={menuStageId}
+            activeGroupId={activeGroupId}
+            activeStep={activeStep}
+            completedStepIds={completedStepIds}
+            tier={tier}
+            stepStates={stepStates}
+            onNavigate={onStepChange}
+            onClose={() => { setMenuOpen(false); setMenuStageId(null); }}
+          />
+        </div>
       )}
     </div>
   );
