@@ -70,6 +70,16 @@ export type {
   RuntimeAuditScope,
   RuntimeAuditSeverity,
 } from "./runtime-integration-audit";
+export {
+  dispatchRuntimeAudit,
+  formatRuntimeAuditTasksBlock,
+} from "./runtime-audit-dispatch";
+export type {
+  RuntimeAuditDispatchInput,
+  RuntimeAuditDispatchResult,
+  DeterministicFixOutcome,
+  RuntimeAuditRepairTask,
+} from "./runtime-audit-dispatch";
 export { runRuntimeSmokeGate } from "./runtime-smoke-gate";
 export type {
   RuntimeSmokeFailure,
