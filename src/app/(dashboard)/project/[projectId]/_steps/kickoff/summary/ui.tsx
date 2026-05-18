@@ -317,10 +317,8 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   };
 
   const aiTasks = tasks.filter((t) => t.executionKind === "ai_autonomous");
-  const humanTasks = tasks.filter((t) => t.executionKind === "human_confirm_after");
   const aiHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
-  const humanHours = tasks.reduce((s, t) => s + (t.humanReviewHours ?? 0), 0);
-  const totalHours = aiHours + humanHours;
+  const totalHours = aiHours;
   const efficiencyPct = tasks.length > 0 ? Math.round((aiTasks.length / tasks.length) * 100) : 0;
   const estimatedCost = (totalHours * 8.5).toFixed(0);
   const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
@@ -439,11 +437,10 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 <div className="px-5 py-3 border-b border-[#f1f5f9]">
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Stats</p>
                 </div>
-                <div className="grid grid-cols-6 divide-x divide-[#f1f5f9]">
+                <div className="grid grid-cols-5 divide-x divide-[#f1f5f9]">
                   {[
                     { label: "TOTAL TASKS", value: String(tasks.length) },
                     { label: "AI ESTIMATE", value: `${aiHours}h` },
-                    { label: "HUMAN ESTIMATE", value: `${humanHours}h` },
                     { label: "TOTAL HOURS", value: `${totalHours}h` },
                     { label: "EFFICIENCY", value: `${efficiencyPct}%`, highlight: true },
                     { label: "EST. COST", value: `$${estimatedCost}` },
@@ -479,19 +476,20 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               {/* Skills trace (which auto-applied rules fired this run) */}
               <SkillsTracePanel trace={skillsTrace} />
 
-              {/* Task table */}
+              {/* Task table — hidden for now */}
+              {false && (
               <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-[#f1f5f9] flex items-center justify-between">
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Tasks</p>
                   <span className="text-[11px] text-[#94a3b8]">Showing {Math.min((page + 1) * PAGE_SIZE, tasks.length)} of {tasks.length} tasks</span>
                 </div>
-                <div className="grid grid-cols-[2fr_1fr_72px_1fr_1fr_72px_96px] gap-4 px-5 py-2.5 bg-[#fafbfc] border-b border-[#f1f5f9]">
-                  {["TASK DESCRIPTION", "PHASE", "TOKENS", "AI EST.", "HUMAN EST.", "PRIORITY", "TYPE"].map((h) => (
+                <div className="grid grid-cols-[2fr_1fr_72px_1fr_72px_96px] gap-4 px-5 py-2.5 bg-[#fafbfc] border-b border-[#f1f5f9]">
+                  {["TASK DESCRIPTION", "PHASE", "TOKENS", "AI EST.", "PRIORITY", "TYPE"].map((h) => (
                     <span key={h} className="text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8]">{h}</span>
                   ))}
                 </div>
                 {pageTasks.map((task, i) => (
-                  <div key={task.id} className={`grid grid-cols-[2fr_1fr_72px_1fr_1fr_72px_96px] gap-4 items-center px-5 py-3.5 ${i < pageTasks.length - 1 ? "border-b border-[#f8fafc]" : ""} hover:bg-[#fafbff] transition-colors`}>
+                  <div key={task.id} className={`grid grid-cols-[2fr_1fr_72px_1fr_72px_96px] gap-4 items-center px-5 py-3.5 ${i < pageTasks.length - 1 ? "border-b border-[#f8fafc]" : ""} hover:bg-[#fafbff] transition-colors`}>
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold text-[#1e293b] truncate">{task.title}</p>
                       <p className="text-[11px] text-[#94a3b8] truncate mt-0.5">{task.description}</p>
@@ -503,9 +501,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                       {task.tokenEstimate?.totalTokens ? formatTokens(task.tokenEstimate.totalTokens) : <span className="text-slate-300">—</span>}
                     </div>
                     <div className="text-[13px] font-medium text-[#334155]">{task.estimatedHours}h</div>
-                    <div className="text-[13px] font-medium text-[#334155]">
-                      {task.humanReviewHours ? `${task.humanReviewHours}h` : <span className="text-slate-300">—</span>}
-                    </div>
                     <div>
                       {task.priority ? (
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
@@ -541,6 +536,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   </div>
                 )}
               </div>
+              )}
             </>
           )}
 
