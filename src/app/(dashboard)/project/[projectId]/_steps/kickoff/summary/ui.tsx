@@ -356,12 +356,25 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   : "Review the project plan and configure integrations before generating the task plan"}
               </p>
             </div>
-            {isCompleted && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {isCompleted && (
+                <button
+                  onClick={runKickoff}
+                  disabled={isRunning}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-50 text-[#712ae2] text-[11px] font-semibold hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Regenerate summary"
+                >
+                  <RefreshCw size={11} className={isRunning ? "animate-spin" : ""} />
+                  Regenerate
+                </button>
+              )}
+              {isCompleted && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live
+                </span>
+              )}
+            </div>
           </div>
 
           {/* ── Run Kick-off (shown when not yet run) ── */}

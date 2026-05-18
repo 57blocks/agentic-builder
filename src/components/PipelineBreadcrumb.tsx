@@ -96,7 +96,7 @@ function CascadingMenu({
         label: GROUP_LABELS[g.id as keyof typeof GROUP_LABELS] ?? g.label,
         status: (stepResult as { status?: string } | null | undefined)?.status as StepStatus | undefined,
         disabled: isStandalone
-          ? (noSnapshot(g.id) && g.id !== activeStep) || (!areDependenciesMet(g.id as StepId, completedStepIds) && g.id !== activeStep)
+          ? noSnapshot(g.id) && g.id !== activeStep
           : false,
         meta: { isStep: isStandalone, parallelHint: g.parallel && (g.children?.length ?? 0) > 1 },
         children: isStandalone
