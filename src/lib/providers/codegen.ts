@@ -54,7 +54,12 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
   );
 }
 
-function shouldForceOpenRouter(): boolean {
+function shouldForceOpenRouter(variant?: CodegenOpenRouterVariant): boolean {
+  const codegenProvider = process.env.CODEGEN_PROVIDER?.trim().toLowerCase();
+  if (variant === "codeGen" && codegenProvider === "deepseek") {
+    return false;
+  }
+
   const provider = process.env.LLM_PROVIDER?.trim().toLowerCase();
   return (
     provider === "openrouter" ||
@@ -276,7 +281,7 @@ export async function invokeCodegenOrOpenRouter(
   const reasoningOptions = buildCodegenReasoningOptions(key);
 
   // ── Priority 1: DeepSeek V4 Pro direct API ──────────────────────────────
-  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+  if (isDeepSeekV4Provider() && !shouldForceOpenRouter(key)) {
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
     const dsBase =

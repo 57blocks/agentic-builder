@@ -1,8 +1,8 @@
-# Task Management Platform
+# 项目脚手架说明
 
 ## 1. 项目概览
 
-这是一个任务管理平台项目，采用前后端分离架构：
+这是一个项目脚手架基础框架，采用前后端分离架构：
 
 - `frontend`：基于 `React + TypeScript + Vite + Ant Design React` 的前端应用
 - `backend`：基于 `Koa + TypeScript + Sequelize + PostgreSQL` 的后端 API 服务
@@ -21,12 +21,12 @@
 2. 后端负责认证鉴权、业务处理、数据访问与 API 暴露。
 3. 数据层使用 PostgreSQL，后端通过 Sequelize 进行连接与模型管理。
 
-### 2.2 前后端通信方式
+### 2.2 前后端接口调用方式约定
 
-- 前端统一通过 `frontend/src/api` 调用后端接口
-- 默认请求前缀为 `/api`
+- 前端统一通过 `frontend/src/api/client.ts` 中封装的 `apiClient` 调用后端接口
+- 前端 `frontend/.env` 中配置 `VITE_API_BASE_URL` 为 `http://localhost:4000`
 - 本地开发时，Vite 通过代理将 `/api` 转发到 `http://localhost:4000`
-- 后端统一以 `/api` 作为接口前缀
+- 后端统一以 `/api` 作为接口前缀，前端调用具体接口时为完整的接口定义URI，例如 `/api/health`
 
 ---
 

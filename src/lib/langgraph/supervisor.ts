@@ -1,7 +1,5 @@
 import path from "path";
 import fs from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { StateGraph, START, END, Send } from "@langchain/langgraph";
 import {
   SupervisorStateAnnotation,
@@ -54,15 +52,16 @@ import {
   resolveModel,
   estimateCost,
   type ChatMessage,
-  type OpenRouterOptions,
-  type OpenRouterToolDefinition,
 } from "@/lib/openrouter";
+import {
+  chatCompletionsDeepSeekV4,
+  DEEPSEEK_V4_DEFAULT_BASE,
+  DEEPSEEK_V4_DEFAULT_MODEL,
+  isDeepSeekV4Provider,
+} from "@/lib/providers/deepseek-v4";
+import type { OpenRouterOptions, OpenRouterResponse } from "@/lib/llm-types";
 import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
-import type {
-  CodingAgentRole,
-  CodingTask,
-  KickoffWorkItem,
-} from "@/lib/pipeline/types";
+import type { CodingAgentRole, CodingTask } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { triagePrebuiltArchitectTasks } from "./architect-triage";
 import {
@@ -79,8 +78,10 @@ import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
 } from "@/lib/pipeline/human-decision";
-import { readResourceRequirements } from "@/lib/pipeline/resource-requirements";
-import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
+import {
+  readResourceRequirements,
+  formatUnfilledKeysForE2EPrompt,
+} from "@/lib/pipeline/resource-requirements";
 import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
@@ -96,278 +97,97 @@ import {
   STRUCTURED_SUPERVISOR_TOOLS,
   executeStructuredSupervisorTool,
 } from "./structured-verify-tools";
-
-const execFileAsync = promisify(execFile);
-
-function getOpenRouterUsageCounts(usage: unknown): {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-} {
-  const raw = usage as
-    | {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-        promptTokens?: number;
-        completionTokens?: number;
-        totalTokens?: number;
-      }
-    | undefined;
-  const promptTokens = raw?.prompt_tokens ?? raw?.promptTokens ?? 0;
-  const completionTokens = raw?.completion_tokens ?? raw?.completionTokens ?? 0;
-  const totalTokens =
-    raw?.total_tokens ?? raw?.totalTokens ?? promptTokens + completionTokens;
-  return { promptTokens, completionTokens, totalTokens };
-}
-
-function recordSupervisorLlmUsage(args: {
-  sessionId: string;
-  stage: string;
-  label?: string;
-  model: string;
-  usage: unknown;
-  costUsd: number;
-}): void {
-  const usageCounts = getOpenRouterUsageCounts(args.usage);
-  recordCodingSessionLlmUsage({
-    sessionId: args.sessionId,
-    stage: args.stage,
-    label: args.label,
-    model: args.model,
-    costUsd: args.costUsd,
-    promptTokens: usageCounts.promptTokens,
-    completionTokens: usageCounts.completionTokens,
-    totalTokens: usageCounts.totalTokens,
-  });
-}
-
-// ─── Role inference ───
-
-const PHASE_TO_ROLE: Record<string, CodingAgentRole> = {
-  Scaffolding: "architect",
-  "Data Layer": "architect",
-  Infrastructure: "architect",
-  "Auth & Gateway": "backend",
-  "Backend Services": "backend",
-  Integration: "backend",
-  Frontend: "frontend",
-  Testing: "test",
-};
-
-function inferRole(task: KickoffWorkItem): CodingAgentRole {
-  if (PHASE_TO_ROLE[task.phase]) return PHASE_TO_ROLE[task.phase];
-  const lower = `${task.phase} ${task.title} ${task.description}`.toLowerCase();
-  if (/test|spec|e2e|vitest|playwright|k6|coverage/.test(lower)) return "test";
-  if (
-    /scaffold|infra|docker|helm|ci\/cd|deploy|config|schema|migrat/.test(lower)
-  )
-    return "architect";
-  if (
-    /frontend|react|component|page|ui|css|tailwind|hook|store|vite/.test(lower)
-  )
-    return "frontend";
-  return "backend";
-}
-
-function isFrontendOnly(state: SupervisorState): boolean {
-  return state.backendTasks.length === 0;
-}
-
-const ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC =
-  process.env.BLUEPRINT_INCREMENTAL_CONTEXT_SYNC !== "0";
-
-function workersForRole(role: CodingAgentRole, count: number): number {
-  if (role === "architect" || role === "test") return 1;
-  // Strict context mode: keep one worker per coding role so each task sees
-  // the latest outputs from previous tasks within the same role.
-  if (
-    ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC &&
-    (role === "backend" || role === "frontend")
-  ) {
-    return 1;
-  }
-  if (count <= 3) return 1;
-  if (count <= 8) return 2;
-  return 3;
-}
-
-function chunkTasks<T>(tasks: T[], chunks: number): T[][] {
-  if (chunks <= 1) return [tasks];
-  const result: T[][] = Array.from({ length: chunks }, () => []);
-  tasks.forEach((t, i) => result[i % chunks].push(t));
-  return result.filter((c) => c.length > 0);
-}
-
-function isToolSequenceValidationError(message: string): boolean {
-  const m = message.toLowerCase();
-  return m.includes("messages with role 'tool'") && m.includes("tool_calls");
-}
-
-function countRemovedOrphanToolMessages(messages: ChatMessage[]): number {
-  let removed = 0;
-  const cleaned: ChatMessage[] = [];
-  let pendingToolCallIds = new Set<string>();
-
-  for (const msg of messages) {
-    if (msg.role === "assistant" && (msg.tool_calls?.length ?? 0) > 0) {
-      pendingToolCallIds = new Set(
-        (msg.tool_calls ?? []).map((tc) => tc.id).filter(Boolean),
-      );
-      cleaned.push(msg);
-      continue;
-    }
-
-    if (msg.role === "tool") {
-      const toolCallId = msg.tool_call_id ?? "";
-      if (toolCallId && pendingToolCallIds.has(toolCallId)) {
-        cleaned.push(msg);
-        pendingToolCallIds.delete(toolCallId);
-      } else {
-        removed++;
-      }
-      continue;
-    }
-
-    pendingToolCallIds = new Set<string>();
-    cleaned.push(msg);
-  }
-
-  messages.splice(0, messages.length, ...cleaned);
-  return removed;
-}
-
-function isContextLengthError(message: string): boolean {
-  return /context(?: length| window)?|maximum context|context_length_exceeded|too many tokens|prompt is too long|token limit/i.test(
-    message,
-  );
-}
-
-async function callWithOrphanToolRetry(
-  label: string,
-  messages: ChatMessage[],
-  modelChain: string[],
-  options: Omit<OpenRouterOptions, "model">,
-) {
-  try {
-    return await chatCompletionWithFallback(messages, modelChain, options);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!isToolSequenceValidationError(msg)) {
-      throw e;
-    }
-    const removed = countRemovedOrphanToolMessages(messages);
-    console.warn(
-      `${label}: detected tool-call sequence error; cleaned ${removed} orphan tool message(s) and retrying once.`,
-    );
-    if (removed <= 0) {
-      throw e;
-    }
-    return chatCompletionWithFallback(messages, modelChain, options);
-  }
-}
-
-function formatTaskBreakdownMarkdown(
-  title: string,
-  tasks: CodingTask[],
-  roleBuckets?: Record<CodingAgentRole, CodingTask[]>,
-  notes?: string[],
-): string {
-  const lines: string[] = [
-    `# ${title}`,
-    "",
-    `- Generated at: ${new Date().toISOString()}`,
-    `- Total tasks: ${tasks.length}`,
-  ];
-
-  if (roleBuckets) {
-    lines.push(
-      `- Role buckets: architect=${roleBuckets.architect.length}, backend=${roleBuckets.backend.length}, frontend=${roleBuckets.frontend.length}, test=${roleBuckets.test.length}`,
-    );
-  }
-
-  if (notes && notes.length > 0) {
-    lines.push(...notes.map((n) => `- Note: ${n}`));
-  }
-
-  lines.push("", "## Tasks", "");
-
-  for (const task of tasks) {
-    lines.push(`### [${task.id}] ${task.title}`);
-    lines.push(
-      `- Phase: ${task.phase} | Priority: ${task.priority} | Execution: ${task.executionKind}`,
-    );
-    lines.push(`- Estimated hours: ${task.estimatedHours}`);
-    lines.push(`- Description: ${task.description}`);
-
-    const files = task.files;
-    const creates = files && !Array.isArray(files) ? (files.creates ?? []) : [];
-    const modifies =
-      files && !Array.isArray(files) ? (files.modifies ?? []) : [];
-    const reads = files && !Array.isArray(files) ? (files.reads ?? []) : [];
-    lines.push(
-      `- Files (create/modify/read): ${creates.length}/${modifies.length}/${reads.length}`,
-    );
-
-    if (creates.length > 0) {
-      lines.push("  - Creates:");
-      lines.push(...creates.map((f: string) => `    - \`${f}\``));
-    }
-    if (modifies.length > 0) {
-      lines.push("  - Modifies:");
-      lines.push(...modifies.map((f: string) => `    - \`${f}\``));
-    }
-    if (reads.length > 0) {
-      lines.push("  - Reads:");
-      lines.push(...reads.map((f: string) => `    - \`${f}\``));
-    }
-
-    const dependencies = task.dependencies ?? [];
-    if (dependencies.length > 0) {
-      lines.push(`- Dependencies: ${dependencies.join(", ")}`);
-    } else {
-      lines.push("- Dependencies: (none)");
-    }
-
-    const subSteps = task.subSteps ?? [];
-    if (subSteps.length > 0) {
-      lines.push("- Sub-steps:");
-      for (const step of subSteps) {
-        lines.push(`  - ${step.step}. ${step.action}: ${step.detail}`);
-      }
-    }
-
-    const acceptanceCriteria = task.acceptanceCriteria ?? [];
-    if (acceptanceCriteria.length > 0) {
-      lines.push("- Acceptance criteria:");
-      lines.push(...acceptanceCriteria.map((ac: string) => `  - ${ac}`));
-    }
-
-    const coversRequirementIds = task.coversRequirementIds ?? [];
-    if (coversRequirementIds.length > 0) {
-      lines.push(`- Covers requirements: ${coversRequirementIds.join(", ")}`);
-    }
-
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
-async function writeTaskBreakdownMarkdown(
-  outputDir: string,
-  fileName: string,
-  content: string,
-): Promise<void> {
-  try {
-    await fsWrite(fileName, content, outputDir);
-    console.log(`[Supervisor] wrote ${fileName}`);
-  } catch (e) {
-    console.warn(
-      `[Supervisor] failed to write ${fileName}: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
-}
+import {
+  ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC,
+  ENABLE_PARALLEL_CODING_WORKERS,
+  parsedWorkerLimit,
+  workersForRole,
+  MAX_E2E_VERIFY_FIX_ATTEMPTS,
+} from "./supervisor/config";
+import { recordSupervisorLlmUsage } from "./supervisor/usage-tracking";
+import {
+  PHASE_TO_ROLE,
+  inferRole,
+  isFrontendOnly,
+} from "./supervisor/role-mapping";
+import {
+  hasOverlap,
+  chunkTasks,
+  collectTaskFiles,
+  chunkTasksByFileConflict,
+} from "./supervisor/shared/task-chunking";
+import {
+  isToolSequenceValidationError,
+  countRemovedOrphanToolMessages,
+  isContextLengthError,
+  callWithOrphanToolRetry,
+} from "./supervisor/shared/llm-call";
+import {
+  formatTaskBreakdownMarkdown,
+  writeTaskBreakdownMarkdown,
+} from "./supervisor/shared/task-breakdown";
+import {
+  routeAfterIntegrationVerify,
+  routeAfterTddGreenVerify,
+  routeAfterTddGreenVerifyRetry,
+  routeAfterE2eVerify,
+} from "./supervisor/routing";
+import {
+  lastTestNameSegment,
+  errorContextMatchesAny,
+  writeTriageReport,
+} from "./supervisor/e2e/triage-helpers";
+import { pathExistsUnderOutput } from "./supervisor/shared/output-fs";
+import {
+  auditApiRouteRegistration,
+  autoRepairRouteRegistration,
+  auditContractCompleteness,
+  autoAppendMissingScopedEndpoints,
+} from "./supervisor/audits/route-registration";
+import { SUPERVISOR_VERIFY_TOOLS } from "./supervisor/verify-tools/definitions";
+import {
+  isSuccessfulSupervisorToolResult,
+  extractScopedValidationIssueMetrics,
+  isValidationIssueMetricsImproved,
+  countRouteAuditIssues,
+  countContractCompletenessIssues,
+  type ScopedValidationKind,
+  type ScopedValidationIssueMetrics,
+} from "./supervisor/verify-tools/scoped-validation";
+import {
+  isMutatingSupervisorBashCommand,
+  detectScopedValidationKind,
+  detectScopedValidationKinds,
+  isValidationLikeBashCommand,
+  buildIntegrationReasoningOptions,
+} from "./supervisor/verify-tools/command-classifier";
+import { executeSupervisorTool } from "./supervisor/verify-tools/executor";
+import {
+  normalizeFrontendHookSignatures,
+  normalizeFrontendJsxElementAnnotations,
+  normalizeFrontendReactComponentTemplates,
+  normalizeFrontendAuthDtoAliases,
+  normalizeFrontendUseFormHook,
+  normalizeFrontendDuplicateApiClient,
+  normalizeFrontendErrorWithCause,
+  auditFrontendApiClientUniqueness,
+  detectFrontendConvergenceClusters,
+} from "./supervisor/normalizers/frontend";
+import {
+  normalizeBackendMiddlewareFolder,
+  normalizeBackendGetValidateBody,
+} from "./supervisor/normalizers/backend";
+import {
+  detectDbDependencies,
+  handlePrismaSetup,
+  normalizeWorkspaceImports,
+} from "./supervisor/db-setup/prisma";
+import { buildComponentInterfaceReference } from "./supervisor/shared/component-interface";
+import {
+  syncDeps,
+  tddTestWriterAndRed,
+  tddGreenVerifyAndReview,
+} from "./supervisor/nodes/tdd";
 
 // ─── Nodes ───
 
@@ -1499,8 +1319,9 @@ async function collectConventionViolations(
 
       // Detect placeholder antd <Result> used in lieu of real view components.
       // Each view file that exists under views/ must be rendered directly in the route, not wrapped by a Result placeholder.
-      const resultPlaceholderInRouter =
-        /<Result\b[^>]*status\s*=/.test(routerContent);
+      const resultPlaceholderInRouter = /<Result\b[^>]*status\s*=/.test(
+        routerContent,
+      );
       if (resultPlaceholderInRouter) {
         violations.push(
           `[CONVENTION] ${routerPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
@@ -1512,8 +1333,13 @@ async function collectConventionViolations(
       // Also check App.tsx when it doubles as the route registry.
       const appPath = "frontend/src/App.tsx";
       const appContent = await fsRead(appPath, outputDir);
-      if (!appContent.startsWith("FILE_NOT_FOUND") && !appContent.startsWith("REJECTED")) {
-        const resultPlaceholderInApp = /<Result\b[^>]*status\s*=/.test(appContent);
+      if (
+        !appContent.startsWith("FILE_NOT_FOUND") &&
+        !appContent.startsWith("REJECTED")
+      ) {
+        const resultPlaceholderInApp = /<Result\b[^>]*status\s*=/.test(
+          appContent,
+        );
         if (resultPlaceholderInApp && viewFiles.length > 0) {
           violations.push(
             `[CONVENTION] ${appPath}: Route registry uses antd <Result> as placeholder for real routes. ` +
@@ -1588,12 +1414,16 @@ async function collectConventionViolations(
     ];
     for (const dbPath of dbCandidates) {
       const dbContent = await fsRead(dbPath, outputDir);
-      if (dbContent.startsWith("FILE_NOT_FOUND") || dbContent.startsWith("REJECTED")) {
+      if (
+        dbContent.startsWith("FILE_NOT_FOUND") ||
+        dbContent.startsWith("REJECTED")
+      ) {
         continue;
       }
       const hasHardTimescale =
-        /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?timescaledb/i.test(dbContent) &&
-        !/TIMESCALE_DISABLED|process\.env\.TIMESCALE/i.test(dbContent);
+        /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?timescaledb/i.test(
+          dbContent,
+        ) && !/TIMESCALE_DISABLED|process\.env\.TIMESCALE/i.test(dbContent);
       if (hasHardTimescale) {
         violations.push(
           `[CONVENTION] ${dbPath}: Unconditional "CREATE EXTENSION timescaledb" will crash on standard PostgreSQL installs. ` +
@@ -1611,8 +1441,6 @@ async function collectConventionViolations(
     files: [...touchedFiles],
   };
 }
-
-const MAX_E2E_VERIFY_FIX_ATTEMPTS = 10;
 
 /**
  * When `true` (the default) a failed e2e run is re-executed once before any
@@ -1790,11 +1618,11 @@ async function auditBackendHealthRoute(
   ) {
     return null;
   }
-  const apiIndex = await fsRead(
-    "backend/src/api/modules/index.ts",
-    outputDir,
-  );
-  if (apiIndex.startsWith("FILE_NOT_FOUND") || apiIndex.startsWith("REJECTED")) {
+  const apiIndex = await fsRead("backend/src/api/modules/index.ts", outputDir);
+  if (
+    apiIndex.startsWith("FILE_NOT_FOUND") ||
+    apiIndex.startsWith("REJECTED")
+  ) {
     return "backend/src/api/modules/index.ts is missing — the e2e webServer health probe at /api/health will fail.";
   }
   if (!/registerHealthRoutes\s*\(/.test(apiIndex)) {
@@ -1858,6 +1686,36 @@ async function detectE2eCommand(
     };
   }
   return null;
+}
+
+/**
+ * Extract Playwright's "N skipped" summary from raw test output, plus any
+ * skip-reason lines like `Skipped: foo` or `test.skip annotation: ...`.
+ * Returns a human-readable one-liner, or null if nothing was skipped.
+ *
+ * Used to amplify deliberate `test.skip(!process.env.X, ...)` guards so the
+ * user sees which features were de-scoped from validation due to missing
+ * env keys — instead of those skips being lost in the noise.
+ */
+function summarizeSkippedTests(output: string): string | null {
+  const m = output.match(/(\d+)\s+skipped/);
+  if (!m || Number(m[1]) === 0) return null;
+  const count = Number(m[1]);
+  // Pull up to 5 distinct skip reasons (anything matching the playwright
+  // skip annotation lines). Skipped tests typically print their reason
+  // alongside; the patterns vary by reporter so we keep this permissive.
+  const reasonSet = new Set<string>();
+  const reasonRe =
+    /(?:^|\n)\s*(?:[-•]\s*)?(?:skipped:\s*|test\.skip[^:]*:\s*|reason:\s*)([^\n]{4,120})/gi;
+  let rm: RegExpExecArray | null;
+  while ((rm = reasonRe.exec(output)) !== null && reasonSet.size < 5) {
+    reasonSet.add(rm[1]!.trim());
+  }
+  const reasons = [...reasonSet];
+  if (reasons.length === 0) {
+    return `${count} test(s) skipped (likely due to missing env keys — check playwright output above).`;
+  }
+  return `${count} test(s) skipped due to missing env keys: ${reasons.slice(0, 3).join("; ")}${reasons.length > 3 ? ` (+${reasons.length - 3} more)` : ""}`;
 }
 
 async function e2eVerifyAndFix(
@@ -1930,6 +1788,27 @@ async function e2eVerifyAndFix(
       console.log(
         "[Supervisor] e2eVerify: no PRD-based test scripts found — generating from PRD_E2E_SPEC.md...",
       );
+      // Surface declared-but-unfilled env keys to the generator so it can
+      // wrap dependent tests in `test.skip(!process.env.X, ...)` instead of
+      // letting them fail at runtime and chew through the fix-loop budget.
+      // Tests for features whose creds aren't configured will then show up
+      // as visible "skipped" warnings in the playwright report.
+      let unfilledKeysBlock = "";
+      try {
+        const declaredResources = await readResourceRequirements(
+          process.cwd(),
+        );
+        unfilledKeysBlock = formatUnfilledKeysForE2EPrompt(declaredResources);
+        if (unfilledKeysBlock) {
+          console.log(
+            `[Supervisor] e2eVerify: injecting ${declaredResources.filter((r) => r.required && !(r.value ?? "").trim()).length} unfilled-key skip-guard hint(s) into generator prompt`,
+          );
+        }
+      } catch (resErr) {
+        console.warn(
+          `[Supervisor] e2eVerify: failed to read resource requirements (continuing without skip-guards): ${resErr instanceof Error ? resErr.message : String(resErr)}`,
+        );
+      }
       try {
         const genModelChain = resolveModelChain(
           MODEL_CONFIG.e2eGen ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
@@ -1951,6 +1830,14 @@ async function e2eVerifyAndFix(
               "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
               "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
               "- Do not re-generate smoke.spec.ts.",
+              "",
+              "## Skip tests for features with missing env keys",
+              "- If the user message contains a `## Env keys NOT configured` block,",
+              "  every test whose flow depends on one of those keys MUST start with",
+              "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
+              "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
+              "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
+              "  a hard failure the fix-loop has to keep chewing.",
               "",
               "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
               "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
@@ -1975,6 +1862,7 @@ async function e2eVerifyAndFix(
               "## PRD E2E Specification",
               e2eSpecDoc.slice(0, 12000),
               "",
+              unfilledKeysBlock,
               state.projectContext
                 ? `## Project context\n${state.projectContext.slice(0, 4000)}`
                 : "",
@@ -2027,6 +1915,14 @@ async function e2eVerifyAndFix(
   });
   const output = `${runResult.stdout}${runResult.stderr}`.trim();
   if (runResult.exitCode === 0) {
+    // Surface "X skipped" tests prominently so the user sees gaps from
+    // missing env keys (e.g. SMTP_HOST) that we deliberately skipped via
+    // `test.skip(!process.env.X, ...)` guards. Playwright already prints
+    // these — we just amplify them so they don't get lost in the log.
+    const skippedSummary = summarizeSkippedTests(output);
+    if (skippedSummary) {
+      console.warn(`[Supervisor] e2eVerify: ${skippedSummary}`);
+    }
     return {
       e2eVerifyAttempts: attempt,
       e2eVerifyErrors: "",
@@ -2437,120 +2333,6 @@ async function e2eVerifyAndFix(
     e2eVerifyAttempts: attempt,
     e2eVerifyErrors: failureSummary,
   };
-}
-
-function routeAfterIntegrationVerify(state: SupervisorState): string {
-  // CODEGEN_HARDENING_PLAN.md §7.3 — "FAILED_BUT_CONTINUED" policy:
-  // Always proceed to e2e_verify even when integration failed. Skipping e2e
-  // because integration FAIL'd hides the highest-signal readiness data
-  // (whether the app actually starts and serves traffic). Session 52851b86
-  // SKIPPED runtime+e2e because of an over-generated contract that could
-  // never have implemented endpoints — but the produced code DID build and
-  // start. The report should reflect that, not collapse to a single
-  // "graph_error" header.
-  //
-  // The session's overall status will still be marked "fail" downstream
-  // (route.ts wraps the post-graph throw on any non-empty gate errors),
-  // but every gate gets to run and contribute its evidence first.
-  if (state.integrationErrors) {
-    console.log(
-      "[Supervisor] routeAfterIntegrationVerify: integration FAILED — proceeding to e2e_verify anyway (FAIL_CONTINUED policy).",
-    );
-  }
-  return "e2e_verify";
-}
-
-function routeAfterTddGreenVerify(state: SupervisorState): string {
-  if (state.integrationErrors?.includes("TDD hard gate failed")) {
-    console.log(
-      "[Supervisor] routeAfterTddGreenVerify: P0 TDD hard gate failed — returning to integration_verify for another repair pass.",
-    );
-    return "integration_verify";
-  }
-  return routeAfterIntegrationVerify(state);
-}
-
-function routeAfterTddGreenVerifyRetry(state: SupervisorState): string {
-  return state.integrationErrors?.includes("TDD hard gate failed")
-    ? "integration_verify"
-    : "summary";
-}
-
-/**
- * Extract the most-uniquely-identifying segment of a Playwright test name.
- * Tests are typically written as `<spec>:<line>:<col> › <suite> › <title>`
- * or in error-context.md form `<spec> >> <suite> >> <title>`. The final
- * segment is the test title, which uniquely identifies the test within a
- * single run. We use it to match across the two formats.
- */
-function lastTestNameSegment(name: string): string {
-  const parts = name
-    .split(/\s*(?:›|>>)\s*/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const last = parts[parts.length - 1] ?? name;
-  return last.replace(/\s+/g, " ").trim();
-}
-
-function errorContextMatchesAny(
-  errorContextMd: string,
-  deterministicNames: Set<string>,
-): boolean {
-  // Find the `- Name: ...` line in the markdown header.
-  const m = /^-\s*Name:\s*(.+)$/m.exec(errorContextMd);
-  if (!m) return false;
-  const ctxTitle = lastTestNameSegment(m[1]);
-  for (const det of deterministicNames) {
-    const detTitle = lastTestNameSegment(det);
-    if (detTitle && ctxTitle === detTitle) return true;
-    // Fuzzy fallback: PRD ids like "E2E-002" must appear in both.
-    const prdId = (/\bE2E-\d+\b/i.exec(detTitle) ?? [])[0];
-    if (prdId && ctxTitle.includes(prdId)) return true;
-  }
-  return false;
-}
-
-async function writeTriageReport(
-  outputDir: string,
-  attempt: number,
-  report: string,
-): Promise<void> {
-  try {
-    const ralphDir = path.join(outputDir, ".ralph");
-    await fs.mkdir(ralphDir, { recursive: true });
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `e2e-triage-attempt-${attempt}-${timestamp}.md`;
-    await fs.writeFile(path.join(ralphDir, filename), report, "utf-8");
-    // Also write/overwrite the "latest" pointer for quick access.
-    await fs.writeFile(path.join(ralphDir, "e2e-triage.md"), report, "utf-8");
-  } catch (err) {
-    console.warn(
-      `[Supervisor] writeTriageReport failed (ignored):`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-}
-
-function routeAfterE2eVerify(state: SupervisorState): string {
-  if (!state.e2eVerifyErrors) {
-    return "summary";
-  }
-  if (state.e2eVerifyAttempts <= MAX_E2E_VERIFY_FIX_ATTEMPTS) {
-    return "e2e_verify";
-  }
-  // All attempts exhausted but still failing — proceed to summary with errors recorded.
-  console.warn(
-    `[Supervisor] e2eVerify: all ${MAX_E2E_VERIFY_FIX_ATTEMPTS} fix attempts exhausted, proceeding to summary with remaining failures.`,
-  );
-  return "summary";
-}
-
-function e2eFailed(state: SupervisorState): never {
-  const details =
-    state.e2eVerifyErrors?.slice(0, 2000) ?? "Unknown E2E failure";
-  throw new Error(
-    `E2E verification gate failed after ${state.e2eVerifyAttempts} attempt(s).\n${details}`,
-  );
 }
 
 // ─── API Contract generation ───
@@ -3187,7 +2969,14 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
   const sends: Send[] = [];
 
   const beCount = workersForRole("backend", state.backendTasks.length);
-  const beChunks = chunkTasks(state.backendTasks, beCount);
+  const beChunks = ENABLE_PARALLEL_CODING_WORKERS
+    ? chunkTasksByFileConflict(state.backendTasks, beCount)
+    : chunkTasks(state.backendTasks, beCount);
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    console.log(
+      `[Supervisor] Backend dispatch (parallel): ${state.backendTasks.length} tasks → ${beChunks.length} conflict-free chunk(s).`,
+    );
+  }
   beChunks.forEach((tasks, i) => {
     sends.push(
       new Send("be_worker", {
@@ -3273,7 +3062,14 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   }
 
   const feCount = workersForRole("frontend", state.frontendTasks.length);
-  const feChunks = chunkTasks(state.frontendTasks, feCount);
+  const feChunks = ENABLE_PARALLEL_CODING_WORKERS
+    ? chunkTasksByFileConflict(state.frontendTasks, feCount)
+    : chunkTasks(state.frontendTasks, feCount);
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    console.log(
+      `[Supervisor] Frontend dispatch (parallel): ${state.frontendTasks.length} tasks → ${feChunks.length} conflict-free chunk(s).`,
+    );
+  }
 
   // state.apiContracts is the append-merged union of:
   //   1. generate_api_contracts (PRD-inferred, speculative — feeds BE as spec)
@@ -3400,10 +3196,7 @@ async function readRoutesManifest(
   let parsedFiles = 0;
 
   for (const fname of jsonFiles) {
-    const raw = await fsRead(
-      path.join("_meta", "routes", fname),
-      outputDir,
-    );
+    const raw = await fsRead(path.join("_meta", "routes", fname), outputDir);
     if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
       continue;
     }
@@ -3429,8 +3222,7 @@ async function readRoutesManifest(
       const r = item as Record<string, unknown>;
       const method =
         typeof r.method === "string" ? r.method.toUpperCase().trim() : "";
-      const endpoint =
-        typeof r.endpoint === "string" ? r.endpoint.trim() : "";
+      const endpoint = typeof r.endpoint === "string" ? r.endpoint.trim() : "";
       if (!method || !endpoint) continue;
       const key = `${method} ${endpoint}`;
       if (seen.has(key)) continue;
@@ -3502,10 +3294,7 @@ async function verifyManifestAgainstSource(
   const dropped: ApiContract[] = [];
   for (const c of manifest) {
     // Look for either `.get(`/`.post(` etc. OR decorator-style `@Get(`/`@Post(`.
-    const verbRe = new RegExp(
-      `(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`,
-      "i",
-    );
+    const verbRe = new RegExp(`(?:\\.|@)${c.method.toLowerCase()}\\s*\\(`, "i");
     if (verbRe.test(haystack)) {
       verified.push(c);
     } else {
@@ -3925,424 +3714,6 @@ async function runTestVerification(outputDir: string): Promise<string> {
   }
 }
 
-// ─── Supervisor verify+fix tools ───────────────────────────────────────────────
-
-const SUPERVISOR_VERIFY_TOOLS: OpenRouterToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "bash",
-      description:
-        "Run a shell command with cwd = project root. " +
-        "Use for: pnpm/npm install, pnpm add <pkg> --filter <workspace>, " +
-        "npx tsc --noEmit, npx prisma generate, etc. " +
-        "For integration validation, scope commands explicitly to frontend/ or backend/.",
-      parameters: {
-        type: "object",
-        properties: {
-          command: { type: "string", description: "Shell command to execute" },
-        },
-        required: ["command"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description: "Read a file by relative path from the project root.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "Relative path, e.g. apps/api/src/index.ts",
-          },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_file",
-      description:
-        "Write or replace a file at the given relative path. In IntegrationVerifyFix this may overwrite scaffold-protected files when needed.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          content: { type: "string" },
-        },
-        required: ["path", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_files",
-      description:
-        "List files recursively under a directory (default: project root).",
-      parameters: {
-        type: "object",
-        properties: {
-          dir: {
-            type: "string",
-            description: "Directory relative to project root (omit for root)",
-          },
-        },
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "grep",
-      description:
-        "Search for a pattern in source files (.ts/.tsx/.json). Returns matching lines.",
-      parameters: {
-        type: "object",
-        properties: {
-          pattern: {
-            type: "string",
-            description: "Search pattern (regex or literal)",
-          },
-          path: {
-            type: "string",
-            description: "File or directory to search (default: .)",
-          },
-        },
-        required: ["pattern"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "report_done",
-      description:
-        "Signal that the verify+fix loop is complete. " +
-        "status='pass' when `tsc --noEmit` exits 0. " +
-        "status='fail' when errors remain that you cannot resolve.",
-      parameters: {
-        type: "object",
-        properties: {
-          status: { type: "string", enum: ["pass", "fail"] },
-          summary: {
-            type: "string",
-            description:
-              "Brief summary: what was fixed, or remaining errors if fail",
-          },
-        },
-        required: ["status", "summary"],
-      },
-    },
-  },
-  ...STRUCTURED_SUPERVISOR_TOOLS,
-];
-
-/** Execute a single tool call from the verify+fix agent loop. */
-function buildSupervisorSearchMatcher(
-  pattern: string,
-): (line: string) => boolean {
-  try {
-    const regex = new RegExp(pattern, "i");
-    return (line: string) => regex.test(line);
-  } catch {
-    const lowered = pattern.toLowerCase();
-    return (line: string) => line.toLowerCase().includes(lowered);
-  }
-}
-
-type ScopedValidationKind =
-  | "frontend_tsc"
-  | "frontend_build"
-  | "backend_tsc"
-  | "backend_smoke";
-
-function isSuccessfulSupervisorToolResult(result: string): boolean {
-  return /^exit_code:\s*0\b/m.test(result);
-}
-
-function stripSupervisorExitCodePrefix(result: string): string {
-  return result.replace(/^exit_code:\s*\d+\s*\n?/m, "").trim();
-}
-
-interface ScopedValidationIssueMetrics {
-  files: number;
-  errors: number;
-}
-
-function extractScopedValidationIssueMetrics(
-  kind: ScopedValidationKind,
-  result: string,
-): ScopedValidationIssueMetrics | null {
-  if (isSuccessfulSupervisorToolResult(result)) {
-    return { files: 0, errors: 0 };
-  }
-  const body = stripSupervisorExitCodePrefix(result);
-  if (!body) return null;
-  if (kind === "backend_smoke") {
-    return { files: 1, errors: 1 };
-  }
-
-  const filePathPattern =
-    /(^|\n)\s*((?:\.{0,2}\/)?(?:[A-Za-z0-9@_\-.]+\/)*[A-Za-z0-9@_\-.]+\.(?:[cm]?[jt]sx?|vue|svelte))(?:[:(]| - )/gm;
-  const files = new Set<string>();
-  let fileMatch: RegExpExecArray | null;
-  while ((fileMatch = filePathPattern.exec(body)) !== null) {
-    files.add(fileMatch[2]);
-  }
-
-  const tsMatches = body.match(/\berror TS\d+:/g);
-  const fileScopedErrors = body.match(/^\S+:\d+:\d+\s+-\s+error\b/gm);
-  const genericErrors = body.match(/^\s*(?:error|Error:)\b/gm);
-  const errors = Math.max(
-    tsMatches?.length ?? 0,
-    fileScopedErrors?.length ?? 0,
-    genericErrors?.length ?? 0,
-    1,
-  );
-
-  return {
-    files: Math.max(files.size, errors > 0 ? 1 : 0),
-    errors,
-  };
-}
-
-function isValidationIssueMetricsImproved(
-  current: ScopedValidationIssueMetrics,
-  previousBest: ScopedValidationIssueMetrics,
-): boolean {
-  return (
-    current.files < previousBest.files ||
-    (current.files === previousBest.files &&
-      current.errors < previousBest.errors)
-  );
-}
-
-function countRouteAuditIssues(audit: RouteRegistrationAudit): number {
-  return (
-    audit.unregisteredModules.length +
-    audit.unresolvedRegistrations.length +
-    audit.missingContractEndpoints.length
-  );
-}
-
-function countContractCompletenessIssues(
-  result: ContractCompletenessResult,
-): number {
-  return result.missingScopedEndpoints.length;
-}
-
-function isMutatingSupervisorBashCommand(command: string): boolean {
-  const normalized = command.replace(/\s+/g, " ").trim().toLowerCase();
-  return (
-    /\b(pnpm|npm|yarn)\s+(install|add|remove|unlink|update)\b/.test(
-      normalized,
-    ) ||
-    /\b(npx\s+)?prisma\s+generate\b/.test(normalized) ||
-    /\bmkdir\b|\btouch\b|\bcp\b|\bmv\b|\bsed\s+-i\b|\bperl\s+-pi\b/.test(
-      normalized,
-    )
-  );
-}
-
-function detectScopedValidationKind(
-  command: string,
-): ScopedValidationKind | null {
-  const normalized = command.replace(/\s+/g, " ").trim().toLowerCase();
-  const touchesFrontend =
-    normalized.includes("cd frontend") ||
-    normalized.includes("/frontend") ||
-    normalized.includes(" frontend/");
-  const touchesBackend =
-    normalized.includes("cd backend") ||
-    normalized.includes("/backend") ||
-    normalized.includes(" backend/");
-
-  if (touchesFrontend && /\b(tsc|npx tsc)\b/.test(normalized)) {
-    return "frontend_tsc";
-  }
-  if (
-    touchesFrontend &&
-    /\b(pnpm|npm|yarn)\s+(run\s+)?build\b/.test(normalized)
-  ) {
-    return "frontend_build";
-  }
-  if (touchesBackend && /\b(tsc|npx tsc)\b/.test(normalized)) {
-    return "backend_tsc";
-  }
-  if (
-    touchesBackend &&
-    (normalized.includes("createapp export missing") ||
-      normalized.includes("backend_smoke_ok") ||
-      normalized.includes("tsx --eval"))
-  ) {
-    return "backend_smoke";
-  }
-  return null;
-}
-
-function isValidationLikeBashCommand(command: string): boolean {
-  const normalized = command.replace(/\s+/g, " ").trim().toLowerCase();
-  return (
-    /\b(tsc|npx tsc)\b/.test(normalized) ||
-    /\b(pnpm|npm|yarn)\s+(run\s+)?build\b/.test(normalized) ||
-    normalized.includes("tsx --eval")
-  );
-}
-
-function buildIntegrationReasoningOptions(): Pick<
-  OpenRouterOptions,
-  "reasoning" | "thinking"
-> {
-  const enabled =
-    (
-      process.env.INTEGRATION_VERIFYFIX_ENABLE_REASONING ?? "true"
-    ).toLowerCase() !== "false";
-  if (!enabled) {
-    return {};
-  }
-
-  const effortRaw =
-    process.env.INTEGRATION_VERIFYFIX_REASONING_EFFORT?.trim().toLowerCase() ??
-    "medium";
-  const effort =
-    effortRaw === "low" || effortRaw === "high" ? effortRaw : "medium";
-
-  const verbosityRaw =
-    process.env.INTEGRATION_VERIFYFIX_THINKING_VERBOSITY?.trim().toLowerCase() ??
-    "medium";
-  const verbosity =
-    verbosityRaw === "low" || verbosityRaw === "high" ? verbosityRaw : "medium";
-
-  return {
-    reasoning: {
-      enabled: true,
-      effort,
-    },
-    thinking: {
-      thinking_effort: effort,
-      verbosity,
-    },
-  };
-}
-
-async function executeSupervisorTool(
-  name: string,
-  args: Record<string, unknown>,
-  outputDir: string,
-): Promise<string> {
-  const MAX_OUT = 4000;
-  const structuredResult = await executeStructuredSupervisorTool({
-    name,
-    args,
-    outputDir,
-  });
-  if (structuredResult !== null) return structuredResult;
-  switch (name) {
-    case "bash": {
-      const command = String(args.command ?? "").trim();
-      if (!command) return "Error: empty command";
-      // Block obviously destructive ops only
-      const unsafe = [/rm\s+-rf?\s+\//, /sudo\b/, /git\s+push\b/];
-      if (unsafe.some((r) => r.test(command))) {
-        return `Error: command rejected — unsafe pattern: ${command.slice(0, 80)}`;
-      }
-      console.log(`[Supervisor] VerifyFix bash: ${command.slice(0, 120)}`);
-      try {
-        const { stdout, stderr } = await execFileAsync(
-          "bash",
-          ["-c", command],
-          {
-            cwd: outputDir,
-            maxBuffer: 10 * 1024 * 1024,
-            timeout: 120_000,
-            env: { ...process.env, FORCE_COLOR: "0" },
-          },
-        );
-        const out = ((stdout ?? "") + (stderr ?? "")).trim();
-        return `exit_code: 0\n${out.slice(0, MAX_OUT)}`;
-      } catch (err: unknown) {
-        const e = err as {
-          code?: number;
-          stdout?: string;
-          stderr?: string;
-          message?: string;
-        };
-        const out = (
-          (e.stdout ?? "") + (e.stderr ?? "") ||
-          e.message ||
-          "unknown error"
-        ).trim();
-        return `exit_code: ${e.code ?? 1}\n${out.slice(0, MAX_OUT)}`;
-      }
-    }
-    case "read_file": {
-      const fp = String(args.path ?? "");
-      const content = await fsRead(fp, outputDir);
-      return content.slice(0, MAX_OUT);
-    }
-    case "write_file": {
-      const fp = String(args.path ?? "");
-      const content = String(args.content ?? "");
-      await fsWrite(fp, content, outputDir, { forceProtectedOverwrite: true });
-      return `OK: wrote ${fp}`;
-    }
-    case "list_files": {
-      const dir = String(args.dir ?? ".");
-      const files = await listFiles(dir, outputDir);
-      return files.join("\n").slice(0, MAX_OUT);
-    }
-    case "grep": {
-      const pattern = String(args.pattern ?? "");
-      const searchPath = String(args.path ?? ".");
-      if (!pattern) return "Error: pattern required";
-
-      const matcher = buildSupervisorSearchMatcher(pattern);
-      const filePaths: string[] = [];
-      const directFileContent = await fsRead(searchPath, outputDir);
-      if (
-        !directFileContent.startsWith("FILE_NOT_FOUND") &&
-        !directFileContent.startsWith("REJECTED")
-      ) {
-        filePaths.push(searchPath);
-      } else {
-        filePaths.push(...(await listFiles(searchPath, outputDir)));
-      }
-
-      const matches: string[] = [];
-      for (const relPath of filePaths) {
-        if (!/\.(ts|tsx|js|jsx|json|md)$/.test(relPath)) continue;
-        const content = await fsRead(relPath, outputDir);
-        if (
-          content.startsWith("FILE_NOT_FOUND") ||
-          content.startsWith("REJECTED")
-        ) {
-          continue;
-        }
-        const lines = content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          if (!matcher(lines[i])) continue;
-          matches.push(`${relPath}:${i + 1}:${lines[i]}`);
-          if (matches.length >= 60) break;
-        }
-        if (matches.length >= 60) break;
-      }
-
-      return (matches.join("\n") || "No matches found.")
-        .trim()
-        .slice(0, MAX_OUT);
-    }
-    default:
-      return `Error: unknown tool '${name}'`;
-  }
-}
-
 function formatWorkerTscWarningsForRoles(
   phaseResults: PhaseResult[],
   roles: CodingAgentRole[],
@@ -4376,6 +3747,64 @@ type PhaseVerifyAndFixOptions = {
   /** Which worker phase results to surface as initial hints (e.g. BE+test vs FE). */
   workerHintRoles?: CodingAgentRole[];
 };
+
+type VerifyFixLlmOptions = Omit<OpenRouterOptions, "model"> & {
+  temperature: number;
+  max_tokens: number;
+};
+
+function shouldUseDeepSeekDirectForVerifyFix(): boolean {
+  return process.env.VERIFY_FIX_PROVIDER?.trim().toLowerCase() === "deepseek";
+}
+
+async function callVerifyFixLlm(
+  label: string,
+  messages: ChatMessage[],
+  modelChain: string[],
+  options: VerifyFixLlmOptions,
+): Promise<OpenRouterResponse> {
+  if (shouldUseDeepSeekDirectForVerifyFix() && isDeepSeekV4Provider()) {
+    const dsModel =
+      process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
+    const dsBase =
+      process.env.DEEPSEEK_V4_BASE_URL?.trim() || DEEPSEEK_V4_DEFAULT_BASE;
+    console.log(
+      `[LLM] provider=deepseek-v4-direct  stage=phase_verify_fix  model=${dsModel}  base=${dsBase}`,
+    );
+    try {
+      return await chatCompletionsDeepSeekV4(messages, options);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isToolSequenceValidationError(msg)) {
+        const removed = countRemovedOrphanToolMessages(messages);
+        console.warn(
+          `${label}: DeepSeek detected tool-call sequence error; cleaned ${removed} orphan tool message(s) and retrying once.`,
+        );
+        if (removed > 0) {
+          try {
+            return await chatCompletionsDeepSeekV4(messages, options);
+          } catch (retryErr) {
+            const retryMsg =
+              retryErr instanceof Error ? retryErr.message : String(retryErr);
+            console.warn(
+              `${label}: DeepSeek retry failed (${retryMsg.slice(0, 200)}). Falling back to OpenRouter chain.`,
+            );
+          }
+        }
+      } else {
+        console.warn(
+          `${label}: DeepSeek direct failed (${msg.slice(0, 200)}). Falling back to OpenRouter chain.`,
+        );
+      }
+    }
+  } else if (shouldUseDeepSeekDirectForVerifyFix()) {
+    console.warn(
+      `${label}: VERIFY_FIX_PROVIDER=deepseek but DEEPSEEK_API_KEY is not configured; falling back to OpenRouter chain.`,
+    );
+  }
+
+  return callWithOrphanToolRetry(label, messages, modelChain, options);
+}
 
 /**
  * Deterministic auto-fix for well-known convention violations.
@@ -4840,7 +4269,7 @@ async function phaseVerifyAndFix(
 
     let resp;
     try {
-      resp = await callWithOrphanToolRetry(label, messages, modelChain, {
+      resp = await callVerifyFixLlm(label, messages, modelChain, {
         temperature: 0.2,
         max_tokens: 36000,
         tools: SUPERVISOR_VERIFY_TOOLS,
@@ -4849,7 +4278,9 @@ async function phaseVerifyAndFix(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
-        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        console.warn(
+          `${label}: context limit hit; compacted once and retrying.`,
+        );
         continue;
       }
       console.error(`${label}: LLM call failed: ${msg}`);
@@ -4871,6 +4302,9 @@ async function phaseVerifyAndFix(
       role: "assistant",
       content: choice.message.content ?? "",
       tool_calls: choice.message.tool_calls,
+      ...(choice.message.reasoning_content
+        ? { reasoning_content: choice.message.reasoning_content }
+        : {}),
     });
 
     const toolCalls = choice.message.tool_calls ?? [];
@@ -4970,101 +4404,6 @@ async function phaseVerifyAndFix(
   };
 }
 
-/**
- * Prisma 5+ validates datasource config (get-config WASM) during `prisma generate`.
- * Schemas using `env("DATABASE_URL")` require a syntactically valid URL in the
- * environment; the coding output directory often has no `.env` loaded into the
- * shell, which yields P1012 on the `url` property. Use a local-only placeholder.
- *
- * Note: only relevant for Prisma 5/6 schemas that still have `url` in datasource.
- * Prisma 7+ removes `url` from the schema entirely (see migrateSchemaToPrisma7).
- */
-function envForPrismaCliFromSchema(
-  schemaContent: string,
-): Record<string, string> {
-  const provider = (name: string) =>
-    new RegExp(`provider\\s*=\\s*["']${name}["']`, "i").test(schemaContent);
-
-  if (provider("mysql")) {
-    return {
-      DATABASE_URL: "mysql://prisma:prisma@127.0.0.1:3306/prisma_phase_verify",
-    };
-  }
-  if (provider("mongodb")) {
-    return { DATABASE_URL: "mongodb://127.0.0.1:27017/prisma_phase_verify" };
-  }
-  if (provider("sqlserver")) {
-    return {
-      DATABASE_URL:
-        "sqlserver://127.0.0.1:1433;database=prisma_phase_verify;user=sa;password=PrismaPhase1;encrypt=true;trustServerCertificate=true",
-    };
-  }
-  if (provider("sqlite")) {
-    if (/url\s*=\s*env\(\s*["']DATABASE_URL["']\s*\)/.test(schemaContent)) {
-      return { DATABASE_URL: "file:./.prisma/prisma_phase_verify.db" };
-    }
-    return {};
-  }
-  if (provider("postgresql") || provider("cockroachdb")) {
-    const url = "postgresql://prisma:prisma@127.0.0.1:5432/prisma_phase_verify";
-    const out: Record<string, string> = { DATABASE_URL: url };
-    if (/directUrl\s*=\s*env\(\s*["']DIRECT_URL["']\s*\)/.test(schemaContent)) {
-      out.DIRECT_URL = url;
-    }
-    return out;
-  }
-  const fallback =
-    "postgresql://prisma:prisma@127.0.0.1:5432/prisma_phase_verify";
-  const out: Record<string, string> = { DATABASE_URL: fallback };
-  if (/directUrl\s*=\s*env\(\s*["']DIRECT_URL["']\s*\)/.test(schemaContent)) {
-    out.DIRECT_URL = fallback;
-  }
-  return out;
-}
-
-/**
- * Prisma 7+ removed the `url` / `directUrl` properties from `datasource db {}` blocks.
- * When `prisma generate` fails with P1012 "url is no longer supported", strip those
- * properties from schema.prisma and create a minimal `prisma.config.ts` so that
- * `prisma generate` can proceed without a live database connection.
- */
-async function migrateSchemaToPrisma7(
-  schemaContent: string,
-  outputDir: string,
-): Promise<{ migrated: boolean; newSchema: string }> {
-  const hasUrl = /^\s+url\s*=/m.test(schemaContent);
-  const hasDirectUrl = /^\s+directUrl\s*=/m.test(schemaContent);
-  if (!hasUrl && !hasDirectUrl) {
-    return { migrated: false, newSchema: schemaContent };
-  }
-
-  const newSchema = schemaContent
-    .replace(/^\s+url\s*=\s*env\([^)]*\)\s*\n/gm, "")
-    .replace(/^\s+url\s*=\s*"[^"]*"\s*\n/gm, "")
-    .replace(/^\s+directUrl\s*=\s*env\([^)]*\)\s*\n/gm, "")
-    .replace(/^\s+directUrl\s*=\s*"[^"]*"\s*\n/gm, "");
-
-  await fsWrite("prisma/schema.prisma", newSchema, outputDir);
-
-  // Create prisma.config.ts only if not already present
-  const existing = await fsRead("prisma.config.ts", outputDir);
-  if (existing.startsWith("FILE_NOT_FOUND")) {
-    const configTs = [
-      "import { defineConfig } from 'prisma/config'",
-      "",
-      "export default defineConfig({",
-      "  schema: './prisma/schema.prisma',",
-      "})",
-      "",
-    ].join("\n");
-    await fsWrite("prisma.config.ts", configTs, outputDir);
-  }
-
-  console.log(
-    "[Supervisor] Prisma 7 migration: removed `url`/`directUrl` from datasource, wrote prisma.config.ts",
-  );
-  return { migrated: true, newSchema };
-}
 // ─── (legacy) Parallel dispatch — kept for reference, replaced by phased dispatch ───
 
 function dispatchParallelWorkers(state: SupervisorState): Send[] {
@@ -5482,18 +4821,6 @@ async function auditImportDependencyConsistency(
   };
 }
 
-async function pathExistsUnderOutput(
-  outputDir: string,
-  relPath: string,
-): Promise<boolean> {
-  try {
-    await fs.stat(path.join(outputDir, relPath));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function detectResidualImplementationConflicts(
   outputDir: string,
 ): Promise<string[]> {
@@ -5540,1094 +4867,6 @@ async function detectResidualImplementationConflicts(
   return conflicts;
 }
 
-interface FrontendNormalizationResult {
-  changedFiles: string[];
-  notes: string[];
-}
-
-interface FrontendConvergenceCluster {
-  key: string;
-  title: string;
-  description: string;
-  files: string[];
-}
-
-async function normalizeFrontendHookSignatures(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const sourceRoots = ["frontend/src", "apps/web/src"];
-
-  for (const root of sourceRoots) {
-    let files: string[] = [];
-    try {
-      files = (await listFiles(root, outputDir)).filter((file) =>
-        /\.(ts|tsx)$/.test(file),
-      );
-    } catch {
-      continue;
-    }
-
-    for (const relPath of files) {
-      const content = await fsRead(relPath, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      ) {
-        continue;
-      }
-
-      let updated = content;
-      updated = updated.replace(
-        /useEffect\(\(\):\s*void\s*=>/g,
-        "useEffect(() =>",
-      );
-      updated = updated.replace(
-        /useLayoutEffect\(\(\):\s*void\s*=>/g,
-        "useLayoutEffect(() =>",
-      );
-
-      if (updated !== content) {
-        await fsWrite(relPath, updated, outputDir);
-        changedFiles.push(relPath);
-      }
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend hook signature normalizer updated ${changedFiles.length} file(s): ${changedFiles.slice(0, 8).join(", ")}${changedFiles.length > 8 ? " ..." : ""}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-async function normalizeFrontendJsxElementAnnotations(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const sourceRoots = ["frontend/src", "apps/web/src"];
-
-  for (const root of sourceRoots) {
-    let files: string[] = [];
-    try {
-      files = (await listFiles(root, outputDir)).filter((file) =>
-        /\.(ts|tsx)$/.test(file),
-      );
-    } catch {
-      continue;
-    }
-
-    for (const relPath of files) {
-      const content = await fsRead(relPath, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      ) {
-        continue;
-      }
-
-      const updated = content.replace(
-        /(?<!React\.)\bJSX\.Element\b/g,
-        "React.JSX.Element",
-      );
-
-      if (updated !== content) {
-        await fsWrite(relPath, updated, outputDir);
-        changedFiles.push(relPath);
-      }
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend JSX return-type normalizer updated ${changedFiles.length} file(s): ${changedFiles.slice(0, 8).join(", ")}${changedFiles.length > 8 ? " ..." : ""}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-async function normalizeFrontendReactComponentTemplates(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const sourceRoots = ["frontend/src", "apps/web/src"];
-
-  for (const root of sourceRoots) {
-    let files: string[] = [];
-    try {
-      files = (await listFiles(root, outputDir)).filter((file) =>
-        /\.tsx$/.test(file),
-      );
-    } catch {
-      continue;
-    }
-
-    for (const relPath of files) {
-      const content = await fsRead(relPath, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      ) {
-        continue;
-      }
-
-      let updated = content;
-      updated = updated.replace(/\)\s*:\s*React\.JSX\.Element\s*\{/g, ") {");
-      updated = updated.replace(/\)\s*:\s*JSX\.Element\s*\{/g, ") {");
-      updated = updated.replace(/\)\s*:\s*React\.JSX\.Element\s*=>/g, ") =>");
-      updated = updated.replace(/\)\s*:\s*JSX\.Element\s*=>/g, ") =>");
-
-      if (!updated.includes("React.")) {
-        updated = updated.replace(
-          /^import React,\s*\{([^}]*)\}\s*from\s*["']react["'];?\n?/m,
-          (_match, imports: string) =>
-            imports.trim().length > 0
-              ? `import {${imports}} from "react";\n`
-              : "",
-        );
-        updated = updated.replace(/^import React from ["']react["'];?\n?/m, "");
-      }
-
-      if (updated !== content) {
-        await fsWrite(relPath, updated, outputDir);
-        changedFiles.push(relPath);
-      }
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend React component-template normalizer updated ${changedFiles.length} file(s): ${changedFiles.slice(0, 8).join(", ")}${changedFiles.length > 8 ? " ..." : ""}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-async function normalizeFrontendAuthDtoAliases(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const candidatePaths = [
-    "frontend/src/types/api.ts",
-    "apps/web/src/types/api.ts",
-  ];
-
-  for (const relPath of candidatePaths) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-
-    if (
-      !content.includes("export type MeResponseDto = User;") &&
-      !content.includes("export type UpdateMeResponseDto = User;")
-    ) {
-      continue;
-    }
-
-    let updated = content;
-    const authUserDtoBlock = `export type AuthUserDto = Pick<User, "id" | "name" | "email" | "avatar" | "timezone"> &\n  Partial<Pick<User, "notificationPreferences" | "createdAt" | "updatedAt">>;\n\n`;
-    if (!updated.includes("export type AuthUserDto =")) {
-      if (updated.includes("export interface AuthResponseDto {")) {
-        updated = updated.replace(
-          "export interface AuthResponseDto {\n",
-          `${authUserDtoBlock}export interface AuthResponseDto {\n`,
-        );
-      } else {
-        updated = `${authUserDtoBlock}${updated}`;
-      }
-    }
-    updated = updated.replace(
-      /user:\s*Pick<User,\s*"id"\s*\|\s*"name"\s*\|\s*"email"\s*\|\s*"avatar"\s*\|\s*"timezone">;/g,
-      "user: AuthUserDto;",
-    );
-    updated = updated.replace(
-      "export type MeResponseDto = User;",
-      "export type MeResponseDto = AuthUserDto;",
-    );
-    updated = updated.replace(
-      "export type UpdateMeResponseDto = User;",
-      "export type UpdateMeResponseDto = AuthUserDto;",
-    );
-
-    if (updated !== content) {
-      await fsWrite(relPath, updated, outputDir);
-      changedFiles.push(relPath);
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend auth DTO normalizer updated ${changedFiles.length} file(s): ${changedFiles.join(", ")}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-async function normalizeFrontendUseFormHook(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const candidatePaths = [
-    "frontend/src/hooks/useForm.ts",
-    "apps/web/src/hooks/useForm.ts",
-  ];
-
-  for (const relPath of candidatePaths) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-
-    let updated = content;
-    updated = updated.replace(
-      "type FormValues = Record<string, string>;",
-      "type FormValues = Record<string, unknown>;",
-    );
-    updated = updated.replace(
-      "const maybeError: string | undefined = validator(values[key], values);",
-      'const maybeError: string | undefined = validator(String(values[key] ?? ""), values);',
-    );
-    updated = updated.replace(
-      "const message: string | undefined = validator(values[field], values);",
-      'const message: string | undefined = validator(String(values[field] ?? ""), values);',
-    );
-
-    if (updated !== content) {
-      await fsWrite(relPath, updated, outputDir);
-      changedFiles.push(relPath);
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend form-hook normalizer updated ${changedFiles.length} file(s): ${changedFiles.join(", ")}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-/**
- * Frontend duplicate-apiClient convergence.
- *
- * The scaffold ships exactly one canonical client at
- * `frontend/src/api/client.ts`. LLM-generated code repeatedly creates a
- * second one at `frontend/src/utils/apiClient.ts` (or `utils/api.ts` /
- * `lib/http.ts`), then half the feature files import from each — driving
- * the "frontend shared API surface mismatch" cluster that stalls
- * `integration_verify_fix` for many iterations.
- *
- * This normalizer:
- *   1. Detects parallel client files in known anti-pattern locations.
- *   2. Rewrites imports of those parallel clients to point at the
- *      canonical `@/api/client` (or relative equivalent).
- *   3. Deletes the parallel client file once no consumer references it.
- */
-async function normalizeFrontendDuplicateApiClient(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-
-  const canonicalCandidates = [
-    "frontend/src/api/client.ts",
-    "apps/web/src/api/client.ts",
-  ];
-  let canonicalRoot: string | null = null;
-  for (const candidate of canonicalCandidates) {
-    const content = await fsRead(candidate, outputDir);
-    if (
-      !content.startsWith("FILE_NOT_FOUND") &&
-      !content.startsWith("REJECTED") &&
-      /export\s+(?:const|function)\s+apiClient\b/.test(content)
-    ) {
-      canonicalRoot = candidate.startsWith("apps/web/")
-        ? "apps/web/src"
-        : "frontend/src";
-      break;
-    }
-  }
-  if (!canonicalRoot) {
-    return { changedFiles, notes };
-  }
-
-  const parallelRelPaths = [
-    `${canonicalRoot}/utils/apiClient.ts`,
-    `${canonicalRoot}/utils/api.ts`,
-    `${canonicalRoot}/utils/http.ts`,
-    `${canonicalRoot}/lib/http.ts`,
-    `${canonicalRoot}/lib/apiClient.ts`,
-    `${canonicalRoot}/services/http.ts`,
-    `${canonicalRoot}/services/apiClient.ts`,
-  ];
-  const parallels: string[] = [];
-  for (const relPath of parallelRelPaths) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    if (
-      /export\s+(?:const|class|function|default)\s+\w*[Aa]pi\w*/.test(content)
-    ) {
-      parallels.push(relPath);
-    }
-  }
-  if (parallels.length === 0) {
-    return { changedFiles, notes };
-  }
-
-  // Rewrite imports across the entire frontend tree.
-  const sourceFiles = (await listFiles(canonicalRoot, outputDir)).filter(
-    (file) => /\.(ts|tsx)$/.test(file),
-  );
-
-  const importRewrites: Array<{ from: RegExp; to: string }> = [
-    // Examples we want to neutralise:
-    //   import { apiClient } from "../utils/apiClient";
-    //   import { ApiClient } from "@/utils/apiClient";
-    //   import apiClient from "../../utils/apiClient";
-    {
-      from: /from\s+["'](?:\.{1,2}\/)+utils\/apiClient["']/g,
-      to: 'from "../api/client"',
-    },
-    {
-      from: /from\s+["'](?:\.{1,2}\/)+utils\/api["']/g,
-      to: 'from "../api/client"',
-    },
-    {
-      from: /from\s+["']@\/utils\/apiClient["']/g,
-      to: 'from "@/api/client"',
-    },
-    {
-      from: /from\s+["']@\/utils\/api["']/g,
-      to: 'from "@/api/client"',
-    },
-    {
-      from: /from\s+["'](?:\.{1,2}\/)+lib\/http["']/g,
-      to: 'from "../api/client"',
-    },
-    {
-      from: /from\s+["']@\/lib\/http["']/g,
-      to: 'from "@/api/client"',
-    },
-    {
-      from: /from\s+["'](?:\.{1,2}\/)+services\/http["']/g,
-      to: 'from "../api/client"',
-    },
-  ];
-
-  for (const relPath of sourceFiles) {
-    if (parallels.includes(relPath)) continue;
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    let updated = content;
-    for (const rule of importRewrites) {
-      updated = updated.replace(rule.from, rule.to);
-    }
-    if (updated !== content) {
-      await fsWrite(relPath, updated, outputDir);
-      changedFiles.push(relPath);
-    }
-  }
-
-  // Replace each parallel client with a thin re-export so any stale import
-  // we did not rewrite still resolves to the canonical instance instead of
-  // diverging behaviour.
-  for (const parallel of parallels) {
-    const reexport = `// Auto-converged by AgenticBuilder preflight normalizer.\n// This file used to define a parallel HTTP client. The canonical client\n// lives at \`frontend/src/api/client.ts\` (re-exported via \`@/api/client\`).\nexport * from "../api/client";\n`;
-    await fsWrite(parallel, reexport, outputDir);
-    changedFiles.push(parallel);
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend duplicate-apiClient normalizer collapsed ${parallels.length} parallel client(s) and rewrote ${changedFiles.length - parallels.length} consumer import(s).`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-interface BackendMiddlewareFolderResult {
-  /** Source files moved from `middleware/` to `middlewares/`. */
-  movedFiles: string[];
-  /** Source files dropped (because the canonical version already existed). */
-  droppedFiles: string[];
-  /** Files whose imports were rewritten. */
-  rewrittenImports: string[];
-  notes: string[];
-}
-
-/**
- * Backend middleware-folder normalizer.
- *
- * Koa convention in the M-tier scaffold is `backend/src/middlewares` (plural).
- * Workers occasionally emit `backend/src/middleware/*.ts` (singular) which
- * leaves the project with two parallel directories — half the imports point
- * to the canonical folder and half to the singular one, producing dozens of
- * `Cannot find module` errors that the LLM then tries (and usually fails) to
- * untangle by hand. This normalizer:
- *
- *   1. Moves every `backend/src/middleware/*.ts` file into
- *      `backend/src/middlewares/` (preferring the canonical version when both
- *      exist).
- *   2. Rewrites every import of `.../middleware/<name>` (relative or alias)
- *      across the backend source tree to `.../middlewares/<name>`.
- *   3. Removes the now-empty singular folder so the audit cannot regress.
- */
-async function normalizeBackendMiddlewareFolder(
-  outputDir: string,
-): Promise<BackendMiddlewareFolderResult> {
-  const result: BackendMiddlewareFolderResult = {
-    movedFiles: [],
-    droppedFiles: [],
-    rewrittenImports: [],
-    notes: [],
-  };
-
-  const singularRoot = "backend/src/middleware";
-  const pluralRoot = "backend/src/middlewares";
-
-  const singularDirAbs = path.join(outputDir, singularRoot);
-  let singularEntries: string[] = [];
-  try {
-    const stat = await fs.stat(singularDirAbs);
-    if (!stat.isDirectory()) return result;
-    singularEntries = (
-      await fs.readdir(singularDirAbs, { withFileTypes: true })
-    )
-      .filter((entry) => entry.isFile() && /\.(ts|tsx)$/.test(entry.name))
-      .map((entry) => entry.name);
-  } catch {
-    return result;
-  }
-
-  if (singularEntries.length === 0) {
-    try {
-      await fs.rmdir(singularDirAbs);
-    } catch {
-      // ignore — directory may not be empty for unrelated reasons.
-    }
-    return result;
-  }
-
-  await fs.mkdir(path.join(outputDir, pluralRoot), { recursive: true });
-
-  for (const fileName of singularEntries) {
-    const singularRel = `${singularRoot}/${fileName}`;
-    const pluralRel = `${pluralRoot}/${fileName}`;
-    const singularContent = await fsRead(singularRel, outputDir);
-    if (
-      singularContent.startsWith("FILE_NOT_FOUND") ||
-      singularContent.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-
-    const existingPlural = await fsRead(pluralRel, outputDir);
-    const pluralExists =
-      !existingPlural.startsWith("FILE_NOT_FOUND") &&
-      !existingPlural.startsWith("REJECTED");
-
-    if (pluralExists) {
-      result.droppedFiles.push(singularRel);
-    } else {
-      await fsWrite(pluralRel, singularContent, outputDir);
-      result.movedFiles.push(singularRel);
-    }
-
-    try {
-      await fs.unlink(path.join(outputDir, singularRel));
-    } catch {
-      // best-effort delete; downstream import rewrite still helps
-    }
-  }
-
-  // Rewrite imports across the backend source tree.
-  const backendFiles = (await listFiles("backend/src", outputDir)).filter(
-    (file) => /\.(ts|tsx)$/.test(file),
-  );
-  const rewriteRules: Array<{ from: RegExp; to: string }> = [
-    {
-      from: /(from\s+["'])((?:\.{1,2}\/)+)middleware\//g,
-      to: "$1$2middlewares/",
-    },
-    {
-      from: /(from\s+["'])@\/middleware\//g,
-      to: "$1@/middlewares/",
-    },
-    {
-      from: /(import\s*\(\s*["'])((?:\.{1,2}\/)+)middleware\//g,
-      to: "$1$2middlewares/",
-    },
-    {
-      from: /(import\s*\(\s*["'])@\/middleware\//g,
-      to: "$1@/middlewares/",
-    },
-  ];
-
-  for (const relPath of backendFiles) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    let updated = content;
-    for (const rule of rewriteRules) {
-      updated = updated.replace(rule.from, rule.to);
-    }
-    if (updated !== content) {
-      await fsWrite(relPath, updated, outputDir);
-      result.rewrittenImports.push(relPath);
-    }
-  }
-
-  // Try to remove the now-empty singular dir so subsequent audits do not
-  // re-flag a residual empty folder.
-  try {
-    const remaining = await fs.readdir(singularDirAbs);
-    if (remaining.length === 0) {
-      await fs.rmdir(singularDirAbs);
-    }
-  } catch {
-    // ignore
-  }
-
-  if (
-    result.movedFiles.length > 0 ||
-    result.droppedFiles.length > 0 ||
-    result.rewrittenImports.length > 0
-  ) {
-    result.notes.push(
-      `Backend middleware-folder normalizer moved ${result.movedFiles.length} file(s), dropped ${result.droppedFiles.length} duplicate(s), and rewrote imports in ${result.rewrittenImports.length} file(s).`,
-    );
-  }
-
-  return result;
-}
-
-interface FrontendApiClientUniquenessResult {
-  /** Canonical client path detected (or null when scaffold is missing). */
-  canonical: string | null;
-  /** Parallel apiClient files that survived the preflight normalizer. */
-  parallelClients: string[];
-  /** Human-readable findings for the LLM prompt / repair log. */
-  findings: string[];
-}
-
-/**
- * Hard-fail audit: there must be exactly ONE HTTP client in the frontend
- * after preflight runs. The preflight normalizer collapses duplicates by
- * rewriting the parallel file to a re-export — this audit treats anything
- * that *defines* a new fetch wrapper, axios instance, or class with the
- * `Api` substring under `utils/`, `lib/`, or `services/` as a regression.
- *
- * Wired as a hard-fail at the final integration gate so coding sessions
- * cannot ship two clients silently again.
- */
-async function auditFrontendApiClientUniqueness(
-  outputDir: string,
-): Promise<FrontendApiClientUniquenessResult> {
-  const empty: FrontendApiClientUniquenessResult = {
-    canonical: null,
-    parallelClients: [],
-    findings: [],
-  };
-
-  const canonicalCandidates = [
-    "frontend/src/api/client.ts",
-    "apps/web/src/api/client.ts",
-  ];
-  let canonical: string | null = null;
-  for (const candidate of canonicalCandidates) {
-    const content = await fsRead(candidate, outputDir);
-    if (
-      !content.startsWith("FILE_NOT_FOUND") &&
-      !content.startsWith("REJECTED") &&
-      /export\s+(?:const|function)\s+apiClient\b/.test(content)
-    ) {
-      canonical = candidate;
-      break;
-    }
-  }
-  if (!canonical) return empty;
-
-  const root = canonical.startsWith("apps/web/")
-    ? "apps/web/src"
-    : "frontend/src";
-  const suspectPaths = [
-    `${root}/utils/apiClient.ts`,
-    `${root}/utils/api.ts`,
-    `${root}/utils/http.ts`,
-    `${root}/lib/http.ts`,
-    `${root}/lib/apiClient.ts`,
-    `${root}/services/http.ts`,
-    `${root}/services/apiClient.ts`,
-  ];
-
-  const parallelClients: string[] = [];
-  for (const rel of suspectPaths) {
-    const content = await fsRead(rel, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    // After preflight, the parallel file should be a thin re-export. Anything
-    // that still declares its own `apiClient`/`ApiClient` class/const, or
-    // creates an axios/fetch instance, is a real divergence.
-    const reexportOnly =
-      /export\s+\*\s+from\s+["']\.\.\/api\/client["']/.test(content) &&
-      !/export\s+(?:const|class|function|default)\s+\w*[Aa]pi\w*/.test(
-        content.replace(
-          /export\s+\*\s+from\s+["']\.\.\/api\/client["'];?\s*\n?/g,
-          "",
-        ),
-      );
-    if (reexportOnly) continue;
-    if (
-      /export\s+(?:const|class|function|default)\s+\w*[Aa]pi\w*/.test(
-        content,
-      ) ||
-      /axios\.create\s*\(/.test(content) ||
-      /class\s+\w*[Aa]pi\w*Client\b/.test(content)
-    ) {
-      parallelClients.push(rel);
-    }
-  }
-
-  const findings: string[] = [];
-  if (parallelClients.length > 0) {
-    findings.push(
-      "## Frontend API client uniqueness violation",
-      `Canonical client: ${canonical}`,
-      "Parallel HTTP client(s) still defining their own \`apiClient\` / \`axios.create\` / \`ApiClient\` class:",
-      ...parallelClients.map((p) => `- ${p}`),
-      'Resolution: delete or convert these files to \`export * from "../api/client"\` and update every consumer to import from the canonical path.',
-    );
-  }
-
-  return {
-    canonical,
-    parallelClients,
-    findings,
-  };
-}
-
-/**
- * Backend GET-with-validateBody normalizer.
- *
- * `validateBody` is a body-validation middleware; LLMs sometimes attach it
- * to `apiRouter.get(...)` calls, which produces both a TypeScript noise
- * (the controller signature is wrong) and a runtime semantics bug (a
- * GET handler should not validate a JSON body). We strip the
- * `validateBody(...)` argument so the route at least compiles and the
- * route audit can re-evaluate; the LLM is still expected to pick a real
- * handler name afterwards.
- */
-async function normalizeBackendGetValidateBody(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const routesRoot = "backend/src/api/modules";
-  let files: string[];
-  try {
-    files = (await listFiles(routesRoot, outputDir)).filter((file) =>
-      file.endsWith(".routes.ts"),
-    );
-  } catch {
-    return { changedFiles, notes };
-  }
-
-  // Match `apiRouter.get( "<path>" , validateBody(<args>), <rest...> )` over
-  // multiple lines and remove the validateBody segment. Also catch sub-router
-  // form `router.get(...)` for completeness.
-  const getCallRe =
-    /\b((?:api)?[Rr]outer)\.get\s*\(\s*((?:[^()"'`]|"[^"]*"|'[^']*'|`[^`]*`|\([^()]*\))+)\)/g;
-  const validateBodyArgRe = /\bvalidateBody\s*\([^()]*\)\s*,\s*/g;
-
-  for (const rel of files) {
-    const content = await fsRead(rel, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    let mutated = false;
-    const updated = content.replace(getCallRe, (match, prefix, args) => {
-      if (!/\bvalidateBody\s*\(/.test(args)) return match;
-      const cleanedArgs = String(args).replace(validateBodyArgRe, "");
-      mutated = true;
-      return `${prefix}.get(${cleanedArgs})`;
-    });
-    if (mutated && updated !== content) {
-      await fsWrite(rel, updated, outputDir);
-      changedFiles.push(rel);
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Backend GET-route normalizer stripped \`validateBody(...)\` from ${changedFiles.length} file(s): ${changedFiles.slice(0, 6).join(", ")}${changedFiles.length > 6 ? " ..." : ""}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-/**
- * `Error(message, e)` → `Error(message, { cause: e })` rewrite.
- *
- * The two-arg `Error(message, cause)` signature is invalid TypeScript and
- * fires `TS2554`/`TS2345` across multiple frontend files in every recent
- * generation. The fix is mechanical: detect `throw new Error(<msg>, <ident>)`
- * patterns where the second arg is a plain identifier (typical catch-binding)
- * and convert it to the `{ cause: ident }` options form.
- */
-async function normalizeFrontendErrorWithCause(
-  outputDir: string,
-): Promise<FrontendNormalizationResult> {
-  const changedFiles: string[] = [];
-  const notes: string[] = [];
-  const sourceRoots = ["frontend/src", "apps/web/src"];
-
-  const pattern =
-    /throw\s+new\s+Error\s*\(\s*([^,()]+?)\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g;
-
-  for (const root of sourceRoots) {
-    let files: string[] = [];
-    try {
-      files = (await listFiles(root, outputDir)).filter((file) =>
-        /\.(ts|tsx)$/.test(file),
-      );
-    } catch {
-      continue;
-    }
-    for (const rel of files) {
-      const content = await fsRead(rel, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      ) {
-        continue;
-      }
-      const updated = content.replace(
-        pattern,
-        (_m, msg: string, ident: string) =>
-          `throw new Error(${msg.trim()}, { cause: ${ident} })`,
-      );
-      if (updated !== content) {
-        await fsWrite(rel, updated, outputDir);
-        changedFiles.push(rel);
-      }
-    }
-  }
-
-  if (changedFiles.length > 0) {
-    notes.push(
-      `Frontend Error(cause) normalizer rewrote ${changedFiles.length} file(s): ${changedFiles.slice(0, 8).join(", ")}${changedFiles.length > 8 ? " ..." : ""}`,
-    );
-  }
-
-  return { changedFiles, notes };
-}
-
-async function detectFrontendConvergenceClusters(
-  outputDir: string,
-): Promise<FrontendConvergenceCluster[]> {
-  const clusters: FrontendConvergenceCluster[] = [];
-  const sourceRoots = ["frontend/src", "apps/web/src"];
-  const frontendFiles = (
-    await Promise.all(
-      sourceRoots.map(async (root) => {
-        try {
-          return await listFiles(root, outputDir);
-        } catch {
-          return [];
-        }
-      }),
-    )
-  ).flat();
-
-  const hookSignatureFiles: string[] = [];
-  for (const relPath of frontendFiles.filter((file) =>
-    /\.(ts|tsx)$/.test(file),
-  )) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    if (
-      content.includes("useEffect((): void =>") ||
-      content.includes("useLayoutEffect((): void =>")
-    ) {
-      hookSignatureFiles.push(relPath);
-    }
-  }
-  if (hookSignatureFiles.length > 0) {
-    clusters.push({
-      key: "hook_signature",
-      title: "React hook callback signature mismatch",
-      description:
-        "Some React hook callbacks are annotated with explicit `: void` return types even though they return cleanup functions. Normalize the hook callback signature before fixing per-file logic.",
-      files: hookSignatureFiles.slice(0, 12),
-    });
-  }
-
-  const jsxAnnotationFiles: string[] = [];
-  for (const relPath of frontendFiles.filter((file) =>
-    /\.(ts|tsx)$/.test(file),
-  )) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    if (/(?<!React\.)\bJSX\.Element\b/.test(content)) {
-      jsxAnnotationFiles.push(relPath);
-    }
-  }
-  if (jsxAnnotationFiles.length > 0) {
-    clusters.push({
-      key: "jsx_namespace_annotation",
-      title: "React JSX namespace annotation mismatch",
-      description:
-        "Generated frontend files still use bare `JSX.Element` return types. Normalize this shared pattern across the cluster by preferring inferred return types or rewriting to `React.JSX.Element` consistently.",
-      files: jsxAnnotationFiles.slice(0, 12),
-    });
-  }
-
-  const reactTemplateResidualFiles: string[] = [];
-  for (const relPath of frontendFiles.filter((file) => /\.tsx$/.test(file))) {
-    const content = await fsRead(relPath, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    if (
-      /^import React from ["']react["'];?$/m.test(content) ||
-      /^import React,\s*\{[^}]+\}\s*from ["']react["'];?$/m.test(content) ||
-      /\)\s*:\s*React\.JSX\.Element\s*(\{|=>)/.test(content)
-    ) {
-      reactTemplateResidualFiles.push(relPath);
-    }
-  }
-  if (reactTemplateResidualFiles.length > 0) {
-    clusters.push({
-      key: "react_component_template_residuals",
-      title: "React component template residuals",
-      description:
-        "Some frontend files still carry template-style explicit component return types or default `React` imports that are no longer needed under the current JSX runtime. Normalize the shared template first, then fix any remaining leaf-file typing issues.",
-      files: reactTemplateResidualFiles.slice(0, 12),
-    });
-  }
-
-  const useFormCandidates = await Promise.all(
-    ["frontend/src/hooks/useForm.ts", "apps/web/src/hooks/useForm.ts"].map(
-      async (filePath) => ({
-        filePath,
-        content: await fsRead(filePath, outputDir),
-      }),
-    ),
-  );
-  const useFormCandidate = useFormCandidates.find(
-    (entry) =>
-      !entry.content.startsWith("FILE_NOT_FOUND") &&
-      !entry.content.startsWith("REJECTED"),
-  );
-  if (
-    useFormCandidate &&
-    useFormCandidate.content.includes(
-      "type FormValues = Record<string, string>;",
-    )
-  ) {
-    const formConsumerFiles: string[] = [];
-    for (const relPath of frontendFiles.filter((file) =>
-      /\.(ts|tsx)$/.test(file),
-    )) {
-      const content = await fsRead(relPath, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      ) {
-        continue;
-      }
-      if (/useForm<\w+>/.test(content)) {
-        formConsumerFiles.push(relPath);
-      }
-    }
-    clusters.push({
-      key: "form_hook_compatibility",
-      title: "Form hook generic incompatibility",
-      description:
-        "The shared `useForm` hook is narrower than the generated page form interfaces. Repair the hook abstraction first so page-level form interfaces no longer need index signatures.",
-      files: [useFormCandidate.filePath, ...formConsumerFiles.slice(0, 8)],
-    });
-  }
-
-  const modelsPath = useFormCandidate?.filePath.startsWith("apps/web/")
-    ? "apps/web/src/types/models.ts"
-    : "frontend/src/types/models.ts";
-  const projectMembersPath = useFormCandidate?.filePath.startsWith("apps/web/")
-    ? "apps/web/src/components/Projects/ProjectMembersList.tsx"
-    : "frontend/src/components/Projects/ProjectMembersList.tsx";
-  const apiTypesPath = useFormCandidate?.filePath.startsWith("apps/web/")
-    ? "apps/web/src/types/api.ts"
-    : "frontend/src/types/api.ts";
-  const modelsContent = await fsRead(modelsPath, outputDir);
-  const projectMembersContent = await fsRead(projectMembersPath, outputDir);
-  const apiTypesContent = await fsRead(apiTypesPath, outputDir);
-  if (
-    !apiTypesContent.startsWith("FILE_NOT_FOUND") &&
-    (/export type MeResponseDto = User;/.test(apiTypesContent) ||
-      /export type UpdateMeResponseDto = User;/.test(apiTypesContent))
-  ) {
-    clusters.push({
-      key: "auth_dto_alias_leakage",
-      title: "Auth DTO aliases leak model-only fields",
-      description:
-        "Frontend auth/session DTOs are aliased directly to `User`, which leaks persistence-model unions into UI and auth flows. Replace those aliases with a dedicated auth DTO shape and update all consuming types consistently.",
-      files: [apiTypesPath, modelsPath],
-    });
-  }
-  if (
-    !modelsContent.startsWith("FILE_NOT_FOUND") &&
-    !projectMembersContent.startsWith("FILE_NOT_FOUND") &&
-    modelsContent.includes("user?: ProjectMemberUserRef;") &&
-    /\.user\./.test(projectMembersContent)
-  ) {
-    clusters.push({
-      key: "dto_ui_consistency",
-      title: "DTO / UI optionality mismatch",
-      description:
-        "Frontend DTOs mark project member `user` as optional, but the consuming UI dereferences it as required. Decide whether the DTO should be required or the UI must guard against missing relations, then fix the cluster consistently.",
-      files: [modelsPath, apiTypesPath, projectMembersPath],
-    });
-  }
-
-  return clusters;
-}
-
-async function syncDeps(_state: SupervisorState) {
-  console.log(
-    "[Supervisor] sync_deps: skipping installs (npm install runs in integration verify).",
-  );
-  return {};
-}
-
-async function tddTestWriterAndRed(
-  state: SupervisorState,
-): Promise<Partial<SupervisorState>> {
-  const emitter = getRepairEmitter(state.sessionId);
-  const writer = await runTddTestWriter({
-    outputDir: state.outputDir,
-    tasks: state.tasks,
-    projectContext: state.projectContext,
-    sessionId: state.sessionId,
-    emitter,
-  });
-  console.log(`[Supervisor] TDD Test Writer: ${writer.summary}`);
-
-  const review = await reviewTddTests({
-    outputDir: state.outputDir,
-    emitter,
-  });
-  console.log(`[Supervisor] TDD Review (pre-implementation): ${review.summary}`);
-
-  const red = await runTddRuntimePhase({
-    outputDir: state.outputDir,
-    phase: "red",
-    emitter,
-  });
-  console.log(`[Supervisor] ${red.summary}`);
-
-  return {
-    totalCostUsd: writer.costUsd,
-  };
-}
-
-async function tddGreenVerifyAndReview(
-  state: SupervisorState,
-): Promise<Partial<SupervisorState>> {
-  const emitter = getRepairEmitter(state.sessionId);
-  const green = await runTddRuntimePhase({
-    outputDir: state.outputDir,
-    phase: "green",
-    emitter,
-  });
-  const review = await reviewTddTests({
-    outputDir: state.outputDir,
-    emitter,
-  });
-
-  const blockers: string[] = [];
-  if (green.p0Failures.length > 0) {
-    blockers.push(`P0 TDD GREEN failures: ${green.p0Failures.join(", ")}`);
-  }
-  if (review.p0Errors.length > 0) {
-    blockers.push(
-      `P0 TDD review errors: ${review.p0Errors
-        .slice(0, 10)
-        .map((finding) => `${finding.testId}: ${finding.message}`)
-        .join("; ")}`,
-    );
-  }
-
-  const existing = state.integrationErrors?.trim();
-  const integrationErrors =
-    blockers.length > 0
-      ? [existing, "TDD hard gate failed:", ...blockers]
-          .filter(Boolean)
-          .join("\n")
-          .slice(0, 4000)
-      : existing;
-
-  console.log(
-    `[Supervisor] TDD GREEN gate: ${green.summary} ${review.summary}`,
-  );
-
-  return {
-    integrationErrors,
-  };
-}
-
 // Tightened thresholds: previous 8/18 burned ~100k tokens on read-only loops
 // before the abort fired. 3 iterations without mutation is enough to know the
 // LLM is reading in circles; 10 iterations is the hard stop.
@@ -6639,1226 +4878,109 @@ const INTEGRATION_STAGNATION_WARNING_BONUS_PER_PROGRESS = 1;
 /** After N total stagnation warnings without progress, inject an escalated prompt. */
 const STAGNATION_ESCALATION_WARNING_COUNT = 2;
 
-// ─── DB dependency detection (Fix 3) ─────────────────────────────────────────
-
-interface DbDependencyInfo {
-  hasPrisma: boolean;
-  hasSequelize: boolean;
-  hasMongoose: boolean;
-  hasKnex: boolean;
-  hasDrizzle: boolean;
-  hasBetterSqlite: boolean;
-  hasEnvFile: boolean;
-  hasDatabaseUrl: boolean;
-  hasDockerCompose: boolean;
-}
-
-async function detectDbDependencies(
-  outputDir: string,
-): Promise<DbDependencyInfo> {
-  const info: DbDependencyInfo = {
-    hasPrisma: false,
-    hasSequelize: false,
-    hasMongoose: false,
-    hasKnex: false,
-    hasDrizzle: false,
-    hasBetterSqlite: false,
-    hasEnvFile: false,
-    hasDatabaseUrl: false,
-    hasDockerCompose: false,
-  };
-
-  // Check package.json dependencies — root and monorepo api workspace
-  const pkgPaths = [
-    "package.json",
-    "backend/package.json",
-    "apps/api/package.json",
-  ];
-  for (const pkgPath of pkgPaths) {
-    const pkgRaw = await fsRead(pkgPath, outputDir);
-    if (pkgRaw.startsWith("FILE_NOT_FOUND")) continue;
-    try {
-      const pkg = JSON.parse(pkgRaw) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-      };
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      info.hasPrisma =
-        info.hasPrisma || "@prisma/client" in deps || "prisma" in deps;
-      info.hasSequelize = info.hasSequelize || "sequelize" in deps;
-      info.hasMongoose = info.hasMongoose || "mongoose" in deps;
-      info.hasKnex = info.hasKnex || "knex" in deps;
-      info.hasDrizzle = info.hasDrizzle || "drizzle-orm" in deps;
-      info.hasBetterSqlite = info.hasBetterSqlite || "better-sqlite3" in deps;
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  // Check .env / .env.local
-  for (const envFile of [".env", ".env.local"]) {
-    const envRaw = await fsRead(envFile, outputDir);
-    if (!envRaw.startsWith("FILE_NOT_FOUND")) {
-      info.hasEnvFile = true;
-      if (/DATABASE_URL\s*=/.test(envRaw)) info.hasDatabaseUrl = true;
-      break;
-    }
-  }
-
-  // Check docker-compose
-  for (const f of ["docker-compose.yml", "docker-compose.yaml"]) {
-    const raw = await fsRead(f, outputDir);
-    if (!raw.startsWith("FILE_NOT_FOUND")) {
-      info.hasDockerCompose = true;
-      break;
-    }
-  }
-
-  return info;
-}
-
-/**
- * Run Prisma-specific setup steps:
- *   1. If .env is absent, write it from `BLUEPRINT_GENERATED_DATABASE_URL` (Agentic Builder env).
- *   2. prisma generate (always safe, no DB needed).
- *   3. Attempt prisma migrate dev if a live DB is reachable:
- *        - If docker-compose.yml exists, try `docker-compose up -d` then migrate.
- *        - If DATABASE_URL is already set in .env, migrate directly.
- *      Failures are non-fatal: we warn and leave clear manual instructions.
- * Returns warning text to surface in integration errors, or "" if all good.
- */
-async function handlePrismaSetup(
-  outputDir: string,
-  info: DbDependencyInfo,
-): Promise<string> {
-  const warnings: string[] = [];
-
-  // ── Step 1: ensure .env (scaffold may have written it; else use Blueprint env) ──
-  if (!info.hasEnvFile) {
-    const fromBlueprint = resolveBlueprintGeneratedDatabaseUrl();
-    if (fromBlueprint) {
-      await fsWrite(
-        ".env",
-        formatGeneratedCodeDotEnv(fromBlueprint),
-        outputDir,
-      );
-      info.hasEnvFile = true;
-      info.hasDatabaseUrl = true;
-      console.log(
-        "[Supervisor] DB check: wrote .env from BLUEPRINT_GENERATED_DATABASE_URL",
-      );
-    }
-  }
-
-  // ── Step 2: prisma generate ──────────────────────────────────────────────
-  let schemaRaw = await fsRead("prisma/schema.prisma", outputDir);
-  if (schemaRaw.startsWith("FILE_NOT_FOUND")) {
-    warnings.push(
-      "## Missing prisma/schema.prisma\n" +
-        "@prisma/client is installed but prisma/schema.prisma was not generated. " +
-        "Add a Prisma schema file or the app will fail at runtime.",
-    );
-    return warnings.join("\n\n");
-  }
-  if (schemaRaw.charCodeAt(0) === 0xfeff) {
-    schemaRaw = schemaRaw.slice(1);
-    await fsWrite("prisma/schema.prisma", schemaRaw, outputDir);
-  }
-
-  console.log("[Supervisor] DB check: running npx prisma generate...");
-  let genResult = await execPrismaGenerate(
-    outputDir,
-    envForPrismaCliFromSchema(schemaRaw),
-    { timeout: 90_000 },
+function readIntegrationVerifyFixMaxIterations(): number {
+  const raw = Number(
+    process.env.INTEGRATION_VERIFY_FIX_MAX_ITERATIONS ?? "500",
   );
-  if (genResult.exitCode !== 0) {
-    const out = (genResult.stdout + genResult.stderr).trim();
-    // Prisma 7+ removed `url` from datasource — auto-migrate and retry once.
-    const isPrisma7UrlError =
-      out.includes("P1012") &&
-      (out.includes("no longer supported") ||
-        out.includes("datasource property"));
-    if (isPrisma7UrlError) {
-      console.log(
-        "[Supervisor] DB check: Prisma 7 `url` incompatibility — auto-migrating schema...",
-      );
-      const { migrated, newSchema } = await migrateSchemaToPrisma7(
-        schemaRaw,
-        outputDir,
-      );
-      if (migrated) {
-        schemaRaw = newSchema;
-        genResult = await execPrismaGenerate(
-          outputDir,
-          {},
-          { timeout: 90_000 },
-        );
-        if (genResult.exitCode !== 0) {
-          const retryOut = (genResult.stdout + genResult.stderr).trim();
-          warnings.push(`## Prisma generate failed\n${retryOut.slice(0, 500)}`);
-          console.warn(
-            `[Supervisor] DB check: prisma generate still failed after migration: ${retryOut.slice(0, 200)}`,
-          );
-          return warnings.join("\n\n");
-        }
-        console.log(
-          "[Supervisor] DB check: prisma generate OK after Prisma 7 migration.",
-        );
-      }
-    } else {
-      warnings.push(`## Prisma generate failed\n${out.slice(0, 500)}`);
-      console.warn(
-        `[Supervisor] DB check: prisma generate failed: ${out.slice(0, 200)}`,
-      );
-      return warnings.join("\n\n");
-    }
-  } else {
-    console.log("[Supervisor] DB check: prisma generate OK.");
-  }
-
-  // ── Step 3: prisma migrate dev ───────────────────────────────────────────
-  let dbReachable = info.hasDatabaseUrl;
-
-  if (!dbReachable && info.hasDockerCompose) {
-    console.log(
-      "[Supervisor] DB check: starting docker-compose services for migration...",
-    );
-    const upResult = await shellExec(
-      "docker-compose up -d 2>&1 | tail -5",
-      outputDir,
-      { timeout: 60_000 },
-    );
-    if (upResult.exitCode === 0) {
-      console.log(
-        "[Supervisor] DB check: docker-compose up -d OK, waiting 8s for DB to be ready...",
-      );
-      await new Promise((r) => setTimeout(r, 8_000));
-      dbReachable = true;
-    } else {
-      const out = (upResult.stdout || upResult.stderr || "").trim();
-      console.warn(
-        `[Supervisor] DB check: docker-compose up failed: ${out.slice(0, 200)}`,
-      );
-    }
-  }
-
-  if (dbReachable) {
-    console.log(
-      "[Supervisor] DB check: running npx prisma migrate dev --name init...",
-    );
-    const migrateResult = await shellExec(
-      "npx prisma migrate dev --name init --skip-seed 2>&1 | tail -20",
-      outputDir,
-      { timeout: 120_000 },
-    );
-    if (migrateResult.exitCode === 0) {
-      console.log("[Supervisor] DB check: prisma migrate dev OK.");
-    } else {
-      const out = (migrateResult.stdout || migrateResult.stderr || "").trim();
-      warnings.push(
-        `## Prisma migrate dev failed\n${out.slice(0, 500)}\n\n` +
-          "Run manually once your database is running:\n" +
-          "```\ndocker-compose up -d\nnpx prisma migrate dev --name init\n```",
-      );
-      console.warn(
-        `[Supervisor] DB check: prisma migrate dev failed: ${out.slice(0, 200)}`,
-      );
-    }
-  } else {
-    warnings.push(
-      "## Prisma migrate dev skipped\n" +
-        "No live database detected (no DATABASE_URL in .env and docker-compose could not start).\n\n" +
-        "Run manually once your database is ready:\n" +
-        "```\ndocker-compose up -d\nnpx prisma migrate dev --name init\n```",
-    );
-  }
-
-  if (!info.hasDockerCompose) {
-    warnings.push(
-      "## Missing docker-compose.yml\n" +
-        "No docker-compose.yml found. Create one to provision the database service, " +
-        "then run: docker-compose up -d && npx prisma migrate dev --name init",
-    );
-  }
-
-  return warnings.join("\n\n");
+  if (!Number.isFinite(raw)) return 500;
+  return Math.max(20, Math.min(1000, Math.floor(raw)));
 }
 
-/**
- * Scan all generated .ts/.tsx files and replace wrong workspace import prefixes
- * with the correct one read from packages/shared/package.json.
- *
- * Agents sometimes hallucinate `@repo/shared` or `@shared` instead of the real
- * workspace name (e.g. `@project/shared`). This corrects them before tsc runs.
- */
-async function normalizeWorkspaceImports(outputDir: string): Promise<void> {
-  const pkgRaw = await fsRead("packages/shared/package.json", outputDir);
-  if (pkgRaw.startsWith("FILE_NOT_FOUND")) return;
+type ParsedValidationSuiteResult = {
+  parsed: boolean;
+  pass: boolean;
+  summary: string;
+  passedSuites: ScopedValidationKind[];
+  failedSuites: string[];
+};
 
-  let sharedPkgName: string;
+function parseValidationSuiteResult(
+  result: string,
+): ParsedValidationSuiteResult {
   try {
-    sharedPkgName = (JSON.parse(pkgRaw) as { name?: string }).name ?? "";
-  } catch {
-    return;
-  }
-  if (!sharedPkgName) return;
-
-  // Build a list of wrong prefixes to replace
-  const wrongPrefixes = ["@repo/shared", "@shared", "@monorepo/shared"].filter(
-    (p) => p !== sharedPkgName,
-  );
-  if (wrongPrefixes.length === 0) return;
-
-  // Find all .ts/.tsx files in apps/ and packages/
-  const srcDirs = ["apps", "packages"];
-  let fixed = 0;
-
-  for (const dir of srcDirs) {
-    let files: string[] = [];
-    try {
-      files = await listFiles(dir, outputDir);
-    } catch {
-      continue;
-    }
-    for (const relPath of files) {
-      if (!/\.(ts|tsx)$/.test(relPath)) continue;
-      const content = await fsRead(relPath, outputDir);
-      if (
-        content.startsWith("FILE_NOT_FOUND") ||
-        content.startsWith("REJECTED")
-      )
-        continue;
-
-      let updated = content;
-      for (const wrong of wrongPrefixes) {
-        if (updated.includes(wrong)) {
-          updated = updated.split(wrong).join(sharedPkgName);
-        }
-      }
-      if (updated !== content) {
-        await fsWrite(relPath, updated, outputDir);
-        fixed++;
-        console.log(
-          `[Supervisor] normalizeWorkspaceImports: fixed "${relPath}" (${wrongPrefixes.find((p) => content.includes(p))} → ${sharedPkgName})`,
-        );
-      }
-    }
-  }
-
-  if (fixed > 0) {
-    console.log(
-      `[Supervisor] normalizeWorkspaceImports: corrected ${fixed} file(s).`,
-    );
-  }
-}
-
-/**
- * Scans frontend/src/components/**\/*.tsx for exported component Props types and
- * returns a compact "Component Interface Reference" block injected into the
- * integration prompt. This lets the integration agent know the EXACT prop names
- * each component expects, preventing TS2322 "Property X does not exist" regressions.
- *
- * Uses regex — good enough for the standard `type XxxProps = { ... }` /
- * `interface XxxProps { ... }` patterns produced by the scaffold. Falls back to
- * an empty string if the frontend directory doesn't exist.
- */
-async function buildComponentInterfaceReference(
-  outputDir: string,
-): Promise<string> {
-  const componentsDir = path.join(outputDir, "frontend", "src", "components");
-  let tsxFiles: string[] = [];
-  try {
-    tsxFiles = await collectTsxFiles(componentsDir);
-  } catch {
-    return "";
-  }
-  if (tsxFiles.length === 0) return "";
-
-  const entries: string[] = [];
-
-  for (const filePath of tsxFiles) {
-    const raw = await fs.readFile(filePath, "utf-8").catch(() => "");
-    if (!raw) continue;
-
-    // Match both `type XxxProps = { ... }` and `interface XxxProps { ... }` (multiline)
-    const blockRe =
-      /(?:export\s+)?(?:type|interface)\s+(\w+Props)\s*(?:=\s*)?\{([\s\S]*?)\}/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = blockRe.exec(raw)) !== null) {
-      const propsName = match[1];
-      const body = match[2];
-
-      // Extract field names (required and optional)
-      const fieldRe = /^\s*(?:readonly\s+)?(\w+)(\?)?:/gm;
-      const fields: string[] = [];
-      let fieldMatch: RegExpExecArray | null;
-      while ((fieldMatch = fieldRe.exec(body)) !== null) {
-        const name = fieldMatch[1];
-        const optional = fieldMatch[2] === "?";
-        if (name !== "children") {
-          fields.push(optional ? `${name}?` : name);
-        }
-      }
-
-      if (fields.length === 0) continue;
-
-      // Derive component name from Props name (strip trailing "Props")
-      const componentName = propsName.replace(/Props$/, "");
-      const relPath = path.relative(path.join(outputDir, "frontend"), filePath);
-      entries.push(`- **${componentName}** (\`${relPath}\`): ${fields.join(", ")}`);
-    }
-  }
-
-  if (entries.length === 0) return "";
-
-  return [
-    "## Component Interface Reference (use EXACT prop names — TS2322 mismatches are P0 HARD FAIL)",
-    "Each line lists a component and its accepted prop names (? = optional).",
-    "Pass ONLY these names. Unknown props cause TypeScript errors that BLOCK report_done(pass).",
-    ...entries,
-  ].join("\n");
-}
-
-async function collectTsxFiles(dir: string): Promise<string[]> {
-  const results: string[] = [];
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...(await collectTsxFiles(full)));
-    } else if (entry.isFile() && entry.name.endsWith(".tsx")) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-
-export interface RouteRegistrationAudit {
-  /** Human-readable lines suitable for feeding into the system prompt. */
-  findings: string[];
-  /** Modules that have a `*.routes.ts` file but are never wired into index.ts. */
-  unregisteredModules: string[];
-  /** Structured per-module data — used by the route-audit auto-wire codemod. */
-  implementedModules: Array<{
-    file: string;
-    exportNames: string[];
-    primaryExportName: string | null;
-    isRegistered: boolean;
-  }>;
-  /** Detected apiRouter prefix from index.ts (defaults to "/api"). */
-  apiRouterPrefix: string;
-  /** register*Routes imports in index.ts that don't resolve to a real module. */
-  unresolvedRegistrations: string[];
-  /** Endpoints declared in API_CONTRACTS.json but no matching route implementation found. */
-  missingContractEndpoints: Array<{ method: string; endpoint: string }>;
-  /**
-   * Endpoints implemented in routes.ts but not present in API_CONTRACTS.json.
-   * Warning only — not a hard failure (internal endpoints may legitimately
-   * live outside the public contract).
-   */
-  undeclaredEndpoints: Array<{ method: string; endpoint: string }>;
-}
-
-/**
- * Audits backend API route wiring against three sources of truth:
- *   1. Filesystem: what route files actually exist under backend/src/api/modules.
- *   2. Router entry: what register*Routes functions index.ts imports AND calls.
- *   3. Contract: API_CONTRACTS.json endpoints (method + path).
- *
- * Inconsistencies between these three are the #1 cause of "generated project
- * starts but returns 404 on the paths the PRD promised". This audit is
- * deliberately regex-based (not AST): the patterns below match the scaffold
- * template conventions and fail loud when they don't — the LLM then has to
- * close the gaps before integrationVerifyAndFix can pass.
- *
- * Returns an empty result (no findings) if the project has no backend or no
- * api/modules tree, so frontend-only projects are a no-op.
- */
-export async function auditApiRouteRegistration(
-  outputDir: string,
-): Promise<RouteRegistrationAudit> {
-  const empty: RouteRegistrationAudit = {
-    findings: [],
-    unregisteredModules: [],
-    implementedModules: [],
-    apiRouterPrefix: "/api",
-    unresolvedRegistrations: [],
-    missingContractEndpoints: [],
-    undeclaredEndpoints: [],
-  };
-
-  const hasBackend = await pathExistsUnderOutput(
-    outputDir,
-    "backend/package.json",
-  );
-  if (!hasBackend) return empty;
-
-  const apiModulesDir = "backend/src/api/modules";
-  if (!(await pathExistsUnderOutput(outputDir, apiModulesDir))) return empty;
-
-  const moduleFiles = (await listFiles(apiModulesDir, outputDir)).filter((f) =>
-    f.endsWith(".routes.ts"),
-  );
-
-  // Implemented modules: map export name → { file, endpoints: [{method, path}] }
-  interface ModuleImpl {
-    file: string;
-    /** All register*Routes export names found in the file (a module may export aliases). */
-    exportNames: string[];
-    /** Primary export name used for backward-compat reporting. */
-    exportName: string | null;
-    mountPrefix: string | null;
-    endpoints: Array<{ method: string; endpoint: string }>;
-  }
-  const implemented: ModuleImpl[] = [];
-
-  // Collect ALL register*Routes exports (not just the first one) so modules
-  // that export both a canonical name and a backward-compat alias don't get
-  // flagged as unregistered when the alias is what index.ts actually calls.
-  const exportNameRe =
-    /export\s+(?:async\s+)?function\s+(register[A-Z]\w*Routes)\s*\(/g;
-  // Match common Koa router variable names: `router`, `apiRouter`,
-  // `<feature>Router`, plus inline `new Router().<verb>()`. Generators
-  // alternate between mounting a sub-router (`router.get(...)` then
-  // `apiRouter.use("/foo", router.routes())`) and binding directly on
-  // the parent (`apiRouter.get("/foo", ...)`); both must be picked up.
-  const routerVerbRe =
-    /\b(?:router|apiRouter|[A-Za-z_$][\w$]*Router)\.(get|post|put|patch|delete|all|options|head)\s*\(\s*["'`]([^"'`]+)["'`]/g;
-  const inlineNewRouterRe =
-    /new\s+Router\s*\([^)]*\)\.(get|post|put|patch|delete|all|options|head)\s*\(\s*["'`]([^"'`]+)["'`]/g;
-  // Form 1: `apiRouter.use("/prefix", router.routes())`  — explicit string in .use()
-  const mountPrefixRe =
-    /apiRouter\.use\s*\(\s*["'`]([^"'`]+)["'`]\s*,\s*(?:router|[A-Za-z_$][\w$]*Router)\.routes/;
-  // Form 2: `new Router({ prefix: "/prefix" })` — prefix in constructor, then
-  // `apiRouter.use(router.routes(), ...)` with NO string argument.  This is the
-  // pattern Koa codegen uses for autogen/routes.ts and must be detected separately.
-  // Previously blind to this, which caused phantom "missing contract" findings.
-  const routerCtorPrefixRe =
-    /new\s+Router\s*\(\s*\{[^}]*\bprefix\s*:\s*["'`]([^"'`]+)["'`]/;
-
-  for (const rel of moduleFiles) {
-    const content = await fsRead(rel, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    // Collect all register*Routes exports (reset lastIndex for global re-use).
-    exportNameRe.lastIndex = 0;
-    const exportNames: string[] = [];
-    let enm: RegExpExecArray | null;
-    while ((enm = exportNameRe.exec(content)) !== null) {
-      exportNames.push(enm[1]);
-    }
-    const mountMatch = content.match(mountPrefixRe);
-    // Fall back to constructor-based prefix when the .use("/prefix", ...) form
-    // is absent — i.e. the sub-router was created with `new Router({ prefix })`.
-    const ctorPrefixMatch = mountMatch ? null : content.match(routerCtorPrefixRe);
-    const endpoints: Array<{ method: string; endpoint: string }> = [];
-    const seen = new Set<string>();
-    const pushEndpoint = (method: string, endpoint: string): void => {
-      const key = `${method.toUpperCase()} ${endpoint}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      endpoints.push({ method: method.toUpperCase(), endpoint });
+    const jsonStart = result.indexOf("{");
+    const raw = jsonStart >= 0 ? result.slice(jsonStart) : result;
+    const data = JSON.parse(raw) as {
+      pass?: unknown;
+      results?: Array<{
+        suite?: unknown;
+        pass?: unknown;
+        skipped?: unknown;
+        output?: unknown;
+      }>;
     };
-    let vm: RegExpExecArray | null;
-    routerVerbRe.lastIndex = 0;
-    while ((vm = routerVerbRe.exec(content)) !== null) {
-      pushEndpoint(vm[1], vm[2]);
-    }
-    inlineNewRouterRe.lastIndex = 0;
-    while ((vm = inlineNewRouterRe.exec(content)) !== null) {
-      pushEndpoint(vm[1], vm[2]);
-    }
-    // If the file binds directly on `apiRouter` (no sub-router .use),
-    // do not prepend a mountPrefix later — endpoints already carry full
-    // paths relative to apiPrefix. Detect this by: any `apiRouter.<verb>`
-    // call exists.
-    const bindsDirectlyOnApiRouter =
-      /\bapiRouter\.(get|post|put|patch|delete|all|options|head)\s*\(/.test(
-        content,
+    const suiteResults = Array.isArray(data.results) ? data.results : [];
+    const passedSuites = suiteResults
+      .filter((suite) => suite.pass === true)
+      .map((suite) => String(suite.suite ?? ""))
+      .filter((suite): suite is ScopedValidationKind =>
+        [
+          "frontend_tsc",
+          "frontend_build",
+          "backend_tsc",
+          "backend_smoke",
+        ].includes(suite),
       );
-    implemented.push({
-      file: rel,
-      exportNames,
-      exportName: exportNames[0] ?? null,
-      mountPrefix: bindsDirectlyOnApiRouter
-        ? null
-        : mountMatch
-          ? mountMatch[1]
-          : ctorPrefixMatch
-            ? ctorPrefixMatch[1]
-            : null,
-      endpoints,
-    });
-  }
-
-  // Parse index.ts: which register*Routes are imported AND called.
-  const indexPath = `${apiModulesDir}/index.ts`;
-  const indexContent = await fsRead(indexPath, outputDir);
-  const indexExists =
-    !indexContent.startsWith("FILE_NOT_FOUND") &&
-    !indexContent.startsWith("REJECTED");
-
-  const registeredNames = new Set<string>();
-  const importedNames = new Set<string>();
-  const apiPrefixMatch = indexContent.match(
-    /new\s+Router\s*\(\s*\{[^}]*\bprefix\s*:\s*["'`]([^"'`]+)["'`]/,
-  );
-  const apiPrefix = apiPrefixMatch ? apiPrefixMatch[1] : "/api";
-
-  if (indexExists) {
-    const importLineRe =
-      /import\s*\{([^}]*)\}\s*from\s*["'][^"']*\/([\w-]+)\/\2\.routes["']/g;
-    let im: RegExpExecArray | null;
-    while ((im = importLineRe.exec(indexContent)) !== null) {
-      for (const n of im[1].split(",")) {
-        const name = n
-          .trim()
-          .split(/\s+as\s+/)[0]
-          .trim();
-        if (name) importedNames.add(name);
-      }
-    }
-    // Also accept flat-form imports like `from "./health/health.routes"`.
-    const flatImportRe =
-      /import\s*\{([^}]*)\}\s*from\s*["'][^"']*\.routes["']/g;
-    let fm: RegExpExecArray | null;
-    while ((fm = flatImportRe.exec(indexContent)) !== null) {
-      for (const n of fm[1].split(",")) {
-        const name = n
-          .trim()
-          .split(/\s+as\s+/)[0]
-          .trim();
-        if (name) importedNames.add(name);
-      }
-    }
-    // Called registrations: `registerFooRoutes(apiRouter)`
-    const callRe = /(register[A-Z]\w*Routes)\s*\(/g;
-    let cm: RegExpExecArray | null;
-    while ((cm = callRe.exec(indexContent)) !== null) {
-      registeredNames.add(cm[1]);
-    }
-  }
-
-  // Find modules where NONE of their register*Routes exports are called in index.ts.
-  // A module that exports both a canonical name AND a backward-compat alias is
-  // considered registered if ANY of its exports is called.
-  const unregisteredModules: string[] = [];
-  for (const mod of implemented) {
-    if (mod.exportNames.length === 0) continue;
-    const anyRegistered = mod.exportNames.some((n) => registeredNames.has(n));
-    if (!anyRegistered) {
-      const primary = mod.exportNames[0];
-      unregisteredModules.push(
-        `${mod.file}: exports "${primary}" but index.ts never calls it.`,
-      );
-    }
-  }
-
-  // Imports referencing a register*Routes that doesn't exist in any routes.ts.
-  const knownExports = new Set(implemented.flatMap((m) => m.exportNames));
-  const unresolvedRegistrations: string[] = [];
-  for (const name of importedNames) {
-    if (!knownExports.has(name)) {
-      unresolvedRegistrations.push(
-        `index.ts imports "${name}" but no routes.ts defines that export.`,
-      );
-    }
-  }
-
-  // Compare against API_CONTRACTS.json.
-  const missingContractEndpoints: Array<{ method: string; endpoint: string }> =
-    [];
-  const undeclaredEndpoints: Array<{ method: string; endpoint: string }> = [];
-
-  const contractRaw = await fsRead("API_CONTRACTS.json", outputDir);
-  const hasContract =
-    !contractRaw.startsWith("FILE_NOT_FOUND") &&
-    !contractRaw.startsWith("REJECTED");
-
-  if (hasContract) {
-    let contracts: Array<{ method?: string; endpoint?: string }> = [];
-    try {
-      const parsed = JSON.parse(contractRaw);
-      if (Array.isArray(parsed)) {
-        contracts = parsed as Array<{ method?: string; endpoint?: string }>;
-      }
-    } catch {
-      // Ignore malformed contracts — earlier phases should have rejected them.
-    }
-
-    // Normalise implemented endpoints: method + full path = apiPrefix + mount + route.
-    const implementedPaths = new Set<string>();
-    for (const mod of implemented) {
-      for (const ep of mod.endpoints) {
-        const fullPath = joinApiPath(
-          apiPrefix,
-          mod.mountPrefix ?? "",
-          ep.endpoint,
-        );
-        implementedPaths.add(`${ep.method} ${fullPath}`);
-      }
-    }
-
-    const contractKeys = new Set<string>();
-    for (const c of contracts) {
-      if (!c.method || !c.endpoint) continue;
-      // Defensive: contributors sometimes accidentally include /api/health in
-      // API_CONTRACTS — strip it so it can't double-count.
-      if (isContractAuditExempt(c.method, c.endpoint)) continue;
-      const key = `${c.method.toUpperCase()} ${normaliseApiPath(c.endpoint)}`;
-      contractKeys.add(key);
-      if (!routeMatches(key, implementedPaths)) {
-        missingContractEndpoints.push({
-          method: c.method.toUpperCase(),
-          endpoint: c.endpoint,
-        });
-      }
-    }
-
-    for (const key of implementedPaths) {
-      if (!routeMatches(key, contractKeys)) {
-        const [method, endpoint] = key.split(" ");
-        // The scaffold-provided `/api/health` probe is intentionally NOT in
-        // API_CONTRACTS.json (it's infra, not a PRD-driven endpoint). Don't
-        // ding it as "undeclared" — that just creates noisy findings the
-        // worker can't resolve. See CODEGEN_HARDENING_PLAN.md §4.x.
-        if (isContractAuditExempt(method, endpoint)) continue;
-        undeclaredEndpoints.push({ method, endpoint });
-      }
-    }
-  }
-
-  const findings: string[] = [];
-  if (unregisteredModules.length > 0) {
-    findings.push("## Unregistered backend modules");
-    findings.push(...unregisteredModules.map((l) => `- ${l}`));
-  }
-  if (unresolvedRegistrations.length > 0) {
-    findings.push("## Dangling register*Routes imports in index.ts");
-    findings.push(...unresolvedRegistrations.map((l) => `- ${l}`));
-  }
-  if (missingContractEndpoints.length > 0) {
-    findings.push("## API_CONTRACTS endpoints with no matching implementation");
-    findings.push(
-      ...missingContractEndpoints.map((e) => `- ${e.method} ${e.endpoint}`),
-    );
-  }
-  if (undeclaredEndpoints.length > 0) {
-    findings.push(
-      "## Implemented endpoints not declared in API_CONTRACTS (verify intent)",
-    );
-    findings.push(
-      ...undeclaredEndpoints.map((e) => `- ${e.method} ${e.endpoint}`),
-    );
-  }
-
-  return {
-    findings,
-    unregisteredModules,
-    implementedModules: implemented.map((m) => ({
-      file: m.file,
-      exportNames: m.exportNames,
-      primaryExportName: m.exportName,
-      isRegistered: m.exportNames.some((n) => registeredNames.has(n)),
-    })),
-    apiRouterPrefix: apiPrefix,
-    unresolvedRegistrations,
-    missingContractEndpoints,
-    undeclaredEndpoints,
-  };
-}
-
-function normaliseApiPath(p: string): string {
-  const withLeading = p.startsWith("/") ? p : `/${p}`;
-  return withLeading.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
-}
-
-/**
- * Endpoints that are infrastructure-provided by the scaffold and intentionally
- * absent from API_CONTRACTS.json. They MUST be skipped from both the
- * "undeclared endpoint" finding (in `auditApiRouteRegistration`) and the
- * runtime smoke gate's auth-required-route assertions.
- *
- * Currently exempt:
- *   - `GET /api/health` and `GET /health` (Playwright webServer probe).
- */
-const CONTRACT_AUDIT_EXEMPT_ENDPOINTS: ReadonlyArray<{
-  method: string;
-  pathRe: RegExp;
-}> = [
-  { method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ },
-];
-
-export function isContractAuditExempt(method: string, endpoint: string): boolean {
-  const m = method.toUpperCase();
-  const p = normaliseApiPath(endpoint);
-  return CONTRACT_AUDIT_EXEMPT_ENDPOINTS.some(
-    (rule) => rule.method === m && rule.pathRe.test(p),
-  );
-}
-
-function joinApiPath(prefix: string, mount: string, route: string): string {
-  const parts = [prefix, mount, route]
-    .filter((s) => s && s.length > 0)
-    .map((s) => (s.startsWith("/") ? s : `/${s}`))
-    .join("");
-  return normaliseApiPath(parts);
-}
-
-/**
- * Match a route key ("METHOD /api/foo/:id") against a set, treating path
- * parameters (`:id`, `:userId`) as wildcards so that `/api/users/:id` in the
- * contract matches `/api/users/:userId` in code (and vice versa).
- */
-function routeMatches(key: string, candidates: Set<string>): boolean {
-  if (candidates.has(key)) return true;
-  const [method, path] = key.split(" ", 2);
-  if (!path) return false;
-  const pattern = new RegExp(
-    "^" + path.replace(/:\w+/g, ":[A-Za-z0-9_]+") + "$",
-  );
-  for (const candidate of candidates) {
-    const [cMethod, cPath] = candidate.split(" ", 2);
-    if (cMethod !== method || !cPath) continue;
-    if (pattern.test(cPath)) return true;
-    const reverse = new RegExp(
-      "^" + cPath.replace(/:\w+/g, ":[A-Za-z0-9_]+") + "$",
-    );
-    if (reverse.test(path)) return true;
-  }
-  return false;
-}
-
-interface ContractCompletenessResult {
-  /** Unique parent→child relationships extracted from Sequelize models. */
-  inferredRelationships: Array<{
-    parent: string;
-    child: string;
-    file: string;
-  }>;
-  /**
-   * Relationships where the scoped-list endpoint (GET /api/parents/:id/children)
-   * is absent from API_CONTRACTS.json AND no acceptable alternative exists.
-   * Only HARD FAIL cases — warnings are separated into `warnOnlyEndpoints`.
-   */
-  missingScopedEndpoints: Array<{
-    parent: string;
-    child: string;
-    expectedPath: string;
-    reason: string;
-  }>;
-  /**
-   * Relationships that look "missing" at first glance but are likely served
-   * via a /me/... or flat filtered endpoint pattern. Reported as WARN only
-   * and do NOT block report_done(pass).
-   */
-  warnOnlyEndpoints: Array<{
-    parent: string;
-    child: string;
-    expectedPath: string;
-    reason: string;
-  }>;
-  /**
-   * Human-readable findings lines ready to paste into an LLM system prompt or
-   * repair-log payload. Includes both HARD and WARN items, each labelled.
-   */
-  findings: string[];
-  /** True when only warnOnly items remain — does not block report_done. */
-  warnOnly: boolean;
-}
-
-/**
- * Audits the API contract against Sequelize models to catch "the contract
- * omits scoped endpoints the data model obviously requires" — e.g. Project
- * hasMany Task but no `GET /api/projects/:id/tasks` in API_CONTRACTS.json.
- *
- * auditApiRouteRegistration only checks consistency between the contract and
- * the implementation. When the contract itself under-specifies the domain,
- * both ends look "consistent" and the bug ships. This audit derives the
- * expected endpoint set from a stronger source of truth (the ORM models)
- * and surfaces the delta.
- *
- * Regex-based on purpose — AST adds a Sequelize-typed dependency surface and
- * the scaffold conventions are narrow enough that regex is precise.
- */
-async function auditContractCompleteness(
-  outputDir: string,
-): Promise<ContractCompletenessResult> {
-  const empty: ContractCompletenessResult = {
-    inferredRelationships: [],
-    missingScopedEndpoints: [],
-    warnOnlyEndpoints: [],
-    findings: [],
-    warnOnly: true,
-  };
-
-  if (!(await pathExistsUnderOutput(outputDir, "backend/package.json"))) {
-    return empty;
-  }
-  const modelsDir = "backend/src/models";
-  if (!(await pathExistsUnderOutput(outputDir, modelsDir))) return empty;
-
-  const modelFiles = (await listFiles(modelsDir, outputDir)).filter(
-    (f) => /\.(ts|js)$/.test(f) && !f.includes("node_modules"),
-  );
-
-  // ── 1. Extract Sequelize hasMany / belongsTo relationships ───────────────
-  // hasMany: `Parent.hasMany(Child[, opts])` — parent "1" → child "many"
-  // belongsTo: `Child.belongsTo(Parent[, opts])` — same relationship, other side
-  const hasManyRe =
-    /([A-Z][A-Za-z0-9_]*)\s*\.\s*hasMany\s*\(\s*([A-Z][A-Za-z0-9_]*)/g;
-  const belongsToRe =
-    /([A-Z][A-Za-z0-9_]*)\s*\.\s*belongsTo\s*\(\s*([A-Z][A-Za-z0-9_]*)/g;
-
-  const unique = new Map<
-    string,
-    { parent: string; child: string; file: string }
-  >();
-  for (const rel of modelFiles) {
-    const content = await fsRead(rel, outputDir);
-    if (
-      content.startsWith("FILE_NOT_FOUND") ||
-      content.startsWith("REJECTED")
-    ) {
-      continue;
-    }
-    let m: RegExpExecArray | null;
-    hasManyRe.lastIndex = 0;
-    while ((m = hasManyRe.exec(content)) !== null) {
-      const key = `${m[1]}->${m[2]}`;
-      if (!unique.has(key)) {
-        unique.set(key, { parent: m[1], child: m[2], file: rel });
-      }
-    }
-    belongsToRe.lastIndex = 0;
-    while ((m = belongsToRe.exec(content)) !== null) {
-      // m[1] = child, m[2] = parent
-      const key = `${m[2]}->${m[1]}`;
-      if (!unique.has(key)) {
-        unique.set(key, { parent: m[2], child: m[1], file: rel });
-      }
-    }
-  }
-
-  const relationships = [...unique.values()];
-  if (relationships.length === 0) {
-    return { ...empty, inferredRelationships: [] };
-  }
-
-  // ── 2. Load API_CONTRACTS.json ──────────────────────────────────────────
-  const contractRaw = await fsRead("API_CONTRACTS.json", outputDir);
-  if (
-    contractRaw.startsWith("FILE_NOT_FOUND") ||
-    contractRaw.startsWith("REJECTED")
-  ) {
-    return { ...empty, inferredRelationships: relationships };
-  }
-
-  let contracts: Array<{ method?: string; endpoint?: string }> = [];
-  try {
-    const parsed = JSON.parse(contractRaw);
-    if (Array.isArray(parsed)) {
-      contracts = parsed as Array<{ method?: string; endpoint?: string }>;
-    }
-  } catch {
-    return { ...empty, inferredRelationships: relationships };
-  }
-
-  const declaredSet = new Set<string>();
-  for (const c of contracts) {
-    if (typeof c.method !== "string" || typeof c.endpoint !== "string") {
-      continue;
-    }
-    declaredSet.add(
-      `${c.method.toUpperCase()} ${normaliseApiPath(c.endpoint)}`,
-    );
-  }
-
-  /**
-   * Find the plural path segment the contract uses for a model, by looking at
-   * its flat list endpoint. If the contract declares `GET /api/tasks`, the
-   * child plural for model "Task" is "tasks". Falls back to lowercased name + "s"
-   * only when no flat endpoint exists at all (so we still give LLM a hint).
-   */
-  const flatSegmentFor = (modelName: string): string | null => {
-    const modelLower = modelName.toLowerCase();
-    for (const c of contracts) {
-      if (c.method?.toUpperCase() !== "GET") continue;
-      if (!c.endpoint) continue;
-      const ep = normaliseApiPath(c.endpoint);
-      const match = ep.match(/^\/api\/([^/]+)$/);
-      if (!match) continue;
-      const segment = match[1].toLowerCase();
-      // Accept segment if it starts with the model's lowercase name (projects,
-      // tasks, users, etc.) — tolerant of pluralisation variance.
-      if (
-        segment === modelLower ||
-        segment === `${modelLower}s` ||
-        segment === `${modelLower}es` ||
-        segment === modelLower.replace(/y$/, "ies") ||
-        segment.startsWith(modelLower)
-      ) {
-        return match[1];
-      }
-    }
-    return null;
-  };
-
-  // ── 3. For each relationship, check scoped endpoint is declared ─────────
-  const hardMissing: ContractCompletenessResult["missingScopedEndpoints"] = [];
-  const warnOnly: ContractCompletenessResult["warnOnlyEndpoints"] = [];
-
-  for (const rel of relationships) {
-    const parentSegment = flatSegmentFor(rel.parent);
-    const childSegment = flatSegmentFor(rel.child);
-
-    // When the parent has no flat list endpoint, the scoped endpoint is
-    // ambiguous — downgrade to WARN rather than blocking the build.
-    if (!parentSegment || !childSegment) {
-      warnOnly.push({
-        parent: rel.parent,
-        child: rel.child,
-        expectedPath: `GET /api/{${rel.parent.toLowerCase()}s}/:id/{${rel.child.toLowerCase()}s}`,
-        reason: `Model relationship ${rel.parent}.hasMany(${rel.child}) found in ${rel.file}, but ${!parentSegment ? "parent" : "child"} has no flat /api list endpoint to derive the plural segment from. Consider adding a filtered endpoint or a /me/${rel.child.toLowerCase()}s pattern.`,
+    const failedSuites = suiteResults
+      .filter((suite) => suite.pass !== true)
+      .map((suite) => {
+        const name = String(suite.suite ?? "unknown");
+        const output =
+          typeof suite.output === "string" && suite.output.trim()
+            ? `: ${suite.output.slice(0, 300)}`
+            : "";
+        return `${name}${output}`;
       });
-      continue;
-    }
-
-    const expectedPattern = new RegExp(
-      `^/api/${parentSegment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/:\\w+/${childSegment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-    );
-    const hasScoped = [...declaredSet].some((key) => {
-      if (!key.startsWith("GET ")) return false;
-      return expectedPattern.test(key.slice(4));
+    const summaryLines = suiteResults.map((suite) => {
+      const name = String(suite.suite ?? "unknown");
+      const status = suite.pass === true ? "pass" : "fail";
+      const skipped = suite.skipped === true ? " (skipped)" : "";
+      return `${name}: ${status}${skipped}`;
     });
-
-    if (hasScoped) continue;
-
-    // Check for acceptable /me/<child> pattern (e.g. GET /api/users/me/interests).
-    // Apps frequently serve user-owned resources via /me/... instead of a full
-    // scoped path — both are valid designs; treat /me pattern as satisfying the
-    // completeness requirement.
-    const childLower = childSegment.toLowerCase();
-    const meAlternatives = [
-      `/api/users/me/${childLower}`,
-      `/api/${parentSegment}/me/${childLower}`,
-      `/api/me/${childLower}`,
-    ];
-    const hasMeAlternative = meAlternatives.some((alt) =>
-      [...declaredSet].some(
-        (key) => key.startsWith("GET ") && key.slice(4) === alt,
-      ),
-    );
-    if (hasMeAlternative) continue;
-
-    // Also accept if the child has a flat filtered endpoint (e.g. GET /api/alerts
-    // filtered by auth user satisfies User.hasMany(Alert)).
-    const hasChildFlat = [...declaredSet].some(
-      (key) =>
-        key.startsWith("GET ") &&
-        (key === `GET /api/${childLower}` ||
-          key === `GET /api/${childSegment}`),
-    );
-    if (hasChildFlat) {
-      // Flat child endpoint exists — likely filtered by auth. Downgrade to WARN.
-      warnOnly.push({
-        parent: rel.parent,
-        child: rel.child,
-        expectedPath: `GET /api/${parentSegment}/:id/${childSegment}`,
-        reason: `A flat GET /api/${childSegment} endpoint exists (auth-filtered pattern). If that endpoint already returns only the current user's ${rel.child} records, the scoped endpoint is redundant. Otherwise add it.`,
-      });
-      continue;
-    }
-
-    hardMissing.push({
-      parent: rel.parent,
-      child: rel.child,
-      expectedPath: `GET /api/${parentSegment}/:id/${childSegment}`,
-      reason: `Model relationship ${rel.parent}.hasMany(${rel.child}) implies this scoped-list endpoint, which is missing from API_CONTRACTS.json with no /me/... alternative.`,
-    });
-  }
-
-  const findings: string[] = [];
-  if (hardMissing.length > 0) {
-    findings.push(
-      "## Contract completeness: missing scoped-list endpoints [HARD FAIL — implement these]",
-    );
-    for (const m of hardMissing) {
-      findings.push(`- ${m.expectedPath}`);
-      findings.push(`  reason: ${m.reason}`);
-    }
-  }
-  if (warnOnly.length > 0) {
-    findings.push(
-      "## Contract completeness: advisory endpoints [WARN only — review but do not block]",
-    );
-    for (const w of warnOnly) {
-      findings.push(`- ${w.expectedPath} (advisory)`);
-      findings.push(`  note: ${w.reason}`);
-    }
-  }
-
   return {
-    inferredRelationships: relationships,
-    missingScopedEndpoints: hardMissing,
-    warnOnlyEndpoints: warnOnly,
-    findings,
-    warnOnly: hardMissing.length === 0,
-  };
-}
-
-/**
- * Programmatically append stub contract entries for scoped-list endpoints
- * that `auditContractCompleteness` flagged as missing.
- *
- * Feeding these into `API_CONTRACTS.json` BEFORE the backend worker phase
- * means downstream codegen sees a complete contract and implements the
- * missing endpoints naturally — instead of the LLM reading "you forgot X"
- * during the late integration loop and potentially stalling on it.
- *
- * Idempotent: skips entries whose `METHOD /path` already exists, and skips
- * entries whose `expectedPath` still contains `{...}` placeholders (meaning
- * the audit couldn't resolve a plural segment and it's not safe to synthesize).
- */
-async function autoAppendMissingScopedEndpoints(
-  outputDir: string,
-  missing: ContractCompletenessResult["missingScopedEndpoints"],
-): Promise<{ added: string[]; skipped: string[] }> {
-  const added: string[] = [];
-  const skipped: string[] = [];
-  if (missing.length === 0) return { added, skipped };
-
-  const contractPath = "API_CONTRACTS.json";
-  const raw = await fsRead(contractPath, outputDir);
-  if (raw.startsWith("FILE_NOT_FOUND") || raw.startsWith("REJECTED")) {
-    return { added, skipped: missing.map((m) => m.expectedPath) };
-  }
-
-  let parsed: Array<Record<string, unknown>>;
-  try {
-    const json = JSON.parse(raw);
-    if (!Array.isArray(json)) {
-      return { added, skipped: missing.map((m) => m.expectedPath) };
-    }
-    parsed = json as Array<Record<string, unknown>>;
+      parsed: true,
+      pass: data.pass === true,
+      summary:
+        summaryLines.length > 0
+          ? summaryLines.join("\n")
+          : `validation suite pass=${data.pass === true}`,
+      passedSuites,
+      failedSuites,
+    };
   } catch {
-    return { added, skipped: missing.map((m) => m.expectedPath) };
+    return {
+      parsed: false,
+      pass: false,
+      summary: result.slice(0, 1000),
+      passedSuites: [],
+      failedSuites: [],
+    };
   }
-
-  const existing = new Set<string>();
-  for (const c of parsed) {
-    if (typeof c.method === "string" && typeof c.endpoint === "string") {
-      existing.add(`${c.method.toUpperCase()} ${normaliseApiPath(c.endpoint)}`);
-    }
-  }
-
-  for (const m of missing) {
-    const [methodRaw, pathRaw] = m.expectedPath.split(" ", 2);
-    if (!methodRaw || !pathRaw) {
-      skipped.push(m.expectedPath);
-      continue;
-    }
-    // Skip unresolved placeholder paths like "GET /api/{users}/:id/{tasks}".
-    if (pathRaw.includes("{") || pathRaw.includes("}")) {
-      skipped.push(
-        `${m.expectedPath} (unresolved plural — fix flat endpoints first)`,
-      );
-      continue;
-    }
-    const method = methodRaw.toUpperCase();
-    const normPath = normaliseApiPath(pathRaw);
-    if (existing.has(`${method} ${normPath}`)) {
-      skipped.push(`${m.expectedPath} (already present)`);
-      continue;
-    }
-    const segMatch = normPath.match(/^\/api\/([^/]+)\/:\w+\/([^/]+)$/);
-    const parentSeg = segMatch?.[1] ?? m.parent.toLowerCase();
-    const childSeg = segMatch?.[2] ?? m.child.toLowerCase();
-    parsed.push({
-      service: parentSeg,
-      endpoint: normPath,
-      method,
-      requestSchema:
-        "params: { id: string }; query?: { limit?: number; offset?: number }",
-      responseSchema: `${m.child}Dto[]`,
-      auth: "bearer",
-      description: `List all ${childSeg} belonging to the ${m.parent.toLowerCase()} identified by :id.`,
-    });
-    existing.add(`${method} ${normPath}`);
-    added.push(`${method} ${normPath}`);
-  }
-
-  if (added.length === 0) return { added, skipped };
-
-  // Re-assign sequential ids so the contract file stays consistent with the
-  // pattern `API-NNN` that `generateApiContracts` establishes.
-  const withIds = parsed.map((item, i) => ({
-    ...item,
-    id: `API-${String(i + 1).padStart(3, "0")}`,
-  }));
-  await fsWrite(contractPath, JSON.stringify(withIds, null, 2), outputDir);
-  return { added, skipped };
 }
 
-export interface RouteAutoRepairResult {
-  appliedAny: boolean;
-  wired: string[];
-  skippedWires: Array<{ exportName: string; reason: string }>;
+function isIntegrationMutationTool(name: string): boolean {
+  return (
+    name === "write_file" ||
+    name === "apply_patch" ||
+    name === "delete_file" ||
+    name === "move_file"
+  );
 }
 
-/**
- * Deterministic preflight repair: for every `*.routes.ts` whose
- * `register<X>Routes` export is not called in
- * `backend/src/api/modules/index.ts`, append the matching `import` + call
- * to the aggregator. Caller MUST re-run `auditApiRouteRegistration` after
- * any successful repair so downstream telemetry + system-prompt blocks
- * reflect the post-repair state.
- *
- * An earlier version also rewrote the apiRouter prefix when contracts
- * used `/api/vN` but `index.ts` used `/api`. That codemod was removed
- * after the replay harness revealed that most real backends inject the
- * `/v1/...` segment via a SUB-router prefix
- * (`new Router({ prefix: "/v1/foo" })`) inside the routes file —
- * bumping the apiRouter prefix to `/api/v1` would have produced
- * double-versioned paths like `/api/v1/v1/foo`. The audit parser was
- * fixed instead to recognize sub-router prefixes, which addresses the
- * same symptom (phantom "missing contract" findings) without the
- * regression risk.
- */
-export async function autoRepairRouteRegistration(
-  outputDir: string,
-  audit: RouteRegistrationAudit,
-): Promise<RouteAutoRepairResult> {
-  const indexPath = "backend/src/api/modules/index.ts";
-  const indexRaw = await fsRead(indexPath, outputDir);
-  if (
-    indexRaw.startsWith("FILE_NOT_FOUND") ||
-    indexRaw.startsWith("REJECTED")
-  ) {
-    return { appliedAny: false, wired: [], skippedWires: [] };
+function getIntegrationMutationPath(
+  name: string,
+  args: Record<string, unknown>,
+): string {
+  if (name === "move_file") {
+    return `${String(args.from ?? "")}->${String(args.to ?? "")}`;
   }
+  return String(args.path ?? "");
+}
 
-  const toWire = audit.implementedModules
-    .filter((m) => !m.isRegistered && m.primaryExportName !== null)
-    .map((m) => ({
-      exportName: m.primaryExportName as string,
-      importPath: computeRelativeImportPath(indexPath, m.file),
-    }));
-  if (toWire.length === 0) {
-    return { appliedAny: false, wired: [], skippedWires: [] };
-  }
-
-  const r = wireRegistrationsIntoIndex(indexRaw, toWire);
-  if (r.wired.length === 0) {
-    return { appliedAny: false, wired: [], skippedWires: r.skipped };
-  }
-  await fsWrite(indexPath, r.content, outputDir);
-  return { appliedAny: true, wired: r.wired, skippedWires: r.skipped };
+function isForbiddenIntegrationValidationHelperPath(pathLike: string): boolean {
+  return /(^|\/)(verify-final|final-check|validation-check)\.(ts|tsx|js|jsx)$/i.test(
+    pathLike.replace(/\\/g, "/"),
+  );
 }
 
 /**
@@ -7875,7 +4997,7 @@ async function integrationVerifyAndFix(
   const label = "[Supervisor] IntegrationVerifyFix";
 
   console.log(
-    `${label}: starting agentic loop (no fixed iteration cap; one context compression on overflow)...`,
+    `${label}: starting agentic loop (max ${readIntegrationVerifyFixMaxIterations()} iterations; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -7962,7 +5084,9 @@ async function integrationVerifyAndFix(
   // implementations" and wedging the verify-fix worker in a stagnation loop.
   // The audit also produces `pendingRepairTasks` for the worker to consume
   // as deterministic instructions (CODEGEN_HARDENING_PLAN.md §7.2).
-  let coverageResult: Awaited<ReturnType<typeof runContractUsageCoverage>> | null = null;
+  let coverageResult: Awaited<
+    ReturnType<typeof runContractUsageCoverage>
+  > | null = null;
   try {
     coverageResult = await runContractUsageCoverage({
       outputDir: state.outputDir,
@@ -8451,12 +5575,14 @@ async function integrationVerifyAndFix(
     "- Registration closure is mandatory: treat missing registrations in `frontend/src/router.tsx`, `backend/src/api/modules/index.ts`, and `backend/src/app.ts` as top-priority integration defects.",
     "- Do not stop after making pages/controllers/middlewares exist on disk; they must be wired into the actual router/module/app entrypoints.",
     "- When a shared module imports a named route registrar or app helper, verify the source file exports that exact symbol; import/export name mismatches are runtime blockers.",
-    "- **Dangling import protocol** — when the route audit reports `index.ts imports \"registerXRoutes\" but no routes.ts defines that export`, follow this exact 3-step procedure:",
+    '- **Dangling import protocol** — when the route audit reports `index.ts imports "registerXRoutes" but no routes.ts defines that export`, follow this exact 3-step procedure:',
     "    1. Read the actual routes.ts file for that module (e.g. `backend/src/api/modules/users/users.routes.ts`) to find its real export name.",
     "    2. Choose ONE of: (a) rename the `export function register*Routes` in routes.ts to match what index.ts expects, OR (b) fix the import line in index.ts to match the actual export name in routes.ts.",
     "    3. Never add a new import to index.ts for a registrar function unless you simultaneously verify OR create that exact export name in the corresponding routes.ts.",
     "- **Component prop contract (P0 HARD FAIL)**: TypeScript error TS2322 of the form \"Property 'X' does not exist on type '...ComponentProps'. Did you mean 'Y'?\" is a P0 HARD FAIL. Read the component's Props type definition (see 'Component Interface Reference' block in the user message), use the CORRECT field name shown there, and DO NOT pass undeclared props. These errors block report_done(pass) exactly like dangling route imports.",
     "- **Stale validation rule (ENFORCED)**: After ANY write_file or mutating bash command ALL 4 scoped validation results become stale. You MUST re-run the FULL 4-command validation sequence (frontend_tsc → frontend_build → backend_tsc → backend_smoke) before calling report_done(pass). Calling report_done(pass) with stale validation will be REJECTED by the system.",
+    "- If `run_validation_suite` returns `pass=true`, STOP immediately and call `report_done(status='pass')`. Do NOT write, patch, delete, move, or create verification helper files after a passing validation suite.",
+    "- Never create source files named `verify-final.ts`, `final-check.ts`, or `validation-check.ts`; use `run_validation_suite` or scoped bash validation instead.",
     "- Run verification ONLY inside `frontend/` and `backend/`. Do not use root-level `npx tsc` against the whole generated-code tree in this phase.",
     "- Do NOT call `report_done(status='pass')` while dependency audit issues remain unresolved.",
     "- Do NOT call `report_done(status='pass')` while the 'Backend route registration audit' block lists unregistered modules, dangling register*Routes imports, or API_CONTRACTS endpoints with no matching implementation. Fix each entry (register, implement, or remove) before finishing.",
@@ -8482,8 +5608,7 @@ async function integrationVerifyAndFix(
   let coverageBlock = "";
   if (coverageResult) {
     const { totals, pruned, pendingRepairTasks } = coverageResult;
-    const noiseFree =
-      pruned.length === 0 && pendingRepairTasks.length === 0;
+    const noiseFree = pruned.length === 0 && pendingRepairTasks.length === 0;
     if (!noiseFree) {
       const lines: string[] = ["", "## Contract usage coverage"];
       lines.push(
@@ -8498,7 +5623,9 @@ async function integrationVerifyAndFix(
           lines.push(`  - PRUNED: ${p.method} ${p.endpoint}`);
         }
         if (pruned.length > 12) {
-          lines.push(`  - … (+${pruned.length - 12} more, full list in .ralph/contract-usage-coverage.json)`);
+          lines.push(
+            `  - … (+${pruned.length - 12} more, full list in .ralph/contract-usage-coverage.json)`,
+          );
         }
       }
       if (pendingRepairTasks.length > 0) {
@@ -8517,7 +5644,9 @@ async function integrationVerifyAndFix(
             `**Case (1) Frontend wiring missing — execute these (${wiring.length}):**`,
           );
           for (const t of wiring.slice(0, 10)) {
-            lines.push(`  - [frontend] ${t.method} ${t.endpoint} — ${t.directive}`);
+            lines.push(
+              `  - [frontend] ${t.method} ${t.endpoint} — ${t.directive}`,
+            );
           }
           if (wiring.length > 10) {
             lines.push(`  - … (+${wiring.length - 10} more)`);
@@ -8611,6 +5740,7 @@ async function integrationVerifyAndFix(
   let totalCostUsd = 0;
   let contextCompressionUsed = false;
   const integrationReasoningOptions = buildIntegrationReasoningOptions();
+  const maxIterations = readIntegrationVerifyFixMaxIterations();
   let validationStale = true;
   let lastMutationAt: string | null = null;
   let lastMutationReason = "initial integration review";
@@ -8846,6 +5976,20 @@ async function integrationVerifyAndFix(
     );
   }
 
+  function markAllScopedValidationsFresh(reason: string): void {
+    const kinds: ScopedValidationKind[] = [];
+    if (hasFrontend) kinds.push("frontend_tsc", "frontend_build");
+    if (hasBackend) kinds.push("backend_tsc", "backend_smoke");
+    for (const kind of kinds) {
+      markScopedValidationSuccess(kind);
+    }
+    validationStale = false;
+    lastFullValidationAt = nowIso();
+    console.log(
+      `${label}: scoped validations fresh via ${reason} — frontend_tsc=${frontendTscOkAt ?? "skip"} frontend_build=${frontendBuildOkAt ?? "skip"} backend_tsc=${backendTscOkAt ?? "skip"} backend_smoke=${backendSmokeOkAt ?? "skip"}`,
+    );
+  }
+
   async function runFinalScopedValidationGates(): Promise<{
     pass: boolean;
     summary: string;
@@ -8918,8 +6062,7 @@ async function integrationVerifyAndFix(
 
     const pass = failures.length === 0;
     if (pass) {
-      validationStale = false;
-      lastFullValidationAt = nowIso();
+      markAllScopedValidationsFresh("final scoped validation gates");
     }
 
     console.log(
@@ -8973,11 +6116,24 @@ async function integrationVerifyAndFix(
     iterations++;
     console.log(`${label}: iteration ${iterations}`);
 
+    if (iterations > maxIterations) {
+      console.warn(
+        `${label}: reached max iterations (${maxIterations}); running final scoped validation before stopping.`,
+      );
+      const maxIterationGate = await runFinalScopedValidationGates();
+      finalStatus = maxIterationGate.pass ? "pass" : "fail";
+      finalSummary = [
+        `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS=${maxIterations}.`,
+        maxIterationGate.summary,
+      ].join("\n\n");
+      break;
+    }
+
     await compactMessagesIfNeeded();
 
     let resp;
     try {
-      resp = await callWithOrphanToolRetry(label, messages, modelChain, {
+      resp = await callVerifyFixLlm(label, messages, modelChain, {
         temperature: 0.2,
         max_tokens: 36000,
         tools: SUPERVISOR_VERIFY_TOOLS,
@@ -8987,7 +6143,9 @@ async function integrationVerifyAndFix(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isContextLengthError(msg) && (await compactMessagesIfNeeded(true))) {
-        console.warn(`${label}: context limit hit; compacted once and retrying.`);
+        console.warn(
+          `${label}: context limit hit; compacted once and retrying.`,
+        );
         continue;
       }
       console.error(`${label}: LLM call failed: ${msg}`);
@@ -9008,6 +6166,9 @@ async function integrationVerifyAndFix(
       role: "assistant",
       content: choice.message.content ?? "",
       tool_calls: choice.message.tool_calls,
+      ...(choice.message.reasoning_content
+        ? { reasoning_content: choice.message.reasoning_content }
+        : {}),
     });
 
     const toolCalls = choice.message.tool_calls ?? [];
@@ -9035,24 +6196,37 @@ async function integrationVerifyAndFix(
       if (tc.function.name === "report_done") {
         const reportedStatus = (args.status as "pass" | "fail") ?? "fail";
 
-        // Guard: reject report_done(pass) when validation results are stale.
-        // The agent MUST re-run all 4 scoped validation commands after any write_file
-        // before it is allowed to claim a passing integration.
         if (reportedStatus === "pass" && validationStale) {
-          const buildCmd =
-            pm === "yarn" ? "yarn run build" : pm === "npm" ? "npm run build" : "pnpm run build";
-          const rejectionMsg = [
-            "REJECTED: report_done(pass) is not allowed — validation results are STALE.",
-            `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
-            "You MUST re-run the FULL 4-command validation sequence after your last write_file:",
-            `  1. cd frontend && npx tsc -p tsconfig.app.json --pretty false 2>&1`,
-            `  2. cd frontend && ${buildCmd} 2>&1`,
-            `  3. cd backend && npx tsc --noEmit --pretty false 2>&1`,
-            `  4. cd backend && npx tsx --eval "(async()=>{const m=await import('./src/app.ts');const f=m.createApp??m.default?.createApp??m.default;if(typeof f!=='function')throw new Error('createApp missing');const a=await f();if(!a||typeof a.callback!=='function')throw new Error('not a Koa app');console.log('backend_smoke_ok');})()" 2>&1`,
-            "All 4 must succeed (exit 0) before you may call report_done(pass).",
-          ].join("\n");
           console.log(
-            `${label}: REJECTED report_done(pass) — stale validation (lastMutation=${lastMutationAt ?? "never"})`,
+            `${label}: report_done(pass) requested while stale — running system final validation instead of rejecting.`,
+          );
+          const autoGate = await runFinalScopedValidationGates();
+          if (autoGate.pass) {
+            finalStatus = "pass";
+            finalSummary = [
+              String(args.summary ?? "").trim(),
+              "Accepted after system final scoped validation:",
+              autoGate.summary,
+            ]
+              .filter(Boolean)
+              .join("\n\n");
+            doneSignaled = true;
+            messages.push({
+              role: "tool",
+              content: "acknowledged after system final validation",
+              tool_call_id: tc.id,
+              name: "report_done",
+            });
+            break;
+          }
+          const rejectionMsg = [
+            "REJECTED: report_done(pass) is not allowed — system final validation still fails.",
+            `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
+            autoGate.summary,
+            "Fix only the failing gate(s), then run run_validation_suite once. Do not create verification helper files.",
+          ].join("\n\n");
+          console.log(
+            `${label}: REJECTED report_done(pass) — system final validation failed.`,
           );
           messages.push({
             role: "tool",
@@ -9075,9 +6249,42 @@ async function integrationVerifyAndFix(
           tool_call_id: tc.id,
           name: "report_done",
         });
+        if (doneSignaled) break;
       } else {
         const command =
           tc.function.name === "bash" ? String(args.command ?? "") : "";
+        const mutationPath = getIntegrationMutationPath(tc.function.name, args);
+        if (
+          isIntegrationMutationTool(tc.function.name) &&
+          isForbiddenIntegrationValidationHelperPath(mutationPath)
+        ) {
+          const result =
+            "REJECTED: do not create or mutate validation helper source files. Use run_validation_suite or scoped bash validation instead.";
+          console.log(
+            `${label}: rejected validation helper mutation ${tc.function.name}:${mutationPath}`,
+          );
+          messages.push({
+            role: "tool",
+            content: result,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
+        if (!validationStale && isIntegrationMutationTool(tc.function.name)) {
+          const result =
+            "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
+          console.log(
+            `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
+          );
+          messages.push({
+            role: "tool",
+            content: result,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
         if (
           tc.function.name === "bash" &&
           isValidationLikeBashCommand(command) &&
@@ -9108,16 +6315,41 @@ async function integrationVerifyAndFix(
           args,
           command,
         );
-        if (tc.function.name === "write_file") {
+        if (tc.function.name === "run_validation_suite") {
+          const parsedSuite = parseValidationSuiteResult(result);
+          if (parsedSuite.parsed) {
+            for (const kind of parsedSuite.passedSuites) {
+              if (markScopedValidationSuccess(kind)) {
+                iterationValidationProgress = true;
+                iterationProgressReasons.push(`run_validation_suite:${kind}`);
+              }
+            }
+            if (parsedSuite.pass) {
+              markAllScopedValidationsFresh("run_validation_suite pass=true");
+              finalStatus = "pass";
+              finalSummary = [
+                "run_validation_suite passed; integration verification completed by system.",
+                parsedSuite.summary,
+              ].join("\n\n");
+              doneSignaled = true;
+            } else if (parsedSuite.failedSuites.length > 0) {
+              finalSummary = parsedSuite.failedSuites.join("\n");
+            }
+          }
+        } else if (
+          isIntegrationMutationTool(tc.function.name) &&
+          /^OK:/i.test(result)
+        ) {
           iterationMutated = true;
-          markValidationStale(`write_file:${String(args.path ?? "")}`);
+          markValidationStale(`${tc.function.name}:${mutationPath}`);
         } else if (
           tc.function.name === "bash" &&
           isSuccessfulSupervisorToolResult(result)
         ) {
-          const validationKind = detectScopedValidationKind(command);
-          if (validationKind) {
-            if (markScopedValidationSuccess(validationKind)) {
+          const validationKinds = detectScopedValidationKinds(command);
+          if (validationKinds.length > 0) {
+            for (const validationKind of validationKinds) {
+              if (!markScopedValidationSuccess(validationKind)) continue;
               iterationValidationProgress = true;
               iterationProgressReasons.push(
                 `scoped_validation:${validationKind}`,
@@ -9128,8 +6360,9 @@ async function integrationVerifyAndFix(
             markValidationStale(`mutating bash:${command.slice(0, 80)}`);
           }
         } else if (tc.function.name === "bash") {
-          const validationKind = detectScopedValidationKind(command);
-          if (validationKind) {
+          const validationKinds = detectScopedValidationKinds(command);
+          if (validationKinds.length > 0) {
+            for (const validationKind of validationKinds) {
             const trendReason = noteValidationIssueTrend(
               validationKind,
               result,
@@ -9137,6 +6370,7 @@ async function integrationVerifyAndFix(
             if (trendReason) {
               iterationValidationProgress = true;
               iterationProgressReasons.push(trendReason);
+              }
             }
           } else if (isMutatingSupervisorBashCommand(command)) {
             iterationMutated = true;
@@ -9147,7 +6381,7 @@ async function integrationVerifyAndFix(
           !iterationMutated &&
           fingerprint &&
           tc.function.name !== "report_done" &&
-          tc.function.name !== "write_file"
+          !isIntegrationMutationTool(tc.function.name)
         ) {
           iterationReadOnlyFingerprints.push(fingerprint);
         }
@@ -9160,6 +6394,7 @@ async function integrationVerifyAndFix(
           tool_call_id: tc.id,
           name: tc.function.name,
         });
+        if (doneSignaled) break;
       }
     }
 
@@ -9502,7 +6737,10 @@ async function integrationVerifyAndFix(
         getRepairEmitter(state.sessionId)({
           stage: "integration-gate",
           event: "human_decision_received",
-          details: { decisionId: humanDecision, triggeredAtIteration: iterations },
+          details: {
+            decisionId: humanDecision,
+            triggeredAtIteration: iterations,
+          },
         });
 
         if (humanDecision === "abort" || humanDecision === "timeout") {
@@ -9516,7 +6754,9 @@ async function integrationVerifyAndFix(
           ]
             .filter(Boolean)
             .join("\n");
-          console.warn(`${label}: aborting on human decision (${humanDecision}).`);
+          console.warn(
+            `${label}: aborting on human decision (${humanDecision}).`,
+          );
           break;
         }
 
@@ -9691,7 +6931,9 @@ async function integrationVerifyAndFix(
       });
       if (!smoke.pass) {
         finalStatus = "fail";
-        const top = smoke.failures.slice(0, 6).map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
+        const top = smoke.failures
+          .slice(0, 6)
+          .map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
         finalSummary = [
           finalSummary,
           "Runtime smoke gate failed:",
@@ -9814,9 +7056,9 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     }
   };
 
-  const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as
-    | { tasks?: Array<{ instruction?: string }> }
-    | null;
+  const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as {
+    tasks?: Array<{ instruction?: string }>;
+  } | null;
   if (tsc?.tasks && Array.isArray(tsc.tasks)) {
     out.tscErrors = tsc.tasks
       .map((t) => (typeof t?.instruction === "string" ? t.instruction : null))
@@ -9824,27 +7066,30 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
       .slice(0, 10);
   }
 
-  const coverage = (await tryReadJson(".ralph/contract-usage-coverage.json")) as
-    | {
+  const coverage = (await tryReadJson(
+    ".ralph/contract-usage-coverage.json",
+  )) as {
         pendingRepairTasks?: Array<{
           method?: string;
           endpoint?: string;
           directive?: string;
         }>;
-      }
-    | null;
-  if (coverage?.pendingRepairTasks && Array.isArray(coverage.pendingRepairTasks)) {
+  } | null;
+  if (
+    coverage?.pendingRepairTasks &&
+    Array.isArray(coverage.pendingRepairTasks)
+  ) {
     out.contractCoverageGaps = coverage.pendingRepairTasks
       .slice(0, 10)
-      .map((t) => `${t.method ?? "?"} ${t.endpoint ?? "?"} — ${t.directive ?? ""}`);
+      .map(
+        (t) => `${t.method ?? "?"} ${t.endpoint ?? "?"} — ${t.directive ?? ""}`,
+      );
   }
 
-  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as
-    | {
+  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as {
         unregisteredModules?: string[];
         unresolvedRegistrations?: string[];
-      }
-    | null;
+  } | null;
   if (routeAudit) {
     const lines: string[] = [];
     for (const m of routeAudit.unregisteredModules ?? []) {
@@ -9856,8 +7101,7 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
   }
 
-  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as
-    | {
+  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
         tasks?: Record<
           string,
           {
@@ -9865,8 +7109,7 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
             gaps?: Array<{ modelPath?: string; modelName?: string }>;
           }
         >;
-      }
-    | null;
+  } | null;
   if (migration?.tasks) {
     const lines: string[] = [];
     for (const entry of Object.values(migration.tasks)) {
@@ -9950,10 +7193,7 @@ export function createSupervisorGraph() {
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
     .addEdge("generate_api_contracts", "tdd_test_writer")
-    .addConditionalEdges(
-      "tdd_test_writer",
-      dispatchBackendAndTestWorkers,
-    )
+    .addConditionalEdges("tdd_test_writer", dispatchBackendAndTestWorkers)
     .addEdge("be_worker", "be_phase_verify")
     .addEdge("be_phase_verify", "extract_real_contracts")
     .addEdge("extract_real_contracts", "fe_dispatch_gate")

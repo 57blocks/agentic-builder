@@ -1,0 +1,436 @@
+{
+  "sessionId": "ddf3ba81-9aea-44ab-b1d2-057f4c1be7a7",
+  "savedAt": "2026-05-17T15:19:14.879Z",
+  "completedTaskIds": [
+    "T-001",
+    "T-002",
+    "T-003",
+    "T-004",
+    "T-005",
+    "T-006",
+    "T-007",
+    "T-014",
+    "T-015",
+    "T-017",
+    "T-018",
+    "T-019",
+    "T-020",
+    "T-023",
+    "T-024",
+    "T-025",
+    "T-008",
+    "T-009",
+    "T-010",
+    "T-011",
+    "T-012",
+    "T-013",
+    "T-016",
+    "T-021",
+    "T-022"
+  ],
+  "failedTaskIds": [],
+  "taskResults": {
+    "T-001": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/models/User.ts",
+        "backend/src/models/Session.ts",
+        "backend/src/models/AccessRequest.ts",
+        "backend/src/models/Stablecoin.ts",
+        "backend/src/models/Variable.ts",
+        "backend/src/models/CoinVariableValue.ts",
+        "backend/src/models/ScoreSnapshot.ts",
+        "backend/src/models/SourceFeed.ts",
+        "backend/src/models/IngestionRun.ts",
+        "backend/src/models/ReserveReview.ts",
+        "backend/src/models/ReserveReviewEvent.ts",
+        "backend/src/models/Feedback.ts",
+        "backend/src/models/AuditLog.ts",
+        "backend/src/models/JobRun.ts",
+        "backend/src/models/WeightsAuditLog.ts",
+        "backend/src/models/index.ts",
+        "backend/src/database/migrations/001-create-tables.ts",
+        "backend/src/database/migrations/002-create-hypertables.ts",
+        "backend/src/db.ts",
+        "backend/src/models/index.test.ts",
+        "backend/src/api/validation/schemas.ts",
+        "backend/package.json",
+        "backend/vitest.config.ts",
+        "backend/src/lib/cli-audit.ts"
+      ]
+    },
+    "T-002": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/api/client.ts",
+        "frontend/src/api/client.test.ts",
+        "shared/types.ts",
+        "frontend/src/api/types.ts",
+        "frontend/src/api/endpoints.ts",
+        "_meta/routes/api-contracts-client.json"
+      ]
+    },
+    "T-003": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/utils/jwt.ts",
+        "backend/src/services/emailService.ts",
+        "backend/src/services/auditService.ts",
+        "backend/src/middlewares/auth.ts",
+        "backend/src/middlewares/rbac.ts",
+        "backend/src/api/modules/auth/auth.controller.ts",
+        "backend/src/api/modules/auth/auth-magic.routes.ts",
+        "backend/src/api/modules/index.ts",
+        "backend/src/api/modules/coins/coins.controller.ts",
+        "backend/src/api/modules/coins/coins.routes.ts",
+        "backend/src/api/modules/reserve-reviews/reserve-reviews.controller.ts",
+        "backend/src/api/modules/reserve-reviews/reserve-reviews.routes.ts",
+        "backend/src/api/modules/admin/variables.controller.ts",
+        "backend/src/api/modules/admin/variables.routes.ts",
+        "backend/src/api/modules/admin/weights.controller.ts",
+        "backend/src/api/modules/admin/weights.routes.ts",
+        "backend/src/api/modules/admin/access-requests.controller.ts",
+        "backend/src/api/modules/admin/access-requests.routes.ts",
+        "backend/src/api/modules/admin/feedback.controller.ts",
+        "backend/src/api/modules/admin/feedback.routes.ts",
+        "backend/src/api/modules/admin/data-feeds.controller.ts",
+        "backend/src/api/modules/admin/data-feeds.routes.ts",
+        "backend/src/api/modules/feedback/feedback.controller.ts",
+        "backend/src/api/modules/feedback/feedback.routes.ts",
+        "backend/src/api/modules/admin/access-requests-public.controller.ts",
+        "backend/src/api/modules/auth/auth.routes.test.ts",
+        "backend/src/api/modules/coins/coins.routes.test.ts",
+        "_meta/routes/core-api.json",
+        "backend/src/api/modules/auth/auth.routes.ts"
+      ]
+    },
+    "T-004": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/externalApis/errors.ts",
+        "backend/src/services/externalApis/retry.ts",
+        "backend/src/services/externalApis/coinGeckoClient.ts",
+        "backend/src/services/externalApis/quotientClient.ts",
+        "backend/src/services/externalApis/xApiClient.ts",
+        "backend/src/services/externalApis/jinaClient.ts",
+        "backend/src/services/llmService.ts",
+        "backend/src/services/externalApis/openAiClient.ts",
+        "backend/src/services/externalApis/index.ts",
+        "backend/src/services/externalApis/coinGeckoClient.test.ts"
+      ]
+    },
+    "T-005": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/scoringEngine.test.ts",
+        "backend/src/services/scoringEngine.ts",
+        "backend/src/services/dataHealthService.ts",
+        "backend/src/services/ingestionOrchestrator.ts",
+        "backend/src/services/reserveAttestationPipeline.ts",
+        "backend/src/queue/inProcessQueue.ts",
+        "backend/src/workers/ingestionWorker.ts",
+        "backend/src/workers/scoringWorker.ts",
+        "backend/src/services/emailService.ts",
+        "backend/src/models/JobRun.ts",
+        "backend/src/models/ReserveReview.ts",
+        "backend/src/models/WeightsAuditLog.ts",
+        "backend/src/models/ScoreSnapshot.ts",
+        "_meta/routes/ingestion-scoring.json"
+      ]
+    },
+    "T-006": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/sseService.ts",
+        "backend/src/api/modules/ingestion/ingestion.controller.ts",
+        "backend/src/api/modules/ingestion/ingestion.routes.ts",
+        "backend/src/api/modules/jobs/jobs.controller.ts",
+        "backend/src/api/modules/jobs/jobs.routes.ts",
+        "backend/src/api/modules/jobs/jobs.routes.test.ts",
+        "backend/src/api/modules/index.ts",
+        "_meta/routes/ingestion-jobs.json"
+      ]
+    },
+    "T-007": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/scripts/forceScoringCycle.ts",
+        "backend/scripts/refetchReserveAttestation.ts",
+        "backend/scripts/overrideReserveValue.ts",
+        "backend/scripts/softDeleteStablecoin.ts",
+        "backend/scripts/verifyReserveApproval.ts",
+        "backend/scripts/forceScoringCycle.test.ts",
+        "backend/src/lib/cli-audit.ts"
+      ]
+    },
+    "T-014": {
+      "status": "completed_with_warnings",
+      "generatedFiles": [
+        "Dockerfile",
+        "docker-compose.prod.yml",
+        "docker/nginx.conf",
+        "docker/supervisord.conf",
+        "docker/entrypoint.sh",
+        "docker/wait-for-postgres.sh",
+        "deploy.sh",
+        "restore-db.sh",
+        "backend/src/database/init/001-extensions.sql",
+        "backend/src/database/init/002-timescale.sql",
+        "frontend/.env.example",
+        "docker/docker-compose.test.ts",
+        "docker/vitest.config.ts",
+        "docker-compose-new.yml",
+        "/docker-compose.yml",
+        ".\\docker-compose.yml",
+        ".\\/docker-compose.yml",
+        "docker-compose.yml"
+      ]
+    },
+    "T-015": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useAutoRefresh.ts",
+        "frontend/src/hooks/useAutoRefresh.test.ts",
+        "frontend/src/hooks/useCoins.ts",
+        "frontend/src/components/monitor/LiveIndicator.tsx",
+        "frontend/src/views/MonitorDashboard.tsx",
+        "frontend/src/router.tsx"
+      ]
+    },
+    "T-017": {
+      "status": "completed_with_warnings",
+      "generatedFiles": [
+        "backend/src/templates/scoringCycleComplete.ts",
+        "backend/src/templates/weightsChanged.ts",
+        "backend/src/services/emailService.ts",
+        "backend/src/api/modules/admin/weights.controller.ts",
+        "backend/src/services/emailService.test.ts",
+        "backend/src/templates/scoringCycleComplete.html",
+        "backend/src/templates/weightsChanged.html"
+      ]
+    },
+    "T-018": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/auditService.test.ts",
+        "backend/src/services/auditService.ts",
+        "backend/src/middlewares/auditMiddleware.ts",
+        "backend/src/api/modules/reserve-reviews/reserve-reviews.controller.ts",
+        "backend/src/api/modules/reserve-reviews/reserve-reviews.routes.ts",
+        "backend/src/api/modules/admin/weights.controller.ts",
+        "backend/src/api/modules/admin/access-requests.controller.ts",
+        "backend/src/api/modules/admin/weights.routes.ts",
+        "backend/src/app.ts",
+        "_meta/routes/audit-logging.json",
+        "backend/src/api/modules/feedback/feedback.controller.ts",
+        "backend/src/api/modules/admin/feedback.controller.ts",
+        "backend/src/api/modules/admin/feedback.routes.ts",
+        "backend/src/api/modules/admin/variables.controller.ts",
+        "backend/src/api/modules/admin/data-feeds.controller.ts",
+        "backend/src/api/modules/admin/data-feeds.routes.ts",
+        "backend/src/api/modules/admin/variables.routes.ts"
+      ]
+    },
+    "T-019": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/stalenessDetector.test.ts",
+        "backend/src/services/stalenessDetector.ts",
+        "backend/src/services/dataHealthService.ts",
+        "backend/src/services/scoringEngine.ts"
+      ]
+    },
+    "T-020": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/services/historyValidator.ts",
+        "backend/src/services/historyValidator.test.ts",
+        "backend/src/services/scoringEngine.ts",
+        "backend/src/services/ingestionOrchestrator.ts"
+      ]
+    },
+    "T-023": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/middlewares/performanceMiddleware.test.ts",
+        "backend/src/middlewares/performanceMiddleware.ts",
+        "frontend/src/hooks/usePerformanceMonitor.ts",
+        "backend/src/api/modules/coins/coins.controller.ts",
+        "backend/src/api/modules/coins/coins.routes.ts",
+        "backend/src/app.ts",
+        "frontend/src/views/MonitorDashboard.tsx"
+      ]
+    },
+    "T-024": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/database/migrations/003-add-stablecoin-source-url.ts",
+        "backend/src/models/Stablecoin.ts",
+        "backend/src/api/modules/admin/stablecoins.controller.ts",
+        "backend/src/api/modules/admin/stablecoins.routes.ts",
+        "backend/src/api/modules/index.ts",
+        "backend/src/api/modules/admin/stablecoins.routes.test.ts",
+        "_meta/routes/admin-stablecoins.json"
+      ]
+    },
+    "T-025": {
+      "status": "completed",
+      "generatedFiles": [
+        "backend/src/api/modules/admin/weights.routes.test.ts",
+        "backend/src/api/modules/admin/weights.controller.ts",
+        "_meta/routes/weights-management.json",
+        "backend/src/api/modules/admin/weights.routes.ts"
+      ]
+    },
+    "T-008": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/stores/authStore.ts",
+        "frontend/src/hooks/useAuth.ts",
+        "frontend/src/providers/AppProviders.tsx",
+        "frontend/src/components/auth/AuthGuard.tsx",
+        "frontend/src/components/auth/RoleGuard.tsx",
+        "frontend/src/components/layout/Header.tsx",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/layout/AppLayout.tsx",
+        "frontend/src/components/layout/AppLayout.test.tsx",
+        "frontend/src/views/LoginPage.tsx",
+        "frontend/src/views/ForbiddenPage.tsx",
+        "frontend/src/views/AccessRequestPage.tsx",
+        "frontend/src/views/ReserveReviewPage.tsx",
+        "frontend/src/views/ReserveReviewDetailPage.tsx",
+        "frontend/src/views/AdminVariablesPage.tsx",
+        "frontend/src/views/AdminWeightsPage.tsx",
+        "frontend/src/views/AdminAccessRequestsPage.tsx",
+        "frontend/src/views/AdminFeedbackPage.tsx",
+        "frontend/src/views/AdminDataFeedsPage.tsx",
+        "frontend/src/views/StablecoinDetailPage.tsx",
+        "frontend/src/router.tsx",
+        "frontend/src/components/layout/AppLayoutShell.tsx",
+        "frontend/src/providers/AuthProvider.tsx",
+        "frontend/src/App.tsx"
+      ]
+    },
+    "T-009": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/components/auth/MagicLinkForm.tsx",
+        "frontend/src/components/auth/AccessRequestForm.tsx",
+        "frontend/src/views/MagicLoginVerifyPage.tsx",
+        "frontend/src/views/LoginPage.tsx",
+        "frontend/src/views/AccessRequestPage.tsx",
+        "frontend/src/router.tsx",
+        "frontend/src/views/LoginPage.test.tsx"
+      ]
+    },
+    "T-010": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/components/monitor/CoinTable.tsx",
+        "frontend/src/views/MonitorDashboard.tsx",
+        "frontend/src/hooks/useCoinDetail.ts",
+        "frontend/src/components/monitor/ScoreGauge.tsx",
+        "frontend/src/components/monitor/VariableBreakdown.tsx",
+        "frontend/src/components/monitor/HistoryChart.tsx",
+        "frontend/src/components/monitor/CoinDetailTabs.tsx",
+        "frontend/src/views/StablecoinDetailPage.tsx",
+        "frontend/src/views/MonitorDashboard.test.tsx",
+        "frontend/src/hooks/useCoins.ts"
+      ]
+    },
+    "T-011": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useReserveReviews.ts",
+        "frontend/src/hooks/useReserveReview.ts",
+        "frontend/src/components/reserve/ReviewTable.tsx",
+        "frontend/src/components/reserve/ReviewActions.tsx",
+        "frontend/src/components/reserve/ReviewForm.tsx",
+        "frontend/src/components/reserve/AuditLogTable.tsx",
+        "frontend/src/views/ReserveReviewPage.tsx",
+        "frontend/src/views/ReserveReviewDetailPage.tsx",
+        "frontend/src/views/ReserveReviewQueue.test.tsx",
+        "frontend/src/views/ReserveReviewQueue.tsx",
+        "frontend/src/views/ReserveReviewDetail.tsx",
+        "frontend/src/router.tsx"
+      ]
+    },
+    "T-012": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useAdminVariables.ts",
+        "frontend/src/hooks/useAdminWeights.ts",
+        "frontend/src/hooks/useAdminAccessRequests.ts",
+        "frontend/src/hooks/useAdminFeedback.ts",
+        "frontend/src/hooks/useAdminDataFeeds.ts",
+        "frontend/src/components/admin/VariableTable.tsx",
+        "frontend/src/components/admin/WeightEditor.tsx",
+        "frontend/src/components/admin/ScorePreview.tsx",
+        "frontend/src/components/admin/AccessRequestTable.tsx",
+        "frontend/src/components/admin/FeedbackList.tsx",
+        "frontend/src/components/admin/DataFeedTable.tsx",
+        "frontend/src/views/AdminVariablesPage.tsx",
+        "frontend/src/views/AdminWeightsPage.tsx",
+        "frontend/src/views/AdminAccessRequestsPage.tsx",
+        "frontend/src/views/AdminFeedbackPage.tsx",
+        "frontend/src/views/AdminDataFeedsPage.tsx",
+        "frontend/src/views/AdminWeights.test.tsx",
+        "frontend/src/views/AdminVariables.tsx",
+        "frontend/src/views/AdminWeights.tsx",
+        "frontend/src/views/AdminAccessRequests.tsx",
+        "frontend/src/views/AdminFeedback.tsx",
+        "frontend/src/views/AdminDataFeeds.tsx"
+      ]
+    },
+    "T-013": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useFeedback.ts",
+        "frontend/src/hooks/useProcessingStatus.ts",
+        "frontend/src/components/feedback/FeedbackModal.tsx",
+        "frontend/src/components/feedback/FeedbackButton.tsx",
+        "frontend/src/components/processing/ProcessingStageIndicator.tsx",
+        "frontend/src/views/ReserveProcessingPage.tsx",
+        "frontend/src/components/feedback/FeedbackModal.test.tsx",
+        "frontend/src/components/layout/Header.tsx",
+        "frontend/src/router.tsx"
+      ]
+    },
+    "T-016": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/stores/watchlistStore.ts",
+        "frontend/src/hooks/useWatchlist.ts",
+        "frontend/src/hooks/useWatchlist.test.ts",
+        "frontend/src/components/monitor/WatchlistManager.tsx",
+        "frontend/src/components/monitor/CustomViewModal.tsx",
+        "frontend/src/components/monitor/CoinTable.tsx",
+        "frontend/src/views/MonitorDashboard.tsx"
+      ]
+    },
+    "T-021": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/views/UnauthorizedPage.tsx",
+        "frontend/src/components/auth/ProtectedRoute.tsx",
+        "frontend/src/components/auth/AuthGuard.tsx",
+        "frontend/src/components/auth/RoleGuard.tsx",
+        "frontend/src/components/auth/ProtectedRoute.test.tsx",
+        "frontend/src/router.tsx"
+      ]
+    },
+    "T-022": {
+      "status": "completed",
+      "generatedFiles": [
+        "frontend/src/hooks/useWeightPreview.ts",
+        "frontend/src/hooks/useWeightPreview.test.ts",
+        "frontend/src/components/admin/WeightEditor.tsx",
+        "frontend/src/components/admin/ScorePreview.tsx",
+        "frontend/src/hooks/useAdminWeights.ts",
+        "frontend/src/views/AdminWeightsPage.tsx",
+        "frontend/src/views/AdminWeights.test.tsx",
+        "frontend/src/views/AdminWeights.tsx"
+      ]
+    }
+  }
+}

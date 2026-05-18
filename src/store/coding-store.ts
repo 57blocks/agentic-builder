@@ -174,7 +174,29 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   supervisorLogs: [],
   pendingHumanDecision: null,
 
-  setProjectId: (id) => set({ projectId: id }),
+  setProjectId: (id) => {
+    const current = get();
+    if (current.projectId && current.projectId !== id) {
+      _codingAbortController?.abort();
+      _codingAbortController = null;
+      set({
+        sessionId: null,
+        projectId: id,
+        status: "idle",
+        agents: [],
+        tasks: [],
+        selectedAgentId: null,
+        totalCostUsd: 0,
+        error: null,
+        integrationVerify: null,
+        e2eVerify: null,
+        supervisorLogs: [],
+        pendingHumanDecision: null,
+      });
+      return;
+    }
+    set({ projectId: id });
+  },
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
@@ -1198,10 +1220,33 @@ function handleCodingEvent(
   }
 
   // Handle repair_event from the supervisor's self-heal channel.
-  // Currently we only surface the human_decision_needed sub-event; all other
-  // repair events are silently dropped (they go to .ralph/repair-log.jsonl).
   if (type === "repair_event") {
     const repairEvent = payload.data?.event as string | undefined;
+
+    // Real-time file read/write activity — update the task's fileActivities list.
+    if (repairEvent === "file_activity") {
+      const taskId = payload.data?.taskId as string | undefined;
+      const details = payload.data?.details as Record<string, unknown> | undefined;
+      if (taskId && details) {
+        const tasks = get().tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          const entry = {
+            operation: details.operation as "read" | "write",
+            path: String(details.path ?? ""),
+            contentPreview: details.contentPreview as string | undefined,
+            contentLength: details.contentLength as number | undefined,
+            timestamp: new Date().toISOString(),
+          };
+          return {
+            ...t,
+            fileActivities: [...(t.fileActivities ?? []), entry],
+          };
+        });
+        set({ tasks });
+      }
+      return;
+    }
+
     if (repairEvent === "human_decision_needed") {
       const details = payload.data?.details as Record<string, unknown> | undefined;
       const sessionId = payload.sessionId ?? get().sessionId;

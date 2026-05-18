@@ -25,7 +25,7 @@ export function resolveBackendPort(): number {
 
 /** Canonical `VITE_API_BASE_URL` for a given backend port. */
 export function buildFrontendApiBaseUrl(backendPort: number): string {
-  return `http://localhost:${backendPort}/api`;
+  return `http://localhost:${backendPort}`;
 }
 
 /** Prefer request body, then Agentic Builder server env (e.g. .env.local). */
@@ -138,7 +138,10 @@ export function upsertBackendPrivyAppIdMirror(
 export function resolvePrivyAppIdMirrorFromFilledResources(
   filledResources: Array<{ envKey: string; value?: string | null }>,
 ): string | null {
-  for (const key of ["VITE_PRIVY_APP_ID", "NEXT_PUBLIC_PRIVY_APP_ID"] as const) {
+  for (const key of [
+    "VITE_PRIVY_APP_ID",
+    "NEXT_PUBLIC_PRIVY_APP_ID",
+  ] as const) {
     const r = filledResources.find((x) => x.envKey === key);
     const v = (r?.value ?? "").trim();
     if (v.length > 0) return v;

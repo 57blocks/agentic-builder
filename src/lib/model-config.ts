@@ -43,11 +43,21 @@ const OPENROUTER_MODEL_CONFIG = {
   // ── Preparation phase ──────────────────────────────────────────────────────
 
   intent: "deepseek/deepseek-v4-flash",
+  /** Skill trigger evaluator. Tiny classification task (YES <quote> | NO)
+   *  on a 12 KB haystack. Reliability matters more than depth — flash
+   *  models occasionally return empty content and tank the eval; mini
+   *  models can miss edge cases. gpt-5.4-mini is the sweet spot. */
+  skillTrigger: "openai/gpt-5.4-mini",
   prd: "deepseek/deepseek-v4-pro",
   prdInteractionImage: "alibaba/wan-2.6",
   prdSpecExtract: "openai/gpt-5.4",
   prdRefine: "openai/gpt-5.4",
   trd: "openai/gpt-5.4-mini",
+  /** TRD reviewer — INTENTIONALLY DIFFERENT model from `trd` writer so the
+   *  reviewer can catch hallucinations the writer wouldn't self-detect.
+   *  Defaults to Claude Sonnet; override via env if a stronger model is
+   *  preferred. */
+  trdReviewer: "claude-sonnet-4",
   sysdesign: "gpt-4o",
   implguide: "gpt-4o",
   design: "openai/gpt-5.4",
@@ -112,11 +122,15 @@ const OPENROUTER_MODEL_CONFIG = {
 
 export const DEEPSEEK_MODEL_CONFIG = {
   intent: DEEPSEEK_DIRECT_MODEL,
+  skillTrigger: DEEPSEEK_DIRECT_MODEL,
   prd: DEEPSEEK_DIRECT_MODEL,
   prdInteractionImage: DEEPSEEK_DIRECT_MODEL,
   prdSpecExtract: DEEPSEEK_DIRECT_MODEL,
   prdRefine: DEEPSEEK_DIRECT_MODEL,
   trd: DEEPSEEK_DIRECT_MODEL,
+  // Reviewer intentionally uses a non-DeepSeek model — cross-vendor review.
+  // Falls back to DEEPSEEK_DIRECT_MODEL if `claude-sonnet-4` is unreachable.
+  trdReviewer: "claude-sonnet-4",
   sysdesign: DEEPSEEK_DIRECT_MODEL,
   implguide: DEEPSEEK_DIRECT_MODEL,
   design: DEEPSEEK_DIRECT_MODEL,
