@@ -283,10 +283,14 @@ export class PipelineEngine {
     }
 
     // ── Classify project complexity (lightweight LLM call, ~200 tokens) ──
+    // When a PRD already exists in this run (e.g. resume after pauseAfterPrd
+    // or imported PRD), pass it so the classifier honors any explicit
+    // `**Project Tier: X**` badge instead of re-classifying the brief alone.
     let classification: ProjectClassification | null = null;
     let tier: ProjectTier = "M";
     try {
-      classification = await classifyProject(run.featureBrief);
+      const existingPrd = run.steps.prd?.content ?? options.existingPrd ?? null;
+      classification = await classifyProject(run.featureBrief, existingPrd);
       tier = normalizeProjectTier(classification.tier);
       run.totalCostUsd += classification.costUsd;
 
@@ -573,6 +577,7 @@ export class PipelineEngine {
         run = await this.executeStep(run, "trd", () =>
           this.trdAgent.generateTRD(
             prdContent,
+            tier,
             undefined,
             run.sessionId,
             prdSpec,
@@ -950,6 +955,7 @@ export class PipelineEngine {
         parseError: taskBreakdownParseError,
         rawOutput: taskBreakdownRawOutput,
         droppedFromTruncation: taskBreakdownDroppedFromTruncation,
+        skillsTrace: taskBreakdownSkillsTrace,
       } = await buildTaskBreakdownFromDocuments({
         prd: prdBody,
         trd: trdBody || undefined,
@@ -1292,6 +1298,7 @@ export class PipelineEngine {
             : {}),
           phaseRequirementGate: phaseGateReport,
           ...(phaseRepairSummary ? { phaseRepair: phaseRepairSummary } : {}),
+          taskBreakdownSkillsTrace,
         },
       });
 

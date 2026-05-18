@@ -1,121 +1,126 @@
 version: 1
 rules:
-  - id: SCORE-RQ1
-    name: "Reserve Ratio normalization"
-    description: "Higher reserve ratio lowers risk; maps ratio to 0-100."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: MC-1
+    name: "Market capitalization normalization"
+    description: "Maps current market cap to a normalized contribution."
+    type: piecewise-linear
+    inputUnit: "usd"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0, to: 1000000, outputFrom: 0, outputTo: 20 }
+      - { from: 1000000, to: 1000000000, outputFrom: 20, outputTo: 80 }
+      - { from: 1000000000, to: 1000000000000, outputFrom: 80, outputTo: 100 }
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: MC-5
+    name: "7-day market cap volatility normalization"
+    description: "Normalizes 7-day volatility into a score contribution."
     type: piecewise-linear
     inputUnit: "ratio"
     outputRange: [0, 100]
     segments:
-      - { from: 0.0, to: 1.0, outputFrom: 100, outputTo: 0 }
+      - { from: 0, to: 0.05, outputFrom: 100, outputTo: 80 }
+      - { from: 0.05, to: 0.15, outputFrom: 80, outputTo: 40 }
+      - { from: 0.15, to: 1, outputFrom: 40, outputTo: 0 }
 
-  - id: SCORE-RQ3
-    name: "Asset Composition Quality normalization"
-    description: "Higher HQLA percentage lowers risk; maps HQLA share to 0-100."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: MC-8
+    name: "30-day volume trend normalization"
+    description: "Normalizes 30-day volume trend into a contribution."
     type: piecewise-linear
-    inputUnit: "hqla_percentage"
+    inputUnit: "ratio"
     outputRange: [0, 100]
     segments:
-      - { from: 0.0, to: 100.0, outputFrom: 100, outputTo: 0 }
+      - { from: 0, to: 0.9, outputFrom: 0, outputTo: 30 }
+      - { from: 0.9, to: 1.1, outputFrom: 30, outputTo: 70 }
+      - { from: 1.1, to: 10, outputFrom: 70, outputTo: 100 }
 
-  - id: SCORE-RQ4
-    name: "Custodian & Jurisdictional Risk normalization"
-    description: "Lower risk rating is safer; maps 1-5 rating to 0-100."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: OC-7
+    name: "On-chain holder concentration normalization"
+    description: "Maps concentration to a risk contribution."
     type: piecewise-linear
-    inputUnit: "rating"
+    inputUnit: "ratio"
     outputRange: [0, 100]
     segments:
-      - { from: 1.0, to: 5.0, outputFrom: 0, outputTo: 100 }
+      - { from: 0, to: 0.1, outputFrom: 0, outputTo: 20 }
+      - { from: 0.1, to: 0.3, outputFrom: 20, outputTo: 70 }
+      - { from: 0.3, to: 1, outputFrom: 70, outputTo: 100 }
 
-  - id: SCORE-MC1
-    name: "Market Cap Change normalization"
-    description: "Sharp market cap decline raises risk; clamps score to 0-100."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: SE-2
+    name: "Negative sentiment volume normalization"
+    description: "Maps recent negative sentiment volume to a contribution."
     type: piecewise-linear
-    inputUnit: "percent_change"
+    inputUnit: "count"
     outputRange: [0, 100]
     segments:
-      - { from: -10.0, to: 5.0, outputFrom: 100, outputTo: 0 }
+      - { from: 0, to: 100, outputFrom: 0, outputTo: 30 }
+      - { from: 100, to: 1000, outputFrom: 30, outputTo: 70 }
+      - { from: 1000, to: 1000000, outputFrom: 70, outputTo: 100 }
 
-  - id: SCORE-MC5
-    name: "Price Deviation from Peg normalization"
-    description: "Larger deviation from peg increases risk; requires 7 days of history."
-    type: piecewise-linear
-    inputUnit: "usd_deviation"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0.0, to: 0.5, outputFrom: 0, outputTo: 100 }
-
-  - id: SCORE-MC8
-    name: "Trading Volume Anomaly normalization"
-    description: "Higher z-score indicates unusual trading activity and higher risk; requires 30 days of history."
-    type: piecewise-linear
-    inputUnit: "z_score"
-    outputRange: [0, 100]
-    segments:
-      - { from: -2.0, to: 3.0, outputFrom: 0, outputTo: 100 }
-
-  - id: SCORE-OC1
-    name: "Net Redemption Activity normalization"
-    description: "Large net redemptions indicate stress and raise risk."
-    type: piecewise-linear
-    inputUnit: "percent_of_supply"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0.0, to: 10.0, outputFrom: 0, outputTo: 100 }
-
-  - id: SCORE-OC2
-    name: "Holder Concentration normalization"
-    description: "Higher supply concentration raises risk."
-    type: piecewise-linear
-    inputUnit: "concentration_pct"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0.0, to: 100.0, outputFrom: 0, outputTo: 100 }
-
-  - id: SCORE-SE1
-    name: "Social Sentiment normalization"
-    description: "Negative sentiment increases risk."
-    type: piecewise-linear
-    inputUnit: "sentiment_score"
-    outputRange: [0, 100]
-    segments:
-      - { from: -100.0, to: 100.0, outputFrom: 100, outputTo: 0 }
-
-  - id: SCORE-SE2
-    name: "News Volume & Sentiment normalization"
-    description: "Higher negative news intensity raises risk."
-    type: piecewise-linear
-    inputUnit: "composite_news_score"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0.0, to: 100.0, outputFrom: 0, outputTo: 100 }
-
-  - id: RISK-LEVEL
-    name: "Composite SPRI to risk level mapping"
-    description: "Maps composite score into Normal, Elevated, High Risk, or Critical."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: SE-4
+    name: "News sentiment polarity"
+    description: "Maps classifier polarity output to a contribution."
     type: decision-table
     inputs:
-      - { name: compositeScore, type: number }
-    output: { name: riskLevel, type: string }
+      - { name: polarity, type: string }
+    output: { name: scoreContribution, type: number }
     cases:
-      - when: { compositeScore: ">=76" }
-        then: "critical"
-      - when: { compositeScore: ">=51" }
-        then: "high_risk"
-      - when: { compositeScore: ">=26" }
-        then: "elevated"
-      - when: { compositeScore: ">=0" }
-        then: "normal"
+      - when: { polarity: "negative" }
+        then: 100
+      - when: { polarity: "neutral" }
+        then: 50
+      - when: { polarity: "positive" }
+        then: 0
 
-  - id: RAPID-MOVER
-    name: "Rapid mover detection"
-    description: "Flags a variable when the normalized score increases by at least 25 points in a scoring cycle."
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RQ-1
+    name: "Reserve composition extraction confidence"
+    description: "Maps extraction confidence into a normalized review contribution."
+    type: piecewise-linear
+    inputUnit: "ratio"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 40 }
+      - { from: 0.5, to: 0.8, outputFrom: 40, outputTo: 80 }
+      - { from: 0.8, to: 1, outputFrom: 80, outputTo: 100 }
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RQ-3
+    name: "Independent attestor coverage normalization"
+    description: "Maps attestor coverage signal to a contribution."
+    type: piecewise-linear
+    inputUnit: "count"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0, to: 1, outputFrom: 0, outputTo: 40 }
+      - { from: 1, to: 3, outputFrom: 40, outputTo: 80 }
+      - { from: 3, to: 1000000, outputFrom: 80, outputTo: 100 }
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RQ-4
+    name: "Reserve liquidity tier normalization"
+    description: "Maps liquidity tier classification to a contribution."
     type: decision-table
     inputs:
-      - { name: deltaNormalizedScore, type: number }
-    output: { name: rapidMover, type: boolean }
+      - { name: tier, type: string }
+    output: { name: scoreContribution, type: number }
     cases:
-      - when: { deltaNormalizedScore: ">=25" }
-        then: true
-      - when: { }
-        then: false
+      - when: { tier: "high" }
+        then: 20
+      - when: { tier: "medium" }
+        then: 60
+      - when: { tier: "low" }
+        then: 100

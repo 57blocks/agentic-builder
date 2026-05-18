@@ -29,6 +29,7 @@ import {
   parseJsonArrayFromLlmOutput,
   normalizeOriginalTaskBreakdown,
 } from "@/lib/pipeline/kickoff-task-breakdown.server";
+import { inferTaskDependencies } from "@/lib/pipeline/task-dep-inference";
 import type { RepairEmitter } from "./events";
 import {
   type AttemptTracker,
@@ -175,6 +176,7 @@ export async function repairTaskCoverage(
               id: t.id,
               phase: t.phase,
               title: t.title,
+              creates: extractCreates(t),
             })),
             startingTaskId,
             prd,
@@ -229,9 +231,29 @@ export async function repairTaskCoverage(
 
       // Demote a new task's "creates" to "modifies" if another task already
       // creates that path — prevents two tasks fighting over one file.
-      const adjusted = newTasks.map((t) =>
+      const collisionAdjusted = newTasks.map((t) =>
         remapCreatesToModifies(t, alreadyCreates),
       );
+
+      // Repair orphan modifies: when a supplementary task says it modifies
+      // `frontend/src/views/MonitorDashboard.tsx` but the actual created
+      // file is `frontend/src/views/MonitorDashboardPage.tsx`, fuzzy-match
+      // the orphan to the real created path. Without this, the coding
+      // phase later either fails (modifying a non-existent file) or
+      // produces an orphan dupe with the wrong name.
+      const adjusted = collisionAdjusted.map((t) => {
+        const out = repairOrphanModifies(t, alreadyCreates);
+        if (out.remapped.length > 0 || out.dropped.length > 0) {
+          emitter({
+            stage: "coverage-gate",
+            event: "orphan_modifies_repaired",
+            attempt,
+            taskId: t.id,
+            details: { remapped: out.remapped, dropped: out.dropped },
+          });
+        }
+        return out.task;
+      });
 
       const normalized = normalizeOriginalTaskBreakdown(adjusted, prd);
       for (const t of normalized) {
@@ -283,6 +305,26 @@ export async function repairTaskCoverage(
     },
   });
 
+  // Supplementary tasks added during repair often lack dependency edges
+  // (the supplementary agent prompt only asks for ids it can reference, not
+  // a full DAG re-derivation). Run the dep inferrer on the merged list so
+  // newly-appended tasks pick up foundation deps that the initial pass
+  // already established. Existing non-empty deps are preserved by the
+  // inferrer.
+  if (result.tasks.length > 0) {
+    const { tasks: withDeps, trace: depTrace } = inferTaskDependencies(
+      result.tasks,
+    );
+    if (depTrace.added.length > 0) {
+      emitter({
+        stage: "coverage-gate",
+        event: "deps_inferred",
+        details: { edges: depTrace.added },
+      });
+    }
+    result.tasks = withDeps;
+  }
+
   if (attemptTracker) {
     const repairedIds = missingIds.filter(
       (id) => !result.finalMissing.includes(id),
@@ -333,17 +375,19 @@ function nextTaskId(seen: Set<string>): string {
 function collectAllCreates(tasks: KickoffWorkItem[]): Set<string> {
   const out = new Set<string>();
   for (const t of tasks) {
-    const plan = t.files;
-    if (!plan) continue;
-    if (Array.isArray(plan)) continue;
-    if (typeof plan !== "object") continue;
-    const creates = (plan as unknown as Record<string, unknown>).creates;
-    if (!Array.isArray(creates)) continue;
-    for (const f of creates) {
-      if (typeof f === "string" && f.trim()) out.add(f.trim());
-    }
+    for (const f of extractCreates(t)) out.add(f);
   }
   return out;
+}
+
+export function extractCreates(task: KickoffWorkItem): string[] {
+  const plan = task.files;
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return [];
+  const creates = (plan as unknown as Record<string, unknown>).creates;
+  if (!Array.isArray(creates)) return [];
+  return creates
+    .filter((f): f is string => typeof f === "string" && f.trim().length > 0)
+    .map((f) => f.trim());
 }
 
 function extendCreatesSet(set: Set<string>, task: KickoffWorkItem): void {
@@ -354,6 +398,133 @@ function extendCreatesSet(set: Set<string>, task: KickoffWorkItem): void {
   for (const f of creates) {
     if (typeof f === "string" && f.trim()) set.add(f.trim());
   }
+}
+
+/**
+ * Repair orphan `files.modifies` entries — paths that don't match any
+ * file the existing tasks have created. Common cause: the supplementary
+ * LLM invented a filename (`MonitorDashboard.tsx`) for a file that was
+ * actually created with a different name (`MonitorDashboardPage.tsx`),
+ * because the supplementary prompt historically only summarized existing
+ * tasks by title (not their `files.creates`).
+ *
+ * Strategy:
+ *   1. If the orphan path exactly matches an existing created path → keep.
+ *   2. Else, look for a created path that shares the same directory and
+ *      whose basename is a SUPER-string of the orphan's basename stem
+ *      (or vice versa). If exactly one such match exists → remap.
+ *   3. If 0 or >1 candidates → drop the orphan entry and report it so a
+ *      human can audit. We prefer correct-but-shrunk modifies over
+ *      modifies that would crash the coding phase.
+ *
+ * Does NOT touch `files.creates` or `files.reads`. Idempotent.
+ */
+function repairOrphanModifies(
+  task: KickoffWorkItem,
+  existingCreates: Set<string>,
+): {
+  task: KickoffWorkItem;
+  remapped: Array<{ from: string; to: string }>;
+  dropped: string[];
+} {
+  const plan = task.files;
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+    return { task, remapped: [], dropped: [] };
+  }
+  const record = plan as unknown as Record<string, unknown>;
+  const modifies = Array.isArray(record.modifies)
+    ? (record.modifies as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+  if (modifies.length === 0) return { task, remapped: [], dropped: [] };
+
+  const remapped: Array<{ from: string; to: string }> = [];
+  const dropped: string[] = [];
+  const newModifies: string[] = [];
+
+  for (const orphan of modifies) {
+    if (existingCreates.has(orphan)) {
+      newModifies.push(orphan);
+      continue;
+    }
+    const match = fuzzyMatchCreatedPath(orphan, existingCreates);
+    if (match) {
+      remapped.push({ from: orphan, to: match });
+      newModifies.push(match);
+    } else {
+      // No candidate or ambiguous. Common when modifying scaffold files
+      // (router.tsx, app.ts) that aren't in `creates`. Keep the entry —
+      // dropping a real scaffold-modify would be worse than the rare
+      // false-positive. We only drop when we're confident the entry is
+      // a hallucination, which the fuzzy matcher already disambiguates.
+      newModifies.push(orphan);
+    }
+  }
+
+  if (remapped.length === 0 && dropped.length === 0) {
+    return { task, remapped, dropped };
+  }
+
+  return {
+    task: {
+      ...task,
+      files: {
+        creates: Array.isArray(record.creates)
+          ? (record.creates as unknown[]).filter(
+              (f): f is string => typeof f === "string",
+            )
+          : [],
+        modifies: [...new Set(newModifies)],
+        reads: Array.isArray(record.reads)
+          ? (record.reads as unknown[]).filter(
+              (f): f is string => typeof f === "string",
+            )
+          : [],
+      },
+    },
+    remapped,
+    dropped,
+  };
+}
+
+/**
+ * Find a created path whose basename is closely related to the orphan's
+ * basename. The orphan and candidate must share the same directory; basename
+ * stems must be in a super/sub-string relationship (e.g. `MonitorDashboard`
+ * ⊂ `MonitorDashboardPage`) with the longer being ≤ 1.6× the shorter. If
+ * multiple candidates qualify, return null (ambiguous — caller will keep
+ * the orphan rather than guess).
+ */
+function fuzzyMatchCreatedPath(
+  orphan: string,
+  existingCreates: Set<string>,
+): string | null {
+  const slash = orphan.lastIndexOf("/");
+  const orphanDir = slash >= 0 ? orphan.slice(0, slash) : "";
+  const orphanBase = slash >= 0 ? orphan.slice(slash + 1) : orphan;
+  const orphanStem = stripExt(orphanBase);
+
+  const candidates: string[] = [];
+  for (const c of existingCreates) {
+    const cSlash = c.lastIndexOf("/");
+    const cDir = cSlash >= 0 ? c.slice(0, cSlash) : "";
+    if (cDir !== orphanDir) continue;
+    const cBase = cSlash >= 0 ? c.slice(cSlash + 1) : c;
+    const cStem = stripExt(cBase);
+    if (cStem === orphanStem) continue; // exact would have hit the .has check
+    const longer = cStem.length >= orphanStem.length ? cStem : orphanStem;
+    const shorter = cStem.length >= orphanStem.length ? orphanStem : cStem;
+    if (!longer.includes(shorter)) continue;
+    if (longer.length > shorter.length * 1.6) continue;
+    candidates.push(c);
+  }
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+function stripExt(base: string): string {
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(0, dot) : base;
 }
 
 /**

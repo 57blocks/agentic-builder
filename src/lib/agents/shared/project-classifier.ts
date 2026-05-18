@@ -31,6 +31,47 @@ export function normalizeProjectTier(tier?: string | null): ProjectTier {
   return "M";
 }
 
+/**
+ * Parse the canonical `**Project Tier: <S|M|L>**` badge from PRD markdown.
+ * Returns the tier letter when found, otherwise null.
+ *
+ * Why: the PRD template emits this badge near the top of every generated PRD.
+ * When present, it is authoritative — it represents the resolved tier after
+ * any classifier output PLUS any manual user override done in the PRD editor.
+ * Downstream agents (TRD, SysDesign, Kickoff) should prefer it over the
+ * raw classifier result on the feature brief alone.
+ */
+export function parseTierFromPrd(content?: string | null): ProjectTier | null {
+  if (!content) return null;
+  const match = content.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+  if (!match) return null;
+  return normalizeProjectTier(match[1]);
+}
+
+/**
+ * Build a synthetic ProjectClassification from a PRD tier badge — no LLM call.
+ * Used to short-circuit `classifyProject` and downstream re-classification when
+ * the PRD already declares the tier. costUsd / durationMs are 0 to avoid
+ * double-counting in run totals.
+ */
+export function extractClassificationFromPrd(
+  prd: string | null | undefined,
+): ProjectClassification | null {
+  const tier = parseTierFromPrd(prd);
+  if (!tier) return null;
+  return {
+    tier,
+    type: "app",
+    needsBackend: tier === "M" || tier === "L",
+    needsDatabase: tier === "L",
+    needsAuth: tier === "L",
+    needsMultipleServices: tier === "L",
+    reasoning: `Extracted from PRD tier badge: tier ${tier}`,
+    costUsd: 0,
+    durationMs: 0,
+  };
+}
+
 const CLASSIFIER_PROMPT = `You are a project complexity classifier. Given a feature brief, classify the project into one of three tiers.
 
 ## Tiers
@@ -180,7 +221,20 @@ async function writeClassificationCache(
 
 export async function classifyProject(
   featureBrief: string,
+  /**
+   * Optional PRD content. When provided AND it contains the canonical
+   * `**Project Tier: <S|M|L>**` badge, the badge is authoritative and is
+   * returned directly without invoking the LLM. This prevents the brief-only
+   * classifier from disagreeing with an explicit tier declared in the PRD
+   * (which can happen if the user uploaded a pre-classified PRD or manually
+   * edited the badge).
+   */
+  prdContent?: string | null,
 ): Promise<ProjectClassification> {
+  // Fast path: PRD tier badge wins over brief-based heuristics.
+  const fromPrd = extractClassificationFromPrd(prdContent);
+  if (fromPrd) return fromPrd;
+
   const model = resolveModel(MODEL_CONFIG.intent);
   const briefHash = classificationCacheKey(featureBrief, model);
 

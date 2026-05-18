@@ -15,7 +15,9 @@ import {
   detectPackageManager,
   buildAddCommand,
   isAutoInstallableNpmPackageName,
+  type FsWriteOptions,
 } from "./tools";
+import { normalizeScaffoldRelPath } from "@/lib/pipeline/scaffold-file-merge";
 import {
   estimateCost,
   type ChatMessage,
@@ -78,11 +80,11 @@ const WORKER_LLM_HEARTBEAT_MS = 10_000;
 // Anti read-only spiral: inject a nudge when the model has read for too long.
 // Set relative to MAX_WORKER_TOOL_ITERATIONS so the nudge happens near the end,
 // not in the middle — we don't want to cut short legitimate reads.
-const READ_STALL_NUDGE_AFTER = 5;        // nudge at round 5/10
+const READ_STALL_NUDGE_AFTER = 5; // nudge at round 5/10
 // Force tool_choice:"none" only when very close to the limit, as a last resort.
 // At this point the model has had ample reads; we'd rather get imperfect code
 // than throw an iteration-exceeded error.
-const READ_STALL_FORCE_WRITE_AFTER = 8;  // force-write at round 8/10
+const READ_STALL_FORCE_WRITE_AFTER = 8; // force-write at round 8/10
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -98,6 +100,26 @@ const CODEGEN_MULTI_ROUND_MAX_ROUNDS = (() => {
   const raw = Number(process.env.CODEGEN_MULTI_ROUND_MAX_ROUNDS ?? "8");
   if (!Number.isFinite(raw) || raw <= 0) return 8;
   return Math.min(Math.max(Math.floor(raw), 1), 20);
+})();
+const CODEGEN_AGENTIC_TOOLS_ENABLED = (() => {
+  const raw = (process.env.CODEGEN_AGENTIC_TOOLS_ENABLED ?? "1")
+    .trim()
+    .toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off";
+})();
+const CODEGEN_AGENT_MAX_ITERATIONS = (() => {
+  const raw = Number(process.env.CODEGEN_AGENT_MAX_ITERATIONS ?? "300");
+  if (!Number.isFinite(raw) || raw <= 0) return 300;
+  return Math.min(Math.max(Math.floor(raw), 4), 300);
+})();
+const CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS = (() => {
+  const raw = Number(
+    process.env.CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS ??
+      process.env.CODEGEN_TOOL_RESULT_MAX_CHARS ??
+      "1200",
+  );
+  if (!Number.isFinite(raw) || raw <= 0) return 1200;
+  return Math.min(Math.max(Math.floor(raw), 200), 4000);
 })();
 const DEFAULT_WORKER_TSC_FIX_MAX_ATTEMPTS = 1;
 const DEFAULT_WORKER_TSC_FIX_MAX_ATTEMPTS_RALPH_CAP = 1;
@@ -139,7 +161,7 @@ const MAX_CONTEXT_TOKENS = 200_000;
 const RALPH_COMPLETE_TOKEN = "<promise>TASK_COMPLETE</promise>";
 const RALPH_FAILED_RE = /<promise>TASK_FAILED:\s*([\s\S]*?)<\/promise>/;
 
-const WORKER_READONLY_TOOLS: OpenRouterToolDefinition[] = [
+const WORKER_TOOLS: OpenRouterToolDefinition[] = [
   {
     type: "function",
     function: {
@@ -155,6 +177,31 @@ const WORKER_READONLY_TOOLS: OpenRouterToolDefinition[] = [
           },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_many_files",
+      description:
+        "Read multiple generated-project files in one call. Prefer this over many read_file calls when you know the paths.",
+      parameters: {
+        type: "object",
+        properties: {
+          paths: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Relative file paths from the generated project root. Maximum 20 files.",
+          },
+          maxCharsPerFile: {
+            type: "number",
+            description:
+              "Optional per-file character cap. Defaults to 2000, max 4000.",
+          },
+        },
+        required: ["paths"],
       },
     },
   },
@@ -197,6 +244,72 @@ const WORKER_READONLY_TOOLS: OpenRouterToolDefinition[] = [
           },
         },
         required: ["pattern"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "apply_patch",
+      description:
+        "Safely replace an exact text snippet inside one generated-project file. Prefer this over emitting a full file block for small edits.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          oldText: { type: "string" },
+          newText: { type: "string" },
+          replaceAll: { type: "boolean" },
+        },
+        required: ["path", "oldText", "newText"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description:
+        "Create or fully replace one generated-project file. Prefer this for new files or full rewrites; use apply_patch for small edits.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_file",
+      description:
+        "Delete one generated-project file. Use only for duplicate or obsolete generated files; scaffold-protected files cannot be deleted.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_file",
+      description:
+        "Move or rename one generated-project file. Scaffold-protected source/destination paths cannot be moved.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: { type: "string" },
+          to: { type: "string" },
+          overwrite: { type: "boolean" },
+        },
+        required: ["from", "to"],
       },
     },
   },
@@ -350,11 +463,16 @@ function buildSearchMatcher(pattern: string): (line: string) => boolean {
 export async function buildProjectConventionCard(
   outputDir: string,
 ): Promise<string> {
-  const lines: string[] = ["## Project Convention Card (read before writing any code)"];
+  const lines: string[] = [
+    "## Project Convention Card (read before writing any code)",
+  ];
 
   // ── Detect frontend API client base URL ──────────────────────────────────
   const clientContent = await fsRead("frontend/src/api/client.ts", outputDir);
-  if (!clientContent.startsWith("FILE_NOT_FOUND") && !clientContent.startsWith("REJECTED")) {
+  if (
+    !clientContent.startsWith("FILE_NOT_FOUND") &&
+    !clientContent.startsWith("REJECTED")
+  ) {
     const baseMatch =
       clientContent.match(/VITE_API_BASE_URL[^|]*\|\|\s*["'`]([^"'`]+)["'`]/) ??
       clientContent.match(/API_BASE\s*=\s*["'`]([^"'`]+)["'`]/) ??
@@ -385,23 +503,34 @@ export async function buildProjectConventionCard(
 
   // ── Detect middleware directory ───────────────────────────────────────────
   const mwsFiles = await fsRead("backend/src/middlewares/auth.ts", outputDir);
-  const mwFiles  = await fsRead("backend/src/middleware/auth.ts",  outputDir);
-  const mwDir =
-    !mwsFiles.startsWith("FILE_NOT_FOUND") ? "backend/src/middlewares/" :
-    !mwFiles.startsWith("FILE_NOT_FOUND")  ? "backend/src/middleware/"  :
-    "backend/src/middlewares/";
-  lines.push(`- **Backend middleware directory**: \`${mwDir}\` (canonical — do not create a parallel directory)`);
+  const mwFiles = await fsRead("backend/src/middleware/auth.ts", outputDir);
+  const mwDir = !mwsFiles.startsWith("FILE_NOT_FOUND")
+    ? "backend/src/middlewares/"
+    : !mwFiles.startsWith("FILE_NOT_FOUND")
+      ? "backend/src/middleware/"
+      : "backend/src/middlewares/";
+  lines.push(
+    `- **Backend middleware directory**: \`${mwDir}\` (canonical — do not create a parallel directory)`,
+  );
 
   // ── Detect backend framework ──────────────────────────────────────────────
   const backendPkg = await fsRead("backend/package.json", outputDir);
   if (!backendPkg.startsWith("FILE_NOT_FOUND")) {
-    const hasKoa  = backendPkg.includes('"koa"');
+    const hasKoa = backendPkg.includes('"koa"');
     const hasExpress = backendPkg.includes('"express"');
     const hasSequelize = backendPkg.includes('"sequelize"');
-    if (hasKoa)  lines.push("- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation");
-    if (hasExpress) lines.push("- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`");
+    if (hasKoa)
+      lines.push(
+        "- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation",
+      );
+    if (hasExpress)
+      lines.push(
+        "- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`",
+      );
     if (hasSequelize) {
-      lines.push("- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.");
+      lines.push(
+        "- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.",
+      );
       lines.push(
         "- **Sequelize migration RULE (CRITICAL)**: If your task modifies any " +
           "file under `backend/src/models/` (add/remove column, change type, " +
@@ -454,7 +583,10 @@ export async function buildProjectConventionCard(
   }
 
   // ── Route registrar convention ────────────────────────────────────────────
-  const indexContent = await fsRead("backend/src/api/modules/index.ts", outputDir);
+  const indexContent = await fsRead(
+    "backend/src/api/modules/index.ts",
+    outputDir,
+  );
   if (!indexContent.startsWith("FILE_NOT_FOUND")) {
     lines.push(
       "- **Route registrar pattern**: `export function registerXxxRoutes(apiRouter: Router): void` — one registrar per domain, call `apiRouter.<verb>(...)` directly",
@@ -465,7 +597,9 @@ export async function buildProjectConventionCard(
   // ── JWT helper ────────────────────────────────────────────────────────────
   const jwtHelper = await fsRead("backend/src/utils/jwt.ts", outputDir);
   if (!jwtHelper.startsWith("FILE_NOT_FOUND")) {
-    lines.push("- **JWT**: use `signJwt`/`verifyJwt` from `backend/src/utils/jwt.ts`. Never call `jsonwebtoken` directly in feature code.");
+    lines.push(
+      "- **JWT**: use `signJwt`/`verifyJwt` from `backend/src/utils/jwt.ts`. Never call `jsonwebtoken` directly in feature code.",
+    );
   }
 
   // ── Shared schema (TRD §6 product) ───────────────────────────────────────
@@ -513,8 +647,14 @@ export async function buildProjectConventionCard(
   }
 
   // ── Playwright webServer & health route (E2E infra contract) ──────────────
-  const playwrightCfg = await fsRead("frontend/playwright.config.ts", outputDir);
-  if (!playwrightCfg.startsWith("FILE_NOT_FOUND") && !backendPkg.startsWith("FILE_NOT_FOUND")) {
+  const playwrightCfg = await fsRead(
+    "frontend/playwright.config.ts",
+    outputDir,
+  );
+  if (
+    !playwrightCfg.startsWith("FILE_NOT_FOUND") &&
+    !backendPkg.startsWith("FILE_NOT_FOUND")
+  ) {
     lines.push(
       "- **Playwright `webServer` (CRITICAL)**: `frontend/playwright.config.ts` MUST keep `webServer` as an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/health`) AND the frontend (`pnpm dev` on :5173). Collapsing it to a single object causes every API-driven e2e test to fail with ECONNREFUSED — the supervisor will auto-rewrite it back. Do NOT remove the backend entry.",
       "- **Backend `/api/health`**: `backend/src/api/modules/health/health.routes.ts` exposes `GET /health` and is registered in `backend/src/api/modules/index.ts` via `registerHealthRoutes(apiRouter)`. Do NOT delete this route — the Playwright `webServer` health probe depends on it.",
@@ -524,30 +664,146 @@ export async function buildProjectConventionCard(
   return lines.join("\n");
 }
 
-async function executeWorkerReadonlyTool(
+type WorkerToolExecutionResult = {
+  content: string;
+  isWrite: boolean;
+  changedFiles: string[];
+  deletedFiles: string[];
+  movedFiles: Array<{ from: string; to: string }>;
+  fatal: boolean;
+};
+
+function workerToolResult(
+  content: string,
+  options?: {
+    isWrite?: boolean;
+    changedFiles?: string[];
+    deletedFiles?: string[];
+    movedFiles?: Array<{ from: string; to: string }>;
+    fatal?: boolean;
+  },
+): WorkerToolExecutionResult {
+  return {
+    content,
+    isWrite: options?.isWrite ?? false,
+    changedFiles: options?.changedFiles ?? [],
+    deletedFiles: options?.deletedFiles ?? [],
+    movedFiles: options?.movedFiles ?? [],
+    fatal: options?.fatal ?? false,
+  };
+}
+
+function safeWorkerPath(outputDir: string, relPath: string): string | null {
+  const normalized = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const abs = path.resolve(path.join(outputDir, normalized));
+  const root = path.resolve(outputDir);
+  if (!abs.startsWith(root + path.sep) && abs !== root) return null;
+  return abs;
+}
+
+function isWorkerProtectedPath(
+  relPath: string,
+  options?: { fsWriteOptions?: FsWriteOptions },
+): boolean {
+  const protectedPaths = options?.fsWriteOptions?.scaffoldProtectedPaths;
+  if (protectedPaths == null) return false;
+  const key = normalizeScaffoldRelPath(relPath);
+  for (const protectedPath of protectedPaths) {
+    if (normalizeScaffoldRelPath(protectedPath) === key) return true;
+  }
+  return false;
+}
+
+function summarizeWorkerToolArgs(
+  name: string,
+  args: Record<string, unknown>,
+): string {
+  switch (name) {
+    case "read_file":
+      return `path=${String(args.path ?? "")}`;
+    case "read_many_files": {
+      const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
+      return `paths=[${paths.slice(0, 10).join(",")}] count=${paths.length} maxCharsPerFile=${String(args.maxCharsPerFile ?? "default")}`;
+    }
+    case "list_files":
+      return `dir=${String(args.dir ?? ".")}`;
+    case "grep":
+      return `pattern=${JSON.stringify(String(args.pattern ?? "").slice(0, 120))} path=${String(args.path ?? ".")}`;
+    case "apply_patch":
+      return [
+        `path=${String(args.path ?? "")}`,
+        `oldTextChars=${typeof args.oldText === "string" ? args.oldText.length : 0}`,
+        `newTextChars=${typeof args.newText === "string" ? args.newText.length : 0}`,
+        `replaceAll=${args.replaceAll === true}`,
+      ].join(" ");
+    case "write_file":
+      return `path=${String(args.path ?? "")} contentChars=${typeof args.content === "string" ? args.content.length : 0}`;
+    case "delete_file":
+      return `path=${String(args.path ?? "")}`;
+    case "move_file":
+      return `from=${String(args.from ?? "")} to=${String(args.to ?? "")} overwrite=${args.overwrite === true}`;
+    default:
+      return Object.keys(args).slice(0, 12).join(",");
+  }
+}
+
+function summarizeWorkerToolResult(result: WorkerToolExecutionResult): string {
+  return [
+    `isWrite=${result.isWrite}`,
+    `changed=[${result.changedFiles.join(",")}]`,
+    `deleted=[${result.deletedFiles.join(",")}]`,
+    `moved=${result.movedFiles.length}`,
+    `result=${JSON.stringify(result.content.slice(0, 300))}`,
+  ].join(" ");
+}
+
+async function executeWorkerToolImpl(
   name: string,
   args: Record<string, unknown>,
   outputDir: string,
-): Promise<string> {
+  options?: { fsWriteOptions?: FsWriteOptions },
+): Promise<WorkerToolExecutionResult> {
   switch (name) {
     case "read_file": {
       const filePath = String(args.path ?? "").trim();
-      if (!filePath) return "Error: path is required";
+      if (!filePath) return workerToolResult("Error: path is required");
       const content = await fsRead(filePath, outputDir);
-      return content.slice(0, MAX_WORKER_TOOL_OUTPUT_CHARS);
+      return workerToolResult(content.slice(0, MAX_WORKER_TOOL_OUTPUT_CHARS));
+    }
+    case "read_many_files": {
+      const paths = Array.isArray(args.paths)
+        ? args.paths.map(String).slice(0, 20)
+        : [];
+      if (paths.length === 0) {
+        return workerToolResult("Error: paths is required");
+      }
+      const maxCharsPerFile =
+        typeof args.maxCharsPerFile === "number"
+          ? Math.max(200, Math.min(Math.floor(args.maxCharsPerFile), 4000))
+          : 2000;
+      const chunks: string[] = [];
+      for (const relPath of paths) {
+        const content = await fsRead(relPath, outputDir);
+        chunks.push(`--- ${relPath} ---\n${content.slice(0, maxCharsPerFile)}`);
+      }
+      return workerToolResult(
+        chunks.join("\n\n").slice(0, MAX_WORKER_TOOL_OUTPUT_CHARS),
+      );
     }
     case "list_files": {
       const dir = String(args.dir ?? ".").trim() || ".";
       const files = await listFiles(dir, outputDir);
-      return (files.join("\n") || "(no files found)").slice(
-        0,
-        MAX_WORKER_TOOL_OUTPUT_CHARS,
+      return workerToolResult(
+        (files.join("\n") || "(no files found)").slice(
+          0,
+          MAX_WORKER_TOOL_OUTPUT_CHARS,
+        ),
       );
     }
     case "grep": {
       const pattern = String(args.pattern ?? "").trim();
       const searchPath = String(args.path ?? ".").trim() || ".";
-      if (!pattern) return "Error: pattern is required";
+      if (!pattern) return workerToolResult("Error: pattern is required");
 
       const matcher = buildSearchMatcher(pattern);
       const filePaths: string[] = [];
@@ -580,14 +836,228 @@ async function executeWorkerReadonlyTool(
         if (matches.length >= 60) break;
       }
 
-      return (matches.join("\n") || "No matches found.").slice(
-        0,
-        MAX_WORKER_TOOL_OUTPUT_CHARS,
+      return workerToolResult(
+        (matches.join("\n") || "No matches found.").slice(
+          0,
+          MAX_WORKER_TOOL_OUTPUT_CHARS,
+        ),
       );
     }
+    case "apply_patch": {
+      const relPath = String(args.path ?? "").trim();
+      const oldText = String(args.oldText ?? "");
+      const newText = String(args.newText ?? "");
+      const replaceAll = args.replaceAll === true;
+      if (!relPath || !oldText) {
+        return workerToolResult("Error: path and oldText are required");
+      }
+      const existing = await fsRead(relPath, outputDir);
+      if (
+        existing.startsWith("FILE_NOT_FOUND") ||
+        existing.startsWith("REJECTED")
+      ) {
+        return workerToolResult(existing);
+      }
+      const count = existing.split(oldText).length - 1;
+      if (count === 0) return workerToolResult("Error: oldText not found");
+      if (count > 1 && !replaceAll) {
+        return workerToolResult(
+          `Error: oldText matched ${count} times; set replaceAll=true or provide a more specific snippet.`,
+        );
+      }
+      const next = replaceAll
+        ? existing.split(oldText).join(newText)
+        : existing.replace(oldText, newText);
+      const writeResult = await fsWrite(
+        relPath,
+        next,
+        outputDir,
+        options?.fsWriteOptions,
+      );
+      if (
+        writeResult.startsWith("REJECTED") ||
+        writeResult.startsWith("SKIPPED_PROTECTED")
+      ) {
+        return workerToolResult(writeResult);
+      }
+      return workerToolResult(
+        `OK: patched ${relPath} (${replaceAll ? count : 1} replacement(s)). ${writeResult}`,
+        { isWrite: true, changedFiles: [relPath] },
+      );
+    }
+    case "write_file": {
+      const relPath = String(args.path ?? "").trim();
+      const content =
+        typeof args.content === "string"
+          ? args.content
+          : String(args.content ?? "");
+      if (!relPath) return workerToolResult("Error: path is required");
+      const writeResult = await fsWrite(
+        relPath,
+        content,
+        outputDir,
+        options?.fsWriteOptions,
+      );
+      if (
+        writeResult.startsWith("REJECTED") ||
+        writeResult.startsWith("SKIPPED_PROTECTED")
+      ) {
+        return workerToolResult(writeResult);
+      }
+      return workerToolResult(
+        `OK: wrote ${relPath} (${content.length} chars). ${writeResult}`,
+        { isWrite: true, changedFiles: [relPath] },
+      );
+    }
+    case "delete_file": {
+      const relPath = String(args.path ?? "").trim();
+      if (!relPath) return workerToolResult("Error: path is required");
+      if (isWorkerProtectedPath(relPath, options)) {
+        return workerToolResult(
+          `REJECTED: cannot delete scaffold-protected file "${relPath}"`,
+        );
+      }
+      const abs = safeWorkerPath(outputDir, relPath);
+      if (!abs) {
+        return workerToolResult(
+          `REJECTED: path traversal detected for "${relPath}"`,
+        );
+      }
+      try {
+        await nodeFs.unlink(abs);
+        return workerToolResult(`OK: deleted ${relPath}`, {
+          isWrite: true,
+          deletedFiles: [relPath],
+        });
+      } catch (error) {
+        return workerToolResult(
+          `Error: delete failed for ${relPath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    case "move_file": {
+      const from = String(args.from ?? "").trim();
+      const to = String(args.to ?? "").trim();
+      if (!from || !to) {
+        return workerToolResult("Error: from and to are required");
+      }
+      if (
+        isWorkerProtectedPath(from, options) ||
+        isWorkerProtectedPath(to, options)
+      ) {
+        return workerToolResult(
+          `REJECTED: cannot move scaffold-protected path "${from}" -> "${to}"`,
+        );
+      }
+      const fromAbs = safeWorkerPath(outputDir, from);
+      const toAbs = safeWorkerPath(outputDir, to);
+      if (!fromAbs || !toAbs) {
+        return workerToolResult("REJECTED: path traversal detected");
+      }
+      try {
+        if (args.overwrite !== true) {
+          try {
+            await nodeFs.access(toAbs);
+            return workerToolResult(`Error: destination exists: ${to}`);
+          } catch {
+            // Destination does not exist.
+          }
+        }
+        await nodeFs.mkdir(path.dirname(toAbs), { recursive: true });
+        await nodeFs.rename(fromAbs, toAbs);
+        return workerToolResult(`OK: moved ${from} -> ${to}`, {
+          isWrite: true,
+          changedFiles: [to],
+          deletedFiles: [from],
+          movedFiles: [{ from, to }],
+        });
+      } catch (error) {
+        return workerToolResult(
+          `Error: move failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     default:
-      return `Error: unknown tool '${name}'`;
+      return workerToolResult(`Error: unknown tool '${name}'`);
   }
+}
+
+async function executeWorkerTool(
+  name: string,
+  args: Record<string, unknown>,
+  outputDir: string,
+  options?: {
+    fsWriteOptions?: FsWriteOptions;
+    workerLabel?: string;
+    sessionId?: string;
+    taskId?: string;
+  },
+): Promise<WorkerToolExecutionResult> {
+  const label = options?.workerLabel ?? "worker";
+  const startedAt = Date.now();
+  console.log(
+    `[Worker:${label}] tool_call ${name} args=${summarizeWorkerToolArgs(name, args)}`,
+  );
+  const result = await executeWorkerToolImpl(name, args, outputDir, options);
+  console.log(
+    `[Worker:${label}] tool_result ${name} durationMs=${Date.now() - startedAt} ${summarizeWorkerToolResult(result)}`,
+  );
+
+  // Emit file activity events so the UI can display real-time file I/O.
+  if (options?.sessionId && options?.taskId) {
+    const emitter = getRepairEmitter(options.sessionId);
+    if (name === "read_file") {
+      emitter({
+        stage: "worker-codegen",
+        event: "file_activity",
+        taskId: options.taskId,
+        details: {
+          operation: "read",
+          path: String(args.path ?? ""),
+        },
+      });
+    } else if (name === "read_many_files" && Array.isArray(args.paths)) {
+      for (const p of args.paths as string[]) {
+        emitter({
+          stage: "worker-codegen",
+          event: "file_activity",
+          taskId: options.taskId,
+          details: {
+            operation: "read",
+            path: String(p),
+          },
+        });
+      }
+    } else if (
+      (name === "write_file" || name === "apply_patch") &&
+      result.isWrite &&
+      !result.content.startsWith("REJECTED") &&
+      !result.content.startsWith("SKIPPED_PROTECTED")
+    ) {
+      const writtenPath = String(args.path ?? "").trim();
+      const writtenContent =
+        name === "write_file"
+          ? typeof args.content === "string"
+            ? args.content
+            : ""
+          : typeof args.newText === "string"
+            ? args.newText
+            : "";
+      emitter({
+        stage: "worker-codegen",
+        event: "file_activity",
+        taskId: options.taskId,
+        details: {
+          operation: "write",
+          path: writtenPath,
+          contentPreview: writtenContent.slice(0, 400),
+          contentLength: writtenContent.length,
+        },
+      });
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -620,6 +1090,7 @@ async function runCodegenWorkerLoop(
   sessionId?: string,
   workerLabel?: string,
   recallCtx?: SecondaryRecallContext,
+  toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
 ): Promise<{
   content: string;
   rawContent: string;
@@ -628,13 +1099,19 @@ async function runCodegenWorkerLoop(
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  llmCalls: number;
+  readOnlyRounds: number;
   /** Pattern ids injected by the secondary recall (empty if not fired). */
   secondaryInjectedIds: string[];
+  /** Files changed through worker tools such as apply_patch / move_file. */
+  toolChangedFiles: string[];
 }> {
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
+  let llmCalls = 0;
+  let readOnlyRounds = 0;
   let consecutiveReadRounds = 0;
   // Track second-pass recall state so we fire it at most once per worker
   // run — otherwise a chatty model that mentions errors in every round
@@ -643,6 +1120,7 @@ async function runCodegenWorkerLoop(
   const primaryIds = new Set(recallCtx?.primaryInjectedIds ?? []);
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
+  const toolChangedFiles = new Set<string>();
 
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
@@ -680,12 +1158,13 @@ async function runCodegenWorkerLoop(
       max_tokens: MAX_OUTPUT_TOKENS,
       openRouterVariant: "codeGen",
       // When forcing write, omit tools entirely so the model cannot call them.
-      tools: forceWrite ? undefined : WORKER_READONLY_TOOLS,
+      tools: forceWrite ? undefined : WORKER_TOOLS,
       tool_choice: forceWrite ? "none" : "auto",
     }).finally(() => {
       clearInterval(heartbeat);
     });
     const choice = response.choices[0];
+    llmCalls += 1;
     const finishReason = choice?.finish_reason ?? "stop";
     const content = choice?.message?.content ?? "";
     const toolCalls = choice?.message?.tool_calls ?? [];
@@ -733,14 +1212,15 @@ async function runCodegenWorkerLoop(
         promptTokens,
         completionTokens,
         totalTokens,
+        llmCalls,
+        readOnlyRounds,
         secondaryInjectedIds,
+        toolChangedFiles: Array.from(toolChangedFiles),
       };
     }
 
-    // All tool calls in this round were read-only — increment the stall counter.
-    consecutiveReadRounds++;
-
     const toolResultTexts: string[] = [];
+    let hadWriteTool = false;
     for (const toolCall of toolCalls) {
       let args: Record<string, unknown>;
       try {
@@ -751,18 +1231,33 @@ async function runCodegenWorkerLoop(
       } catch {
         args = {};
       }
-      const result = await executeWorkerReadonlyTool(
+      const result = await executeWorkerTool(
         toolCall.function.name,
         args,
         outputDir,
+        { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId },
       );
+      if (result.isWrite) {
+        hadWriteTool = true;
+        for (const changedFile of result.changedFiles) {
+          toolChangedFiles.add(changedFile);
+        }
+      }
       messages.push({
         role: "tool",
         tool_call_id: toolCall.id,
         name: toolCall.function.name,
-        content: result,
+        content: result.content,
       });
-      toolResultTexts.push(result);
+      toolResultTexts.push(result.content);
+    }
+
+    if (hadWriteTool) {
+      consecutiveReadRounds = 0;
+    } else {
+      // All tool calls in this round were read-only — increment the stall counter.
+      consecutiveReadRounds++;
+      readOnlyRounds++;
     }
 
     // Second-pass memory recall: if the model's content or any tool result
@@ -807,6 +1302,308 @@ async function runCodegenWorkerLoop(
   throw new Error(
     `Worker tool loop exceeded ${MAX_WORKER_TOOL_ITERATIONS} iterations without final code output.`,
   );
+}
+
+type CodegenAgentCompletionReason =
+  | "status_done"
+  | "task_complete"
+  | "legacy_file_blocks"
+  | "max_iterations";
+
+type CodegenAgentSessionResult = {
+  content: string;
+  rawContent: string;
+  model: string;
+  costUsd: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  llmCalls: number;
+  readOnlyRounds: number;
+  writeToolCalls: number;
+  changedFiles: string[];
+  deletedFiles: string[];
+  movedFiles: Array<{ from: string; to: string }>;
+  completed: boolean;
+  completionReason: CodegenAgentCompletionReason;
+  secondaryInjectedIds: string[];
+};
+
+function hasTaskCompleteSignal(content: string): boolean {
+  return (
+    /<task_complete\s*\/?>/i.test(content) ||
+    /<task_complete>\s*<\/task_complete>/i.test(content) ||
+    content.includes(RALPH_COMPLETE_TOKEN)
+  );
+}
+
+function compactToolMessageResult(result: WorkerToolExecutionResult): string {
+  if (!result.isWrite) return result.content;
+  const compacted = result.content.slice(
+    0,
+    CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS,
+  );
+  return compacted.length < result.content.length
+    ? `${compacted}\n... [write tool result truncated]`
+    : compacted;
+}
+
+async function runCodegenAgentSession(
+  messages: ChatMessage[],
+  outputDir: string,
+  task: CodingTask,
+  sessionId?: string,
+  workerLabel?: string,
+  recallCtx?: SecondaryRecallContext,
+  toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
+): Promise<CodegenAgentSessionResult> {
+  let totalCostUsd = 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let llmCalls = 0;
+  let readOnlyRounds = 0;
+  let writeToolCalls = 0;
+  let lastModel = "unknown";
+  let lastContent = "";
+  const rawParts: string[] = [];
+  const changedFiles = new Set<string>();
+  const deletedFiles = new Set<string>();
+  const movedFiles: Array<{ from: string; to: string }> = [];
+  const primaryIds = new Set(recallCtx?.primaryInjectedIds ?? []);
+  const injectedIds = new Set(primaryIds);
+  const secondaryInjectedIds: string[] = [];
+  let didSecondaryRecall = false;
+
+  for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
+    const callStartedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
+      console.log(
+        `[Worker] codegen agent still waiting... loop=${i + 1}/${CODEGEN_AGENT_MAX_ITERATIONS} waited=${waitedSec}s`,
+      );
+    }, WORKER_LLM_HEARTBEAT_MS);
+    const response = await invokeCodegenOrOpenRouter(messages, {
+      temperature: 0.3,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      openRouterVariant: "codeGen",
+      tools: WORKER_TOOLS,
+      tool_choice: "auto",
+    }).finally(() => {
+      clearInterval(heartbeat);
+    });
+
+    const choice = response.choices[0];
+    const finishReason = choice?.finish_reason ?? "stop";
+    const content = choice?.message?.content ?? "";
+    const toolCalls = choice?.message?.tool_calls ?? [];
+    const usage = getResponseUsageCounts(response);
+    const costUsd = estimateCost(response.model, response.usage);
+    llmCalls += 1;
+    totalCostUsd += costUsd;
+    promptTokens += usage.promptTokens;
+    completionTokens += usage.completionTokens;
+    totalTokens += usage.totalTokens;
+    lastModel = response.model;
+    lastContent = content;
+    rawParts.push(
+      `\n\n<!-- agent-loop:${i + 1} model:${response.model} -->\n${content}`,
+    );
+
+    if (sessionId) {
+      recordCodingSessionLlmUsage({
+        sessionId,
+        stage: "worker_codegen",
+        label: workerLabel,
+        model: response.model,
+        costUsd,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
+      });
+    }
+
+    if (finishReason === "length") {
+      throw new Error(
+        `Worker codegen output truncated (finish_reason=length, model=${response.model})`,
+      );
+    }
+
+    const reasoningContent = choice?.message?.reasoning_content;
+    messages.push({
+      role: "assistant",
+      content,
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+    });
+
+    if (toolCalls.length > 0) {
+      const toolResultTexts: string[] = [];
+      let hadWriteTool = false;
+      for (const toolCall of toolCalls) {
+        let args: Record<string, unknown>;
+        try {
+          args = JSON.parse(toolCall.function.arguments || "{}") as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          args = {};
+        }
+        const result = await executeWorkerTool(
+          toolCall.function.name,
+          args,
+          outputDir,
+          { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId ?? task.id },
+        );
+        if (result.isWrite) {
+          hadWriteTool = true;
+          writeToolCalls += 1;
+          for (const changedFile of result.changedFiles) {
+            changedFiles.add(changedFile);
+          }
+          for (const deletedFile of result.deletedFiles) {
+            deletedFiles.add(deletedFile);
+          }
+          movedFiles.push(...result.movedFiles);
+        }
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          name: toolCall.function.name,
+          content: compactToolMessageResult(result),
+        });
+        toolResultTexts.push(result.content);
+      }
+
+      if (!hadWriteTool) readOnlyRounds++;
+
+      if (recallCtx && !didSecondaryRecall) {
+        const errorSignal = detectErrorSignalForRecall(
+          content,
+          toolResultTexts,
+        );
+        if (errorSignal) {
+          didSecondaryRecall = true;
+          const recall = await recallAndPrepareInject({
+            agent: recallCtx.agent,
+            role: recallCtx.role,
+            task: {
+              ...recallCtx.task,
+              description:
+                `${recallCtx.task.description ?? ""}\n\n## Encountered error signal\n${errorSignal.snippet}`.trim(),
+            },
+            projectRoot: recallCtx.projectRoot,
+            kickoffId: recallCtx.kickoffId,
+            layers: recallCtx.layers,
+            tokenBudget: recallCtx.tokenBudget,
+            excludeIds: Array.from(injectedIds),
+            pass: "secondary",
+          });
+          if (recall.block) {
+            for (const r of recall.active) {
+              injectedIds.add(r.id);
+              if (!primaryIds.has(r.id)) secondaryInjectedIds.push(r.id);
+            }
+            messages.push({
+              role: "system",
+              content:
+                `## Memory · second-pass recall (failure-mode: ${errorSignal.mode})\n` +
+                recall.block,
+            });
+          }
+        }
+      }
+      continue;
+    }
+
+    validateCodegenFileOutput(content);
+    const parsedFiles = parseFileOutput(content);
+    const parsedEntries = Object.entries(parsedFiles);
+    for (const [fp, fc] of parsedEntries) {
+      const msg = await fsWrite(fp, fc, outputDir, toolOptions?.fsWriteOptions);
+      if (msg.startsWith("SKIPPED_PROTECTED") || msg.startsWith("REJECTED")) {
+        console.log(`[Worker:${workerLabel ?? "worker"}] ${msg}`);
+        continue;
+      }
+      changedFiles.add(fp);
+      console.log(
+        `[Worker:${workerLabel ?? "worker"}] legacy file block ${msg}`,
+      );
+    }
+
+    const roundStatus = parseCodegenRoundStatus(content);
+    const taskComplete = hasTaskCompleteSignal(content);
+    const remainingCreates = getRemainingPlannedCreates(
+      task,
+      Array.from(changedFiles),
+    );
+    const hasWrites =
+      changedFiles.size > 0 || deletedFiles.size > 0 || movedFiles.length > 0;
+
+    if (
+      (roundStatus === "done" || taskComplete || parsedEntries.length > 0) &&
+      remainingCreates.length === 0 &&
+      hasWrites
+    ) {
+      return {
+        content,
+        rawContent: rawParts.join(""),
+        model: lastModel,
+        costUsd: totalCostUsd,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        llmCalls,
+        readOnlyRounds,
+        writeToolCalls,
+        changedFiles: Array.from(changedFiles),
+        deletedFiles: Array.from(deletedFiles),
+        movedFiles,
+        completed: true,
+        completionReason: taskComplete
+          ? "task_complete"
+          : roundStatus === "done"
+            ? "status_done"
+            : "legacy_file_blocks",
+        secondaryInjectedIds,
+      };
+    }
+
+    messages.push({
+      role: "user",
+      content: [
+        "Continue this same task in the same agentic session.",
+        remainingCreates.length > 0
+          ? `You still MUST create or update these planned file(s):\n${remainingCreates.map((file) => `- ${file}`).join("\n")}`
+          : "",
+        "Use write_file for new/full-file changes and apply_patch for small edits.",
+        "Do not just describe the work. Use tools to write the remaining changes.",
+        "If the task is complete, respond exactly with STATUS: DONE.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+  }
+
+  return {
+    content: lastContent,
+    rawContent: rawParts.join(""),
+    model: lastModel,
+    costUsd: totalCostUsd,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    llmCalls,
+    readOnlyRounds,
+    writeToolCalls,
+    changedFiles: Array.from(changedFiles),
+    deletedFiles: Array.from(deletedFiles),
+    movedFiles,
+    completed: false,
+    completionReason: "max_iterations",
+    secondaryInjectedIds,
+  };
 }
 
 /**
@@ -1734,13 +2531,17 @@ async function generateCode(state: WorkerState) {
             .join("\n")}`
         : "";
 
-    const multiRoundInstruction = CODEGEN_MULTI_ROUND_ENABLED
-      ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
+    const agenticInstruction = CODEGEN_AGENTIC_TOOLS_ENABLED
+      ? `\n\nAGENTIC TOOL CODING MODE:\n- This is one task in one continuous agentic session.\n- Inspect only the files you need with read_file, read_many_files, list_files, or grep.\n- Create or fully replace files with write_file.\n- Use apply_patch for small edits to existing files.\n- Use delete_file or move_file only to remove duplicates or fix incorrect generated paths.\n- Tool results are authoritative and intentionally compact; do not echo full file contents in chat.\n- Do not output full file blocks unless tool writing fails; file blocks are legacy fallback only.\n- When all required files are written and acceptance criteria are met, respond with STATUS: DONE or <task_complete>.`
       : "";
+    const multiRoundInstruction =
+      !CODEGEN_AGENTIC_TOOLS_ENABLED && CODEGEN_MULTI_ROUND_ENABLED
+        ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
+        : "";
 
     messages.push({
       role: "user",
-      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available read-only tools (\`read_file\`, \`list_files\`, \`grep\`) to inspect the generated project before coding.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
+      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${agenticInstruction}${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available tools (\`read_file\`, \`read_many_files\`, \`list_files\`, \`grep\`) to inspect the generated project before coding. Prefer \`write_file\` for new files or full-file rewrites. For small edits to existing generated files, prefer \`apply_patch\`; use \`delete_file\` or \`move_file\` only to remove duplicates or fix incorrect generated paths.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
     });
 
     const startMs = Date.now();
@@ -1756,9 +2557,19 @@ async function generateCode(state: WorkerState) {
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
+    let llmCalls = 0;
+    let readOnlyRounds = 0;
     let aggregateRawContent = "";
     let rounds = 0;
     let lastModel = "unknown";
+    const roundWritesByRound: number[] = [];
+    const codegenMode = CODEGEN_AGENTIC_TOOLS_ENABLED
+      ? "agentic-tools"
+      : "multi-round";
+    let writeToolCalls = 0;
+    let deletedFileCount = 0;
+    let movedFileCount = 0;
+    let completionReason: string = "unknown";
 
     const secondaryRecallCtx: SecondaryRecallContext | undefined =
       memoryRecall.active.length > 0 || memoryRecall.shadow.length > 0
@@ -1779,32 +2590,30 @@ async function generateCode(state: WorkerState) {
           }
         : undefined;
 
-    // Snapshot the initial context length so we can trim round-accumulated
-    // messages (tool results, assistant file blocks) between multi-rounds.
-    // Without this, context grows from ~15 K → 80 K+ over 8 rounds.
-    const initialMessagesLength = messages.length;
-
-    while (rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS) {
+    if (CODEGEN_AGENTIC_TOOLS_ENABLED) {
       rounds += 1;
-      const response = await runCodegenWorkerLoop(
+      const response = await runCodegenAgentSession(
         messages,
         state.outputDir,
+        task,
         state.sessionId,
         state.workerLabel,
         secondaryRecallCtx,
+        { fsWriteOptions: fsOpts, taskId: task.id },
       );
       const content = response.content;
-      validateCodegenFileOutput(content);
-      const parsedFiles = parseFileOutput(content);
-      const roundStatus = parseCodegenRoundStatus(content);
       totalCostUsd += response.costUsd;
       promptTokens += response.promptTokens;
       completionTokens += response.completionTokens;
       totalTokens += response.totalTokens;
-      aggregateRawContent +=
-        `\n\n<!-- round:${rounds} model:${response.model} -->\n` +
-        response.rawContent;
+      llmCalls += response.llmCalls;
+      readOnlyRounds += response.readOnlyRounds;
+      writeToolCalls += response.writeToolCalls;
+      deletedFileCount += response.deletedFiles.length;
+      movedFileCount += response.movedFiles.length;
+      aggregateRawContent += response.rawContent;
       lastModel = response.model;
+      completionReason = response.completionReason;
 
       // Parse cite tags emitted by the worker so attribution can credit
       // the specific patterns the model claims it used. Best-effort: never
@@ -1828,79 +2637,171 @@ async function generateCode(state: WorkerState) {
         }
       }
 
-      let roundWrites = 0;
-      for (const [fp, fc] of Object.entries(parsedFiles)) {
-        const msg = await fsWrite(fp, fc, state.outputDir, fsOpts);
-        if (msg.startsWith("SKIPPED_PROTECTED")) {
-          console.log(`[Worker:${state.workerLabel}] ${msg}`);
-          continue;
-        }
+      for (const fp of response.changedFiles) {
         if (!writtenSet.has(fp)) {
           writtenSet.add(fp);
           writtenFiles.push(fp);
+          newFileEntries.push({
+            path: fp,
+            role: state.role,
+            summary: `Generated/updated via worker tool for task: ${task.title}`,
+          });
         }
-        newFileEntries.push({
-          path: fp,
-          role: state.role,
-          summary: `Generated for task: ${task.title}`,
-        });
-        roundWrites += 1;
       }
-
-      console.log(
-        `[Worker:${state.workerLabel}] codegen round ${rounds}/${CODEGEN_MULTI_ROUND_MAX_ROUNDS}: wrote ${roundWrites} file(s), status=${roundStatus ?? "implicit_done"}, model=${response.model}`,
-      );
-
-      const remainingCreates = getRemainingPlannedCreates(task, writtenFiles);
-      const forcedContinue =
-        CODEGEN_MULTI_ROUND_ENABLED &&
-        remainingCreates.length > 0 &&
-        rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
-      if (forcedContinue && roundStatus !== "continue") {
+      roundWritesByRound.push(response.changedFiles.length);
+      if (!response.completed) {
         console.warn(
-          `[Worker:${state.workerLabel}] codegen round ${rounds}: file plan still missing ${remainingCreates.length} create(s); overriding ${roundStatus ?? "implicit_done"} -> continue.`,
+          `[Worker:${state.workerLabel}] Agentic codegen stopped without explicit completion (reason=${response.completionReason}).`,
         );
       }
-      const shouldContinue =
-        CODEGEN_MULTI_ROUND_ENABLED &&
-        (roundStatus === "continue" || forcedContinue) &&
-        rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
-      if (!shouldContinue) break;
+    } else {
+      // Snapshot the initial context length so we can trim round-accumulated
+      // messages (tool results, assistant file blocks) between multi-rounds.
+      // Without this, context grows from ~15 K → 80 K+ over 8 rounds.
+      const initialMessagesLength = messages.length;
 
-      const knownFiles = writtenFiles
-        .slice(-40)
-        .map((f) => `- ${f}`)
-        .join("\n");
-      // Compress messages accumulated during this round back to the initial
-      // context snapshot.  This prevents the prompt from growing linearly
-      // with the number of rounds (15 K → 86 K+).  All tool call results and
-      // large assistant file-block messages are dropped; the continuation
-      // message below re-injects the file list so the model retains awareness
-      // of what has already been written.
-      messages.splice(initialMessagesLength);
-      messages.push({
-        role: "user",
-        content: [
-          "Continue with the next batch of files for this SAME task.",
-          `Output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) in this round.`,
-          "Prefer files not yet generated in this task.",
-          "If any previously generated file is incomplete, inconsistent, miswired, or needs correction, rewrite it in this round.",
-          "Do not preserve an incorrect earlier version just to avoid rewriting.",
-          remainingCreates.length > 0
-            ? `You still MUST create these planned file(s) before finishing:\n${remainingCreates.map((file) => `- ${file}`).join("\n")}`
-            : "",
-          "End with STATUS: CONTINUE or STATUS: DONE.",
-          "",
-          knownFiles ? `Already generated files:\n${knownFiles}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      });
+      while (rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS) {
+        rounds += 1;
+        const response = await runCodegenWorkerLoop(
+          messages,
+          state.outputDir,
+          state.sessionId,
+          state.workerLabel,
+          secondaryRecallCtx,
+          { fsWriteOptions: fsOpts, taskId: task.id },
+        );
+        const content = response.content;
+        validateCodegenFileOutput(content);
+        const parsedFiles = parseFileOutput(content);
+        const roundStatus = parseCodegenRoundStatus(content);
+        totalCostUsd += response.costUsd;
+        promptTokens += response.promptTokens;
+        completionTokens += response.completionTokens;
+        totalTokens += response.totalTokens;
+        llmCalls += response.llmCalls;
+        readOnlyRounds += response.readOnlyRounds;
+        aggregateRawContent +=
+          `\n\n<!-- round:${rounds} model:${response.model} -->\n` +
+          response.rawContent;
+        lastModel = response.model;
+        completionReason = roundStatus ?? "implicit_done";
+
+        // Parse cite tags emitted by the worker so attribution can credit
+        // the specific patterns the model claims it used. Best-effort: never
+        // throws, validates ids against the actual injected set so a
+        // hallucinated id can't poison scoring.
+        if (memoryRecall.active.length > 0) {
+          const citedIds = parseMemoryCites(content);
+          if (citedIds.length > 0) {
+            const allInjected = [
+              ...memoryRecall.active.map((r) => r.id),
+              ...response.secondaryInjectedIds,
+            ];
+            await recordMemoryCites({
+              traceRoot: state.outputDir,
+              agent: "worker_codegen",
+              kickoffId: state.sessionId,
+              taskId: task.id,
+              citedIds,
+              injectedIds: allInjected,
+            });
+          }
+        }
+
+        let roundWrites = 0;
+        for (const fp of response.toolChangedFiles) {
+          if (!writtenSet.has(fp)) {
+            writtenSet.add(fp);
+            writtenFiles.push(fp);
+            newFileEntries.push({
+              path: fp,
+              role: state.role,
+              summary: `Generated/updated via worker tool for task: ${task.title}`,
+            });
+          }
+          roundWrites += 1;
+        }
+        for (const [fp, fc] of Object.entries(parsedFiles)) {
+          const msg = await fsWrite(fp, fc, state.outputDir, fsOpts);
+          if (msg.startsWith("SKIPPED_PROTECTED")) {
+            console.log(`[Worker:${state.workerLabel}] ${msg}`);
+            continue;
+          }
+          if (!writtenSet.has(fp)) {
+            writtenSet.add(fp);
+            writtenFiles.push(fp);
+          }
+          newFileEntries.push({
+            path: fp,
+            role: state.role,
+            summary: `Generated for task: ${task.title}`,
+          });
+          roundWrites += 1;
+        }
+
+        console.log(
+          `[Worker:${state.workerLabel}] codegen round ${rounds}/${CODEGEN_MULTI_ROUND_MAX_ROUNDS}: wrote ${roundWrites} file(s), status=${roundStatus ?? "implicit_done"}, model=${response.model}`,
+        );
+        roundWritesByRound.push(roundWrites);
+
+        const remainingCreates = getRemainingPlannedCreates(task, writtenFiles);
+        const forcedContinue =
+          CODEGEN_MULTI_ROUND_ENABLED &&
+          remainingCreates.length > 0 &&
+          rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
+        if (forcedContinue && roundStatus !== "continue") {
+          console.warn(
+            `[Worker:${state.workerLabel}] codegen round ${rounds}: file plan still missing ${remainingCreates.length} create(s); overriding ${roundStatus ?? "implicit_done"} -> continue.`,
+          );
+        }
+        const shouldContinue =
+          CODEGEN_MULTI_ROUND_ENABLED &&
+          (roundStatus === "continue" || forcedContinue) &&
+          rounds < CODEGEN_MULTI_ROUND_MAX_ROUNDS;
+        if (!shouldContinue) break;
+
+        const knownFiles = writtenFiles
+          .slice(-40)
+          .map((f) => `- ${f}`)
+          .join("\n");
+        // Compress messages accumulated during this round back to the initial
+        // context snapshot.  This prevents the prompt from growing linearly
+        // with the number of rounds (15 K → 80 K+).  All tool call results and
+        // large assistant file-block messages are dropped; the continuation
+        // message below re-injects the file list so the model retains awareness
+        // of what has already been written.
+        messages.splice(initialMessagesLength);
+        messages.push({
+          role: "user",
+          content: [
+            "Continue with the next batch of files for this SAME task.",
+            `Output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) in this round.`,
+            "Prefer files not yet generated in this task.",
+            "If any previously generated file is incomplete, inconsistent, miswired, or needs correction, rewrite it in this round.",
+            "Do not preserve an incorrect earlier version just to avoid rewriting.",
+            remainingCreates.length > 0
+              ? `You still MUST create these planned file(s) before finishing:\n${remainingCreates.map((file) => `- ${file}`).join("\n")}`
+              : "",
+            "End with STATUS: CONTINUE or STATUS: DONE.",
+            "",
+            knownFiles ? `Already generated files:\n${knownFiles}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+      }
     }
     const durationMs = Date.now() - startMs;
 
     console.log(
-      `[Worker:${state.workerLabel}] Generated ${writtenFiles.length} files in ${(durationMs / 1000).toFixed(1)}s (rounds=${rounds}, model=${lastModel}, cost: $${totalCostUsd.toFixed(4)})`,
+      `[Worker:${state.workerLabel}] Generated ${writtenFiles.length} files in ${(durationMs / 1000).toFixed(1)}s (mode=${codegenMode}, rounds=${rounds}, model=${lastModel}, cost: $${totalCostUsd.toFixed(4)})`,
+    );
+    const totalRoundWrites = roundWritesByRound.reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    console.log(
+      `[Worker:${state.workerLabel}] Codegen metrics task="${task.title}" mode=${codegenMode} llmCalls=${llmCalls} promptTokens=${promptTokens} completionTokens=${completionTokens} totalTokens=${totalTokens} readOnlyRounds=${readOnlyRounds} writeToolCalls=${writeToolCalls} roundWrites=${totalRoundWrites} roundWritesByRound=[${roundWritesByRound.join(",")}] deletedFiles=${deletedFileCount} movedFiles=${movedFileCount} durationSec=${(durationMs / 1000).toFixed(1)} model=${lastModel} completion=${completionReason}`,
     );
 
     // Migration-coverage check — fires per-task immediately after writes.
@@ -1909,7 +2810,10 @@ async function generateCode(state: WorkerState) {
     // downstream self-heal can convert it into a repair task.
     try {
       const coverage = checkMigrationCoverage({ writtenFiles });
-      if (coverage.modelFilesTouched.length > 0 || coverage.migrationFilesTouched.length > 0) {
+      if (
+        coverage.modelFilesTouched.length > 0 ||
+        coverage.migrationFilesTouched.length > 0
+      ) {
         const ralphDir = path.join(state.outputDir, ".ralph");
         await nodeFs.mkdir(ralphDir, { recursive: true });
         const reportPath = path.join(ralphDir, "migration-coverage.json");
@@ -1924,7 +2828,11 @@ async function generateCode(state: WorkerState) {
               ok: boolean;
               modelFilesTouched: string[];
               migrationFilesTouched: string[];
-              gaps: { modelPath: string; modelName: string; instruction: string }[];
+              gaps: {
+                modelPath: string;
+                modelName: string;
+                instruction: string;
+              }[];
               checkedAt: string;
             }
           >;
@@ -1952,7 +2860,11 @@ async function generateCode(state: WorkerState) {
           checkedAt,
         };
         report.updatedAt = checkedAt;
-        await nodeFs.writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+        await nodeFs.writeFile(
+          reportPath,
+          JSON.stringify(report, null, 2) + "\n",
+          "utf8",
+        );
 
         if (!coverage.ok) {
           console.warn(

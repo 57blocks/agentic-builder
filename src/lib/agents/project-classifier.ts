@@ -5,6 +5,8 @@
 export {
   classifyProject,
   normalizeProjectTier,
+  parseTierFromPrd,
+  extractClassificationFromPrd,
   type ProjectTier,
   type ProjectClassification,
 } from "./shared/project-classifier";

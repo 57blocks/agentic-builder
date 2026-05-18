@@ -13,6 +13,7 @@ import { findDesignStylePreset } from "@/lib/pipeline/design-style-presets";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
+import { recallDesignContext } from "@/lib/memory/preparation-recall";
 
 /** Pencil step: LLM (up to 16k tokens) + many batch_design chunks can exceed 5 minutes. */
 export const maxDuration = 600;
@@ -51,15 +52,18 @@ This is a **Tier-L monorepo** project:
 function buildAgentMap(
   tierConstraint: string,
   designStyleMarkdown: string,
+  effectiveTier: "S" | "M" | "L",
   referenceImageBase64?: string,
+  designKnowledgeContext?: string,
 ): Record<string, DocAgentFn> {
-  const designAdditional = [tierConstraint, designStyleMarkdown]
-    .filter((s) => s.trim().length > 0)
+  const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
+    .filter((s) => s && s.trim().length > 0)
     .join("\n\n");
   return {
     trd: (prd, _trd, _sys, _ds, sid, prdSpec, onChunk) =>
       new TRDAgent().generateTRD(
         `${tierConstraint}\n\n${prd}`,
+        effectiveTier,
         undefined,
         sid,
         prdSpec ?? null,
@@ -198,10 +202,32 @@ export async function POST(request: NextRequest) {
   const designDirectionPrompt = typeof (body as Record<string, unknown>).designDirectionPrompt === "string"
     ? (body as Record<string, unknown>).designDirectionPrompt as string
     : undefined;
+
+  // ── Design knowledge recall ────────────────────────────────────────────────
+  // Fetch industry-matched Style Specs and 57B library records to inject into
+  // the DesignAgent prompt. Only runs when `design` is one of the selected docs.
+  let designKnowledgeContext: string | undefined;
+  let recalledKnowledgeIds: string[] = [];
+  if (selectedDocs.includes("design") || (designVariants && designVariants.length > 0)) {
+    try {
+      const recall = await recallDesignContext({
+        sessionId,
+        featureBrief: prdContent.slice(0, 300),
+        prdContent,
+      });
+      designKnowledgeContext = recall.contextChunk || undefined;
+      recalledKnowledgeIds = recall.recalledKnowledgeIds ?? [];
+    } catch (e) {
+      console.warn("[parallel-generate] design recall failed (skipping):", (e as Error).message);
+    }
+  }
+
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
+    effectiveTier,
     styleReferenceImageBase64,
+    designKnowledgeContext,
   );
 
   const encoder = new TextEncoder();
@@ -220,6 +246,7 @@ export async function POST(request: NextRequest) {
             const variantAgentMap = buildAgentMap(
               tierConstraint,
               directionPrompt,
+              effectiveTier,
               styleReferenceImageBase64,
             );
             try {
@@ -371,6 +398,9 @@ export async function POST(request: NextRequest) {
             tokens: result.usage.total_tokens,
             ...(trdArtifactsSummary
               ? { trdArtifacts: trdArtifactsSummary }
+              : {}),
+            ...(docId === "design" && recalledKnowledgeIds.length > 0
+              ? { recalledKnowledgeIds }
               : {}),
           });
         } catch (error) {

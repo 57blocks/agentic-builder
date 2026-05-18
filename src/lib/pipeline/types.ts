@@ -132,6 +132,16 @@ export type CodingTaskStatus =
   | "completed_with_warnings"
   | "failed";
 
+export interface TaskFileActivity {
+  operation: "read" | "write";
+  path: string;
+  /** First ~300 chars of written content — only populated for write ops. */
+  contentPreview?: string;
+  /** Total character length of the written content. */
+  contentLength?: number;
+  timestamp: string;
+}
+
 export interface CodingTask extends KickoffWorkItem {
   assignedAgentId: string | null;
   codingStatus: CodingTaskStatus;
@@ -157,6 +167,8 @@ export interface CodingTask extends KickoffWorkItem {
   taskCostUsd?: number;
   /** Explicit list of modified files for this task (same as generatedFiles). */
   modifiedFiles?: string[];
+  /** Real-time file read/write activity streamed during task execution. */
+  fileActivities?: TaskFileActivity[];
 }
 
 export interface CodingAgentInstance {

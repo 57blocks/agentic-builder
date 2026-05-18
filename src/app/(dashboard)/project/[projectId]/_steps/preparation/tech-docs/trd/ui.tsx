@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import StageInputBar from "@/components/StageInputBar";
+import TrdReviewPanel from "@/components/TrdReviewPanel";
+import type { TrdReviewResult } from "@/lib/agents/architect/trd-reviewer-agent";
 import type { StepUIProps } from "../../../_shared/types";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
@@ -66,6 +68,52 @@ export function TrdUI(props: StepUIProps) {
   const autoStartedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // ── TRD review state ─────────────────────────────────────────────────
+  const [reviewResult, setReviewResult] = useState<TrdReviewResult | null>(
+    null,
+  );
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  // Bind a review to a specific TRD content snapshot so we don't re-run
+  // every time the user navigates back. When TRD content changes, we'll
+  // pick that up via the dependency on step?.content.
+  const reviewedForContentRef = useRef<string | null>(null);
+
+  const runReview = (
+    trdContent: string,
+    prdContent: string,
+    activeTier: "S" | "M" | "L",
+  ) => {
+    if (!trdContent.trim() || !prdContent.trim()) return;
+    reviewedForContentRef.current = trdContent;
+    setReviewLoading(true);
+    setReviewError(null);
+    setReviewResult(null);
+    fetch("/api/agents/trd-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prd: prdContent,
+        trd: trdContent,
+        tier: activeTier,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        return res.json() as Promise<{ result: TrdReviewResult }>;
+      })
+      .then((data) => setReviewResult(data.result))
+      .catch((err) =>
+        setReviewError(err instanceof Error ? err.message : "Review failed"),
+      )
+      .finally(() => setReviewLoading(false));
+  };
+
   // Auto-start: when both PRD and design spec are available and TRD hasn't been generated yet
   useEffect(() => {
     console.log("[TrdUI] auto-start effect running", { isHydrated, autoStarted: autoStartedRef.current, isRunning, hasContent: !!step?.content, hasPrd: !!steps.prd?.content, hasDesign: !!steps.design?.content, prdStatus: steps.prd?.status, designStatus: steps.design?.status });
@@ -93,6 +141,29 @@ export function TrdUI(props: StepUIProps) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [content, isThisRunning]);
+
+  // Review is now MANUAL — user clicks the "Run review" button in
+  // TrdReviewPanel. We deliberately do NOT auto-trigger on TRD completion,
+  // so cost is opt-in. If the user wants automatic review back, restore the
+  // useEffect that watches `isDone` / `step?.content` and calls runReview().
+
+  const handleRegenerate = () => {
+    if (isThisRunning) return;
+    const ok = window.confirm(
+      "Regenerate TRD from scratch?\n\nThis discards the current TRD content and any pending review, then runs the TRD agent again against the latest PRD.",
+    );
+    if (!ok) return;
+    // Clear the prior review so the panel doesn't show stale results while
+    // the new TRD streams. The auto-review effect will re-fire once the
+    // fresh TRD content lands.
+    reviewedForContentRef.current = null;
+    setReviewResult(null);
+    setReviewError(null);
+    setReviewLoading(false);
+    // Re-arm auto-start so the streaming effect doesn't bail.
+    autoStartedRef.current = true;
+    void executeStep("trd");
+  };
 
   const handleDownloadPdf = () => {
     if (!content || isPrinting) return;
@@ -167,10 +238,19 @@ export function TrdUI(props: StepUIProps) {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isThisRunning || !isDone}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Regenerate TRD from scratch against the latest PRD"
+                >
+                  <RefreshCw size={12} className={isThisRunning ? "animate-spin" : ""} />
+                  {isThisRunning ? "Regenerating…" : "Regenerate"}
+                </button>
                 <button
                   onClick={handleDownloadPdf}
-                  disabled={!isDone || isPrinting}
+                  disabled={!isDone || isPrinting || isThisRunning}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Download PDF"
                 >
@@ -196,6 +276,22 @@ export function TrdUI(props: StepUIProps) {
               <div ref={bottomRef} />
             </div>
           </div>
+
+          {/* Cross-vendor review panel — auto-fires when TRD streams complete */}
+          {isDone && !isThisRunning && (
+            <TrdReviewPanel
+              result={reviewResult}
+              loading={reviewLoading}
+              error={reviewError}
+              onRerunReview={() => {
+                const trdContent = step?.content ?? "";
+                const prdContent = steps.prd?.content ?? "";
+                // Force a re-run even if same content.
+                reviewedForContentRef.current = null;
+                runReview(trdContent, prdContent, tier);
+              }}
+            />
+          )}
         </div>
       </div>
 

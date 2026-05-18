@@ -3,7 +3,7 @@ export interface ApiConfig {
 }
 
 // 默认使用相对路径走 Vite dev server 代理，生产环境可通过 VITE_API_BASE_URL 覆盖
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 export type ApiQueryValue = string | number | boolean | null | undefined;
 

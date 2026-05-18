@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
@@ -10,45 +10,9 @@ import type {
   KnowledgeRecordsResponse,
 } from "@/app/api/memory/knowledge/records/route";
 import type { DesignIndustry } from "@/lib/memory/knowledge/57b-library";
-
-// ---------------------------------------------------------------------------
-// Reference image data per industry
-// ---------------------------------------------------------------------------
-interface RefImage {
-  src: string;
-  label: string;
-  desc: string;
-  avoid?: boolean;
-}
-
-const INDUSTRY_REFS: Record<DesignIndustry, RefImage[]> = {
-  ai: [
-    { src: "/knowledge-refs/ai-1-lumina.png",    label: "LuminaAI",    desc: "Fluid warm gradient hero, clean white nav, bold serif headline" },
-    { src: "/knowledge-refs/ai-5-kodu.png",       label: "Kodu",        desc: "Deep purple-to-black gradient, oversized white type, glow effects" },
-    { src: "/knowledge-refs/ai-2-aipatrn.png",    label: "AIPatrn",     desc: "Dark mesh background, bright purple accents, tight card grid" },
-    { src: "/knowledge-refs/ai-7-seto.png",       label: "SETO",        desc: "Frosted glass sidebar, purple star branding, chat history panel" },
-    { src: "/knowledge-refs/ai-8-nuro.png",       label: "NuroAI",      desc: "Light SaaS layout, blue CTA, floating dashboard cards" },
-    { src: "/knowledge-refs/ai-8-nuro-full.png",  label: "NuroAI Full", desc: "Full-page view with features grid, testimonials, FAQ sections" },
-    { src: "/knowledge-refs/ai-9-draftai.png",    label: "DraftAI",     desc: "Light gray base, chat-like left panel, minimalist branding" },
-    { src: "/knowledge-refs/ai-3-chat.png",       label: "Chat AI",     desc: "Clean greeting interface with AI prompt suggestions" },
-    { src: "/knowledge-refs/ai-4-avoid.png",      label: "Avoid — Playex", desc: "Overly dense layout, weak visual hierarchy — use as counter-example", avoid: true },
-  ],
-  "fintech-web3": [
-    { src: "/knowledge-refs/f1-solvance.png",    label: "Solvance Finance", desc: "Clean white FinTech, forest-green brand, phone product hero shot" },
-    { src: "/knowledge-refs/f2-blocksphere.png", label: "BlockSphere",      desc: "Deep navy, white serif headline, purple CTA, enterprise feel" },
-    { src: "/knowledge-refs/f3-bullxt.png",      label: "bullXT",           desc: "Pure dark base, neon purple-pink gradient, live crypto price cards" },
-    { src: "/knowledge-refs/f5-nebula.png",      label: "Nebula Core",      desc: "Purple-to-black deep gradient, large 3D holographic cube hero" },
-    { src: "/knowledge-refs/f4-videosnap.png",   label: "VideoSnap",        desc: "Gray texture hero, strong CTA placement, metric highlight bar" },
-  ],
-  saas: [
-    { src: "/knowledge-refs/s1-saas.png", label: "Collabix",   desc: "Warm beige accent banner, white card grid, task progress bars" },
-    { src: "/knowledge-refs/s2-saas.png", label: "Picktime",   desc: "White with blue primary, scheduling card UI, simple two-column pricing" },
-    { src: "/knowledge-refs/s3-saas.png", label: "Earnify",    desc: "Orange brand accent, dark sidebar mock, large KPI numbers, chart social proof" },
-    { src: "/knowledge-refs/s4-saas.png", label: "Appvia",     desc: "Purple-lavender tinted sections, calendar widget, feature checklist" },
-    { src: "/knowledge-refs/s5-saas.png", label: "Untitled UI",desc: "Very clean white SaaS, gray scale hierarchy, large dashboard screenshot hero" },
-    { src: "/knowledge-refs/s6-saas.png", label: "DraftAI",    desc: "Light layout, AI tool positioning, inspiration grid, minimal branding" },
-  ],
-};
+import type { StyleSpecIndustry } from "@/lib/memory/knowledge/style-spec/types";
+import { extractStyleSpecHtml } from "@/lib/memory/knowledge/style-spec/compose-body";
+import { extractTrendRefreshMarkdown } from "@/lib/memory/knowledge/trend-refresh";
 
 // ---------------------------------------------------------------------------
 // Icons
@@ -97,10 +61,29 @@ function XMarkIcon() {
   );
 }
 
-function ExpandIcon() {
+function UploadIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function MagicWandIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M15 9h0M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
@@ -133,53 +116,102 @@ const INDUSTRY_KW: Record<DesignIndustry, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Lightbox
+// Style Spec preview modal — MD / HTML tabs
 // ---------------------------------------------------------------------------
-function Lightbox({ image, onClose }: { image: RefImage; onClose: () => void }) {
+function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onClose: () => void }) {
+  const [tab, setTab] = useState<"html" | "markdown" | "raw">("html");
+  const html = extractStyleSpecHtml(record.body);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-8"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        className="relative max-w-4xl w-full"
+        initial={{ scale: 0.96, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.96, opacity: 0, y: 8 }}
+        transition={{ type: "spring", stiffness: 360, damping: 28 }}
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onClose}
-          className="absolute -top-3 -right-3 z-10 w-7 h-7 rounded-full bg-white shadow-lg flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors"
-        >
-          <XMarkIcon />
-        </button>
-        <div className="rounded-2xl overflow-hidden shadow-2xl bg-slate-900">
-          <div className="relative w-full" style={{ aspectRatio: "16/9" }}>
-            <Image
-              src={image.src}
-              alt={image.label}
-              fill
-              className="object-contain"
-              sizes="(max-width: 1200px) 90vw, 1000px"
-              unoptimized
-            />
-          </div>
-          <div className={`px-5 py-3 border-t border-slate-700 ${image.avoid ? "bg-rose-950" : "bg-slate-800"}`}>
-            <div className="flex items-center gap-2">
-              {image.avoid && (
-                <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-rose-600 text-white">
-                  Avoid
-                </span>
-              )}
-              <span className="text-sm font-semibold text-white">{image.label}</span>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3 min-w-0">
+            {record.imagePath && (
+              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-100">
+                <Image src={record.imagePath} alt={record.imageName ?? ""} fill className="object-cover" unoptimized />
+              </div>
+            )}
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-slate-900 truncate">{record.title}</h2>
+              <p className="text-xs text-slate-500 truncate">
+                {record.id} · industry {record.industry ?? "n/a"} · score {(record.metrics.score ?? 0).toFixed(2)}
+              </p>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">{image.desc}</p>
           </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors">
+            <XMarkIcon />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-6 py-2 border-b border-slate-100 bg-slate-50">
+          {(["html", "markdown", "raw"] as const).map((id) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                tab === id
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-white"
+              }`}
+            >
+              {id === "html" ? "HTML Preview" : id === "markdown" ? "Markdown" : "Raw record"}
+            </button>
+          ))}
+          {tab === "html" && html && (
+            <button
+              onClick={() => {
+                const blob = new Blob([html], { type: "text/html" });
+                const url = URL.createObjectURL(blob);
+                window.open(url, "_blank");
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+              }}
+              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-white transition-colors"
+            >
+              Open in tab ↗
+            </button>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto bg-white">
+          {tab === "html" ? (
+            html ? (
+              <iframe
+                srcDoc={html}
+                sandbox="allow-scripts allow-same-origin"
+                className="w-full h-full border-0"
+                title="Style Spec Preview"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-slate-400">
+                No HTML preview available for this record.
+              </div>
+            )
+          ) : tab === "markdown" ? (
+            <div className="p-8 max-w-3xl mx-auto prose prose-sm prose-slate">
+              <ReactMarkdown>{record.body}</ReactMarkdown>
+            </div>
+          ) : (
+            <pre className="p-6 text-[11px] font-mono whitespace-pre-wrap break-all text-slate-700 leading-relaxed">
+              {record.body}
+            </pre>
+          )}
         </div>
       </motion.div>
     </motion.div>
@@ -187,47 +219,43 @@ function Lightbox({ image, onClose }: { image: RefImage; onClose: () => void }) 
 }
 
 // ---------------------------------------------------------------------------
-// Reference gallery card
+// Style Spec card — one per analysed image
 // ---------------------------------------------------------------------------
-function RefGalleryCard({ image, onClick }: { image: RefImage; onClick: () => void }) {
+function StyleSpecCard({ record, onOpen }: { record: KnowledgeRecordFull; onOpen: () => void }) {
+  const isCapture = record.isTrendCapture;
   return (
     <motion.button
       whileHover={{ y: -3, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
-      onClick={onClick}
-      className={`group relative rounded-xl overflow-hidden border text-left shadow-sm transition-shadow hover:shadow-md ${
-        image.avoid
-          ? "border-rose-200 ring-1 ring-rose-200"
-          : "border-slate-200"
+      onClick={onOpen}
+      className={`group relative rounded-xl overflow-hidden border bg-white text-left shadow-sm transition-shadow hover:shadow-md ${
+        isCapture ? "border-amber-200" : "border-violet-200"
       }`}
     >
-      {/* Screenshot */}
       <div className="relative w-full bg-slate-100" style={{ aspectRatio: "16/10" }}>
-        <Image
-          src={image.src}
-          alt={image.label}
-          fill
-          className="object-cover object-top"
-          sizes="(max-width: 768px) 50vw, 25vw"
-          unoptimized
-        />
-        {/* Hover overlay with expand icon */}
+        {record.imagePath ? (
+          <Image src={record.imagePath} alt={record.imageName ?? ""} fill className="object-cover object-top" sizes="(max-width:768px) 50vw, 25vw" unoptimized />
+        ) : null}
+        <div className={`absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shadow flex items-center gap-1 text-white ${
+          isCapture ? "bg-amber-600" : "bg-violet-600"
+        }`}>
+          <MagicWandIcon /> {isCapture ? "Trend Capture" : "Style Spec"}
+        </div>
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded-lg p-1.5">
-            <ExpandIcon />
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 rounded-lg p-1.5 flex items-center gap-1 text-[11px] font-medium text-slate-700">
+            <EyeIcon /> View Spec
           </div>
         </div>
-        {/* Avoid badge */}
-        {image.avoid && (
-          <div className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-rose-600 text-white shadow">
-            Avoid
-          </div>
-        )}
       </div>
-      {/* Caption */}
-      <div className={`px-3 py-2 ${image.avoid ? "bg-rose-50" : "bg-white"}`}>
-        <div className="text-[12px] font-semibold text-slate-800 truncate">{image.label}</div>
-        <div className="text-[11px] text-slate-500 leading-snug mt-0.5 line-clamp-2">{image.desc}</div>
+      <div className="px-3 py-2">
+        <div className="text-[12px] font-semibold text-slate-800 truncate">{record.imageName ?? record.title}</div>
+        {isCapture && record.sourceSite ? (
+          <div className="text-[11px] text-amber-700 leading-snug mt-0.5 truncate">
+            ↗ {record.sourceSite}
+          </div>
+        ) : (
+          <div className="text-[11px] text-slate-500 leading-snug mt-0.5 line-clamp-2">{record.title}</div>
+        )}
       </div>
     </motion.button>
   );
@@ -301,8 +329,11 @@ export default function KnowledgePage() {
   const [activeIndustry, setActiveIndustry] = useState<DesignIndustry>("ai");
   const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [batchAnalysing, setBatchAnalysing] = useState(false);
+  const [specModal, setSpecModal] = useState<KnowledgeRecordFull | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [lightbox, setLightbox] = useState<RefImage | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -328,10 +359,21 @@ export default function KnowledgePage() {
     setRefreshing(true);
     try {
       const res = await fetch(`/api/memory/knowledge/refresh?industry=${activeIndustry}`, { method: "POST" });
-      const data = await res.json() as { ok: boolean };
-      if (data.ok) { showToast(`Trend refresh complete for ${activeIndustry}`, true); await fetchRecords(); }
-      else showToast("Refresh failed — check server logs", false);
-    } catch { showToast("Network error during refresh", false); }
+      const data = await res.json() as {
+        ok: boolean;
+        summary?: { captured: number; failed: number; pruned: number };
+      };
+      if (data.ok && data.summary) {
+        const { captured, failed, pruned } = data.summary;
+        showToast(
+          `Trend capture for ${activeIndustry}: ${captured} captured, ${failed} failed, ${pruned} pruned`,
+          true,
+        );
+        await fetchRecords();
+      } else {
+        showToast("Trend capture failed — check server logs", false);
+      }
+    } catch { showToast("Network error during capture", false); }
     finally { setRefreshing(false); }
   }
 
@@ -349,10 +391,62 @@ export default function KnowledgePage() {
     finally { setSeeding(false); }
   }
 
+  async function handleUpload(file: File, industry: StyleSpecIndustry) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("industry", industry);
+      const res = await fetch("/api/memory/knowledge/upload", { method: "POST", body: fd });
+      const data = await res.json() as { ok: boolean; error?: string; record?: { id: string } };
+      if (data.ok) {
+        showToast(`Analysed ${file.name} → ${data.record?.id}`, true);
+        await fetchRecords();
+      } else {
+        showToast(`Upload failed: ${data.error ?? "unknown"}`, false);
+      }
+    } catch (err) {
+      showToast(`Upload error: ${(err as Error).message}`, false);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleBatchAnalyse() {
+    setBatchAnalysing(true);
+    try {
+      const res = await fetch("/api/memory/knowledge/analyze-existing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await res.json() as {
+        ok: boolean;
+        error?: string;
+        summary?: { analysed: number; skipped: number; failed: number; total: number };
+      };
+      if (data.ok && data.summary) {
+        const { analysed, skipped, failed, total } = data.summary;
+        showToast(`Batch: ${analysed} analysed, ${skipped} skipped, ${failed} failed (of ${total})`, failed === 0);
+        await fetchRecords();
+      } else {
+        showToast(`Batch failed: ${data.error ?? "unknown"}`, false);
+      }
+    } catch (err) {
+      showToast(`Batch error: ${(err as Error).message}`, false);
+    } finally {
+      setBatchAnalysing(false);
+    }
+  }
+
   const industryRecords = records.filter((r) => r.industry === activeIndustry);
   const libraryRecord = industryRecords.find((r) => r.isLibrary);
   const refreshRecords = industryRecords.filter((r) => r.isRefresh);
-  const refs = INDUSTRY_REFS[activeIndustry];
+  // Generic-bucket style specs are also visible from any industry tab so users
+  // can browse all custom uploads regardless of bucketing.
+  const styleSpecRecords = records.filter(
+    (r) => r.isStyleSpec && (r.industry === activeIndustry || r.industry === "generic"),
+  );
   const activeInfo = INDUSTRIES.find((i) => i.id === activeIndustry)!;
 
   return (
@@ -372,9 +466,9 @@ export default function KnowledgePage() {
         )}
       </AnimatePresence>
 
-      {/* Lightbox */}
+      {/* Style Spec modal */}
       <AnimatePresence>
-        {lightbox && <Lightbox image={lightbox} onClose={() => setLightbox(null)} />}
+        {specModal && <StyleSpecModal record={specModal} onClose={() => setSpecModal(null)} />}
       </AnimatePresence>
 
       {/* Header */}
@@ -392,11 +486,36 @@ export default function KnowledgePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleUpload(f, activeIndustry as StyleSpecIndustry);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-300 bg-violet-50 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-all"
+            >
+              <UploadIcon />{uploading ? "Analysing…" : `Upload to ${activeInfo.label}`}
+            </button>
+            <button
+              onClick={() => void handleBatchAnalyse()}
+              disabled={batchAnalysing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+            >
+              <MagicWandIcon />{batchAnalysing ? "Analysing…" : "Analyse All Images"}
+            </button>
             <button onClick={() => void handleReseed()} disabled={seeding} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all">
               <SeedIcon />{seeding ? "Seeding…" : "Re-seed Library"}
             </button>
             <button onClick={() => void handleRefresh()} disabled={refreshing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 disabled:opacity-50 transition-all">
-              <RefreshIcon spinning={refreshing} />{refreshing ? "Refreshing…" : `Refresh ${activeInfo.label} Trends`}
+              <RefreshIcon spinning={refreshing} />{refreshing ? "Capturing…" : `Capture ${activeInfo.label} Trends`}
             </button>
           </div>
         </div>
@@ -440,25 +559,38 @@ export default function KnowledgePage() {
                 </div>
               </div>
 
-              {/* Reference Screenshots */}
+              {/* Generated Style Specs (per uploaded image) */}
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="text-sm font-bold text-slate-800">
-                      {activeInfo.emoji} Reference Screenshots
-                      <span className="ml-2 text-slate-400 font-normal text-xs">({refs.length} examples)</span>
+                      ✨ Generated Style Specs
+                      <span className="ml-2 text-slate-400 font-normal text-xs">
+                        ({styleSpecRecords.length} spec{styleSpecRecords.length === 1 ? "" : "s"})
+                      </span>
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Representative visual styles for this industry — the DesignAgent references these aesthetics.
-                      Click any image to expand.
+                      Each uploaded image OR captured trend site is analysed by a vision LLM → produces a Markdown summary + a full HTML visualisation document.
+                      Both are recalled into DesignAgent when the project matches this industry.
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                  {refs.map((img) => (
-                    <RefGalleryCard key={img.src} image={img} onClick={() => setLightbox(img)} />
-                  ))}
-                </div>
+                {styleSpecRecords.length === 0 ? (
+                  <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-8 text-center">
+                    <p className="text-sm text-slate-500 mb-1">No Style Specs yet for this bucket.</p>
+                    <p className="text-xs text-slate-400 mb-3">
+                      Click <strong>Capture {activeInfo.label} Trends</strong> above to auto-discover and screenshot trending sites,{" "}
+                      <strong>Upload to {activeInfo.label}</strong> to add your own image, or{" "}
+                      <strong>Analyse All Images</strong> to process the static references in <code>public/knowledge-refs/</code>.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                    {styleSpecRecords.map((r) => (
+                      <StyleSpecCard key={r.id} record={r} onOpen={() => setSpecModal(r)} />
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Style Guide */}
@@ -479,25 +611,42 @@ export default function KnowledgePage() {
                 )}
               </div>
 
-              {/* Daily Trend Refreshes */}
+              {/* Daily Trend Refreshes — legacy text-only trend notes (kept
+                  visible while historical records remain; new refreshes now
+                  go through the trend-capture pipeline above). */}
               {refreshRecords.length > 0 && (
                 <div>
                   <h2 className="text-sm font-bold text-slate-800 mb-3">
                     🔄 Daily Trend Refreshes
-                    <span className="ml-2 text-slate-400 font-normal text-xs">({refreshRecords.length} records, last 30 days)</span>
+                    <span className="ml-2 text-slate-400 font-normal text-xs">({refreshRecords.length} legacy text records)</span>
                   </h2>
                   <div className="space-y-3">
                     {refreshRecords.map((r) => {
                       const date = r.tags.find((t) => t.startsWith("refreshed:"))?.replace("refreshed:", "");
+                      // Newly-generated trend records embed both Markdown and HTML
+                      // sections — display only the Markdown for the inline summary
+                      // and reveal the HTML doc through the preview modal. Legacy
+                      // records (Markdown-only body) fall back to rendering the
+                      // entire body verbatim.
+                      const markdown = extractTrendRefreshMarkdown(r.body) ?? r.body;
+                      const hasHtml = Boolean(extractStyleSpecHtml(r.body));
                       return (
                         <div key={r.id} className="bg-white rounded-xl border border-dashed border-slate-300 p-4">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Trend Refresh</span>
                             {date && <span className="text-[11px] text-slate-400">{date}</span>}
                             <span className="ml-auto text-xs text-emerald-600 font-medium">score {(r.metrics.score ?? 0).toFixed(2)}</span>
+                            {hasHtml && (
+                              <button
+                                onClick={() => setSpecModal(r)}
+                                className="flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:text-violet-900 px-2 py-1 rounded-md hover:bg-violet-50 transition-colors"
+                              >
+                                <EyeIcon /> Open HTML preview
+                              </button>
+                            )}
                           </div>
                           <div className="prose prose-sm prose-slate max-w-none text-[13px] [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:text-slate-700 [&_h3]:mt-3 [&_h3]:mb-1 [&_ul]:mt-1 [&_li]:text-slate-600 [&_strong]:text-slate-800">
-                            <ReactMarkdown>{r.body}</ReactMarkdown>
+                            <ReactMarkdown>{markdown}</ReactMarkdown>
                           </div>
                         </div>
                       );
@@ -506,12 +655,6 @@ export default function KnowledgePage() {
                 </div>
               )}
 
-              {refreshRecords.length === 0 && libraryRecord && (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center">
-                  <p className="text-sm text-slate-500 mb-1">No daily refresh records yet.</p>
-                  <p className="text-xs text-slate-400 mb-3">Click <strong>Refresh {activeInfo.label} Trends</strong> above to generate LLM-powered design trend notes for {new Date().getFullYear()}.</p>
-                </div>
-              )}
             </motion.div>
           </AnimatePresence>
         )}

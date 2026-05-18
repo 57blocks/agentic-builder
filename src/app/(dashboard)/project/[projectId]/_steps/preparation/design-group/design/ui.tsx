@@ -533,6 +533,7 @@ export function DesignUI(props: StepUIProps) {
     designSourceMode?: "ai" | "custom";
     stitchResult?: StitchGenerateResult | null;
     prdHash?: string | null;
+    recalledKnowledgeIds?: string[] | null;
   };
 
   // ── Local design state ──────────────────────────────────────────────────
@@ -1287,6 +1288,33 @@ export function DesignUI(props: StepUIProps) {
         {/* ══ Phase 2: Design Spec ══ */}
         {phase === "spec" && (
           <>
+            {/* ── Recalled knowledge badge ── */}
+            {!isDesignRunning && (designMeta.recalledKnowledgeIds?.length ?? 0) > 0 && (
+              <div className="shrink-0 mx-4 mt-3 px-3 py-2 rounded-lg bg-violet-950/40 border border-violet-700/30 flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-violet-300 font-medium whitespace-nowrap">Knowledge applied:</span>
+                {(designMeta.recalledKnowledgeIds ?? []).map((id) => (
+                  <a
+                    key={id}
+                    href="/knowledge"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`View ${id} in Knowledge Base`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-800/50 text-violet-200 text-[10px] font-mono hover:bg-violet-700/60 transition-colors"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                    {id}
+                  </a>
+                ))}
+                <a
+                  href="/knowledge"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto text-[10px] text-violet-400 hover:text-violet-200 transition-colors underline underline-offset-2"
+                >
+                  Open Knowledge Base →
+                </a>
+              </div>
+            )}
             {isDesignRunning ? (
               <div className="flex flex-col items-center justify-center h-full gap-4">
                 <Loading size="lg" text="Generating Design System Spec…" />

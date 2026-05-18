@@ -1,0 +1,60 @@
+import type { CodingAgentRole } from "@/lib/pipeline/types";
+
+/**
+ * Supervisor-level feature flags & tunables.
+ *
+ * All env reads happen exactly once at module load to keep behaviour stable
+ * across a graph run. This module is intentionally side-effect free beyond
+ * those env reads.
+ */
+
+export const ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC =
+  process.env.BLUEPRINT_INCREMENTAL_CONTEXT_SYNC !== "0";
+
+// P0 parallel-coding flag.
+//   "0" or unset → legacy single-worker behaviour (default; preserves the
+//                  strict incremental-context guarantee for in-flight runs).
+//   "auto"       → derive worker count from task count via the heuristic
+//                  below, but still respect file-conflict groups.
+//   <integer>    → explicit upper bound on workers per coding role.
+export const PARALLEL_CODING_WORKERS_RAW = (
+  process.env.BLUEPRINT_PARALLEL_CODING_WORKERS ?? "0"
+).trim();
+
+export const ENABLE_PARALLEL_CODING_WORKERS =
+  PARALLEL_CODING_WORKERS_RAW !== "" && PARALLEL_CODING_WORKERS_RAW !== "0";
+
+export function parsedWorkerLimit(): number | "auto" {
+  if (PARALLEL_CODING_WORKERS_RAW === "auto") return "auto";
+  const n = Number.parseInt(PARALLEL_CODING_WORKERS_RAW, 10);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return n;
+}
+
+export function workersForRole(role: CodingAgentRole, count: number): number {
+  if (role === "architect" || role === "test") return 1;
+  // Strict context mode: keep one worker per coding role so each task sees
+  // the latest outputs from previous tasks within the same role.
+  // Disabled automatically when the operator opts in to parallel coding.
+  if (
+    ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC &&
+    !ENABLE_PARALLEL_CODING_WORKERS &&
+    (role === "backend" || role === "frontend")
+  ) {
+    return 1;
+  }
+  if (ENABLE_PARALLEL_CODING_WORKERS) {
+    const limit = parsedWorkerLimit();
+    const auto = count <= 3 ? 1 : count <= 8 ? 2 : 3;
+    if (limit === "auto") return Math.min(auto, count);
+    return Math.min(limit, count);
+  }
+  if (count <= 3) return 1;
+  if (count <= 8) return 2;
+  return 3;
+}
+
+// ─── Phase-level retry budgets ──────────────────────────────────────────
+
+/** Max number of automated fix attempts inside the e2e_verify node. */
+export const MAX_E2E_VERIFY_FIX_ATTEMPTS = 10;
