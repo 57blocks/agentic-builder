@@ -1001,34 +1001,35 @@ export function DesignUI(props: StepUIProps) {
         {phase === "style" && (
           <>
             <div className="py-8 flex flex-col gap-6">
-              <div className="flex flex-row gap-6 items-stretch">
-              {/* ── Card 1: Recommended (radio + carousel inline) ── */}
-              <div
-                onClick={() => setDesignSourceMode("ai")}
-                className={`w-2/3 flex gap-4 rounded-xl border-2 p-5 cursor-pointer transition-all ${
-                  designSourceMode === "ai"
-                    ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <div className="w-5 shrink-0 pt-0.5">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                    designSourceMode === "ai" ? "border-[#712ae2]" : "border-slate-300"
-                  }`}>
-                    {designSourceMode === "ai" && (
-                      <div className="w-2 h-2 rounded-full bg-[#712ae2]" />
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-3">
-                    <h3 className="text-[14px] font-bold text-slate-900">Recommended</h3>
-                    <span className="text-[11px] text-slate-400">AI analyzes PRD to generate styles</span>
-                  </div>
+              {/* ── Tab bar ── */}
+              <div className="flex border-b border-slate-200">
+                <button
+                  onClick={() => setDesignSourceMode("ai")}
+                  className={`px-5 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${
+                    designSourceMode === "ai"
+                      ? "border-[#712ae2] text-[#712ae2]"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Recommended
+                </button>
+                <button
+                  onClick={() => setDesignSourceMode("custom")}
+                  className={`px-5 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${
+                    designSourceMode === "custom"
+                      ? "border-[#712ae2] text-[#712ae2]"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Custom Upload
+                </button>
+              </div>
 
-                  {/* AI Content */}
+              {/* ── Tab: Recommended ── */}
+              {designSourceMode === "ai" && (
+                <div className="flex flex-col gap-4">
                   {designStylesLoading && (
-                    <div className="flex items-center justify-center py-6">
+                    <div className="flex items-center justify-center py-10">
                       <Loading size="md" text="Generating design styles…" />
                     </div>
                   )}
@@ -1040,13 +1041,12 @@ export function DesignUI(props: StepUIProps) {
                     />
                   )}
                   {!designStylesLoading && !designStyles && (
-                    <div className="flex flex-col items-center justify-center py-6 gap-3 text-slate-400">
+                    <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
                       {designStylesError ? (
                         <>
                           <p className="text-sm text-red-500">Failed to generate design styles: {designStylesError}</p>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
+                            onClick={() => {
                               setDesignStylesLoading(true);
                               setDesignStylesError(null);
                               generateDesignStyles(prdContent).then((result) => {
@@ -1086,7 +1086,7 @@ export function DesignUI(props: StepUIProps) {
                         <>
                           <p className="text-sm">PRD generation was interrupted. Go back to PRD to complete it.</p>
                           <button
-                            onClick={(e) => { e.stopPropagation(); props.onNavigate("prd" as StepId); }}
+                            onClick={() => props.onNavigate("prd" as StepId)}
                             className="px-4 py-2 text-[13px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors"
                           >
                             Go to PRD
@@ -1098,40 +1098,18 @@ export function DesignUI(props: StepUIProps) {
                     </div>
                   )}
                 </div>
-              </div>
+              )}
 
-              {/* ── Card 2: Custom Upload (radio + upload inline) ── */}
-              <div
-                onClick={() => setDesignSourceMode("custom")}
-                className={`w-1/3 flex gap-4 rounded-xl border-2 p-5 cursor-pointer transition-all ${
-                  designSourceMode === "custom"
-                    ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <div className="w-5 shrink-0 pt-0.5">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                    designSourceMode === "custom" ? "border-[#712ae2]" : "border-slate-300"
-                  }`}>
-                    {designSourceMode === "custom" && (
-                      <div className="w-2 h-2 rounded-full bg-[#712ae2]" />
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0 flex flex-col">
-                  <div className="flex flex-col mb-3">
-                    <h3 className="text-[14px] font-bold text-slate-900">Custom Upload</h3>
-                    <span className="text-[11px] text-slate-400">Upload images or HTML as reference</span>
-                  </div>
-
-                  {/* Custom Content: Drop zone */}
+              {/* ── Tab: Custom Upload ── */}
+              {designSourceMode === "custom" && (
+                <div className="flex flex-col gap-4">
+                  {/* Drop zone */}
                   <div
-                    onClick={(e) => e.stopPropagation()}
                     onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
                     onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
                     onDragLeave={() => setDragActive(false)}
                     onDrop={handleDrop}
-                    className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 transition-colors flex-1 ${
+                    className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors ${
                       dragActive
                         ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
                         : "border-slate-300 bg-slate-50"
@@ -1158,12 +1136,12 @@ export function DesignUI(props: StepUIProps) {
 
                   {/* File list */}
                   {customFiles.length > 0 && (
-                    <div className="flex flex-col gap-2 mt-4">
+                    <div className="flex flex-col gap-2">
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Uploaded files ({customFiles.length})
                       </div>
                       {customFiles.map((f) => (
-                        <div key={f.key} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" onClick={(e) => e.stopPropagation()}>
+                        <div key={f.key} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
                           {f.kind === "image" && f.previewUrl ? (
                             <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1187,8 +1165,8 @@ export function DesignUI(props: StepUIProps) {
                     </div>
                   )}
 
-                  {/* ── URL reference input ── */}
-                  <div className="mt-4 flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+                  {/* URL reference input */}
+                  <div className="flex flex-col gap-2">
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Or paste a reference URL</div>
                     <form
                       onSubmit={async (e) => {
@@ -1262,8 +1240,7 @@ export function DesignUI(props: StepUIProps) {
                     )}
                   </div>
                 </div>
-              </div>
-              </div>
+              )}
 
               {/* ── Bottom center next button ── */}
               <div className="flex justify-center">
