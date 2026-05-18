@@ -609,6 +609,61 @@ export function DesignUI(props: StepUIProps) {
   // ── Auto-generate design styles once PRD content is available ────────────
   const autoGenRef = useRef(false);
 
+  // ── iframe streaming refs ──────────────────────────────────────────────────
+  // We use imperative document.write() instead of updating srcDoc on every
+  // chunk to avoid full iframe reloads that cause visible flickering.
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeWrittenRef = useRef(0);
+  const iframeDocOpenRef = useRef(false);
+  // True after a stream has been written to the iframe; prevents srcDoc from
+  // overwriting the already-complete streamed content.
+  const iframeStreamedRef = useRef(false);
+
+  // Reset iframe state when a new streaming run begins.
+  useEffect(() => {
+    if (isDesignRunning) {
+      iframeWrittenRef.current = 0;
+      iframeDocOpenRef.current = false;
+      iframeStreamedRef.current = false;
+    }
+  }, [isDesignRunning]);
+
+  // Write incremental chunks to the iframe document during streaming.
+  useEffect(() => {
+    if (!isDesignRunning || !streamingContent) return;
+    const trimmed = streamingContent.trimStart();
+    const looksLikeHtml =
+      trimmed.startsWith("<!DOCTYPE") ||
+      trimmed.startsWith("<html") ||
+      trimmed.startsWith("<!");
+    if (!looksLikeHtml) return;
+
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+    if (!doc) return;
+
+    if (!iframeDocOpenRef.current) {
+      doc.open();
+      iframeDocOpenRef.current = true;
+    }
+    const delta = streamingContent.slice(iframeWrittenRef.current);
+    if (delta) {
+      doc.write(delta);
+      iframeWrittenRef.current = streamingContent.length;
+      iframeStreamedRef.current = true;
+    }
+  }, [streamingContent, isDesignRunning]);
+
+  // Close the document when streaming finishes.
+  useEffect(() => {
+    if (!isDesignRunning && iframeDocOpenRef.current) {
+      const doc = iframeRef.current?.contentDocument ?? iframeRef.current?.contentWindow?.document;
+      doc?.close();
+      iframeDocOpenRef.current = false;
+    }
+  }, [isDesignRunning]);
+
   // ── Auto-advance to spec when design completes ──────────────────────────
   const prevDesignRunning = useRef(isDesignRunning);
   useEffect(() => {
@@ -1005,7 +1060,11 @@ export function DesignUI(props: StepUIProps) {
       </div>
 
       {/* ── Main Content ── */}
-      <div className="flex-1 overflow-y-auto px-16">
+      <div className={
+        phase === "spec" || phase === "stitch"
+          ? "flex-1 min-h-0 flex flex-col overflow-hidden"
+          : "flex-1 overflow-y-auto px-16"
+      }>
         {/* ══ Phase 1: Style Selection ══ */}
         {phase === "style" && (
           <>
@@ -1273,19 +1332,19 @@ export function DesignUI(props: StepUIProps) {
 
         {/* ══ Phase 2: Design Spec ══ */}
         {phase === "spec" && (
-          <>
-            {/* ── Recalled knowledge badge ── */}
-            {!isDesignRunning && (designMeta.recalledKnowledgeIds?.length ?? 0) > 0 && (
-              <div className="shrink-0 mx-4 mt-3 px-3 py-2 rounded-lg bg-violet-950/40 border border-violet-700/30 flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] text-violet-300 font-medium whitespace-nowrap">Knowledge applied:</span>
+          <div className="flex flex-col h-full min-h-0">
+            {/* ── Recalled knowledge badge strip ── */}
+            {(designMeta.recalledKnowledgeIds?.length ?? 0) > 0 && (
+              <div className="shrink-0 mx-4 mt-2.5 flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-slate-400 font-medium mr-0.5">Knowledge applied:</span>
                 {(designMeta.recalledKnowledgeIds ?? []).map((id) => (
                   <a
                     key={id}
-                    href="/knowledge"
+                    href={`/knowledge?highlight=${encodeURIComponent(id)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     title={`View ${id} in Knowledge Base`}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-800/50 text-violet-200 text-[10px] font-mono hover:bg-violet-700/60 transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[10px] font-mono hover:bg-violet-100 hover:border-violet-300 transition-colors"
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
                     {id}
@@ -1295,35 +1354,41 @@ export function DesignUI(props: StepUIProps) {
                   href="/knowledge"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="ml-auto text-[10px] text-violet-400 hover:text-violet-200 transition-colors underline underline-offset-2"
+                  className="ml-1 text-[10px] text-slate-400 hover:text-violet-500 transition-colors"
                 >
-                  Open Knowledge Base →
+                  Open KB →
                 </a>
               </div>
             )}
-            {isDesignRunning ? (
-              <div className="flex flex-col items-center justify-center h-full gap-4">
-                <Loading size="lg" text="Generating Design System Spec…" />
-                <p className="text-[12px] text-slate-400">
-                  Building your HTML design system document…
-                </p>
-              </div>
-            ) : designContent ? (
-              (() => {
-                const trimmed = designContent.trimStart();
-                const isHtml =
-                  trimmed.startsWith("<!DOCTYPE") ||
-                  trimmed.startsWith("<html") ||
-                  trimmed.startsWith("<!");
-                if (isHtml) {
-                  return (
-                    <div className="relative h-full">
-                      <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+            {(() => {
+              // Determine rendering mode: streaming HTML → live iframe preview
+              const streamTrimmed = streamingContent.trimStart();
+              const isStreamingHtml =
+                isDesignRunning &&
+                (streamTrimmed.startsWith("<!DOCTYPE") ||
+                  streamTrimmed.startsWith("<html") ||
+                  streamTrimmed.startsWith("<!"));
+              const finalTrimmed = designContent.trimStart();
+              const isFinalHtml =
+                !isDesignRunning &&
+                (finalTrimmed.startsWith("<!DOCTYPE") ||
+                  finalTrimmed.startsWith("<html") ||
+                  finalTrimmed.startsWith("<!"));
+
+              if (isStreamingHtml || isFinalHtml || iframeStreamedRef.current) {
+                return (
+                  <div className="relative flex-1 min-h-0 mt-2 flex flex-col">
+                    {isDesignRunning && (
+                      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-2.5 py-1 bg-black/60 backdrop-blur-sm rounded-full text-white text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Generating…
+                      </div>
+                    )}
+                    {!isDesignRunning && (
+                      <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
                         <button
                           onClick={() => {
-                            const blob = new Blob([designContent], {
-                              type: "text/html",
-                            });
+                            const blob = new Blob([designContent], { type: "text/html" });
                             const a = document.createElement("a");
                             a.href = URL.createObjectURL(blob);
                             a.download = "design-system.html";
@@ -1336,9 +1401,7 @@ export function DesignUI(props: StepUIProps) {
                         </button>
                         <button
                           onClick={() => {
-                            const blob = new Blob([designContent], {
-                              type: "text/html",
-                            });
+                            const blob = new Blob([designContent], { type: "text/html" });
                             const url = URL.createObjectURL(blob);
                             window.open(url, "_blank");
                             setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -1348,34 +1411,48 @@ export function DesignUI(props: StepUIProps) {
                           <OpenIcon /> Open in Tab
                         </button>
                       </div>
-                      <iframe
-                        srcDoc={designContent}
-                        sandbox="allow-scripts allow-same-origin"
-                        className="w-full h-full border-0"
-                        title="Design System Spec"
-                      />
-                    </div>
-                  );
-                }
+                    )}
+                    <iframe
+                      ref={iframeRef}
+                      // Only set srcDoc for DB-loaded content (not after streaming)
+                      srcDoc={!iframeStreamedRef.current && !isDesignRunning ? designContent : undefined}
+                      sandbox="allow-scripts allow-same-origin"
+                      className="w-full flex-1 border-0"
+                      title="Design System Spec"
+                    />
+                  </div>
+                );
+              }
+
+              if (isDesignRunning) {
                 return (
-                  <div className="p-6 max-w-4xl mx-auto">
+                  <div className="flex flex-col items-center justify-center h-full gap-4">
+                    <Loading size="lg" text="Generating Design System Spec…" />
+                    <p className="text-[12px] text-slate-400">Building your HTML design system document…</p>
+                  </div>
+                );
+              }
+
+              if (designContent) {
+                return (
+                  <div className="p-6 max-w-4xl mx-auto overflow-auto flex-1 min-h-0">
                     <MarkdownRenderer content={designContent} />
                   </div>
                 );
-              })()
-            ) : (
-              <div className="flex items-center justify-center h-full text-slate-400">
-                <p className="text-sm">
-                  Waiting for design spec to generate…
-                </p>
-              </div>
-            )}
-          </>
+              }
+
+              return (
+                <div className="flex items-center justify-center h-full text-slate-400">
+                  <p className="text-sm">Waiting for design spec to generate…</p>
+                </div>
+              );
+            })()}
+          </div>
         )}
 
         {/* ══ Phase 3: Stitch Design ══ */}
         {phase === "stitch" && (
-          <>
+          <div className="flex flex-col flex-1 min-h-0 h-full">
             {stitchGenerating && (
               <div className="flex flex-col items-center justify-center h-full gap-4">
                 <Loading size="lg" text="Generating with Stitch…" />
@@ -1544,7 +1621,7 @@ export function DesignUI(props: StepUIProps) {
                 </button>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
 
