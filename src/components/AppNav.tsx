@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
@@ -169,35 +170,48 @@ export default function AppNav() {
 
   const dragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "drag" };
   const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "no-drag" };
+  const collapsed = useSidebarStore((s) => s.collapsed);
+  const toggleSidebar = useSidebarStore((s) => s.toggle);
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen w-60 bg-white border-r border-slate-200 flex flex-col justify-between z-50 pr-px py-4"
+      className={`fixed left-0 top-0 h-screen ${collapsed ? "w-16" : "w-60"} bg-white border-r border-slate-200 flex flex-col justify-between z-50 pr-px py-4 transition-all duration-300`}
       style={dragStyle}
     >
+      {/* Toggle button */}
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        className="absolute -right-3 top-6 z-50 w-6 h-6 rounded-full border border-slate-200 bg-white flex items-center justify-center shadow-sm hover:bg-slate-50 transition-colors"
+        style={noDragStyle}
+      >
+        <ChevronLeft size={12} className={`text-slate-500 transition-transform duration-300 ${collapsed ? "rotate-180" : ""}`} />
+      </button>
       {/* Logo & Brand */}
-      <div className="px-6 pb-8 pt-[30px]" style={noDragStyle}>
-        <div className="flex items-center gap-3">
+      <div className={`${collapsed ? "px-0 pt-[30px] pb-8 flex justify-center" : "px-6 pb-8 pt-[30px]"}`} style={noDragStyle}>
+        <div className={`flex ${collapsed ? "flex-col items-center" : "items-center gap-3"}`}>
           <div className="w-8 h-8 bg-slate-900 rounded-xs flex items-center justify-center shrink-0">
             <svg width="10.5" height="11.667" viewBox="0 0 12 14" fill="white" aria-hidden>
               <path d="M6 0L12 3.5V10.5L6 14L0 10.5V3.5L6 0Z" />
             </svg>
           </div>
-          <div className="flex flex-col">
-            <span className="text-[18px] font-bold tracking-[-0.45px] text-slate-900 leading-7">
-              Agentic Builder
-            </span>
-            <span className="text-xs uppercase text-slate-600 leading-3.75 font-space-grotesk">
-              V{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.1.0"}
-            </span>
-          </div>
+          {!collapsed && (
+            <div className="flex flex-col">
+              <span className="text-[18px] font-bold tracking-[-0.45px] text-slate-900 leading-7">
+                Agentic Builder
+              </span>
+              <span className="text-xs uppercase text-slate-600 leading-3.75 font-space-grotesk">
+                V{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.1.0"}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 min-h-0 px-4 overflow-y-auto" style={noDragStyle}>
+      <nav className={`flex-1 min-h-0 overflow-y-auto ${collapsed ? "px-2" : "px-4"}`} style={noDragStyle}>
         <div className="mb-4">
-          <h3 className="text-[12px] uppercase font-semibold text-slate-600 px-2 mb-3 tracking-wide">Projects</h3>
+          {!collapsed && <h3 className="text-[12px] uppercase font-semibold text-slate-600 px-2 mb-3 tracking-wide">Projects</h3>}
           
           {loading && (
             <span className="px-3 py-2 text-[12px] text-slate-600 block">Loading…</span>
@@ -224,7 +238,7 @@ export default function AppNav() {
               return (
                 <div
                   key={project.id}
-                  className={`group relative flex flex-col gap-1.5 p-3 rounded-lg border transition-all ${
+                  className={`group relative flex flex-col gap-1.5 ${collapsed ? "p-2 items-center" : "p-3"} rounded-lg border transition-all ${
                     isActive
                       ? "bg-slate-100 border-slate-200 shadow-sm"
                       : "bg-slate-50 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
@@ -251,6 +265,16 @@ export default function AppNav() {
                         className="flex-1 min-w-0 text-[13px] font-medium text-slate-900 bg-white border border-indigo-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-300"
                       />
                     </div>
+                  ) : collapsed ? (
+                    <Link
+                      href={href}
+                      className="flex items-center justify-center"
+                      title={displayName}
+                    >
+                      <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
+                        <FileIcon />
+                      </span>
+                    </Link>
                   ) : (
                     <Link
                       href={href}
@@ -266,7 +290,7 @@ export default function AppNav() {
                   )}
 
                   {/* Per-project 3-dot menu */}
-                  {!isRenaming && (
+                  {!collapsed && !isRenaming && (
                     <div
                       data-project-menu
                       className="absolute top-2 right-2"
@@ -320,7 +344,7 @@ export default function AppNav() {
                   )}
 
                   <div className={`h-px bg-linear-to-r ${isActive ? "from-slate-400 to-transparent" : "from-slate-300 to-transparent"}`}></div>
-                  {stageMeta ? (
+                  {!collapsed && stageMeta ? (
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
                       <span className="text-[11px] text-slate-700 font-medium">
@@ -330,9 +354,9 @@ export default function AppNav() {
                         — {stageMeta.desc}
                       </span>
                     </div>
-                  ) : (
+                  ) : !collapsed ? (
                     <span className="text-[11px] text-slate-500">Ready</span>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
@@ -341,16 +365,17 @@ export default function AppNav() {
       </nav>
 
       {/* Secondary Nav Links */}
-      <div className="px-6 pb-4 flex flex-col gap-2" style={noDragStyle}>
+      <div className={`${collapsed ? "px-0 flex flex-col items-center" : "px-6"} pb-4 flex flex-col gap-2`} style={noDragStyle}>
         <Link
           href="/reports"
           className={`text-sm font-medium transition-colors ${
             pathname === "/reports"
               ? "text-slate-900"
               : "text-slate-500 hover:text-slate-900"
-          }`}
+          } ${collapsed ? "w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100" : ""}`}
+          title={collapsed ? "Reports" : undefined}
         >
-          Reports
+          {collapsed ? <span className="text-[13px] font-bold">R</span> : "Reports"}
         </Link>
         <Link
           href="/memory"
@@ -358,45 +383,56 @@ export default function AppNav() {
             pathname === "/memory"
               ? "text-slate-900"
               : "text-slate-500 hover:text-slate-900"
-          }`}
+          } ${collapsed ? "w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100" : ""}`}
+          title={collapsed ? "Memory" : undefined}
         >
-          Memory
+          {collapsed ? <span className="text-[13px] font-bold">M</span> : "Memory"}
         </Link>
         <Link
           href="/knowledge"
-          className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${
+          className={`flex items-center text-sm font-medium transition-colors ${
             pathname === "/knowledge"
               ? "text-slate-900"
               : "text-slate-500 hover:text-slate-900"
-          }`}
+          } ${collapsed ? "w-8 h-8 justify-center rounded-lg hover:bg-slate-100" : "gap-1.5"}`}
+          title={collapsed ? "Knowledge" : undefined}
         >
-          <span>Knowledge</span>
-          <span className="text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full leading-none">
-            57B
-          </span>
+          {collapsed ? (
+            <span className="text-[13px] font-bold">K</span>
+          ) : (
+            <>
+              <span>Knowledge</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full leading-none">
+                57B
+              </span>
+            </>
+          )}
         </Link>
       </div>
 
       {/* Bottom: New Project + User Profile */}
-      <div className="flex flex-col gap-6 px-4" style={noDragStyle}>
+      <div className={`flex flex-col gap-6 ${collapsed ? "px-2 items-center" : "px-4"}`} style={noDragStyle}>
         <button
           onClick={handleNewProject}
-          className="flex items-center justify-center gap-2 w-full py-2.5 bg-slate-950 text-white text-[14px] font-bold rounded-lg hover:bg-slate-800 hover:shadow-md hover:scale-105 transition-all active:bg-slate-950 active:scale-95"
+          className={`flex items-center justify-center ${collapsed ? "w-10 h-10" : "gap-2 w-full py-2.5"} bg-slate-950 text-white text-[14px] font-bold rounded-lg hover:bg-slate-800 hover:shadow-md hover:scale-105 transition-all active:bg-slate-950 active:scale-95`}
+          title={collapsed ? "New Project" : undefined}
         >
           <PlusIcon />
-          <span>New Project</span>
+          {!collapsed && <span>New Project</span>}
         </button>
 
-        <div className="border-t border-slate-200 flex items-center gap-3 pt-4.25 pb-2 px-3">
+        <div className={`border-t border-slate-200 flex items-center ${collapsed ? "justify-center pt-4 px-0" : "gap-3 pt-4.25 pb-2 px-3"}`}>
           <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0 overflow-hidden">
             <div className="w-full h-full bg-linear-to-br from-slate-400 to-slate-500 flex items-center justify-center text-white text-sm font-bold">
               A
             </div>
           </div>
-          <div className="flex flex-col overflow-hidden">
-            <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">Alex Chen</span>
-            <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
-          </div>
+          {!collapsed && (
+            <div className="flex flex-col overflow-hidden">
+              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">Alex Chen</span>
+              <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
+            </div>
+          )}
         </div>
       </div>
 

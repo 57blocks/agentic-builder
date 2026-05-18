@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AppNav from "@/components/AppNav";
+import SidebarContent from "@/components/SidebarContent";
 
 export const metadata: Metadata = {
   title: "Agentic Builder",
@@ -16,9 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased min-h-screen bg-(--background) text-(--foreground) flex" suppressHydrationWarning>
         <AppNav />
-        <div className="flex-1 min-w-0 flex flex-col pl-60 overflow-hidden">
-          {children}
-        </div>
+        <SidebarContent>{children}</SidebarContent>
       </body>
     </html>
   );
