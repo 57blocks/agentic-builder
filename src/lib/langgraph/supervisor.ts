@@ -69,6 +69,8 @@ import {
   runContractUsageCoverage,
   runRuntimeIntegrationAudit,
   formatRuntimeAuditBlock,
+  dispatchRuntimeAudit,
+  formatRuntimeAuditTasksBlock,
   runRuntimeSmokeGate,
   runTscDiagnosticsAsTasks,
   runMigrationCoverageRepair,
@@ -5327,23 +5329,49 @@ async function integrationVerifyAndFix(
   // `.blueprint/scaffold-applied.json`; `declaredEnvKeys` is read here
   // because resource-requirements.json lives at process.cwd() (the host
   // builder), not at the generated project root.
+  //
+  // We route the audit through `dispatchRuntimeAudit` which (a) runs the
+  // initial audit, (b) applies any registered deterministic fixers
+  // (currently: `bg-job-worker-startup` → wire `start*Worker` into
+  // `server.ts` via `worker-startup-autofix`), (c) re-runs the audit to
+  // confirm closure, and (d) persists the residual findings as a
+  // closed per-task list at `.ralph/runtime-audit-tasks.json` so the
+  // verify-fix worker sees concrete tasks instead of free-form prose.
   let runtimeAuditResult: Awaited<
     ReturnType<typeof runRuntimeIntegrationAudit>
+  > | null = null;
+  let runtimeAuditDispatch: Awaited<
+    ReturnType<typeof dispatchRuntimeAudit>
   > | null = null;
   try {
     const declaredResources = await readResourceRequirements(process.cwd());
     const declaredEnvKeys = declaredResources.map((r) => r.envKey);
-    runtimeAuditResult = await runRuntimeIntegrationAudit({
+    runtimeAuditDispatch = await dispatchRuntimeAudit({
       outputDir: state.outputDir,
       declaredEnvKeys,
       emitter: getRepairEmitter(state.sessionId),
       sessionId: state.sessionId,
     });
-    if (!runtimeAuditResult.clean) {
+    runtimeAuditResult = runtimeAuditDispatch.residualAudit;
+    if (runtimeAuditResult && !runtimeAuditResult.clean) {
       const errCount = runtimeAuditResult.bySeverity.error ?? 0;
       const warnCount = runtimeAuditResult.bySeverity.warn ?? 0;
+      const fixed = runtimeAuditDispatch.deterministicFixes.filter(
+        (o) => o.appliedAny,
+      );
+      const fixedSummary =
+        fixed.length > 0
+          ? ` (deterministic fixes applied: ${fixed.map((o) => o.ruleId).join(", ")})`
+          : "";
       console.log(
-        `${label}: runtime-integration-audit found ${runtimeAuditResult.findings.length} finding(s) (${errCount} error, ${warnCount} warn) across ${Object.keys(runtimeAuditResult.byRule).length} rule(s).`,
+        `${label}: runtime-integration-audit found ${runtimeAuditResult.findings.length} residual finding(s) (${errCount} error, ${warnCount} warn) across ${Object.keys(runtimeAuditResult.byRule).length} rule(s)${fixedSummary}.`,
+      );
+    } else if (runtimeAuditDispatch.deterministicFixes.some((o) => o.appliedAny)) {
+      const fixed = runtimeAuditDispatch.deterministicFixes.filter(
+        (o) => o.appliedAny,
+      );
+      console.log(
+        `${label}: runtime-integration-audit clean after deterministic fixes (${fixed.map((o) => o.ruleId).join(", ")}).`,
       );
     }
   } catch (err) {
@@ -5872,9 +5900,17 @@ async function integrationVerifyAndFix(
   // §4.2 / §4.3 / §4.4 / §4.5 / §4.7) — empty when the audit was clean or
   // didn't run. Rendered immediately after `coverageBlock` so the worker
   // sees both deterministic decision sets back-to-back.
-  const runtimeAuditBlock = runtimeAuditResult
-    ? formatRuntimeAuditBlock(runtimeAuditResult)
-    : "";
+  //
+  // Prefer the per-finding closed-task block from `dispatchRuntimeAudit`
+  // (stable IDs, one task per residual finding, deterministic fixes
+  // already excluded) over the legacy free-form prose block. The legacy
+  // renderer is only kept as a fallback for when the dispatcher failed to
+  // run.
+  const runtimeAuditBlock = runtimeAuditDispatch
+    ? formatRuntimeAuditTasksBlock(runtimeAuditDispatch)
+    : runtimeAuditResult
+      ? formatRuntimeAuditBlock(runtimeAuditResult)
+      : "";
 
   const migrationCoverageBlock = migrationCoverageResult
     ? formatMigrationCoverageBlock(migrationCoverageResult)
