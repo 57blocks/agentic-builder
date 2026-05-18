@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Loader2, ChevronLeft, ChevronRight, GitBranch, Settings, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
+import { ArrowRight, Loader2, ChevronLeft, ChevronRight, GitBranch, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
@@ -99,9 +99,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const [page, setPage] = useState(0);
   const [repoUrl, setRepoUrl] = useState<string | null>(null);
   const [repoLoading, setRepoLoading] = useState(true);
-  const [requirements, setRequirements] = useState<ResourceRequirement[]>([]);
-
-  // ── Abilities config state (pre-kickoff) ──
+  // ── Abilities config state ──
   const [abilities, setAbilities] = useState<ResourceRequirement[]>([]);
   const [abilitiesLoading, setAbilitiesLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
@@ -231,17 +229,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
       .finally(() => setRepoLoading(false));
   }, []);
 
-  // Load saved resource requirements for Phase 2 display
-  useEffect(() => {
-    if (!hasRunKickoff) return;
-    fetch("/api/agents/pipeline/resource-requirements")
-      .then((r) => r.json())
-      .then((data: { requirements?: ResourceRequirement[] }) => {
-        if (Array.isArray(data.requirements)) setRequirements(data.requirements);
-      })
-      .catch(() => {});
-  }, [hasRunKickoff]);
-
   const runKickoff = async () => {
     setError(null);
     useStepStore.setState((s) => ({
@@ -303,13 +290,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               setStepResult("summary", { stepId: "summary", status: "completed", content: kickoffContent, costUsd, durationMs, metadata: kickoffMetadata, timestamp: now });
               setStepResult("task-breakdown", { stepId: "task-breakdown", status: "completed", content: kickoffContent, costUsd: 0, durationMs: 0, metadata: kickoffMetadata, timestamp: now });
               useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
-              // Refresh requirements display after kickoff
-              fetch("/api/agents/pipeline/resource-requirements")
-                .then((r) => r.json())
-                .then((data: { requirements?: ResourceRequirement[] }) => {
-                  if (Array.isArray(data.requirements)) setRequirements(data.requirements);
-                })
-                .catch(() => {});
             }
           } catch { /* skip */ }
         }
@@ -331,21 +311,34 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
   const pageTasks = tasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  // ── Token computation ──
+  const totalInputTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.inputTokens ?? 0), 0);
+  const totalOutputTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.outputTokens ?? 0), 0);
+  const totalTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.totalTokens ?? 0), 0);
+  const tokenCost = tasks.reduce((s, t) => s + (t.tokenEstimate?.estimatedCostUsd ?? 0), 0);
+  const hasTokenData = totalTokens > 0;
+
+  function formatTokens(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }
+
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto bg-[#f8f9ff]">
         <div className="max-w-5xl mx-auto px-8 py-7 space-y-5">
 
-          {/* ── Header ── */}
+          {/* ── Header (always shows Sprint Kick-off Summary) ── */}
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-[22px] font-bold text-[#0b1c30] leading-tight">
-                {hasRunKickoff ? "Sprint Kick-off Summary" : "Configure Abilities"}
+                Sprint Kick-off Summary
               </h1>
               <p className="text-[13px] text-[#94a3b8] mt-0.5">
-                {hasRunKickoff
+                {isCompleted
                   ? "AI-generated task plan based on your PRD, TRD and Design Spec"
-                  : "Configure third-party integrations before generating the task plan"}
+                  : "Review the project plan and configure integrations before generating the task plan"}
               </p>
             </div>
             {isCompleted && (
@@ -356,290 +349,19 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
             )}
           </div>
 
-          {/* ── Phase 1: Configure Abilities ── */}
+          {/* ── Run Kick-off (shown when not yet run) ── */}
           {!hasRunKickoff && (
-            <>
-              {/* Two-column: Abilities + Project Links */}
-              <div className="grid grid-cols-[3fr_2fr] gap-4 items-start">
-
-                {/* Abilities */}
-                <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[#f1f5f9] flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <p className="text-[16px] font-bold text-[#0b1c30]">Abilities</p>
-                      {abilitiesConfigured > 0 && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
-                          {abilitiesConfigured} Configured
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={handleDetectAbilities}
-                      disabled={detecting || abilitiesLoading}
-                      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#712ae2] bg-violet-50 px-2.5 py-1 rounded-full hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {detecting
-                        ? <><Loader2 size={11} className="animate-spin" /> Analyzing…</>
-                        : <><RefreshCw size={11} /> {abilities.length === 0 ? "Detect from PRD" : "Re-detect"}</>
-                      }
-                    </button>
-                  </div>
-
-                  <div className="px-5 py-4 space-y-3">
-                    {detectError && (
-                      <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{detectError}</p>
-                    )}
-
-                    {abilitiesLoading ? (
-                      <p className="text-[12px] text-[#94a3b8]">Loading…</p>
-                    ) : abilities.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-[#e2e8f0] bg-[#fafbff] p-4 text-center">
-                        <p className="text-[13px] font-medium text-[#334155]">No integrations detected yet</p>
-                        <p className="text-[12px] text-[#94a3b8] mt-1">
-                          Click <span className="font-semibold text-[#712ae2]">Detect from PRD</span> to auto-detect third-party dependencies from your PRD, or skip if your app has no external services.
-                        </p>
-                      </div>
-                    ) : (
-                      abilities.map((item) => {
-                        const enabled = enabledKeys.has(item.envKey);
-                        return (
-                          <div
-                            key={item.envKey}
-                            className={`rounded-xl border transition-colors ${enabled ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white opacity-60"}`}
-                          >
-                            {/* Card header */}
-                            <div className="flex items-center gap-3 px-4 py-3">
-                              <div className="w-9 h-9 rounded-lg bg-[#1a1a2e] flex items-center justify-center text-[18px] shrink-0 shadow-sm">
-                                {CATEGORY_ICON[item.category] ?? "🔧"}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[13px] font-bold text-[#0b1c30] leading-tight truncate">
-                                  {item.label}
-                                </p>
-                                <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">
-                                  {CATEGORY_INTEGRATION_LABEL[item.category] ?? "INTEGRATION"}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => toggleAbility(item.envKey)}
-                                className="shrink-0 ml-2"
-                                title={enabled ? "Disable" : "Enable"}
-                              >
-                                {enabled
-                                  ? <CheckSquare size={20} className="text-[#712ae2]" />
-                                  : <Square size={20} className="text-[#cbd5e1]" />
-                                }
-                              </button>
-                            </div>
-
-                            {/* Expanded: key input */}
-                            {enabled && (
-                              <div className="px-4 pb-3 pt-0.5 border-t border-[#f1f5f9]">
-                                <p className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
-                                  {item.envKey.replace(/_/g, " ")}
-                                </p>
-                                <div className="relative">
-                                  <input
-                                    type={showSecrets[item.envKey] ? "text" : "password"}
-                                    value={item.value ?? ""}
-                                    onChange={(e) => handleAbilityValueChange(item.envKey, e.target.value)}
-                                    placeholder={item.example ?? "Paste value here…"}
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowSecrets((p) => ({ ...p, [item.envKey]: !p[item.envKey] }))}
-                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155] transition-colors"
-                                  >
-                                    {showSecrets[item.envKey] ? <EyeOff size={15} /> : <Eye size={15} />}
-                                  </button>
-                                </div>
-                                {item.description && item.description !== item.label && (
-                                  <p className="text-[11px] text-[#94a3b8] mt-1.5 leading-relaxed">{item.description}</p>
-                                )}
-                                {item.docsUrl && (
-                                  <a href={item.docsUrl} target="_blank" rel="noreferrer"
-                                    className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline mt-1">
-                                    <ExternalLink size={10} /> Where to get this key →
-                                  </a>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-
-                    {/* Add manually — always shown */}
-                    <button
-                      onClick={() => {
-                        const key = prompt("Enter env variable name (UPPER_SNAKE_CASE):");
-                        if (!key) return;
-                        const cleaned = key.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
-                        if (!cleaned || abilities.some((a) => a.envKey === cleaned)) return;
-                        const next: ResourceRequirement[] = [...abilities, {
-                          envKey: cleaned, label: cleaned, description: "Manually added.",
-                          category: "other", required: false, value: "",
-                        }];
-                        setAbilities(next);
-                        setEnabledKeys((p) => new Set([...p, cleaned]));
-                        void persistAbilities(next);
-                      }}
-                      className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:text-[#6b24da] transition-colors pt-1"
-                    >
-                      <Plus size={13} /> Add API key manually
-                    </button>
-                  </div>
+            <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
+              <div className="px-6 py-8 flex flex-col items-center justify-center gap-4 text-center">
+                <div className="w-14 h-14 rounded-full bg-[#712ae2]/10 flex items-center justify-center">
+                  <Rocket size={28} className="text-[#712ae2]" />
                 </div>
-
-                {/* Project Links */}
-                <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[#f1f5f9]">
-                    <p className="text-[16px] font-bold text-[#0b1c30]">Project Links</p>
-                    <p className="text-[11px] text-[#94a3b8] mt-0.5">Connect your repositories and project boards</p>
-                  </div>
-                  <div className="px-5 py-4 space-y-3">
-
-                    {/* ── GitHub ── */}
-                    <div className={`rounded-xl border transition-colors ${
-                      linkConfig.githubToken ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white"
-                    }`}>
-                      <button
-                        onClick={() => setGithubExpanded((v) => !v)}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-[#1a1a2e] flex items-center justify-center shrink-0 shadow-sm">
-                          <GitBranch size={16} className="text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-bold text-[#0b1c30] leading-tight">GitHub Repository</p>
-                          <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">GIT INTEGRATION</p>
-                        </div>
-                        {linkConfig.githubToken ? (
-                          <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Connected</span>
-                        ) : (
-                          <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
-                        )}
-                        <CheckSquare size={18} className={`shrink-0 ml-1 ${githubExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
-                      </button>
-
-                      {githubExpanded && (
-                        <div className="px-4 pb-4 pt-0.5 border-t border-[#f1f5f9] space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
-                              GITHUB TOKEN <span className="text-red-500">*</span>
-                            </label>
-                            <div className="relative">
-                              <input
-                                type={showLinkSecrets["githubToken"] ? "text" : "password"}
-                                value={linkConfig.githubToken}
-                                onChange={(e) => updateLinkConfig({ githubToken: e.target.value })}
-                                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                                autoComplete="off" spellCheck={false}
-                                className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
-                              />
-                              <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, githubToken: !p["githubToken"] }))}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155]">
-                                {showLinkSecrets["githubToken"] ? <EyeOff size={14} /> : <Eye size={14} />}
-                              </button>
-                            </div>
-                            <p className="text-[11px] text-[#94a3b8] mt-1">Personal access token with <code className="bg-[#f1f5f9] px-1 rounded text-[10px]">repo</code> scope. Used to create and push the generated repository.</p>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">GITHUB ORG / USER <span className="text-[#cbd5e1]">(optional)</span></label>
-                            <input
-                              type="text"
-                              value={linkConfig.githubOrg}
-                              onChange={(e) => updateLinkConfig({ githubOrg: e.target.value })}
-                              placeholder="my-org or my-username"
-                              className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
-                            />
-                          </div>
-                          {repoUrl && (
-                            <a href={repoUrl} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:underline">
-                              <ExternalLink size={11} /> View Repository →
-                            </a>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ── Jira ── */}
-                    <div className={`rounded-xl border transition-colors ${
-                      linkConfig.jiraToken ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white"
-                    }`}>
-                      <button
-                        onClick={() => setJiraExpanded((v) => !v)}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-[#0052cc] flex items-center justify-center shrink-0 shadow-sm">
-                          <Plus size={16} className="text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-bold text-[#0b1c30] leading-tight">Jira Board</p>
-                          <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">PROJECT MANAGEMENT</p>
-                        </div>
-                        {linkConfig.jiraToken ? (
-                          <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Connected</span>
-                        ) : (
-                          <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
-                        )}
-                        <CheckSquare size={18} className={`shrink-0 ml-1 ${jiraExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
-                      </button>
-
-                      {jiraExpanded && (
-                        <div className="px-4 pb-4 pt-0.5 border-t border-[#f1f5f9] space-y-3">
-                          {[
-                            { key: "jiraHost" as const, label: "JIRA HOST", placeholder: "https://yourteam.atlassian.net", required: true, secret: false },
-                            { key: "jiraEmail" as const, label: "JIRA EMAIL", placeholder: "your@email.com", required: true, secret: false },
-                            { key: "jiraToken" as const, label: "JIRA API TOKEN", placeholder: "API token from Atlassian account settings", required: true, secret: true },
-                            { key: "jiraProject" as const, label: "PROJECT KEY", placeholder: "PROJ", required: true, secret: false },
-                          ].map(({ key, label, placeholder, required, secret }) => (
-                            <div key={key}>
-                              <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
-                                {label} {required && <span className="text-red-500">*</span>}
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type={secret && !showLinkSecrets[key] ? "password" : "text"}
-                                  value={linkConfig[key]}
-                                  onChange={(e) => updateLinkConfig({ [key]: e.target.value })}
-                                  placeholder={placeholder}
-                                  autoComplete="off" spellCheck={false}
-                                  className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
-                                />
-                                {secret && (
-                                  <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, [key]: !p[key] }))}
-                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155]">
-                                    {showLinkSecrets[key] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                          <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline">
-                            <ExternalLink size={10} /> Get your Atlassian API token →
-                          </a>
-                        </div>
-                      )}
-                    </div>
-
-                  </div>
+                <div>
+                  <p className="text-[15px] font-bold text-[#0b1c30]">Ready to generate the task plan</p>
+                  <p className="text-[12px] text-[#94a3b8] mt-1 max-w-md">
+                    Configure integrations below or click the button to generate the kick-off plan from your PRD, TRD and Design Spec.
+                  </p>
                 </div>
-              </div>
-
-              {error && (
-                <div className="rounded-xl border border-red-200 bg-white px-5 py-4 shadow-sm">
-                  <p className="text-[13px] font-semibold text-red-700">Kick-off failed</p>
-                  <p className="text-[12px] text-red-500 mt-1">{error}</p>
-                </div>
-              )}
-
-              <div className="flex justify-end pt-2">
                 <button
                   onClick={runKickoff}
                   disabled={isRunning}
@@ -651,8 +373,11 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     <><Rocket size={16} /> Run Kick-off</>
                   )}
                 </button>
+                {error && (
+                  <p className="text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2 max-w-md">{error}</p>
+                )}
               </div>
-            </>
+            </div>
           )}
 
           {/* ── Generating banner ── */}
@@ -666,7 +391,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
             </div>
           )}
 
-          {/* ── Error ── */}
+          {/* ── Error during generation ── */}
           {error && isThisRunning && (
             <div className="rounded-xl border border-red-200 bg-white px-5 py-4 shadow-sm">
               <p className="text-[13px] font-semibold text-red-700">Kick-off failed</p>
@@ -678,7 +403,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
             </div>
           )}
 
-          {/* ── Phase 2: Review Summary ── */}
+          {/* ── Stats + Tasks (after completion) ── */}
           {isCompleted && tasks.length > 0 && (
             <>
               {/* Stats bar */}
@@ -701,6 +426,26 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     </div>
                   ))}
                 </div>
+                {hasTokenData && (
+                  <div className="border-t border-[#f1f5f9] bg-[#fafbff]">
+                    <div className="px-5 py-2 border-b border-[#f1f5f9]">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-[#712ae2]">Token Usage</p>
+                    </div>
+                    <div className="grid grid-cols-4 divide-x divide-[#f1f5f9]">
+                      {[
+                        { label: "INPUT TOKENS", value: formatTokens(totalInputTokens) },
+                        { label: "OUTPUT TOKENS", value: formatTokens(totalOutputTokens) },
+                        { label: "TOTAL TOKENS", value: formatTokens(totalTokens), highlight: true },
+                        { label: "TOKEN COST", value: `$${tokenCost.toFixed(2)}` },
+                      ].map(({ label, value, highlight }) => (
+                        <div key={label} className="px-4 py-3 text-center">
+                          <p className={`text-[15px] font-bold ${highlight ? "text-[#712ae2]" : "text-[#0b1c30]"}`}>{value}</p>
+                          <p className="text-[9px] text-[#94a3b8] mt-0.5 font-medium">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Task table */}
@@ -709,13 +454,13 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Tasks</p>
                   <span className="text-[11px] text-[#94a3b8]">Showing {Math.min((page + 1) * PAGE_SIZE, tasks.length)} of {tasks.length} tasks</span>
                 </div>
-                <div className="grid grid-cols-[2fr_1fr_80px_72px_96px] gap-4 px-5 py-2.5 bg-[#fafbfc] border-b border-[#f1f5f9]">
-                  {["TASK DESCRIPTION", "PHASE", "AI EST.", "PRIORITY", "TYPE"].map((h) => (
+                <div className="grid grid-cols-[2fr_1fr_72px_1fr_1fr_72px_96px] gap-4 px-5 py-2.5 bg-[#fafbfc] border-b border-[#f1f5f9]">
+                  {["TASK DESCRIPTION", "PHASE", "TOKENS", "AI EST.", "HUMAN EST.", "PRIORITY", "TYPE"].map((h) => (
                     <span key={h} className="text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8]">{h}</span>
                   ))}
                 </div>
                 {pageTasks.map((task, i) => (
-                  <div key={task.id} className={`grid grid-cols-[2fr_1fr_80px_72px_96px] gap-4 items-center px-5 py-3.5 ${i < pageTasks.length - 1 ? "border-b border-[#f8fafc]" : ""} hover:bg-[#fafbff] transition-colors`}>
+                  <div key={task.id} className={`grid grid-cols-[2fr_1fr_72px_1fr_1fr_72px_96px] gap-4 items-center px-5 py-3.5 ${i < pageTasks.length - 1 ? "border-b border-[#f8fafc]" : ""} hover:bg-[#fafbff] transition-colors`}>
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold text-[#1e293b] truncate">{task.title}</p>
                       <p className="text-[11px] text-[#94a3b8] truncate mt-0.5">{task.description}</p>
@@ -723,7 +468,13 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     <div>
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${phaseColor(task.phase)}`}>{task.phase}</span>
                     </div>
+                    <div className="text-[12px] font-medium text-[#334155]">
+                      {task.tokenEstimate?.totalTokens ? formatTokens(task.tokenEstimate.totalTokens) : <span className="text-slate-300">—</span>}
+                    </div>
                     <div className="text-[13px] font-medium text-[#334155]">{task.estimatedHours}h</div>
+                    <div className="text-[13px] font-medium text-[#334155]">
+                      {task.executionKind === "human_confirm_after" ? <span>{task.estimatedHours}h</span> : <span className="text-slate-300">—</span>}
+                    </div>
                     <div>
                       {task.priority ? (
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
@@ -759,62 +510,273 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   </div>
                 )}
               </div>
-
-              {/* Abilities + Project Links */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* Abilities */}
-                <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[#f1f5f9] flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Abilities</p>
-                    <button onClick={() => onNavigate("deploy")}
-                      className="inline-flex items-center gap-1 text-[10px] font-bold text-[#712ae2] bg-violet-50 px-2 py-0.5 rounded-full hover:bg-violet-100 transition-colors">
-                      <Settings size={10} /> Manage
-                    </button>
-                  </div>
-                  <div className="px-5 py-4 space-y-3">
-                    {requirements.length === 0 ? (
-                      <p className="text-[12px] text-[#94a3b8]">No external resources configured.</p>
-                    ) : (
-                      requirements.map((req) => (
-                        <div key={req.envKey} className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 ${CATEGORY_COLOR[req.category] ?? CATEGORY_COLOR.other}`}>
-                              {CATEGORY_LABEL[req.category] ?? "Other"}
-                            </span>
-                            <span className="text-[12px] font-mono font-medium text-[#334155] truncate">{req.envKey}</span>
-                          </div>
-                          <span className={`text-[10px] font-semibold shrink-0 ${(req.value ?? "").trim() ? "text-emerald-600" : "text-amber-600"}`}>
-                            {(req.value ?? "").trim() ? "Configured" : "Missing"}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Project Links */}
-                <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[#f1f5f9]">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Links</p>
-                  </div>
-                  <div className="px-5 py-4 space-y-3">
-                    {repoLoading ? (
-                      <p className="text-[12px] text-[#94a3b8]">Loading…</p>
-                    ) : repoUrl ? (
-                      <a href={repoUrl} target="_blank" rel="noreferrer"
-                        className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-[#712ae2] transition-colors">
-                        <GitBranch size={15} className="shrink-0 text-[#334155]" /> GitHub Repository
-                      </a>
-                    ) : (
-                      <p className="text-[12px] text-[#94a3b8]">
-                        No repository created yet. Configure deployment to create one.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
             </>
           )}
+
+          {/* ── Abilities + Project Links (side by side) ── */}
+          <div className="grid grid-cols-2 gap-4 items-start">
+          <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-[#f1f5f9] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <p className="text-[16px] font-bold text-[#0b1c30]">Abilities</p>
+                {abilitiesConfigured > 0 && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
+                    {abilitiesConfigured} Configured
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={handleDetectAbilities}
+                disabled={detecting || abilitiesLoading}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#712ae2] bg-violet-50 px-2.5 py-1 rounded-full hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {detecting
+                  ? <><Loader2 size={11} className="animate-spin" /> Analyzing…</>
+                  : <><RefreshCw size={11} /> {abilities.length === 0 ? "Detect from PRD" : "Re-detect"}</>
+                }
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              {detectError && (
+                <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{detectError}</p>
+              )}
+
+              {abilitiesLoading ? (
+                <p className="text-[12px] text-[#94a3b8]">Loading…</p>
+              ) : abilities.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-[#e2e8f0] bg-[#fafbff] p-4 text-center">
+                  <p className="text-[13px] font-medium text-[#334155]">No integrations detected yet</p>
+                  <p className="text-[12px] text-[#94a3b8] mt-1">
+                    Click <span className="font-semibold text-[#712ae2]">Detect from PRD</span> to auto-detect third-party dependencies from your PRD, or skip if your app has no external services.
+                  </p>
+                </div>
+              ) : (
+                abilities.map((item) => {
+                  const enabled = enabledKeys.has(item.envKey);
+                  return (
+                    <div
+                      key={item.envKey}
+                      className={`rounded-xl border transition-colors ${enabled ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white opacity-60"}`}
+                    >
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <div className="w-9 h-9 rounded-lg bg-[#1a1a2e] flex items-center justify-center text-[18px] shrink-0 shadow-sm">
+                          {CATEGORY_ICON[item.category] ?? "🔧"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-bold text-[#0b1c30] leading-tight truncate">{item.label}</p>
+                          <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">
+                            {CATEGORY_INTEGRATION_LABEL[item.category] ?? "INTEGRATION"}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => toggleAbility(item.envKey)}
+                          className="shrink-0 ml-2"
+                          title={enabled ? "Disable" : "Enable"}
+                        >
+                          {enabled
+                            ? <CheckSquare size={20} className="text-[#712ae2]" />
+                            : <Square size={20} className="text-[#cbd5e1]" />
+                          }
+                        </button>
+                      </div>
+
+                      {enabled && (
+                        <div className="px-4 pb-3 pt-0.5 border-t border-[#f1f5f9]">
+                          <p className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
+                            {item.envKey.replace(/_/g, " ")}
+                          </p>
+                          <div className="relative">
+                            <input
+                              type={showSecrets[item.envKey] ? "text" : "password"}
+                              value={item.value ?? ""}
+                              onChange={(e) => handleAbilityValueChange(item.envKey, e.target.value)}
+                              placeholder={item.example ?? "Paste value here…"}
+                              autoComplete="off" spellCheck={false}
+                              className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowSecrets((p) => ({ ...p, [item.envKey]: !p[item.envKey] }))}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155] transition-colors"
+                            >
+                              {showSecrets[item.envKey] ? <EyeOff size={15} /> : <Eye size={15} />}
+                            </button>
+                          </div>
+                          {item.description && item.description !== item.label && (
+                            <p className="text-[11px] text-[#94a3b8] mt-1.5 leading-relaxed">{item.description}</p>
+                          )}
+                          {item.docsUrl && (
+                            <a href={item.docsUrl} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline mt-1">
+                              <ExternalLink size={10} /> Where to get this key →
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              <button
+                onClick={() => {
+                  const key = prompt("Enter env variable name (UPPER_SNAKE_CASE):");
+                  if (!key) return;
+                  const cleaned = key.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+                  if (!cleaned || abilities.some((a) => a.envKey === cleaned)) return;
+                  const next: ResourceRequirement[] = [...abilities, {
+                    envKey: cleaned, label: cleaned, description: "Manually added.",
+                    category: "other", required: false, value: "",
+                  }];
+                  setAbilities(next);
+                  setEnabledKeys((p) => new Set([...p, cleaned]));
+                  void persistAbilities(next);
+                }}
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:text-[#6b24da] transition-colors pt-1"
+              >
+                <Plus size={13} /> Add API key manually
+              </button>
+            </div>
+          </div>
+
+          {/* ── Project Links (editable, always visible at bottom) ── */}
+          <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-[#f1f5f9]">
+              <p className="text-[16px] font-bold text-[#0b1c30]">Project Links</p>
+              <p className="text-[11px] text-[#94a3b8] mt-0.5">Connect your repositories and project boards</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+
+              {/* ── GitHub ── */}
+              <div className={`rounded-xl border transition-colors ${
+                linkConfig.githubToken ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white"
+              }`}>
+                <button
+                  onClick={() => setGithubExpanded((v) => !v)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-[#1a1a2e] flex items-center justify-center shrink-0 shadow-sm">
+                    <GitBranch size={16} className="text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-bold text-[#0b1c30] leading-tight">GitHub Repository</p>
+                    <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">GIT INTEGRATION</p>
+                  </div>
+                  {linkConfig.githubToken ? (
+                    <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Connected</span>
+                  ) : (
+                    <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
+                  )}
+                  <CheckSquare size={18} className={`shrink-0 ml-1 ${githubExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
+                </button>
+
+                {githubExpanded && (
+                  <div className="px-4 pb-4 pt-0.5 border-t border-[#f1f5f9] space-y-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
+                        GITHUB TOKEN <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showLinkSecrets["githubToken"] ? "text" : "password"}
+                          value={linkConfig.githubToken}
+                          onChange={(e) => updateLinkConfig({ githubToken: e.target.value })}
+                          placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                          autoComplete="off" spellCheck={false}
+                          className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                        />
+                        <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, githubToken: !p["githubToken"] }))}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155]">
+                          {showLinkSecrets["githubToken"] ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#94a3b8] mt-1">Personal access token with <code className="bg-[#f1f5f9] px-1 rounded text-[10px]">repo</code> scope. Used to create and push the generated repository.</p>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">GITHUB ORG / USER <span className="text-[#cbd5e1]">(optional)</span></label>
+                      <input
+                        type="text"
+                        value={linkConfig.githubOrg}
+                        onChange={(e) => updateLinkConfig({ githubOrg: e.target.value })}
+                        placeholder="my-org or my-username"
+                        className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                      />
+                    </div>
+                    {repoUrl && (
+                      <a href={repoUrl} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:underline">
+                        <ExternalLink size={11} /> View Repository →
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Jira ── */}
+              <div className={`rounded-xl border transition-colors ${
+                linkConfig.jiraToken ? "border-[#e2e8f0] bg-[#f8f9ff]" : "border-[#f1f5f9] bg-white"
+              }`}>
+                <button
+                  onClick={() => setJiraExpanded((v) => !v)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-[#0052cc] flex items-center justify-center shrink-0 shadow-sm">
+                    <Plus size={16} className="text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-bold text-[#0b1c30] leading-tight">Jira Board</p>
+                    <p className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider mt-0.5">PROJECT MANAGEMENT</p>
+                  </div>
+                  {linkConfig.jiraToken ? (
+                    <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Connected</span>
+                  ) : (
+                    <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
+                  )}
+                  <CheckSquare size={18} className={`shrink-0 ml-1 ${jiraExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
+                </button>
+
+                {jiraExpanded && (
+                  <div className="px-4 pb-4 pt-0.5 border-t border-[#f1f5f9] space-y-3">
+                    {[
+                      { key: "jiraHost" as const, label: "JIRA HOST", placeholder: "https://yourteam.atlassian.net", required: true, secret: false },
+                      { key: "jiraEmail" as const, label: "JIRA EMAIL", placeholder: "your@email.com", required: true, secret: false },
+                      { key: "jiraToken" as const, label: "JIRA API TOKEN", placeholder: "API token from Atlassian account settings", required: true, secret: true },
+                      { key: "jiraProject" as const, label: "PROJECT KEY", placeholder: "PROJ", required: true, secret: false },
+                    ].map(({ key, label, placeholder, required, secret }) => (
+                      <div key={key}>
+                        <label className="block text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest mb-1.5">
+                          {label} {required && <span className="text-red-500">*</span>}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={secret && !showLinkSecrets[key] ? "password" : "text"}
+                            value={linkConfig[key]}
+                            onChange={(e) => updateLinkConfig({ [key]: e.target.value })}
+                            placeholder={placeholder}
+                            autoComplete="off" spellCheck={false}
+                            className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                          />
+                          {secret && (
+                            <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, [key]: !p[key] }))}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155]">
+                              {showLinkSecrets[key] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline">
+                      <ExternalLink size={10} /> Get your Atlassian API token →
+                    </a>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+          </div>
 
         </div>
       </div>
