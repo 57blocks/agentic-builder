@@ -342,11 +342,11 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
       <div className="flex-1 overflow-y-auto bg-[#f8f9ff]">
         <div className="max-w-5xl mx-auto px-8 py-7 space-y-5">
 
-          {/* ── Header (always shows Sprint Kick-off Summary) ── */}
+          {/* ── Header ── */}
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-[22px] font-bold text-[#0b1c30] leading-tight">
-                Sprint Kick-off Summary
+                Overview
               </h1>
               <p className="text-[13px] text-[#94a3b8] mt-0.5">
                 {isCompleted

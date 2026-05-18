@@ -466,18 +466,6 @@ export function IntentUI(props: StepUIProps) {
             <span className="text-xs text-slate-600 font-medium">{isRechecking ? "Analyzing…" : intentAllClear ? "Ready to generate" : "Describe your project"}</span>
           </div>
         </div>
-        {/* Always-available escape hatch — works even mid-analysis. */}
-        {(messages.length > 0 || isRechecking) && featureBrief.trim() && nextStep && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleStartGeneration([], {})}
-            className="text-xs font-medium"
-            title="Skip remaining clarifications and continue to PRD"
-          >
-            Skip to PRD <ArrowRight size={12} />
-          </Button>
-        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8 space-y-6">

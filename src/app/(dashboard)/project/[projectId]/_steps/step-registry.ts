@@ -54,8 +54,8 @@ import { VerifyUI } from "./preparation/quality/verify/ui";
 import { envSetupAgent } from "./kickoff/setup/env-setup/agent";
 import { EnvSetupUI } from "./kickoff/setup/env-setup/ui";
 
-import { summaryAgent } from "./kickoff/summary/agent";
-import { SummaryUI } from "./kickoff/summary/ui";
+import { summaryAgent } from "./kickoff/overview/agent";
+import { SummaryUI } from "./kickoff/overview/ui";
 
 import { taskBreakdownAgent } from "./kickoff/planning/task-breakdown/agent";
 import { TaskBreakdownUI } from "./kickoff/planning/task-breakdown/ui";
