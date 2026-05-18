@@ -329,10 +329,12 @@ Field rules:
   - Complex multi-file task (full CRUD module, several pages): **2–4h**
   - Exceptionally broad task (rare): **4–6h**
   Values over 6 are almost always wrong and should be split. This field is the AI coding time only.
-- **humanReviewHours**: number (0–2), hours a human needs to review/approve the task output. **REQUIRED** — you MUST set this:
-  - For \`"ai_autonomous"\`: set to **0**.
-  - For \`"human_confirm_after"\`: set to **0.5–1** (typical). NEVER set to 0.
-  Example for a human_confirm_after task: \`"humanReviewHours": 0.5\`
+- **humanReviewHours**: number, hours a **human developer** would take to write this same task from scratch. **REQUIRED for ALL tasks.** Human time is typically **5-10x AI time**, since humans read docs, debug, test, and iterate. Use these reference ranges:
+  - Simple single-file task: **2–4h** for a human
+  - Moderate multi-file feature: **4–8h** for a human
+  - Complex multi-file task: **8–24h** for a human
+  - Exceptionally broad task: **24–40h** for a human
+  CRITICAL: \`humanReviewHours\` MUST be **larger than** \`estimatedHours\` for every task (humans are slower than AI). Example: if \`estimatedHours\` is 1, then \`humanReviewHours\` should be 4–8.
 - **executionKind**: "ai_autonomous" (AI can fully handle) or "human_confirm_after"
   (needs human review/approval after completion).
 - **files**: object with three sub-arrays:
@@ -460,7 +462,7 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
 - Order tasks by execution sequence (respecting dependencies).
 - Focus on CODING tasks — skip pure planning, meeting, or documentation-only items.
 - Reference PRD feature IDs (FR-xxx) and user stories (US-xx) where applicable.
-- Tasks that involve security, payment, or auth MUST be "human_confirm_after".
+- Tasks that involve security, payment, auth, data mutation (create/update/delete), destructive operations (drop, reset, purge), external API integration wiring, or complex frontend UI pages with forms/validation MUST be "human_confirm_after". Only purely scaffold/generate tasks (e.g. "create model file", "add config") should be "ai_autonomous".
 - Every task MUST have subSteps (2-6 steps), tokenEstimate, acceptanceCriteria, and coversRequirementIds (non-empty when PRD lists AC/FR ids).
 - Every file path across all tasks must be assigned to exactly one task's "files.creates". All other tasks that touch the same file must list it under "files.modifies" or "files.reads".
 - Before writing subSteps for a task, check its "dependencies" array. Any file listed in a dependency task's "files.creates" is already on disk — reference it via "modifies" or "reads", never recreate it.
