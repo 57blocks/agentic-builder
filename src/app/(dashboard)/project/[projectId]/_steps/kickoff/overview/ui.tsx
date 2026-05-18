@@ -540,8 +540,8 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
             </>
           )}
 
-          {/* ── Abilities + Project Links (side by side) ── */}
-          <div className="grid grid-cols-2 gap-4 items-start">
+          {/* ── Abilities + Project Links (stacked) ── */}
+          <div className="flex flex-col gap-4">
           <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 border-b border-[#f1f5f9] flex items-center justify-between">
               <div className="flex items-center gap-2">
