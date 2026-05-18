@@ -454,11 +454,16 @@ async function ruleBgWorkerStartup(
         id: makeId("bg-job-worker-startup", file, line),
         ruleId: "bg-job-worker-startup",
         scope: "backend",
-        severity: "warn",
+        // ERROR (not warn): this is a silent production failure. The HTTP
+        // smoke probe sees no symptom — endpoints respond, but enqueued
+        // background runs sit forever because no consumer is registered.
+        // We treat any project that ships a `start*Worker` export without
+        // a matching call in `server.ts` as hard-broken.
+        severity: "error",
         file,
         line,
         snippet: `export async function ${fnName}(...) { ... }`,
-        reason: `\`${fnName}\` is exported from a worker module but \`backend/src/server.ts\` never calls it. The in-process queue then has no consumer — every enqueued run hangs forever.`,
+        reason: `\`${fnName}\` is exported from a worker module but \`backend/src/server.ts\` never calls it. The in-process queue then has no consumer — every enqueued run hangs forever. The HTTP smoke gate cannot detect this on its own because the API surface stays nominally responsive.`,
         directive: `In \`backend/src/server.ts\`, after the app is created and BEFORE \`app.listen(...)\`, import and call \`await ${fnName}();\`. This registers the in-process consumer at boot.`,
       });
     }

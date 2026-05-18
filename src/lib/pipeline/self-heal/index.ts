@@ -36,6 +36,12 @@ export type {
   TaskCoverageRepairInput,
   TaskCoverageRepairResult,
 } from "./task-coverage-repair";
+export { repairContractCoverage } from "./contract-coverage-repair";
+export { getUnresolvedMigrationGaps } from "./migration-coverage-repair";
+export type {
+  ContractCoverageRepairInput,
+  ContractCoverageRepairResult,
+} from "./contract-coverage-repair";
 export { repairMissingBackendPhase } from "./phase-repair";
 export type { PhaseRepairInput, PhaseRepairResult } from "./phase-repair";
 export { dispatchAuditRepair } from "./audit-repair-dispatch";
