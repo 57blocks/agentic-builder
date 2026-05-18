@@ -281,6 +281,13 @@ export async function invokeCodegenOrOpenRouter(
   const reasoningOptions = buildCodegenReasoningOptions(key);
 
   // ── Priority 1: DeepSeek V4 Pro direct API ──────────────────────────────
+  // Activated when DEEPSEEK_API_KEY is set (isDeepSeekV4Provider).
+  // CODEGEN_PROVIDER=deepseek also signals intent to use DeepSeek direct;
+  // emit a warning if the key is missing so the fallback isn't silent.
+  const wantsDeepSeekDirect =
+    key === "codeGen" &&
+    process.env.CODEGEN_PROVIDER?.trim().toLowerCase() === "deepseek";
+
   if (isDeepSeekV4Provider() && !shouldForceOpenRouter(key)) {
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
@@ -297,6 +304,10 @@ export async function invokeCodegenOrOpenRouter(
         `[LLM] DeepSeek V4 exhausted all attempts (${msg.slice(0, 200)}). Falling back to OpenRouter chain.`,
       );
     }
+  } else if (wantsDeepSeekDirect && !isDeepSeekV4Provider()) {
+    console.warn(
+      `[LLM] CODEGEN_PROVIDER=deepseek but DEEPSEEK_API_KEY is not configured; falling back to OpenRouter chain.`,
+    );
   }
 
   // ── Priority 2: custom OpenAI-compatible endpoint ────────────────────────

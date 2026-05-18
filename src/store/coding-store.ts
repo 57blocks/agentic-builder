@@ -1223,26 +1223,43 @@ function handleCodingEvent(
   if (type === "repair_event") {
     const repairEvent = payload.data?.event as string | undefined;
 
-    // Real-time file read/write activity — update the task's fileActivities list.
+    // Any repair_event that carries a taskId means the backend has activated
+    // that task. Promote it from pending → in_progress immediately so the node
+    // reflects "active" before agent_task_start arrives (which only fires after
+    // the LangGraph pick_next_task node finishes, always later than repair events).
+    const repairTaskId = payload.taskId ?? (payload.data?.taskId as string | undefined);
+    if (repairTaskId) {
+      const current = get().tasks.find((t) => t.id === repairTaskId);
+      if (current?.codingStatus === "pending") {
+        set({
+          tasks: get().tasks.map((t) =>
+            t.id === repairTaskId
+              ? { ...t, codingStatus: "in_progress" as const, progressStage: "generating" as const }
+              : t,
+          ),
+        });
+      }
+    }
+
+    // Real-time file read/write activity — append to the task's fileActivities.
     if (repairEvent === "file_activity") {
-      const taskId = payload.data?.taskId as string | undefined;
+      const taskId = repairTaskId;
       const details = payload.data?.details as Record<string, unknown> | undefined;
       if (taskId && details) {
-        const tasks = get().tasks.map((t) => {
-          if (t.id !== taskId) return t;
-          const entry = {
-            operation: details.operation as "read" | "write",
-            path: String(details.path ?? ""),
-            contentPreview: details.contentPreview as string | undefined,
-            contentLength: details.contentLength as number | undefined,
-            timestamp: new Date().toISOString(),
-          };
-          return {
-            ...t,
-            fileActivities: [...(t.fileActivities ?? []), entry],
-          };
+        const entry = {
+          operation: details.operation as "read" | "write",
+          path: String(details.path ?? ""),
+          contentPreview: details.contentPreview as string | undefined,
+          contentLength: details.contentLength as number | undefined,
+          timestamp: new Date().toISOString(),
+        };
+        set({
+          tasks: get().tasks.map((t) =>
+            t.id === taskId
+              ? { ...t, fileActivities: [...(t.fileActivities ?? []), entry] }
+              : t,
+          ),
         });
-        set({ tasks });
       }
       return;
     }
