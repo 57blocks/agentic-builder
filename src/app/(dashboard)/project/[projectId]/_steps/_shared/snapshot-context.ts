@@ -71,6 +71,17 @@ export async function loadAllStepSnapshots(projectSlug: string): Promise<void> {
     };
   }
   useStepStore.setState({ steps: merged as unknown as typeof s.steps });
+
+  // Restore intent-specific fields from intent step metadata (intentMessages
+  // are stored in metadata, not in the step result, so the bulk setState above
+  // does not populate them — we must extract them explicitly here).
+  const intentMeta = (all["intent"]?.metadata as Record<string, unknown> | undefined);
+  if (intentMeta?.intentMessages && Array.isArray(intentMeta.intentMessages) && intentMeta.intentMessages.length > 0) {
+    useStepStore.setState({
+      intentMessages: intentMeta.intentMessages,
+      intentEnrichedBrief: (intentMeta.intentEnrichedBrief as string) ?? "",
+    });
+  }
 }
 
 // ── Standard per-step snapshot (saves only its own step's data) ──────────────

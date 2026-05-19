@@ -70,5 +70,12 @@ export function useStageStatuses(): Record<StageId, StageStatus> {
   let preview: StageStatus = "idle";
   if (coding === "completed") preview = "active";
 
-  return { preparation, kickoff, coding, preview };
+  // ── deploy ────────────────────────────────────────────────────────────────
+  // Deploy was added by the pipeline-ui merge. There's no live signal for it
+  // yet (no DeployStore, no pipeline step entry), so the stage stays idle
+  // until that wiring lands. Returning "idle" keeps the type contract honest
+  // without inventing fake status transitions here.
+  const deploy: StageStatus = "idle";
+
+  return { preparation, kickoff, coding, preview, deploy };
 }
