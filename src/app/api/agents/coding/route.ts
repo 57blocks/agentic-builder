@@ -720,6 +720,7 @@ export async function POST(request: NextRequest) {
       projectId: string;
       screenId: string;
       projectUrl: string;
+      screenshotUrl?: string | null;
     } | null;
   };
 
