@@ -1,0 +1,31 @@
+{
+  "id": "CL-0deb6cacb2ba4db6",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · M · app",
+  "tags": [
+    "classifier",
+    "tier:M",
+    "type:app",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778762777001,
+  "updatedAt": 1778762777001,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "M",
+    "type": "app",
+    "needsBackend": true,
+    "needsDatabase": true,
+    "needsAuth": true,
+    "needsMultipleServices": false,
+    "reasoning": "A web3 mini-program typically requires a backend for blockchain interaction, a database for off-chain data, and wallet-based authentication, but is not complex enough to need multiple services.",
+    "costUsd": 0,
+    "durationMs": 15776,
+    "briefHash": "0deb6cacb2ba4db6",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

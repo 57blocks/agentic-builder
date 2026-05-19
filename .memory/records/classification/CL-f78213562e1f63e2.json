@@ -1,0 +1,31 @@
+{
+  "id": "CL-f78213562e1f63e2",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · L · platform",
+  "tags": [
+    "classifier",
+    "tier:L",
+    "type:platform",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778811754985,
+  "updatedAt": 1778811754985,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "L",
+    "type": "platform",
+    "needsBackend": true,
+    "needsDatabase": true,
+    "needsAuth": true,
+    "needsMultipleServices": true,
+    "reasoning": "This is a complex enterprise platform with multiple user roles (Internal Admin, Internal Operator, Enterprise User), full RBAC, multiple pages (monitor, detail, reserve review, data feed, account management, feedback, etc.), backend scoring engine with 9 variables, external data integrations (CoinGecko, DeFi Llama, FRED), scheduled tasks, and a complete access request/approval workflow.",
+    "costUsd": 0,
+    "durationMs": 5783,
+    "briefHash": "f78213562e1f63e2",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

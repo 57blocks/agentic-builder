@@ -1,0 +1,31 @@
+{
+  "id": "CL-11c314a62357e040",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · M · platform",
+  "tags": [
+    "classifier",
+    "tier:M",
+    "type:platform",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1779097173839,
+  "updatedAt": 1779097173839,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "M",
+    "type": "platform",
+    "needsBackend": true,
+    "needsDatabase": true,
+    "needsAuth": true,
+    "needsMultipleServices": false,
+    "reasoning": "Internal team task management platform with role-based access (admin and regular user) and password authentication, requiring a backend and database but no external integrations or multiple services.",
+    "costUsd": 0,
+    "durationMs": 6287,
+    "briefHash": "11c314a62357e040",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "CL-11b5ce35ab3fd06c",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778568438251,
+  "updatedAt": 1778568438251,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "这是一个可爱风格且带多巴胺配色的计算器，本质上是单页前端小工具，不需要后端、数据库、认证或多服务架构。",
+    "costUsd": 0,
+    "durationMs": 4083,
+    "briefHash": "11b5ce35ab3fd06c",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "openai/gpt-5.4"
+  }
+}

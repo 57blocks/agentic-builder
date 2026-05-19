@@ -1,0 +1,31 @@
+{
+  "id": "CL-f6047ab363c27510",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778912578027,
+  "updatedAt": 1778912578027,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "A simple calculator with session-based history and no authentication is a straightforward frontend tool.",
+    "costUsd": 0,
+    "durationMs": 12112,
+    "briefHash": "f6047ab363c27510",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

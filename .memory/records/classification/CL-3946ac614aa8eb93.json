@@ -1,0 +1,31 @@
+{
+  "id": "CL-3946ac614aa8eb93",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778493236219,
+  "updatedAt": 1778493236219,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "这是一个仅供个人使用、支持基础加减乘除的移动端响应式前端计算器，无需登录、后端或数据库，因此属于简单项目。",
+    "costUsd": 0,
+    "durationMs": 2938,
+    "briefHash": "3946ac614aa8eb93",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "openai/gpt-5.4"
+  }
+}

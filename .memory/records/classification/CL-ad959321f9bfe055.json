@@ -1,0 +1,31 @@
+{
+  "id": "CL-ad959321f9bfe055",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · M · platform",
+  "tags": [
+    "classifier",
+    "tier:M",
+    "type:platform",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778815615720,
+  "updatedAt": 1778815615720,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "M",
+    "type": "platform",
+    "needsBackend": true,
+    "needsDatabase": true,
+    "needsAuth": true,
+    "needsMultipleServices": false,
+    "reasoning": "Full-stack application with a single backend service, database, basic auth, and moderate complexity (scoring engine, dashboard, review workflow) but not requiring multiple services or microservices.",
+    "costUsd": 0,
+    "durationMs": 33395,
+    "briefHash": "ad959321f9bfe055",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

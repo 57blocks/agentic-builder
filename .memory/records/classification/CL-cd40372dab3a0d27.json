@@ -1,0 +1,31 @@
+{
+  "id": "CL-cd40372dab3a0d27",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778928197120,
+  "updatedAt": 1778928197120,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "A simple AI chatbot can be implemented as a single-page app with no backend or database, using a pre-trained model or API calls.",
+    "costUsd": 0,
+    "durationMs": 10361,
+    "briefHash": "cd40372dab3a0d27",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}
