@@ -428,7 +428,7 @@ export default function AppNav() {
           </div>
           {!collapsed && (
             <div className="flex flex-col overflow-hidden">
-              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">Alex Chen</span>
+              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">57Blocks</span>
               <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
             </div>
           )}

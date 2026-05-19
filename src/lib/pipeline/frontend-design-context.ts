@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { fetchStitchScreenHtml } from "@/lib/stitch-api";
 
 const TOOL_TRANSCRIPT_MARKER = "## Tool Transcript";
 const MAX_PENCIL_SUMMARY_CHARS = 12_000;
@@ -107,6 +108,7 @@ export interface StitchDesignMeta {
   projectId: string;
   screenId: string;
   projectUrl: string;
+  screenshotUrl?: string | null;
 }
 
 /** Read Pencil markdown from root (canonical) or legacy nested paths. */
@@ -131,22 +133,26 @@ const MAX_STITCH_HTML_CHARS = 40_000;
 
 /**
  * Prepare Stitch-exported HTML for injection into the coding context.
- * Strips CSS/JS/tags to leave plain readable text so the model can
- * understand component names, layout hierarchy, and design tokens,
- * then truncates to avoid blowing the context budget.
+ * Strips scripts, styles, and inline event handlers but PRESERVES
+ * HTML structure (tags with class names, attributes) so the model can
+ * understand DOM hierarchy, flex layout, and Tailwind classes.
  */
 function prepareStitchHtmlForCodegen(raw: string): string {
   if (!raw.trim()) return "";
-  const stripped = raw
+  const cleaned = raw
+    // Remove <style> blocks and their content
     .replace(/<style[\s\S]*?<\/style>/gi, "")
+    // Remove <script> blocks and their content
     .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&[a-z]+;/gi, " ")
-    .replace(/\s{2,}/g, " ")
+    // Remove inline event handlers
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
+    // Collapse whitespace within text nodes (but keep HTML tags intact)
+    .replace(/>\s+</g, ">\n<")
+    .replace(/\s{3,}/g, "  ")
     .trim();
-  if (!stripped) return "";
-  if (stripped.length <= MAX_STITCH_HTML_CHARS) return stripped;
-  return `${stripped.slice(0, MAX_STITCH_HTML_CHARS)}\n\n[Stitch design HTML truncated for codegen]`;
+  if (!cleaned) return "";
+  if (cleaned.length <= MAX_STITCH_HTML_CHARS) return cleaned;
+  return `${cleaned.slice(0, MAX_STITCH_HTML_CHARS)}\n\n[Stitch design HTML truncated for codegen]`;
 }
 
 /**
@@ -166,6 +172,23 @@ export async function buildFrontendDesignContextForCodegen(
   pencilDesignRaw: string,
   stitchMeta?: StitchDesignMeta,
 ): Promise<string> {
+  // ── Fetch fresh Stitch design at coding time ──────────────────────────────
+  // The user may have modified the design in Stitch after kickoff, so the
+  // cached StitchDesign.html is stale. Call Stitch MCP get_screen to get
+  // the latest HTML + screenshot URL, then overwrite the cache.
+  const freshScreenshotUrl = stitchMeta?.screenshotUrl ?? null;
+  if (stitchMeta?.projectId && stitchMeta?.screenId) {
+    try {
+      const freshHtml = await fetchStitchScreenHtml(stitchMeta.projectId, stitchMeta.screenId);
+      if (freshHtml) {
+        await fs.writeFile(path.join(outputRoot, "StitchDesign.html"), freshHtml, "utf-8");
+        console.log("[FrontendDesignContext] Fresh Stitch HTML fetched via MCP get_screen, cache overwritten.");
+      }
+    } catch (e) {
+      console.warn("[FrontendDesignContext] Failed to fetch fresh Stitch HTML, falling back to cached:", e);
+    }
+  }
+
   const stitchRaw = await readStitchDesignHtml(outputRoot);
   const stitchText = prepareStitchHtmlForCodegen(stitchRaw);
   const assets = await buildPublicDesignAssetsBlock(outputRoot);
@@ -181,9 +204,14 @@ export async function buildFrontendDesignContextForCodegen(
     ? [
         "## (PRIMARY) Stitch UI Design — source of truth for visual layout",
         "",
-        "The following is the extracted text content from a high-fidelity UI design exported from Google Stitch.",
+        "The following is the HTML structure from a high-fidelity UI design exported from Google Stitch. " +
+        "The HTML tags, class names (Tailwind), and DOM hierarchy are preserved so you can reproduce " +
+        "the exact layout, component structure, and styling.",
         stitchMeta?.projectUrl
           ? `Stitch project URL: ${stitchMeta.projectUrl}`
+          : "",
+        freshScreenshotUrl
+          ? `Stitch design screenshot reference URL: ${freshScreenshotUrl}`
           : "",
         "",
         "**THIS IS THE PRIMARY DESIGN REFERENCE.** You MUST reproduce the UI exactly as shown in the Stitch design.",
