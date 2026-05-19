@@ -35,7 +35,7 @@ export default function PreviewWorkspace({ codeOutputDir }: Props) {
           />
         </div>
       </div>
-      <div className="w-[380px] shrink-0 border-l border-zinc-200">
+      <div style={{ flex: '0 0 380px', minWidth: 0 }} className="border-l border-zinc-200">
         <CodeChatPanel ref={chatRef} codeOutputDir={codeOutputDir} />
       </div>
     </div>

@@ -1091,6 +1091,8 @@ async function runCodegenWorkerLoop(
   workerLabel?: string,
   recallCtx?: SecondaryRecallContext,
   toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
+  /** Worker role — used to select the codegen model variant. */
+  role?: CodingAgentRole,
 ): Promise<{
   content: string;
   rawContent: string;
@@ -1121,6 +1123,9 @@ async function runCodegenWorkerLoop(
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
   const toolChangedFiles = new Set<string>();
+  // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity;
+  // other roles (backend/architect/test) keep DeepSeek as primary.
+  const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
 
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
@@ -1156,7 +1161,7 @@ async function runCodegenWorkerLoop(
     const response = await invokeCodegenOrOpenRouter(messages, {
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
-      openRouterVariant: "codeGen",
+      openRouterVariant: codegenVariant,
       // When forcing write, omit tools entirely so the model cannot call them.
       tools: forceWrite ? undefined : WORKER_TOOLS,
       tool_choice: forceWrite ? "none" : "auto",
@@ -1356,7 +1361,10 @@ async function runCodegenAgentSession(
   workerLabel?: string,
   recallCtx?: SecondaryRecallContext,
   toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
+  role?: CodingAgentRole,
 ): Promise<CodegenAgentSessionResult> {
+  // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity.
+  const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
@@ -1386,7 +1394,7 @@ async function runCodegenAgentSession(
     const response = await invokeCodegenOrOpenRouter(messages, {
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
-      openRouterVariant: "codeGen",
+      openRouterVariant: codegenVariant,
       tools: WORKER_TOOLS,
       tool_choice: "auto",
     }).finally(() => {
@@ -2600,6 +2608,7 @@ async function generateCode(state: WorkerState) {
         state.workerLabel,
         secondaryRecallCtx,
         { fsWriteOptions: fsOpts, taskId: task.id },
+        state.role,
       );
       const content = response.content;
       totalCostUsd += response.costUsd;
@@ -2669,6 +2678,7 @@ async function generateCode(state: WorkerState) {
           state.workerLabel,
           secondaryRecallCtx,
           { fsWriteOptions: fsOpts, taskId: task.id },
+          state.role,
         );
         const content = response.content;
         validateCodegenFileOutput(content);

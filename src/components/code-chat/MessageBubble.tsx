@@ -74,7 +74,7 @@ export default function MessageBubble({ message, codeOutputDir, onReverted }: Pr
 
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-full text-[12.5px] leading-relaxed text-zinc-800">
+      <div className="w-full max-w-full overflow-x-hidden text-[12.5px] leading-relaxed text-zinc-800 [&_pre]:whitespace-pre-wrap [&_pre]:break-words">
         {message.segments.length === 0 && isStreaming && (
           <div className="flex items-center gap-2 text-[11px] text-zinc-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" />
