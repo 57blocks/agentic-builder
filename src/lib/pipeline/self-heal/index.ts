@@ -36,8 +36,21 @@ export type {
   TaskCoverageRepairInput,
   TaskCoverageRepairResult,
 } from "./task-coverage-repair";
+export { repairContractCoverage } from "./contract-coverage-repair";
+export { getUnresolvedMigrationGaps } from "./migration-coverage-repair";
+export type {
+  ContractCoverageRepairInput,
+  ContractCoverageRepairResult,
+} from "./contract-coverage-repair";
 export { repairMissingBackendPhase } from "./phase-repair";
 export type { PhaseRepairInput, PhaseRepairResult } from "./phase-repair";
+export { applyTaskBreakdownPatches } from "./task-breakdown-patches";
+export type {
+  ApplyTaskBreakdownPatchesInput,
+  ApplyTaskBreakdownPatchesResult,
+  TaskBreakdownPatchEntry,
+  TaskBreakdownPatchRuleId,
+} from "./task-breakdown-patches";
 export { dispatchAuditRepair } from "./audit-repair-dispatch";
 export type {
   AuditRepairDispatchInput,
@@ -64,6 +77,16 @@ export type {
   RuntimeAuditScope,
   RuntimeAuditSeverity,
 } from "./runtime-integration-audit";
+export {
+  dispatchRuntimeAudit,
+  formatRuntimeAuditTasksBlock,
+} from "./runtime-audit-dispatch";
+export type {
+  RuntimeAuditDispatchInput,
+  RuntimeAuditDispatchResult,
+  DeterministicFixOutcome,
+  RuntimeAuditRepairTask,
+} from "./runtime-audit-dispatch";
 export { runRuntimeSmokeGate } from "./runtime-smoke-gate";
 export type {
   RuntimeSmokeFailure,

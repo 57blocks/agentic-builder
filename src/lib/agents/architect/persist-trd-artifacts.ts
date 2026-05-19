@@ -28,6 +28,10 @@ import {
   validateWorkflowDag,
   type DagValidation,
 } from "./dag-validator";
+import {
+  validateTrdContracts,
+  type TrdContractValidation,
+} from "./trd-contract-validator";
 
 export interface PersistedTrdArtifacts {
   /** Raw parser output — useful for surfacing malformed/unknown blocks. */
@@ -42,6 +46,8 @@ export interface PersistedTrdArtifacts {
   rulesValidation?: RulesDslValidation;
   /** Result of running validateWorkflowDag when pipelineDagYaml was present. */
   dagValidation?: DagValidation;
+  /** Result of running validateTrdContracts against the full TRD markdown. */
+  contractValidation: TrdContractValidation;
 }
 
 export async function persistTrdArtifactsFromContent(
@@ -54,6 +60,7 @@ export async function persistTrdArtifactsFromContent(
   const written: PersistedTrdArtifacts["written"] = {};
   let rulesValidation: RulesDslValidation | undefined;
   let dagValidation: DagValidation | undefined;
+  const contractValidation = validateTrdContracts(content);
 
   if (artifacts.schemaTs) {
     const p = path.join(blueprintDir, "shared-schema.ts");
@@ -77,5 +84,11 @@ export async function persistTrdArtifactsFromContent(
     });
   }
 
-  return { artifacts, written, rulesValidation, dagValidation };
+  return {
+    artifacts,
+    written,
+    rulesValidation,
+    dagValidation,
+    contractValidation,
+  };
 }

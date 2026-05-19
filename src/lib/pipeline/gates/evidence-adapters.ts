@@ -18,6 +18,7 @@ import type { GateReportBase } from "@/lib/requirements/prd-spec-types";
 import type { PrdSpecGateResult } from "./prd-spec-gate";
 import type { RulesDslValidation } from "@/lib/agents/architect/trd-rules-validator";
 import type { DagValidation } from "@/lib/agents/architect/dag-validator";
+import type { TrdContractValidation } from "@/lib/agents/architect/trd-contract-validator";
 
 function digest(s: string): string {
   return crypto.createHash("sha1").update(s).digest("hex").slice(0, 12);
@@ -130,6 +131,25 @@ export function evidenceFromDagValidation(validation: DagValidation): Evidence {
       pipelineCount: validation.pipelineCount,
       nodeCount: validation.nodeCount,
       servicesReferenced: validation.servicesReferenced,
+      warningCount: validation.warnings.length,
+    },
+  });
+}
+
+export function evidenceFromTrdContractValidation(
+  validation: TrdContractValidation,
+): Evidence {
+  return makeEvidence({
+    kind: "validator",
+    validatorName: "trd-contract-validator",
+    description: validation.ok
+      ? `TRD runtime/data contracts validated (${validation.checkedContracts.length} contract(s) checked).`
+      : `TRD runtime/data contract validation found ${validation.warnings.length} blocker(s).`,
+    passed: validation.ok,
+    outputDigest: digest(JSON.stringify(validation)),
+    details: {
+      checkedContracts: validation.checkedContracts,
+      requiredEnvKeys: validation.requiredEnvKeys,
       warningCount: validation.warnings.length,
     },
   });

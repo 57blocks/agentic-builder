@@ -26,6 +26,10 @@ import fs from "fs/promises";
 import path from "path";
 import type { ResourceRequirement } from "./resource-requirements";
 import type { ScaffoldTier } from "./scaffold-copy";
+import type {
+  AuthDecision,
+  AuthMode,
+} from "@/lib/agents/architect/auth-decision-types";
 
 const SKIP_DIR_NAMES = new Set([
   "node_modules",
@@ -48,8 +52,19 @@ export interface OptionalScaffoldFeature {
   /** Display label, surfaced in logs / reports. */
   label?: string;
   /**
+   * Auth mode this feature owns. When `.blueprint/auth-decision.json` has a
+   * matching `mode`, this feature is FORCED in even when `triggerEnvKeys`
+   * is empty — and conflicting auth features (different `authMode`) are
+   * excluded from the apply set (mutual exclusion).
+   *
+   * Features without `authMode` are NOT treated as auth scaffolds (e.g.
+   * `payment-stripe`) and remain triggered purely by env keys.
+   */
+  authMode?: AuthMode;
+  /**
    * If ANY of these env keys is declared on a `ResourceRequirement`, the
    * feature is applied. Comparison is case-insensitive and ignores `value`.
+   * May be empty for auth scaffolds that activate purely via authMode.
    */
   triggerEnvKeys: string[];
   /**
@@ -121,15 +136,19 @@ export async function loadOptionalManifest(
     )) {
       if (!value || typeof value !== "object") continue;
       const v = value as Partial<OptionalScaffoldFeature>;
-      if (!Array.isArray(v.triggerEnvKeys) || v.triggerEnvKeys.length === 0) {
-        continue;
-      }
+      const triggerEnvKeys = Array.isArray(v.triggerEnvKeys)
+        ? (v.triggerEnvKeys as unknown[])
+            .filter((k): k is string => typeof k === "string")
+            .map((k) => k.trim().toUpperCase())
+            .filter(Boolean)
+        : [];
+      const authMode = isAuthMode(v.authMode) ? v.authMode : undefined;
+      // Skip features that have neither an env-key trigger nor an authMode.
+      if (triggerEnvKeys.length === 0 && !authMode) continue;
       features[name] = {
         label: typeof v.label === "string" ? v.label : undefined,
-        triggerEnvKeys: v.triggerEnvKeys
-          .filter((k): k is string => typeof k === "string")
-          .map((k) => k.trim().toUpperCase())
-          .filter(Boolean),
+        authMode,
+        triggerEnvKeys,
         extraDeps: v.extraDeps,
       };
     }
@@ -148,15 +167,60 @@ function envKeysFromRequirements(reqs: ResourceRequirement[]): Set<string> {
   return out;
 }
 
+function isAuthMode(s: unknown): s is AuthMode {
+  return s === "password-rbac" || s === "magic-link" || s === "privy";
+}
+
+/**
+ * Pick the set of features to apply.
+ *
+ * Auth scaffolds (features with `authMode`) are mutually exclusive — at
+ * most ONE wins per project:
+ *
+ *   1. If `authDecision` is present, its `mode` selects exactly one auth
+ *      feature; all other authMode features are excluded even when their
+ *      env keys are declared (decision file is authoritative).
+ *   2. If `authDecision` is absent, legacy behaviour applies — any
+ *      authMode feature whose env keys are declared gets picked. When
+ *      multiple match, the one with the most env-key hits wins; ties
+ *      break by manifest insertion order.
+ *
+ * Non-auth features (no `authMode`) are picked independently by env key.
+ */
 function pickTriggeredFeatures(
   manifest: OptionalScaffoldManifest,
   declaredEnvKeys: Set<string>,
+  authDecision: AuthDecision | null,
 ): Array<{ name: string; feature: OptionalScaffoldFeature }> {
-  const out: Array<{ name: string; feature: OptionalScaffoldFeature }> = [];
+  const auth: Array<{ name: string; feature: OptionalScaffoldFeature; hits: number }> = [];
+  const nonAuth: Array<{ name: string; feature: OptionalScaffoldFeature }> = [];
+
   for (const [name, feature] of Object.entries(manifest.features)) {
-    const hit = feature.triggerEnvKeys.some((k) => declaredEnvKeys.has(k));
-    if (hit) out.push({ name, feature });
+    if (feature.authMode) {
+      const hits = feature.triggerEnvKeys.filter((k) => declaredEnvKeys.has(k)).length;
+      auth.push({ name, feature, hits });
+    } else if (feature.triggerEnvKeys.some((k) => declaredEnvKeys.has(k))) {
+      nonAuth.push({ name, feature });
+    }
   }
+
+  let chosenAuth: { name: string; feature: OptionalScaffoldFeature } | null = null;
+  if (authDecision) {
+    const match = auth.find((a) => a.feature.authMode === authDecision.mode);
+    if (match) chosenAuth = { name: match.name, feature: match.feature };
+  } else {
+    // Legacy: env-key based. Highest hits wins; insertion order breaks ties.
+    const triggered = auth
+      .filter((a) => a.hits > 0)
+      .sort((x, y) => y.hits - x.hits);
+    if (triggered.length > 0) {
+      chosenAuth = { name: triggered[0].name, feature: triggered[0].feature };
+    }
+  }
+
+  const out: Array<{ name: string; feature: OptionalScaffoldFeature }> = [];
+  if (chosenAuth) out.push(chosenAuth);
+  out.push(...nonAuth);
   return out;
 }
 
@@ -267,6 +331,7 @@ export async function copyOptionalScaffolds(
   tier: ScaffoldTier,
   outputDir: string,
   reqs: ResourceRequirement[],
+  authDecision: AuthDecision | null = null,
 ): Promise<CopyOptionalScaffoldsResult> {
   const empty: CopyOptionalScaffoldsResult = {
     applied: [],
@@ -280,7 +345,7 @@ export async function copyOptionalScaffolds(
   if (!manifest) return empty;
 
   const declared = envKeysFromRequirements(reqs);
-  const triggered = pickTriggeredFeatures(manifest, declared);
+  const triggered = pickTriggeredFeatures(manifest, declared, authDecision);
   if (triggered.length === 0) {
     return { ...empty, manifestFound: true };
   }

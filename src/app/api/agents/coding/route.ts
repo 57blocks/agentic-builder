@@ -33,6 +33,7 @@ import {
   resolvePrivyAppIdMirrorFromFilledResources,
 } from "@/lib/pipeline/generated-code-env";
 import { normalizeProjectTier } from "@/lib/agents/shared/project-classifier";
+import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
 import {
   readResourceRequirements,
   upsertResourceEnvVars,
@@ -834,6 +835,13 @@ export async function POST(request: NextRequest) {
   // → copy `_optional/auth-privy/**`). See CODEGEN_HARDENING_PLAN.md §4.10.
   const resourceRequirements = await readResourceRequirements(process.cwd());
 
+  // Authoritative auth-mode decision from the Setup Wizard's Phase 0. When
+  // present it OVERRIDES the legacy env-key trigger so we pick exactly the
+  // scaffold the user / architect chose (avoids accidentally pulling in
+  // auth-privy just because PRIVY_APP_ID happens to be declared but the
+  // user picked password-rbac).
+  const authDecision = await readAuthDecision(process.cwd());
+
   // Always overwrite scaffold files so fresh copies are guaranteed even if cleanup was partial.
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
@@ -841,6 +849,7 @@ export async function POST(request: NextRequest) {
     const result = await copyScaffold(tier, outputRoot, {
       forceOverwrite: true,
       resourceRequirements,
+      authDecision,
     });
     scaffoldCopied = result.copied;
     appliedOptionalScaffolds = result.optional.applied;
