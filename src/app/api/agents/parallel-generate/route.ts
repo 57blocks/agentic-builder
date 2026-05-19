@@ -14,6 +14,9 @@ import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 import { recallDesignContext } from "@/lib/memory/preparation-recall";
+import { ensureAuthDecisionAfterPrd } from "@/lib/pipeline/ensure-auth-decision";
+import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
+import type { AuthDecision } from "@/lib/agents/architect/auth-decision-types";
 
 /** Pencil step: LLM (up to 16k tokens) + many batch_design chunks can exceed 5 minutes. */
 export const maxDuration = 600;
@@ -55,6 +58,7 @@ function buildAgentMap(
   effectiveTier: "S" | "M" | "L",
   referenceImageBase64?: string,
   designKnowledgeContext?: string,
+  authDecision?: AuthDecision | null,
 ): Record<string, DocAgentFn> {
   const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
     .filter((s) => s && s.trim().length > 0)
@@ -68,6 +72,7 @@ function buildAgentMap(
         sid,
         prdSpec ?? null,
         onChunk,
+        authDecision ?? null,
       ),
     sysdesign: (prd, trd, _sys, _ds, sid) =>
       new SysDesignAgent().generateSysDesign(
@@ -222,12 +227,37 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // When TRD is being generated, lock in an auth decision first so the TRD
+  // agent has an authoritative auth contract. Mirrors PipelineEngine; for
+  // selectedDocs without TRD this is a cheap no-op when the file already
+  // exists.
+  let authDecision: AuthDecision | null = null;
+  if (selectedDocs.includes("trd")) {
+    try {
+      const ensured = await ensureAuthDecisionAfterPrd({
+        projectRoot: process.cwd(),
+        prdContent,
+        sessionId,
+      });
+      authDecision = ensured.decision;
+    } catch (e) {
+      console.warn(
+        "[parallel-generate] ensureAuthDecisionAfterPrd failed (continuing without auth contract):",
+        (e as Error).message,
+      );
+      authDecision = await readAuthDecision(process.cwd());
+    }
+  } else {
+    authDecision = await readAuthDecision(process.cwd());
+  }
+
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
     effectiveTier,
     styleReferenceImageBase64,
     designKnowledgeContext,
+    authDecision,
   );
 
   const encoder = new TextEncoder();
@@ -374,6 +404,14 @@ export async function POST(request: NextRequest) {
                 console.warn(
                   `[parallel-generate] pipeline-dag.yaml has ${persisted.dagValidation.warnings.length} warning(s):`,
                   persisted.dagValidation.warnings
+                    .map((w) => `${w.code}: ${w.message}`)
+                    .join("; "),
+                );
+              }
+              if (!persisted.contractValidation.ok) {
+                console.warn(
+                  `[parallel-generate] TRD runtime/data contract validation has ${persisted.contractValidation.warnings.length} blocker(s):`,
+                  persisted.contractValidation.warnings
                     .map((w) => `${w.code}: ${w.message}`)
                     .join("; "),
                 );

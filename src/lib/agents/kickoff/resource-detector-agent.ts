@@ -2,6 +2,7 @@ import { BaseAgent } from "../shared/base-agent";
 import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
 import { chatCompletionWithFallback, resolveModel } from "@/lib/openrouter";
 import type { ResourceCategory, ResourceRequirement } from "@/lib/pipeline/resource-requirements";
+import { augmentResourceRequirementsFromDocuments } from "./resource-requirement-augment";
 
 /**
  * Resource Requirement Detector
@@ -155,8 +156,14 @@ export class ResourceDetectorAgent extends BaseAgent {
     );
 
     const parsed = parseRequirementsJson(result.content);
+    const requirements = augmentResourceRequirementsFromDocuments(parsed.items, [
+      input.prd,
+      input.trd,
+      input.sysDesign,
+      input.implGuide,
+    ]);
     return {
-      requirements: parsed.items,
+      requirements,
       raw: result.content,
       parseError: parsed.error,
       model: result.model,

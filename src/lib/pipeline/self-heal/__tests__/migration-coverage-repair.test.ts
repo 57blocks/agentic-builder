@@ -205,6 +205,192 @@ describe("runMigrationCoverageRepair — emitter telemetry", () => {
   });
 });
 
+describe("runMigrationCoverageRepair — filterByDisk", () => {
+  async function writeFile(rel: string, body = ""): Promise<void> {
+    const abs = path.join(outputDir, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, body, "utf8");
+  }
+
+  it("drops gaps whose model file no longer exists on disk", async () => {
+    // T-005 reported a gap for JobRun.ts, but the model has since been
+    // deleted by a coverage-repair replan. With no model on disk, the
+    // gap is moot and must NOT keep the integration gate red.
+    await writeReport({
+      version: 1,
+      updatedAt: "x",
+      tasks: {
+        "T-005": {
+          taskId: "T-005",
+          taskTitle: "stale gap",
+          ok: false,
+          modelFilesTouched: ["backend/src/models/JobRun.ts"],
+          migrationFilesTouched: [],
+          gaps: [
+            {
+              modelPath: "backend/src/models/JobRun.ts",
+              modelName: "JobRun",
+              instruction: "x",
+            },
+          ],
+          checkedAt: "x",
+        },
+      },
+    });
+
+    const r = await runMigrationCoverageRepair({
+      outputDir,
+      filterByDisk: true,
+    });
+
+    expect(r.pendingRepairTasks).toEqual([]);
+    expect(r.totalGaps).toBe(0);
+    expect(r.tasksWithGaps).toBe(0);
+  });
+
+  it("drops gaps whose model name is covered by a migration filename", async () => {
+    await writeFile(
+      "backend/src/database/migrations/009-create-ingestion-runs.ts",
+    );
+    await writeFile("backend/src/models/IngestionRun.ts");
+    await writeReport({
+      version: 1,
+      updatedAt: "x",
+      tasks: {
+        "T-004": {
+          taskId: "T-004",
+          taskTitle: "covered",
+          ok: false,
+          modelFilesTouched: ["backend/src/models/IngestionRun.ts"],
+          migrationFilesTouched: [],
+          gaps: [
+            {
+              modelPath: "backend/src/models/IngestionRun.ts",
+              modelName: "IngestionRun",
+              instruction: "x",
+            },
+          ],
+          checkedAt: "x",
+        },
+      },
+    });
+
+    const r = await runMigrationCoverageRepair({
+      outputDir,
+      filterByDisk: true,
+    });
+
+    expect(r.pendingRepairTasks).toEqual([]);
+  });
+
+  it("keeps gaps when the model file exists AND no covering migration", async () => {
+    await writeFile("backend/src/models/JobRun.ts");
+    await writeReport({
+      version: 1,
+      updatedAt: "x",
+      tasks: {
+        "T-005": {
+          taskId: "T-005",
+          taskTitle: "real gap",
+          ok: false,
+          modelFilesTouched: ["backend/src/models/JobRun.ts"],
+          migrationFilesTouched: [],
+          gaps: [
+            {
+              modelPath: "backend/src/models/JobRun.ts",
+              modelName: "JobRun",
+              instruction: "x",
+            },
+          ],
+          checkedAt: "x",
+        },
+      },
+    });
+
+    const r = await runMigrationCoverageRepair({
+      outputDir,
+      filterByDisk: true,
+    });
+
+    expect(r.pendingRepairTasks).toHaveLength(1);
+    expect(r.pendingRepairTasks[0]?.modelName).toBe("JobRun");
+  });
+
+  it("real-world: mixed list collapses to only genuine gaps", async () => {
+    // Mirrors the bug seen in production: ReserveReview/Stablecoin
+    // ARE covered, JobRun/WeightsAuditLog/ScoreSnapshot models were
+    // DELETED. Only "still-on-disk + uncovered" should survive — in
+    // this scenario the surviving set is empty.
+    await writeFile("backend/src/models/ReserveReview.ts");
+    await writeFile("backend/src/models/Stablecoin.ts");
+    await writeFile(
+      "backend/src/database/migrations/004-create-stablecoins.ts",
+    );
+    await writeFile(
+      "backend/src/database/migrations/011-create-reserve-reviews.ts",
+    );
+    await writeReport({
+      version: 1,
+      updatedAt: "x",
+      tasks: {
+        "T-005": {
+          taskId: "T-005",
+          taskTitle: "stale + covered mix",
+          ok: false,
+          modelFilesTouched: [],
+          migrationFilesTouched: [],
+          gaps: [
+            {
+              modelPath: "backend/src/models/JobRun.ts",
+              modelName: "JobRun",
+              instruction: "x",
+            },
+            {
+              modelPath: "backend/src/models/ReserveReview.ts",
+              modelName: "ReserveReview",
+              instruction: "x",
+            },
+            {
+              modelPath: "backend/src/models/WeightsAuditLog.ts",
+              modelName: "WeightsAuditLog",
+              instruction: "x",
+            },
+            {
+              modelPath: "backend/src/models/ScoreSnapshot.ts",
+              modelName: "ScoreSnapshot",
+              instruction: "x",
+            },
+          ],
+          checkedAt: "x",
+        },
+        "T-REPAIR": {
+          taskId: "T-REPAIR",
+          taskTitle: "covered gap",
+          ok: false,
+          modelFilesTouched: [],
+          migrationFilesTouched: [],
+          gaps: [
+            {
+              modelPath: "backend/src/models/Stablecoin.ts",
+              modelName: "Stablecoin",
+              instruction: "x",
+            },
+          ],
+          checkedAt: "x",
+        },
+      },
+    });
+
+    const r = await runMigrationCoverageRepair({
+      outputDir,
+      filterByDisk: true,
+    });
+
+    expect(r.pendingRepairTasks).toEqual([]);
+    expect(r.tasksWithGaps).toBe(0);
+  });
+});
+
 describe("formatMigrationCoverageBlock", () => {
   it("returns empty string when there are no tasks", () => {
     expect(

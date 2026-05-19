@@ -44,6 +44,13 @@ export type {
 } from "./contract-coverage-repair";
 export { repairMissingBackendPhase } from "./phase-repair";
 export type { PhaseRepairInput, PhaseRepairResult } from "./phase-repair";
+export { applyTaskBreakdownPatches } from "./task-breakdown-patches";
+export type {
+  ApplyTaskBreakdownPatchesInput,
+  ApplyTaskBreakdownPatchesResult,
+  TaskBreakdownPatchEntry,
+  TaskBreakdownPatchRuleId,
+} from "./task-breakdown-patches";
 export { dispatchAuditRepair } from "./audit-repair-dispatch";
 export type {
   AuditRepairDispatchInput,

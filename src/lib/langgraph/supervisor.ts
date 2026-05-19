@@ -5909,8 +5909,8 @@ async function integrationVerifyAndFix(
   const runtimeAuditBlock = runtimeAuditDispatch
     ? formatRuntimeAuditTasksBlock(runtimeAuditDispatch)
     : runtimeAuditResult
-      ? formatRuntimeAuditBlock(runtimeAuditResult)
-      : "";
+    ? formatRuntimeAuditBlock(runtimeAuditResult)
+    : "";
 
   const migrationCoverageBlock = migrationCoverageResult
     ? formatMigrationCoverageBlock(migrationCoverageResult)

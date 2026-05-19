@@ -27,6 +27,7 @@ export {
   evidenceFromGateReport,
   evidenceFromRulesValidation,
   evidenceFromDagValidation,
+  evidenceFromTrdContractValidation,
 } from "./evidence-adapters";
 export { collectCodingStageEvidence } from "./coding-stage-evidence";
 export type { CollectCodingStageEvidenceResult } from "./coding-stage-evidence";
