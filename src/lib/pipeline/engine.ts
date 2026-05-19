@@ -80,10 +80,7 @@ import {
   type ClarificationAnswer,
   type IntentResult,
 } from "@/lib/agents/intent";
-import {
-  applyPrdPatches,
-  type PrdPatch,
-} from "@/lib/agents/pm/prd-patch";
+import { applyPrdPatches, type PrdPatch } from "@/lib/agents/pm/prd-patch";
 
 interface PatchAgentResponse {
   summary?: string;
@@ -1387,9 +1384,7 @@ export class PipelineEngine {
             : {}),
           phaseRequirementGate: phaseGateReport,
           ...(phaseRepairSummary ? { phaseRepair: phaseRepairSummary } : {}),
-          ...(taskBreakdownPatches.length > 0
-            ? { taskBreakdownPatches }
-            : {}),
+          ...(taskBreakdownPatches.length > 0 ? { taskBreakdownPatches } : {}),
           taskBreakdownSkillsTrace,
         },
       });
@@ -1766,7 +1761,9 @@ export class PipelineEngine {
           overhalf,
         );
       } else if (parsed?.fullRewrite) {
-        console.info("[engine] PRD patch agent reported fullRewrite=true — using full regenerate path");
+        console.info(
+          "[engine] PRD patch agent reported fullRewrite=true — using full regenerate path",
+        );
       }
     }
 
