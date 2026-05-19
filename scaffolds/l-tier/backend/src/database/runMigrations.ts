@@ -1,9 +1,29 @@
 /**
  * Umzug-based Sequelize migration runner.
  *
- * Loads every `*.ts` / `*.js` file under `src/database/migrations/` (each
- * exporting `up({ context: queryInterface })` and `down(...)`), tracks
- * applied state in a `migrations_meta` table, and provides:
+ * Loads every `*.ts` / `*.js` file under `src/database/migrations/`. Each
+ * migration MUST export `up` / `down`. Two signatures are accepted:
+ *
+ *   1. sequelize-cli style (preferred — matches what the codegen agents
+ *      and scaffold-bundled migrations are written for):
+ *
+ *        export async function up(
+ *          queryInterface: QueryInterface,
+ *          sequelize: Sequelize,
+ *        ): Promise<void> { ... }
+ *
+ *   2. umzug v3 native context-bag style (fallback, kept for older
+ *      hand-written migrations):
+ *
+ *        export async function up(
+ *          { context }: { context: QueryInterface },
+ *        ): Promise<void> { ... }
+ *
+ * The dispatcher below switches based on `fn.length`, so authors do not
+ * need to pick one style globally — they can coexist.
+ *
+ * The runner tracks applied state in a `migrations_meta` table, and
+ * provides:
  *
  *   - `runMigrations()` — apply all pending (called from `initDb()`)
  *   - `revertLastMigration()` — roll back one step (for dev)
@@ -24,6 +44,32 @@ import { sequelize } from "../db";
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations");
 
+// Dispatch a migration's `up` / `down` export with the right argument
+// shape. We prefer the sequelize-cli positional signature because every
+// migration in this codebase (LLM-generated and scaffold-bundled alike)
+// is written that way — and several rely on `queryInterface.sequelize`
+// being defined, which is only true when the queryInterface is passed
+// positionally rather than wrapped in `{ context }`.
+async function callMigration(
+  fn: unknown,
+  label: string,
+  context: ReturnType<typeof sequelize.getQueryInterface>,
+): Promise<void> {
+  if (typeof fn !== "function") {
+    throw new Error(`migration ${label} does not export the function`);
+  }
+  if ((fn as Function).length >= 2) {
+    // (queryInterface, sequelize)
+    await (fn as (qi: unknown, sq: unknown) => Promise<void>)(
+      context,
+      sequelize,
+    );
+    return;
+  }
+  // ({ context }) — umzug v3 native fallback.
+  await (fn as (arg: { context: unknown }) => Promise<void>)({ context });
+}
+
 export const umzug = new Umzug({
   migrations: {
     glob: ["*.{ts,js}", { cwd: MIGRATIONS_DIR }],
@@ -35,18 +81,12 @@ export const umzug = new Umzug({
         up: async () => {
           if (!filePath) throw new Error(`migration ${name} has no path`);
           const mod = await import(filePath);
-          if (typeof mod.up !== "function") {
-            throw new Error(`migration ${name} does not export up()`);
-          }
-          await mod.up({ context });
+          await callMigration(mod.up, `${name} up()`, context);
         },
         down: async () => {
           if (!filePath) throw new Error(`migration ${name} has no path`);
           const mod = await import(filePath);
-          if (typeof mod.down !== "function") {
-            throw new Error(`migration ${name} does not export down()`);
-          }
-          await mod.down({ context });
+          await callMigration(mod.down, `${name} down()`, context);
         },
       };
     },

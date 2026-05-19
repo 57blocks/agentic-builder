@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "migrate": "tsx src/database/runMigrations.ts up",
     "migrate:down": "tsx src/database/runMigrations.ts down",
+    "seed": "tsx src/scripts/seed-auth-users.ts",
     "test": "vitest run"
   },
   "keywords": [],

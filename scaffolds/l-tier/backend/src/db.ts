@@ -1,6 +1,19 @@
-import "dotenv/config";
-import { Sequelize } from 'sequelize';
-import { enableTimescaleExtension } from './utils/timescale';
+import { config as loadDotenv } from "dotenv";
+import { Sequelize } from "sequelize";
+import { enableTimescaleExtension } from "./utils/timescale";
+
+// In dev / test the project-local `.env` MUST win over whatever the parent
+// shell (or IDE startup hooks like `.zshrc`) already exported. Otherwise a
+// leaked `DATABASE_URL` from another project silently redirects every
+// query to the wrong database — the failure mode looks like a perfectly
+// valid 401 / "column does not exist", which wastes hours of debugging.
+//
+// In production we deliberately do NOT override: container orchestrators
+// (Docker/K8s) inject the canonical secret and the file shouldn't shadow
+// it.
+loadDotenv({
+  override: process.env.NODE_ENV !== "production",
+});
 
 const DATABASE_URL = process.env.DATABASE_URL;
 

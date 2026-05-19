@@ -107,12 +107,16 @@ describe("runEvidenceGate — other stages", () => {
     expect(r.passed).toBe(true);
   });
 
-  it("trd stage requires both trd-rules-validator and dag-validator", () => {
+  it("trd stage requires runtime/data contracts and accepts optional artifact validators", () => {
     expect(
       runEvidenceGate("trd", [validator("trd-rules-validator")]).passed,
     ).toBe(false);
     expect(
+      runEvidenceGate("trd", [validator("trd-contract-validator")]).passed,
+    ).toBe(true);
+    expect(
       runEvidenceGate("trd", [
+        validator("trd-contract-validator"),
         validator("trd-rules-validator"),
         validator("dag-validator"),
       ]).passed,

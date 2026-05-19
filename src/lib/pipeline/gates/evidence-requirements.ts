@@ -67,12 +67,18 @@ export const EVIDENCE_POLICIES: Record<EvidenceStage, EvidenceStagePolicy> = {
     stage: "trd",
     required: [
       {
+        description: "TRD runtime/data contract validator passed",
+        matcher: byKindAndName("validator", "trd-contract-validator"),
+      },
+      {
         description: "TRD rule validator passed (DSL well-formedness)",
         matcher: byKindAndName("validator", "trd-rules-validator"),
+        optional: true,
       },
       {
         description: "Pipeline DAG validator passed (no cycles / dangling deps)",
         matcher: byKindAndName("validator", "dag-validator"),
+        optional: true,
       },
     ],
   },

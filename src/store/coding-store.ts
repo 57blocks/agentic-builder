@@ -78,6 +78,20 @@ interface CodingState {
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
+  /** Tear down the current coding session entirely (regardless of status) and
+   *  trigger a fresh full coding pipeline from task #1. Aborts any active SSE,
+   *  drops the persisted `coding-session` snapshot, and clears the failure
+   *  checkpoint so stale state cannot leak into the new run. Already-generated
+   *  files on disk are NOT touched — coding agents will overwrite/modify as
+   *  the new task plan dictates. */
+  rerunCoding: (
+    runId: string,
+    tasks: KickoffWorkItem[],
+    codeOutputDir: string,
+    projectTier?: string,
+    prdContent?: string,
+    stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
+  ) => void;
   retryIntegrationVerify: (
     runId: string,
     codeOutputDir: string,
@@ -308,6 +322,61 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         const s = get();
         persistSessionSnapshot(s.projectId ?? "", s);
       });
+  },
+
+  rerunCoding: (runId, tasks, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+    const { projectId } = get();
+
+    // 1. Abort any active SSE connection. The backend coding pipeline reads
+    //    the close signal and stops scheduling further workers.
+    _codingAbortController?.abort();
+    _codingAbortController = null;
+
+    // 2. Drop the persisted coding-session snapshot. Without this, a future
+    //    page-mount would `hydrateFromSnapshot` the stale completed/failed
+    //    run and the UI would briefly flash the old result before the new
+    //    SSE stream takes over.
+    if (projectId) {
+      fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/project-step-snapshot?stepId=coding-session`,
+        { method: "DELETE" },
+      ).catch((e) =>
+        console.warn(
+          "[coding-store] failed to delete coding-session snapshot:",
+          e,
+        ),
+      );
+    }
+
+    // 3. Clear the failure-task checkpoint that the retry button consults.
+    fetch("/api/agents/coding/checkpoint", { method: "DELETE" }).catch(() => {});
+
+    // 4. Fully reset in-memory state to idle, then delegate to startCoding
+    //    which performs the actual POST + SSE wiring. We do not inline the
+    //    body of startCoding here on purpose — it stays the single source of
+    //    truth for "kick off a fresh coding run".
+    set({
+      sessionId: null,
+      status: "idle",
+      agents: [],
+      tasks: [],
+      selectedAgentId: null,
+      totalCostUsd: 0,
+      error: null,
+      integrationVerify: null,
+      e2eVerify: null,
+      supervisorLogs: [],
+      pendingHumanDecision: null,
+    });
+
+    get().startCoding(
+      runId,
+      tasks,
+      codeOutputDir,
+      projectTier,
+      prdContent,
+      stitchMeta,
+    );
   },
 
   retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent, stitchMeta) => {
@@ -784,6 +853,8 @@ function handleCodingEvent(
 
   if (type === "agent_task_start") {
     const taskId = payload.taskId;
+    const previousTaskId =
+      get().agents.find((a) => a.id === payload.agentId)?.currentTaskId ?? null;
     const agents = get().agents.map((a) => {
       if (a.id !== payload.agentId) return a;
       return {
@@ -810,6 +881,19 @@ function handleCodingEvent(
     let tasks: CodingTask[];
     if (taskExists) {
       tasks = existingTasks.map((t) => {
+        if (t.id === previousTaskId && previousTaskId !== taskId && t.codingStatus === "in_progress") {
+          return {
+            ...t,
+            codingStatus: "completed_with_warnings" as const,
+            progressStage: undefined,
+            verifyErrors:
+              t.verifyErrors ??
+              "Task was auto-closed because the same worker started a new task before a completion event arrived.",
+            errorPreview:
+              t.errorPreview ??
+              "Auto-closed after worker advanced to the next task.",
+          };
+        }
         if (t.id !== taskId) return t;
         return {
           ...t,
@@ -823,7 +907,21 @@ function handleCodingEvent(
       });
     } else {
       tasks = [
-        ...existingTasks,
+        ...existingTasks.map((t) =>
+          t.id === previousTaskId && previousTaskId !== taskId && t.codingStatus === "in_progress"
+            ? {
+                ...t,
+                codingStatus: "completed_with_warnings" as const,
+                progressStage: undefined,
+                verifyErrors:
+                  t.verifyErrors ??
+                  "Task was auto-closed because the same worker started a new task before a completion event arrived.",
+                errorPreview:
+                  t.errorPreview ??
+                  "Auto-closed after worker advanced to the next task.",
+              }
+            : t,
+        ),
         {
           id: taskId,
           phase: (payload.data?.phase as string) ?? "Dynamic",
@@ -882,6 +980,7 @@ function handleCodingEvent(
       const totalTokens = tokenUsage?.totalTokens ?? 0;
       return {
         ...a,
+        status: "idle" as const,
         currentTaskId: null,
         completedTaskIds: [...a.completedTaskIds, payload.taskId!],
         totalCostUsd: a.totalCostUsd + costUsd,

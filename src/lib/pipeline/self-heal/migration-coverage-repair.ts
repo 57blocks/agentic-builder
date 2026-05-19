@@ -51,15 +51,24 @@ export interface MigrationCoverageRepairInput {
   sessionId?: string;
   /**
    * When true, cross-reference the per-task gap list against the actual
-   * migration files in `backend/src/database/migrations/` and drop gaps
-   * whose model name appears in a migration filename. This eliminates
-   * stale gaps that an earlier task recorded but a later task resolved —
-   * without filtering, the verify-fix worker keeps being told to "write
-   * a migration for Stablecoin" even when `003-add-stablecoin-*.ts`
-   * already exists.
+   * files on disk and drop gaps that have become moot. A gap is dropped
+   * when EITHER of these is true:
    *
-   * Defaults to `false` to preserve existing test behavior (callers that
-   * want a raw per-task view, e.g. forensic audits, still get it).
+   *   1. The model name appears in a migration filename under
+   *      `backend/src/database/migrations/` — a later task already
+   *      wrote the migration for it.
+   *
+   *   2. The model file itself no longer exists at `modelPath` — an
+   *      earlier task created the model, recorded the gap, then a
+   *      replan/coverage-repair pass deleted the model entirely. With
+   *      no model on disk, no migration is needed.
+   *
+   * Without this filter the supervisor's final integration gate keeps
+   * blocking on stale "missing migration for JobRun" entries from a
+   * deleted JobRun.ts, looping forever.
+   *
+   * Defaults to `false` to preserve existing test behavior (callers
+   * that want a raw per-task view, e.g. forensic audits, still get it).
    */
   filterByDisk?: boolean;
 }
@@ -176,10 +185,38 @@ async function filterByMigrationFiles(
 ): Promise<MigrationRepairTask[]> {
   if (gaps.length === 0) return gaps;
   const files = await listMigrationFilesLower(outputDir);
-  if (files.length === 0) return gaps;
-  return gaps.filter(
-    (g) => !isCoveredByMigrationFile(g.modelName, files),
+
+  // Pre-resolve "does the model file still exist on disk?" for every
+  // unique modelPath in one pass — saves N file stat() calls when the
+  // same model is referenced by multiple tasks.
+  const uniquePaths = Array.from(new Set(gaps.map((g) => g.modelPath)));
+  const existence = new Map<string, boolean>();
+  await Promise.all(
+    uniquePaths.map(async (rel) => {
+      const abs = path.join(outputDir, rel);
+      try {
+        await fs.access(abs);
+        existence.set(rel, true);
+      } catch {
+        existence.set(rel, false);
+      }
+    }),
   );
+
+  return gaps.filter((g) => {
+    const modelStillExists = existence.get(g.modelPath) === true;
+    if (!modelStillExists) {
+      // Model file was deleted after the gap was recorded (typical
+      // when coverage-repair replanning drops an obsolete model).
+      // No model => no migration needed.
+      return false;
+    }
+    if (files.length > 0 && isCoveredByMigrationFile(g.modelName, files)) {
+      // A migration file mentioning this model exists.
+      return false;
+    }
+    return true;
+  });
 }
 
 /**

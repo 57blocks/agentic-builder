@@ -192,6 +192,21 @@ export async function upsertStepSnapshot(
     });
 }
 
+/** Remove a single step snapshot. No-op if it does not exist. */
+export async function deleteStepSnapshot(
+  projectId: string,
+  stepId: string,
+): Promise<void> {
+  await db
+    .delete(projectStepSnapshot)
+    .where(
+      and(
+        eq(projectStepSnapshot.projectId, projectId),
+        eq(projectStepSnapshot.stepId, stepId),
+      ),
+    );
+}
+
 /** Fetch all step snapshots for a project, returned as { stepId: snapshot, ... }. */
 export async function getAllStepSnapshots(
   projectId: string,

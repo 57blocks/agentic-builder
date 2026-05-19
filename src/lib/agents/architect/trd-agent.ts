@@ -9,6 +9,9 @@ import type {
   PrdRuleSpec,
 } from "@/lib/requirements/prd-spec-types";
 import type { ProjectTier } from "../shared/project-classifier";
+import type { AuthDecision } from "./auth-decision-types";
+import { TRD_GENERATION_CONTRACTS_PROMPT } from "./trd-generation-contracts";
+import { renderAuthoritativeAuthDecisionBlock } from "./trd-auth-block";
 
 const SYSTEM_PROMPT = `You are a senior Technical Architect Agent.
 
@@ -50,6 +53,8 @@ hallucinating the wrong tier. Re-read the tier line and adjust.
 (Cover: frontend framework, rendering, state management, realtime transport, backend framework,
  primary DB, object storage, search, auth, plugin/extension runtime, message queue,
  CDN/edge, infrastructure, observability, CI/CD.)
+
+${TRD_GENERATION_CONTRACTS_PROMPT}
 
 ## 2. Frontend Architecture
 ### 2.1 Application Shell
@@ -447,9 +452,15 @@ export class TRDAgent extends BaseAgent {
     prdSpec?: { domain?: PrdDomainSpec } | null,
     /** When provided, switches to streaming mode and calls onChunk for each content delta. */
     onChunk?: (chunk: string) => void,
+    /** Persisted auth decision (`.blueprint/auth-decision.json`). Injected as
+     *  an authoritative block so TRD §1/§4/§Auth Decision Contract align to
+     *  the user-selected (or PRD-decided-default) auth mode rather than the
+     *  LLM's free-form guess from PRD text. */
+    authDecision?: AuthDecision | null,
   ) {
     const rulesBlock = renderAuthoritativeRulesBlock(prdSpec?.domain?.rules);
-    const augmentedContext = [additionalContext, rulesBlock]
+    const authBlock = renderAuthoritativeAuthDecisionBlock(authDecision);
+    const augmentedContext = [additionalContext, rulesBlock, authBlock]
       .filter((s) => s && s.trim().length > 0)
       .join("\n\n");
     // Tier line is the very first thing the model sees in the user message —
