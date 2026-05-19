@@ -32,7 +32,11 @@
  */
 
 import path from "node:path";
-import type { KickoffWorkItem, TaskFilePlan, TaskSubStep } from "@/lib/pipeline/types";
+import type {
+  KickoffWorkItem,
+  TaskFilePlan,
+  TaskSubStep,
+} from "@/lib/pipeline/types";
 import type { ProjectTier } from "@/lib/agents/shared/project-classifier";
 import type { RepairEmitter } from "./events";
 import { noopRepairEmitter } from "./events";
@@ -144,10 +148,11 @@ function ruleWorkerStartupWiring(
     const substep: TaskSubStep = {
       step: nextSubStepNumber(t),
       action: "Wire start*Worker() calls in backend/src/server.ts",
-      detail:
-        `MODIFY existing backend/src/server.ts: after database initialisation (db.authenticate / sync) and BEFORE app.listen(...), import each start*Worker() exported by the worker files (${allWorkerFiles
-          .map((p) => path.basename(p))
-          .join(", ")}) and invoke them with awaited error handling. This guarantees all background ingestion / scoring / notification workers boot at server start.`,
+      detail: `MODIFY existing backend/src/server.ts: after database initialisation (db.authenticate / sync) and BEFORE app.listen(...), import each start*Worker() exported by the worker files (${allWorkerFiles
+        .map((p) => path.basename(p))
+        .join(
+          ", ",
+        )}) and invoke them with awaited error handling. This guarantees all background ingestion / scoring / notification workers boot at server start.`,
     };
     const next: KickoffWorkItem = {
       ...t,
@@ -199,7 +204,9 @@ function rulePipelineDagWorkerCoverage(
     workerSubjects.add(workerFileSubject(f));
   }
 
-  const uncovered = scheduled.filter((p) => !workerSubjectMatches(p, workerSubjects));
+  const uncovered = scheduled.filter(
+    (p) => !workerSubjectMatches(p, workerSubjects),
+  );
   if (uncovered.length === 0) return tasks;
 
   let working = tasks;
@@ -288,7 +295,10 @@ function subjectFromPipelineId(id: string): string {
 }
 
 function workerFileSubject(file: string): string {
-  const base = path.basename(file).replace(/\.ts$/i, "").replace(/Worker$/i, "");
+  const base = path
+    .basename(file)
+    .replace(/\.ts$/i, "")
+    .replace(/Worker$/i, "");
   return base.toLowerCase();
 }
 
@@ -345,7 +355,8 @@ function ruleCoverageRepairOrphanMerge(
   for (const orphan of orphans) {
     const parentId = pickMergeParent(orphan, tasks);
     if (!parentId) continue;
-    const parent = parentUpdates.get(parentId) ?? cloneTask(taskById.get(parentId)!);
+    const parent =
+      parentUpdates.get(parentId) ?? cloneTask(taskById.get(parentId)!);
     mergeOrphanIntoParent(parent, orphan);
     parentUpdates.set(parentId, parent);
     removed.add(orphan.id);
@@ -392,7 +403,10 @@ function pickMergeParent(
   tasks: KickoffWorkItem[],
 ): string | null {
   const candidates = tasks.filter(
-    (t) => t.id !== orphan.id && hasFiles(t) && (t.phase ?? "") === (orphan.phase ?? ""),
+    (t) =>
+      t.id !== orphan.id &&
+      hasFiles(t) &&
+      (t.phase ?? "") === (orphan.phase ?? ""),
   );
   if (candidates.length === 0) {
     const anyCandidate = tasks.find((t) => t.id !== orphan.id && hasFiles(t));

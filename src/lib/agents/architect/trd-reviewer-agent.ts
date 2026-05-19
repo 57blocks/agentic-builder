@@ -297,9 +297,7 @@ function asSeverity(v: unknown): TrdReviewSeverity {
   return "medium";
 }
 
-function normaliseOverall(
-  input: unknown,
-): TrdReviewResult["overall"] {
+function normaliseOverall(input: unknown): TrdReviewResult["overall"] {
   if (!input || typeof input !== "object") {
     return { score: 0, summary: "No overall score returned." };
   }

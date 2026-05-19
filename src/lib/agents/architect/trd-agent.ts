@@ -468,7 +468,13 @@ export class TRDAgent extends BaseAgent {
     const message = `Project Tier: ${tier}\n\nGenerate a comprehensive Technical Requirements Document (TRD) based on the following PRD:\n\n${prdContent}`;
     const ctx = augmentedContext.length > 0 ? augmentedContext : undefined;
     if (onChunk) {
-      return this.streamRun(message, (chunk) => onChunk(chunk), ctx, "step-trd", sessionId);
+      return this.streamRun(
+        message,
+        (chunk) => onChunk(chunk),
+        ctx,
+        "step-trd",
+        sessionId,
+      );
     }
     return this.run(message, ctx, "step-trd", sessionId);
   }
@@ -522,11 +528,12 @@ export function renderAuthoritativeRulesBlock(
     if (r.type === "decision-table" && r.cases?.length) {
       lines.push(`    cases:`);
       for (const c of r.cases) {
-        const whenStr = Object.keys(c.when).length === 0
-          ? "{}"
-          : `{ ${Object.entries(c.when)
-              .map(([k, v]) => `${k}: ${yamlString(String(v))}`)
-              .join(", ")} }`;
+        const whenStr =
+          Object.keys(c.when).length === 0
+            ? "{}"
+            : `{ ${Object.entries(c.when)
+                .map(([k, v]) => `${k}: ${yamlString(String(v))}`)
+                .join(", ")} }`;
         lines.push(
           `      - { when: ${whenStr}, then: ${yamlString(String(c.then))} }`,
         );
