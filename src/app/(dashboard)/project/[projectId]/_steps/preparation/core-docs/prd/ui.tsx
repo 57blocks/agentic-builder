@@ -508,22 +508,31 @@ export function PrdUI(props: StepUIProps) {
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
-        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => {
-          // Fire-and-forget memory capture before navigating
+        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={async () => {
+          // Await memory capture BEFORE navigating so the fetch is never
+          // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
-          if (finalContent && kickoffSessionId) {
+          if (finalContent) {
+            const captureSessionId = kickoffSessionId ?? `prd-cap-${Date.now()}`;
             const originalContent = prdHistoryRef.current[0]?.content ?? finalContent;
-            fetch("/api/memory/prd/capture", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                sessionId: kickoffSessionId,
-                originalPrd: originalContent,
-                finalPrd: finalContent,
-                tier,
-                projectType: intentMeta?.classification?.type ?? "unknown",
-              }),
-            }).catch(() => {/* ignore */});
+            try {
+              const res = await fetch("/api/memory/prd/capture", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  sessionId: captureSessionId,
+                  originalPrd: originalContent,
+                  finalPrd: finalContent,
+                  tier,
+                  projectType: intentMeta?.classification?.type ?? "unknown",
+                }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data?.skipped) console.warn("[PrdUI] memory capture skipped:", data.reason ?? data.error);
+              else console.log("[PrdUI] memory capture ok:", data?.outcome, data?.recordId);
+            } catch (err) {
+              console.warn("[PrdUI] memory capture fetch error:", err);
+            }
           }
           if (nextStep) props.onNavigate(nextStep);
         }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}

@@ -1689,22 +1689,31 @@ export function DesignUI(props: StepUIProps) {
           {phase === "stitch" && (
             <div className="flex items-center justify-end w-full">
                 <button
-                  onClick={() => {
-                    // Fire-and-forget memory capture for design phase
+                  onClick={async () => {
+                    // Await memory capture BEFORE navigating so the fetch is never
+                    // interrupted by handleStepChange's store reset + snapshot reload.
                     const finalDesign = steps.design?.content ?? "";
-                    if (finalDesign && kickoffSessionId) {
+                    if (finalDesign) {
+                      const captureSessionId = kickoffSessionId ?? `design-cap-${Date.now()}`;
                       const originalDesign = originalDesignRef.current || finalDesign;
-                      fetch("/api/memory/design/capture", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          sessionId: kickoffSessionId,
-                          originalDesign,
-                          finalDesign,
-                          tier,
-                          projectType: intentMeta?.classification?.type ?? "unknown",
-                        }),
-                      }).catch(() => {/* ignore */});
+                      try {
+                        const res = await fetch("/api/memory/design/capture", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            sessionId: captureSessionId,
+                            originalDesign,
+                            finalDesign,
+                            tier,
+                            projectType: intentMeta?.classification?.type ?? "unknown",
+                          }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (data?.skipped) console.warn("[DesignUI] memory capture skipped:", data.reason ?? data.error);
+                        else console.log("[DesignUI] memory capture ok:", data?.outcome, data?.recordId);
+                      } catch (err) {
+                        console.warn("[DesignUI] memory capture fetch error:", err);
+                      }
                     }
                     const next = getNextStep("design", tier);
                     if (next) props.onNavigate(next);
