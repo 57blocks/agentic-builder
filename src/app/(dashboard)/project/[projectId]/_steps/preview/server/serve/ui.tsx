@@ -3,7 +3,7 @@
 import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStepStore } from "@/store/step-store";
-import PreviewPanel from "@/components/PreviewPanel";
+import PreviewWorkspace from "@/components/preview/PreviewWorkspace";
 import type { StepUIProps } from "../../../_shared/types";
 
 export function ServeUI(props: StepUIProps) {
@@ -23,7 +23,7 @@ export function ServeUI(props: StepUIProps) {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <PreviewPanel codeOutputDir={codeOutputDir} />
+        <PreviewWorkspace codeOutputDir={codeOutputDir} />
       </div>
     </div>
   );
