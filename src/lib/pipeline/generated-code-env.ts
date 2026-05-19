@@ -40,6 +40,18 @@ export function resolveBlueprintGeneratedDatabaseUrl(
   return v.length > 0 ? v : null;
 }
 
+/** Same shape as resolveBlueprintGeneratedDatabaseUrl, but for Redis. */
+export function resolveBlueprintGeneratedRedisUrl(
+  requestOverride?: string | null,
+): string | null {
+  const v = (
+    requestOverride ??
+    process.env.BLUEPRINT_GENERATED_REDIS_URL ??
+    ""
+  ).trim();
+  return v.length > 0 ? v : null;
+}
+
 /** Generate a random hex string suitable for JWT_SECRET in dev/staging. */
 function generateJwtSecret(): string {
   return randomBytes(32).toString("hex");
@@ -84,6 +96,20 @@ export function upsertDatabaseUrlEnv(
   if (!envContent.trim()) return `${serialized}\n`;
   if (/^\s*DATABASE_URL\s*=.*$/m.test(envContent)) {
     return envContent.replace(/^\s*DATABASE_URL\s*=.*$/m, serialized);
+  }
+  const normalized = envContent.endsWith("\n") ? envContent : `${envContent}\n`;
+  return `${normalized}${serialized}\n`;
+}
+
+/** Upsert REDIS_URL into an existing .env payload. */
+export function upsertRedisUrlEnv(
+  envContent: string,
+  redisUrl: string,
+): string {
+  const serialized = `REDIS_URL=${JSON.stringify(redisUrl)}`;
+  if (!envContent.trim()) return `${serialized}\n`;
+  if (/^\s*REDIS_URL\s*=.*$/m.test(envContent)) {
+    return envContent.replace(/^\s*REDIS_URL\s*=.*$/m, serialized);
   }
   const normalized = envContent.endsWith("\n") ? envContent : `${envContent}\n`;
   return `${normalized}${serialized}\n`;
