@@ -23,11 +23,21 @@ const DEEPSEEK_DIRECT_MODEL = "deepseek-v4-pro";
 const DEEPSEEK_DIRECT_CHAIN = [DEEPSEEK_DIRECT_MODEL] as const;
 
 // Direct connection first, then OpenRouter as fallback for fix/verify phases
+const DEEPSEEK_CODEGEN_CHAIN = [
+  "openai/gpt-5.3-codex",
+  DEEPSEEK_DIRECT_MODEL,
+  "qwen/qwen3.6-plus",
+  "deepseek/deepseek-v3.2",
+  "moonshotai/kimi-k2.6",
+  "claude-sonnet",
+] as const;
+
 const DEEPSEEK_CODEFX_CHAIN = [
   DEEPSEEK_DIRECT_MODEL,
   "openai/gpt-5.3-codex",
   "claude-sonnet-4",
   "qwen/qwen3.6-plus",
+  "claude-sonnet",
   "deepseek/deepseek-v3.2",
 ] as const;
 
@@ -75,10 +85,20 @@ const OPENROUTER_MODEL_CONFIG = {
 
   // ── Coding phase ───────────────────────────────────────────────────────────
 
-  /** Code generation: try primary, fall back to secondary on failure. */
+  /** Code generation (backend/architect): keep DeepSeek as primary. */
   codeGen: [
     "deepseek/deepseek-v4-pro",
     "openai/gpt-5.3-codex",
+    "qwen/qwen3.6-plus",
+    "deepseek/deepseek-v3.2",
+    "moonshotai/kimi-k2.6",
+    "claude-sonnet",
+  ] as string[],
+
+  /** Code generation (frontend only): prefer gpt-5.3-codex for better UI fidelity. */
+  codeGenFrontend: [
+    "openai/gpt-5.3-codex",
+    "deepseek/deepseek-v4-pro",
     "qwen/qwen3.6-plus",
     "deepseek/deepseek-v3.2",
     "moonshotai/kimi-k2.6",
@@ -142,6 +162,7 @@ export const DEEPSEEK_MODEL_CONFIG = {
   taskBreakdown: DEEPSEEK_DIRECT_CHAIN,
   taskBreakdownReview: DEEPSEEK_DIRECT_CHAIN,
   codeGen: DEEPSEEK_DIRECT_CHAIN,
+  codeGenFrontend: DEEPSEEK_CODEGEN_CHAIN,
   codeFix: DEEPSEEK_CODEFX_CHAIN,
   phaseVerifyFix: DEEPSEEK_VERIFYFX_CHAIN,
   e2eGen: DEEPSEEK_DIRECT_CHAIN,
