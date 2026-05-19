@@ -1,0 +1,31 @@
+{
+  "id": "CL-a9cb40ef8fc7fcca",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · bot",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:bot",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778986502969,
+  "updatedAt": 1778986502969,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "bot",
+    "needsBackend": true,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "Simple AI chatbot with basic functionality, no complex requirements.",
+    "costUsd": 0,
+    "durationMs": 3086,
+    "briefHash": "a9cb40ef8fc7fcca",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

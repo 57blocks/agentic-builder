@@ -1,0 +1,31 @@
+{
+  "id": "CL-d48b9baf0871497b",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778812279411,
+  "updatedAt": 1778812279411,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "A calculator is a simple single-page tool with no backend, database, or authentication requirements.",
+    "costUsd": 0,
+    "durationMs": 3908,
+    "briefHash": "d48b9baf0871497b",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

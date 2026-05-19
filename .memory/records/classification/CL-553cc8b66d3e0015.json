@@ -1,0 +1,31 @@
+{
+  "id": "CL-553cc8b66d3e0015",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778640352466,
+  "updatedAt": 1778640356633,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "这是一个简单的计算器应用，纯前端，无需后端或数据库。",
+    "costUsd": 0,
+    "durationMs": 9041,
+    "briefHash": "553cc8b66d3e0015",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "CL-88e55c253d188f3f",
+  "layer": "L1",
+  "kind": "classification",
+  "title": "Classification · S · tool",
+  "tags": [
+    "classifier",
+    "tier:S",
+    "type:tool",
+    "promptVersion:v1-2026-04-28"
+  ],
+  "source": "cache",
+  "refs": {},
+  "createdAt": 1778987551704,
+  "updatedAt": 1778987551704,
+  "schemaVersion": 1,
+  "body": {
+    "tier": "S",
+    "type": "tool",
+    "needsBackend": false,
+    "needsDatabase": false,
+    "needsAuth": false,
+    "needsMultipleServices": false,
+    "reasoning": "A small robot project is likely a simple utility or toy, requiring no backend, database, or authentication.",
+    "costUsd": 0,
+    "durationMs": 3257,
+    "briefHash": "88e55c253d188f3f",
+    "promptVersion": "v1-2026-04-28",
+    "modelUsed": "deepseek/deepseek-v4-flash"
+  }
+}
