@@ -44,10 +44,15 @@ const CodeChatPanel = forwardRef<CodeChatPanelHandle, Props>(function CodeChatPa
         </div>
         <button
           onClick={reset}
-          disabled={messages.length === 0 || streaming}
+          disabled={messages.length === 0}
           className="text-[10px] text-zinc-500 transition-colors hover:text-zinc-700 disabled:opacity-40"
+          title={
+            streaming
+              ? "Aborts the in-flight request and clears the conversation"
+              : "Clears the conversation"
+          }
         >
-          New chat
+          {streaming ? "Reset" : "New chat"}
         </button>
       </div>
       <MessageList
