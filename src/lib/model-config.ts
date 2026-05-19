@@ -83,6 +83,12 @@ const OPENROUTER_MODEL_CONFIG = {
   taskBreakdown: ["claude-sonnet-4", "openai/gpt-5.4"] as string[],
   taskBreakdownReview: ["openai/gpt-5.4", "claude-sonnet-4"] as string[],
 
+  /** Infra spec generation — small JSON task. A cheap model is fine. */
+  infra: "openai/gpt-5.4-mini",
+
+  /** Service detection — tiny classification task on TRD/SysDesign. */
+  serviceDetect: "openai/gpt-5.4-mini",
+
   // ── Coding phase ───────────────────────────────────────────────────────────
 
   /** Code generation (backend/architect): keep DeepSeek as primary. */
@@ -161,6 +167,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   verify: DEEPSEEK_DIRECT_MODEL,
   taskBreakdown: DEEPSEEK_DIRECT_CHAIN,
   taskBreakdownReview: DEEPSEEK_DIRECT_CHAIN,
+  infra: DEEPSEEK_DIRECT_MODEL,
+  serviceDetect: DEEPSEEK_DIRECT_MODEL,
   codeGen: DEEPSEEK_DIRECT_CHAIN,
   codeGenFrontend: DEEPSEEK_CODEGEN_CHAIN,
   codeFix: DEEPSEEK_CODEFX_CHAIN,
