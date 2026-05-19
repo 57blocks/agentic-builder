@@ -6,7 +6,7 @@ import { parseSseStream } from "./sse-parser";
 import type { CodeChatEvent } from "./types";
 
 const DEFAULT_MODEL = process.env.CODE_CHAT_MODEL || "anthropic/claude-sonnet-4";
-const MAX_ITERATIONS = 8;
+const MAX_ITERATIONS = 20;
 
 /**
  * Max consecutive iterations where the model produced text but zero tool
@@ -56,6 +56,15 @@ export async function runCodeChat(opts: RunCodeChatOptions): Promise<void> {
     if (signal?.aborted) {
       emit({ kind: "error", message: "Cancelled." });
       return;
+    }
+
+    // Once past the halfway mark, insert a terse reminder so the model
+    // doesn't burn remaining turns on investigation-only tool calls.
+    if (iter === MAX_ITERATIONS / 2) {
+      messages.push({
+        role: "user",
+        content: `You have ${MAX_ITERATIONS / 2} turns remaining. If you're still investigating, switch to making edits now and produce your final answer.`,
+      });
     }
 
     const body = await streamChatCompletion(messages, {
