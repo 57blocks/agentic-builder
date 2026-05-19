@@ -246,6 +246,7 @@ function ScreenshotCarousel({
 }) {
   const [zoom, setZoom] = useState(1);
   const [htmlDownloading, setHtmlDownloading] = useState(false);
+  const [imgLoadAttempts, setImgLoadAttempts] = useState<Record<string, number>>({});
   useEffect(() => {
     setZoom(1);
   }, [activeIdx]);
@@ -331,7 +332,7 @@ function ScreenshotCarousel({
         style={{ cursor, userSelect: "none" }}
       >
         <img
-          key={cur?.screenshotUrl}
+          key={`${cur?.screenshotUrl}::${imgLoadAttempts[cur?.screenshotUrl ?? ""] ?? 0}`}
           src={cur?.screenshotUrl}
           alt={cur?.title}
           draggable={false}
@@ -340,6 +341,14 @@ function ScreenshotCarousel({
             transform: `scale(${zoom})`,
             transformOrigin: "top center",
             maxWidth: "100%",
+          }}
+          onError={() => {
+            const url = cur?.screenshotUrl;
+            if (!url) return;
+            const attempts = imgLoadAttempts[url] ?? 0;
+            if (attempts < 3) {
+              setImgLoadAttempts((m) => ({ ...m, [url]: attempts + 1 }));
+            }
           }}
         />
       </div>

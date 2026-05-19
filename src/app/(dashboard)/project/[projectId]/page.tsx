@@ -204,7 +204,7 @@ export default function ProjectPage() {
             stepStates={stepStates}
           />
         </div>
-        <div className="flex items-center gap-1 pt-3 pr-2 shrink-0" style={noDragStyle}>
+        {/* <div className="flex items-center gap-1 pt-3 pr-2 shrink-0" style={noDragStyle}>
           <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
             <Monitor className="size-4" />
           </Button>
@@ -214,7 +214,7 @@ export default function ProjectPage() {
           <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
             <HelpCircle className="size-4" />
           </Button>
-        </div>
+        </div> */}
       </header>
 
       {/* ── Active Step View ── */}

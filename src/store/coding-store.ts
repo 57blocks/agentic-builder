@@ -14,6 +14,18 @@ import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
  *  can abort the HTTP connection and signal the backend to stop processing. */
 let _codingAbortController: AbortController | null = null;
 
+/** Last known codeOutputDir — used by reset() to abort the backend session. */
+let _codingOutputDir: string | null = null;
+
+/** Fire-and-forget call to stop any in-flight backend coding session. */
+function abortBackendSession(codeOutputDir: string): void {
+  fetch("/api/agents/coding/abort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codeOutputDir }),
+  }).catch(() => {/* best-effort */});
+}
+
 import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
 
 export interface IntegrationVerifyState {
@@ -248,8 +260,12 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     // doesn't show stale data while a fresh full run is in progress.
     fetch("/api/agents/coding/checkpoint", { method: "DELETE" }).catch(() => {});
 
-    // Abort any previous coding session before starting a new one.
+    // Abort any previous coding session (client-side SSE + backend process).
+    // The backend call is needed for the page-refresh case where the previous
+    // SSE connection was silently dropped and the backend is still running.
     _codingAbortController?.abort();
+    abortBackendSession(codeOutputDir);
+    _codingOutputDir = codeOutputDir;
 
     const controller = new AbortController();
     _codingAbortController = controller;
@@ -427,6 +443,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
     // Abort any previous coding session before starting retry.
     _codingAbortController?.abort();
+    abortBackendSession(codeOutputDir);
+    _codingOutputDir = codeOutputDir;
 
     const controller = new AbortController();
     _codingAbortController = controller;
@@ -769,8 +787,14 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
   reset: () => {
     // Abort the backend coding session so it stops processing tasks.
+    // Client-side abort propagates via request.signal → sessionAbortController.
+    // Also call the abort endpoint directly for immediate effect.
     _codingAbortController?.abort();
     _codingAbortController = null;
+    if (_codingOutputDir) {
+      abortBackendSession(_codingOutputDir);
+      _codingOutputDir = null;
+    }
     set({
       sessionId: null,
       status: "idle",
