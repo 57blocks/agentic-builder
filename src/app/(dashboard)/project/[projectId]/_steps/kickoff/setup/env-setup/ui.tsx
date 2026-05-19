@@ -19,6 +19,8 @@ import {
 } from "@/lib/agents/setup/env-key-catalog";
 import { parseEnvKeysFromTrd } from "@/lib/agents/setup/parse-trd-env";
 import type { StepUIProps } from "../../../_shared/types";
+import { AuthModeCard } from "./AuthModeCard";
+import type { AuthDecision } from "@/lib/agents/architect/auth-decision-types";
 
 type KeyState = "provided" | "skipped" | "auto" | "deferred";
 
@@ -27,7 +29,21 @@ interface FieldState {
   state: KeyState;
 }
 
-type Phase = "infra" | "vendor" | "deploy" | "running";
+type Phase = "auth" | "infra" | "vendor" | "deploy" | "running";
+
+/** Env keys whose surfacing depends on the active auth mode. We always KEEP
+ *  detected/catalog keys outside this set; we only filter these in based on
+ *  the user's choice. Keeps the existing wizardKeys logic intact. */
+const AUTH_GATED_KEYS = new Set<string>([
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASSWORD",
+  "SMTP_FROM",
+  "PRIVY_APP_ID",
+  "PRIVY_APP_SECRET",
+  "VITE_PRIVY_APP_ID",
+]);
 
 export function EnvSetupUI({ onNavigate }: StepUIProps) {
   const featureBrief = useStepStore((s) => s.featureBrief);
@@ -44,20 +60,30 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
     [steps.prd?.content],
   );
 
+  // ── Auth decision (Phase 0) ─────────────────────────────────────────
+  const [authDecision, setAuthDecision] = useState<AuthDecision | null>(null);
+
   // Merge detected keys with the catalog. If detection turns up nothing
   // (e.g. TRD §12 was elided), fall back to "any vendor/auth/deploy entry in
-  // catalog" so the Wizard is still useful.
+  // catalog" so the Wizard is still useful. The auth-gated keys (SMTP_*,
+  // PRIVY_*) are filtered in/out by the active AuthDecision so each mode
+  // surfaces only the credentials it actually needs.
   const wizardKeys = useMemo<EnvKeyMeta[]>(() => {
-    if (detectedKeys.length > 0) {
-      return detectedKeys
-        .map((k) => getEnvKeyMeta(k))
-        .filter((m) => m.category !== "infrastructure"); // infra handled in Phase 1
-    }
-    return ENV_KEY_CATALOG.filter((e) => e.category !== "infrastructure");
-  }, [detectedKeys]);
+    const base = detectedKeys.length > 0
+      ? detectedKeys
+          .map((k) => getEnvKeyMeta(k))
+          .filter((m) => m.category !== "infrastructure")
+      : ENV_KEY_CATALOG.filter((e) => e.category !== "infrastructure");
+
+    const required = new Set(authDecision?.requiredEnvKeys ?? []);
+    return base.filter((m) => {
+      if (!AUTH_GATED_KEYS.has(m.key)) return true;
+      return required.has(m.key);
+    });
+  }, [detectedKeys, authDecision]);
 
   // ── Form state ──────────────────────────────────────────────────────
-  const [phase, setPhase] = useState<Phase>("infra");
+  const [phase, setPhase] = useState<Phase>("auth");
   const [infraChoice, setInfraChoice] = useState<"bundled" | "byo">("bundled");
   const [byoDb, setByoDb] = useState("");
   const [byoRedis, setByoRedis] = useState("");
@@ -266,8 +292,18 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
         </div>
 
         {/* Phase indicator */}
-        <div className="flex items-center gap-2 mt-6 mb-8 text-[12px]">
-          <PhaseChip active={phase === "infra"} done={phase !== "infra"} label="1. Infrastructure" />
+        <div className="flex items-center gap-2 mt-6 mb-8 text-[12px] flex-wrap">
+          <PhaseChip
+            active={phase === "auth"}
+            done={phase !== "auth"}
+            label="0. Authentication"
+          />
+          <ChevronArrow />
+          <PhaseChip
+            active={phase === "infra"}
+            done={phase === "vendor" || phase === "deploy"}
+            label="1. Infrastructure"
+          />
           <ChevronArrow />
           <PhaseChip
             active={phase === "vendor"}
@@ -277,6 +313,17 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
           <ChevronArrow />
           <PhaseChip active={phase === "deploy"} done={false} label="3. Deploy (optional)" />
         </div>
+
+        {/* Phase 0: Authentication strategy */}
+        {phase === "auth" && (
+          <AuthModeCard
+            decision={authDecision}
+            onChange={setAuthDecision}
+            prd={steps.prd?.content ?? ""}
+            trd={steps.trd?.content ?? ""}
+            onNext={() => setPhase("infra")}
+          />
+        )}
 
         {/* Phase 1: Infrastructure */}
         {phase === "infra" && (
@@ -318,7 +365,10 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
               )}
             </div>
 
-            <div className="flex justify-end mt-6">
+            <div className="flex justify-between mt-6">
+              <Button variant="ghost" onClick={() => setPhase("auth")}>
+                ← Back
+              </Button>
               <Button onClick={() => setPhase("vendor")}>
                 Next: vendor keys
               </Button>

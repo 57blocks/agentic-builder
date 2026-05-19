@@ -50,7 +50,9 @@ const byKindAndName = (
 
 const byCommandPrefix = (prefix: string): EvidenceRequirement["matcher"] => {
   return (e) =>
-    e.kind === "command" && (e.command?.startsWith(prefix) ?? false) && e.passed === true;
+    e.kind === "command" &&
+    (e.command?.startsWith(prefix) ?? false) &&
+    e.passed === true;
 };
 
 export const EVIDENCE_POLICIES: Record<EvidenceStage, EvidenceStagePolicy> = {
@@ -67,12 +69,19 @@ export const EVIDENCE_POLICIES: Record<EvidenceStage, EvidenceStagePolicy> = {
     stage: "trd",
     required: [
       {
-        description: "TRD rule validator passed (DSL well-formedness)",
-        matcher: byKindAndName("validator", "trd-rules-validator"),
+        description: "TRD runtime/data contract validator passed",
+        matcher: byKindAndName("validator", "trd-contract-validator"),
       },
       {
-        description: "Pipeline DAG validator passed (no cycles / dangling deps)",
+        description: "TRD rule validator passed (DSL well-formedness)",
+        matcher: byKindAndName("validator", "trd-rules-validator"),
+        optional: true,
+      },
+      {
+        description:
+          "Pipeline DAG validator passed (no cycles / dangling deps)",
         matcher: byKindAndName("validator", "dag-validator"),
+        optional: true,
       },
     ],
   },
@@ -80,7 +89,8 @@ export const EVIDENCE_POLICIES: Record<EvidenceStage, EvidenceStagePolicy> = {
     stage: "sysdesign",
     required: [
       {
-        description: "TRD artefact persistence completed (shared-schema + dag written)",
+        description:
+          "TRD artefact persistence completed (shared-schema + dag written)",
         matcher: byKindAndName("validator", "persist-trd-artifacts"),
       },
     ],
@@ -102,7 +112,8 @@ export const EVIDENCE_POLICIES: Record<EvidenceStage, EvidenceStagePolicy> = {
         matcher: byKindAndName("validator", "task-prd-coverage"),
       },
       {
-        description: "Phase-requirement gate passed (backend phase present where required)",
+        description:
+          "Phase-requirement gate passed (backend phase present where required)",
         matcher: byKindAndName("validator", "phase-requirement"),
       },
     ],

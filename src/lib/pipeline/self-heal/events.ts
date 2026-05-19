@@ -27,7 +27,8 @@ export type RepairStage =
   | "preflight-route-audit"
   | "preflight-deps"
   | "generate_api_contracts"
-  | "preflight-contract-completeness";
+  | "preflight-contract-completeness"
+  | "preflight-task-contract-coverage";
 
 export interface RepairEvent {
   timestamp: string;

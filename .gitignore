@@ -47,6 +47,7 @@ example
 
 # resource-requirements contains user-provided API key values
 .blueprint/resource-requirements.json
+.blueprint/auth-decision.json
 
 # misc
 *.pem

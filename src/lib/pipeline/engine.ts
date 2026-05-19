@@ -27,6 +27,8 @@ import {
   normalizeProjectTier,
 } from "@/lib/agents";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
+import { ensureAuthDecisionAfterPrd } from "./ensure-auth-decision";
+import { readAuthDecision } from "./auth-decision-io";
 import type { AgentResult } from "@/lib/agents";
 import type { ProjectTier, ProjectClassification } from "@/lib/agents";
 import type {
@@ -55,7 +57,9 @@ import {
   consoleRepairSink,
   repairTaskCoverage,
   repairMissingBackendPhase,
+  applyTaskBreakdownPatches,
 } from "./self-heal";
+import type { TaskBreakdownPatchEntry } from "./self-heal";
 import { AttemptTracker } from "./self-heal/attempt-tracker";
 import { escalateRepairCircuit } from "./self-heal/escalate-repair-circuit";
 import { missingIdsScopeKey } from "./self-heal/attempt-tracker";
@@ -65,6 +69,7 @@ import {
   evidenceFromGateReport,
   evidenceFromRulesValidation,
   evidenceFromDagValidation,
+  evidenceFromTrdContractValidation,
 } from "./gates";
 import {
   recallPrdContext,
@@ -75,10 +80,7 @@ import {
   type ClarificationAnswer,
   type IntentResult,
 } from "@/lib/agents/intent";
-import {
-  applyPrdPatches,
-  type PrdPatch,
-} from "@/lib/agents/pm/prd-patch";
+import { applyPrdPatches, type PrdPatch } from "@/lib/agents/pm/prd-patch";
 
 interface PatchAgentResponse {
   summary?: string;
@@ -482,6 +484,23 @@ export class PipelineEngine {
 
     const prdContent = run.steps.prd?.content ?? "";
 
+    // Lock in an auth decision before TRD runs so the architect prompt has
+    // an authoritative auth contract instead of guessing from PRD text. The
+    // helper respects userOverridden=true (Phase 0 wins), and falls back to
+    // password-rbac on any decider error.
+    try {
+      await ensureAuthDecisionAfterPrd({
+        projectRoot: process.cwd(),
+        prdContent,
+        sessionId: run.sessionId,
+      });
+    } catch (err) {
+      console.warn(
+        "[Pipeline] ensureAuthDecisionAfterPrd failed (continuing without auth contract):",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     if (fast) {
       const existingDocs = await this.readExistingDocsFromOutput(outputRoot);
 
@@ -574,6 +593,10 @@ export class PipelineEngine {
           | { prdSpec?: PrdSpec }
           | undefined;
         const prdSpec = prdMetadata?.prdSpec ?? null;
+        // Load the auth decision written by ensureAuthDecisionAfterPrd (or
+        // a prior Phase 0 override) so the TRD prompt has an authoritative
+        // mode/roles/seedAccounts/env-keys block to honor.
+        const authDecision = await readAuthDecision(process.cwd());
         run = await this.executeStep(run, "trd", () =>
           this.trdAgent.generateTRD(
             prdContent,
@@ -581,6 +604,8 @@ export class PipelineEngine {
             undefined,
             run.sessionId,
             prdSpec,
+            undefined,
+            authDecision,
           ),
         );
         if (run.status === "failed") return run;
@@ -1201,6 +1226,67 @@ export class PipelineEngine {
         }
       }
 
+      // Deterministic post-processing patches. Closes 3 common gaps the
+      // coverage-repair loop cannot fix on its own:
+      //   1. server.ts wiring for the start*Worker boot contract,
+      //   2. injecting workers for cron pipelines declared in
+      //      `.blueprint/pipeline-dag.yaml` that have no matching worker file,
+      //   3. merging coverage-repair-produced placeholder tasks (empty
+      //      creates+modifies) into a real sibling so coding workers never
+      //      pick up a task with no file plan.
+      let taskBreakdownPatches: TaskBreakdownPatchEntry[] = [];
+      try {
+        let pipelineDagYaml: string | undefined;
+        try {
+          pipelineDagYaml = await fs.readFile(
+            path.join(this.projectRoot, ".blueprint", "pipeline-dag.yaml"),
+            "utf-8",
+          );
+        } catch {
+          pipelineDagYaml = undefined;
+        }
+        const patchResult = applyTaskBreakdownPatches({
+          tasks: finalTaskBreakdown,
+          trd: trdBody || undefined,
+          pipelineDagYaml,
+          tier,
+          emitter: coverageRepairEmitter,
+        });
+        finalTaskBreakdown = patchResult.tasks;
+        taskBreakdownPatches = patchResult.patches;
+        if (patchResult.patches.length > 0) {
+          // Re-evaluate gates since Rule C may remove fileless orphans (their
+          // coversRequirementIds get folded into the surviving parent, so
+          // coverage should not regress, but defence-in-depth is cheap).
+          taskCoverageGate = runTaskCoverageGate(
+            prdIndexForTasks,
+            finalTaskBreakdown,
+          );
+          phaseGateReport = runPhaseRequirementGate({
+            tier,
+            tasks: finalTaskBreakdown,
+            needsBackend: (
+              run.steps.intent?.metadata?.classification as
+                | { needsBackend?: boolean }
+                | undefined
+            )?.needsBackend,
+          });
+        }
+      } catch (patchErr) {
+        console.warn(
+          `[Engine] Task-breakdown patch rules threw (non-fatal):`,
+          patchErr instanceof Error ? patchErr.message : patchErr,
+        );
+        coverageRepairEmitter({
+          stage: "task-breakdown",
+          event: "patch_rules_error",
+          details: {
+            error:
+              patchErr instanceof Error ? patchErr.message : String(patchErr),
+          },
+        });
+      }
+
       // Evidence-gate evaluation for task-breakdown — telemetry only during
       // Phase B rollout. The pipeline does NOT block on this verdict yet;
       // the existing coverage-warning block continues to drive UX.
@@ -1298,6 +1384,7 @@ export class PipelineEngine {
             : {}),
           phaseRequirementGate: phaseGateReport,
           ...(phaseRepairSummary ? { phaseRepair: phaseRepairSummary } : {}),
+          ...(taskBreakdownPatches.length > 0 ? { taskBreakdownPatches } : {}),
           taskBreakdownSkillsTrace,
         },
       });
@@ -1426,24 +1513,36 @@ export class PipelineEngine {
           .join("; "),
       );
     }
+    if (!result.contractValidation.ok) {
+      console.warn(
+        `[Pipeline] TRD runtime/data contract validation has ${result.contractValidation.warnings.length} blocker(s):`,
+        result.contractValidation.warnings
+          .map((w) => `${w.code}: ${w.message}`)
+          .join("; "),
+      );
+    }
 
-    // Evidence-gate for TRD — both validators must pass. Telemetry-only
+    // Evidence-gate for TRD — mandatory runtime/data contracts plus optional
+    // artifact validators when the corresponding blocks were emitted.
     // during Phase B rollout; the metadata block lets the UI surface the
     // verdict without altering pipeline flow.
     let trdEvidenceVerdict:
       | { passed: boolean; missingRequirements: string[] }
       | undefined;
-    if (result.rulesValidation && result.dagValidation) {
-      const evidence = [
-        evidenceFromRulesValidation(result.rulesValidation),
-        evidenceFromDagValidation(result.dagValidation),
-      ];
-      const report = runEvidenceGate("trd", evidence);
-      trdEvidenceVerdict = {
-        passed: report.passed,
-        missingRequirements: report.missingRequirements,
-      };
-    }
+    const evidence = [
+      evidenceFromTrdContractValidation(result.contractValidation),
+      ...(result.rulesValidation
+        ? [evidenceFromRulesValidation(result.rulesValidation)]
+        : []),
+      ...(result.dagValidation
+        ? [evidenceFromDagValidation(result.dagValidation)]
+        : []),
+    ];
+    const report = runEvidenceGate("trd", evidence);
+    trdEvidenceVerdict = {
+      passed: report.passed,
+      missingRequirements: report.missingRequirements,
+    };
 
     run.steps.trd = {
       ...trd,
@@ -1459,6 +1558,7 @@ export class PipelineEngine {
           ...(result.dagValidation
             ? { dagValidation: result.dagValidation }
             : {}),
+          contractValidation: result.contractValidation,
         },
         ...(trdEvidenceVerdict ? { evidenceGate: trdEvidenceVerdict } : {}),
       },
@@ -1661,7 +1761,9 @@ export class PipelineEngine {
           overhalf,
         );
       } else if (parsed?.fullRewrite) {
-        console.info("[engine] PRD patch agent reported fullRewrite=true — using full regenerate path");
+        console.info(
+          "[engine] PRD patch agent reported fullRewrite=true — using full regenerate path",
+        );
       }
     }
 

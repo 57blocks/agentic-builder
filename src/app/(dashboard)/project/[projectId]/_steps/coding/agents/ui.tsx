@@ -21,7 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { Play, Clock, RotateCcw, AlertTriangle } from "lucide-react";
+import { Play, Clock, RotateCcw, AlertTriangle, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import { useCodingStore } from "@/store/coding-store";
@@ -201,7 +201,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   const setStepResult = useStepStore((s) => s.setStepResult);
 
   const codingState = useCodingStore();
-  const { startCoding, retryFailedTasks, hydrateFromSnapshot } = useCodingStore();
+  const { startCoding, retryFailedTasks, rerunCoding, hydrateFromSnapshot } =
+    useCodingStore();
   const projectId = useStageStore((s) => s.projectId);
 
   // Track whether this mount is a "return visit" (component unmounted and remounted)
@@ -303,6 +304,49 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     if (failedTaskIds.length === 0) return;
     retryFailedTasks(runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent);
   }, [retryFailedTasks, runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent]);
+
+  // ── Rerun the entire coding session from scratch ──────────────────────────
+  // Used when the user wants to discard the current results (regardless of
+  // success/failure / in-progress) and re-trigger the full coding pipeline
+  // against the latest task breakdown. Always behind a confirm prompt because
+  // it aborts any active SSE and overwrites generated files.
+  const handleRerun = useCallback(() => {
+    if (kickoffTasks.length === 0) return;
+    const completedCount = codingState.tasks.filter(
+      (t) => t.codingStatus === "completed",
+    ).length;
+    const summary =
+      codingState.tasks.length > 0
+        ? `${completedCount}/${codingState.tasks.length} tasks completed in the current session.\n\n`
+        : "";
+    const ok = window.confirm(
+      `Rerun the entire coding pipeline from task #1?\n\n` +
+        summary +
+        `This will:\n` +
+        `  • Abort the current run (if any)\n` +
+        `  • Reset every task back to pending and start a fresh session\n` +
+        `  • Overwrite previously generated files as the new run produces them\n\n` +
+        `Already-saved kickoff artifacts (PRD / TRD / task breakdown / env / auth decision) are NOT touched.`,
+    );
+    if (!ok) return;
+    rerunCoding(
+      runId,
+      kickoffTasks,
+      codeOutputDir,
+      projectTier,
+      prdContent,
+      stitchMeta ?? undefined,
+    );
+  }, [
+    codingState.tasks,
+    kickoffTasks,
+    rerunCoding,
+    runId,
+    codeOutputDir,
+    projectTier,
+    prdContent,
+    stitchMeta,
+  ]);
 
   // ── Merge kickoff + live coding tasks ──────────────────────────────────────
   const mergedTasks = useMergedTasks(kickoffTasks, codingState.tasks);
@@ -484,6 +528,20 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           >
             <RotateCcw size={13} />
             Retry Failed ({failedTaskIds.length})
+          </button>
+        )}
+
+        {/* Rerun — always available once the user has triggered at least one
+            coding run, regardless of success / failure / in-flight. Confirm
+            dialog inside handleRerun prevents accidental clicks. */}
+        {hasStarted && kickoffTasks.length > 0 && (
+          <button
+            onClick={handleRerun}
+            title="Rerun the entire coding pipeline from task #1"
+            className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
+          >
+            <RefreshCw size={13} />
+            {isRunning ? "Abort & Rerun" : "Rerun"}
           </button>
         )}
 

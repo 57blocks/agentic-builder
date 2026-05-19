@@ -5,6 +5,7 @@ import {
   copyOptionalScaffolds,
   type CopyOptionalScaffoldsResult,
 } from "./scaffold-optional";
+import type { AuthDecision } from "@/lib/agents/architect/auth-decision-types";
 
 export type ScaffoldTier = "S" | "M" | "L";
 
@@ -76,6 +77,13 @@ export async function copyScaffold(
   options?: {
     forceOverwrite?: boolean;
     resourceRequirements?: ResourceRequirement[];
+    /**
+     * When provided, the optional-scaffold picker uses this as the
+     * authoritative source for the chosen auth mode. The matching
+     * `_optional/auth-*` feature is forced in (even with empty
+     * triggerEnvKeys) and competing auth scaffolds are excluded.
+     */
+    authDecision?: AuthDecision | null;
   },
 ): Promise<CopyScaffoldResult> {
   const forceOverwrite = options?.forceOverwrite ?? false;
@@ -120,12 +128,13 @@ export async function copyScaffold(
   // payment SDKs, analytics, etc. live in `<tier>/_optional/<feature>/` and
   // are copied here based on which env vars the kickoff detector declared.
   let optional = emptyOptional;
-  if (options?.resourceRequirements) {
+  if (options?.resourceRequirements || options?.authDecision) {
     try {
       optional = await copyOptionalScaffolds(
         tier,
         outputDir,
-        options.resourceRequirements,
+        options.resourceRequirements ?? [],
+        options.authDecision ?? null,
       );
       if (optional.applied.length > 0) {
         console.log(

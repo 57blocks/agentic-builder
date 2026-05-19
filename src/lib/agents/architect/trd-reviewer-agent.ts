@@ -20,7 +20,7 @@ import {
 import { MODEL_CONFIG } from "@/lib/model-config";
 import type { ProjectTier } from "../shared/project-classifier";
 
-export const TRD_REVIEWER_PROMPT_VERSION = "v1-2026-05-16";
+export const TRD_REVIEWER_PROMPT_VERSION = "v2-2026-05-18-runtime-contracts";
 
 // ─── Output schema (also exported for UI use) ─────────────────────────────
 
@@ -71,7 +71,7 @@ You receive THREE inputs:
 2. The TRD generated from that PRD by another agent.
 3. The authoritative project tier (S | M | L).
 
-Your job is to grade the TRD across 7 fixed dimensions, surface BLOCKERS that would break codegen, and propose actionable IMPROVEMENTS. Be specific — every observation must reference a concrete section, identifier, or line in the TRD.
+Your job is to grade the TRD across 12 fixed dimensions, surface BLOCKERS that would break codegen, and propose actionable IMPROVEMENTS. Be specific — every observation must reference a concrete section, identifier, or line in the TRD.
 
 ## Fixed dimensions (score each 1-10; 10 = excellent)
 
@@ -82,10 +82,15 @@ Your job is to grade the TRD across 7 fixed dimensions, surface BLOCKERS that wo
 5. **normalization-formulas** — When the PRD enumerates named atomic variables/metrics (e.g. MC-1, RQ-1, OC-7), does the TRD provide a per-variable normalization rule (even a placeholder)? A missing §9 / normalization table for a metrics-heavy product is a high-severity gap.
 6. **identifier-consistency** — Every identifier in the TRD (variable IDs, env keys, vendor names, FR-* refs, file paths) must either appear verbatim in the PRD OR be marked \`[TRD-NEW]\`. Flag silent inventions or rename drift.
 7. **stack-appropriateness** — Are the chosen libraries/services right for the PRD's scale and constraints? Flag obvious over- or under-engineering (e.g. K8s for a 4-coin PoC; cron + setInterval for a 10k-coin real-time platform).
+8. **runtime-boot-contract** — If the TRD has scheduled jobs, workers, queues, or ingestion/scoring pipelines, does it explicitly require \`backend/src/server.ts\` to import and start every exported \`start*Worker\` during boot? Missing this is a high-severity blocker because generated workers may never run.
+9. **resource-env-contract** — Does the TRD include a literal Environment Variables Contract table for every external service it names? For stablecoin/data-feed products, look specifically for \`COINGECKO_API_KEY\`, \`QUOTIENT_API_KEY\`, \`X_BEARER_TOKEN\`, \`JINA_API_KEY\`, the \`LLM_*\` bundle, and \`SMTP_*\` keys when the corresponding vendors/features appear.
+10. **seed-data-isolation** — Does the TRD forbid seed/demo data from marking real external source health as healthy or setting provider success timestamps? Missing this is a blocker for any app where the UI displays source freshness or score data.
+11. **source-health-semantics** — Does the TRD define that \`source_feeds\` / equivalent health and \`ingestion_runs\` are updated only by real ingestion jobs or explicit admin refetch, with distinct not-configured/stale/failed/demo/healthy states?
+12. **auth-decision-alignment** — Does the TRD state that auth mode must follow the persisted auth decision / Phase 0 override when present, instead of silently choosing Magic Link, Privy, OIDC, or username/password RBAC on its own?
 
 ## Blocker vs Improvement
 
-- **Blocker** = if codegen runs against this TRD AS-IS, the resulting code will be wrong in a way the user will notice (wrong tier, wrong vendor, wrong scheduler, missing critical files).
+- **Blocker** = if codegen runs against this TRD AS-IS, the resulting code will be wrong in a way the user will notice (wrong tier, wrong vendor, wrong scheduler, missing critical files, workers never booting, external data falsely shown as healthy).
 - **Improvement** = the TRD is functionally usable but a stronger TRD would do X.
 
 Be sparing with "high" severity. Reserve it for genuine correctness issues.
@@ -131,8 +136,11 @@ Be sparing with "high" severity. Reserve it for genuine correctness issues.
 }
 
 Hard rules:
-- Always emit ALL 7 dimensions in the order listed (tier-consistency, per-source-granularity, deployment-artifacts, schema-completeness, normalization-formulas, identifier-consistency, stack-appropriateness).
+- Always emit ALL 12 dimensions in the order listed (tier-consistency, per-source-granularity, deployment-artifacts, schema-completeness, normalization-formulas, identifier-consistency, stack-appropriateness, runtime-boot-contract, resource-env-contract, seed-data-isolation, source-health-semantics, auth-decision-alignment).
 - If a dimension is genuinely not applicable (e.g. tier-S has no per-source DAG), give it a score of 10 with evidence "Not applicable for Tier S".
+- For products with scheduled jobs / ingestion / scoring, missing \`runtime-boot-contract\` MUST be a blocker.
+- For products with external providers, missing literal env keys in \`resource-env-contract\` MUST be a blocker.
+- For products where source freshness or scores are shown in the UI, missing seed-data isolation or source-health semantics MUST be a blocker.
 - Maximum 8 blockers and 12 improvements (force prioritization).
 - Output ONLY the JSON object. No backticks, no preface, no postface.`;
 
@@ -215,6 +223,11 @@ const REQUIRED_DIMENSION_IDS = [
   "normalization-formulas",
   "identifier-consistency",
   "stack-appropriateness",
+  "runtime-boot-contract",
+  "resource-env-contract",
+  "seed-data-isolation",
+  "source-health-semantics",
+  "auth-decision-alignment",
 ];
 
 type ParsedShell = Omit<
@@ -284,9 +297,7 @@ function asSeverity(v: unknown): TrdReviewSeverity {
   return "medium";
 }
 
-function normaliseOverall(
-  input: unknown,
-): TrdReviewResult["overall"] {
+function normaliseOverall(input: unknown): TrdReviewResult["overall"] {
   if (!input || typeof input !== "object") {
     return { score: 0, summary: "No overall score returned." };
   }

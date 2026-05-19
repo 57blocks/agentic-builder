@@ -6,8 +6,10 @@ middleware) and the frontend (apps install `@privy-io/react-auth` and use
 
 ## Triggers
 
-The codegen pipeline copies this feature into the generated project when ANY
-of these env vars appears in `.blueprint/resource-requirements.json`:
+The codegen pipeline copies this feature into the generated project when
+`.blueprint/auth-decision.json` has `mode: "privy"`. Legacy trigger: the
+appearance of any of the env vars below in `.blueprint/resource-requirements.json`
+is still honored for backwards compatibility.
 
 - `VITE_PRIVY_APP_ID` (frontend bundle)
 - `NEXT_PUBLIC_PRIVY_APP_ID` (Next.js variant)
@@ -24,7 +26,8 @@ of these env vars appears in `.blueprint/resource-requirements.json`:
 | `backend/src/privy/client.ts`                 | Lazy-init `PrivyClient` (server SDK). |
 | `backend/src/middlewares/privyAuth.ts`        | Token-verification middleware **plus** `requirePrivyAuth(ctx)` guard, `requirePrivyAuthMiddleware` (Koa middleware form), and `resolveOrCreateDbUser(ctx)` upsert helper. |
 | `backend/src/app.ts`                          | **Overwrites** base — registers `privyAuthMiddleware`. |
-| `backend/src/api/modules/auth/auth.routes.ts` | **Overwrites** base — registers `GET /auth/me` and `POST /auth/verify`. |
+| `backend/src/api/modules/index.ts`            | **Overwrites** base — mounts apiRouter at `/api/v1` so contract paths resolve. |
+| `backend/src/api/modules/auth/auth.routes.ts` | **Overwrites** base — registers `GET /v1/auth/me` and `POST /v1/auth/verify` (relative `/auth/*`). |
 
 ### Frontend
 
