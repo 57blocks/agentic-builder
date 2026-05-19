@@ -8,6 +8,14 @@ import type { CodeChatEvent } from "./types";
 const DEFAULT_MODEL = process.env.CODE_CHAT_MODEL || "anthropic/claude-sonnet-4";
 const MAX_ITERATIONS = 8;
 
+/**
+ * Max consecutive iterations where the model produced text but zero tool
+ * calls. If we cross this, surface a clear error to the UI instead of
+ * looping silently — the user can then nudge the model, retry, or switch
+ * model.
+ */
+const MAX_EMPTY_TOOL_ITERATIONS = 2;
+
 interface PartialToolCall {
   id: string;
   name: string;
@@ -35,6 +43,15 @@ export async function runCodeChat(opts: RunCodeChatOptions): Promise<void> {
   const messages = opts.messages;
   const model = opts.model || DEFAULT_MODEL;
 
+  // Log the resolved model + provider once per turn so the operator can tell
+  // from `next dev` output whether OpenRouter or some env-driven direct
+  // provider (DeepSeek V4 / Gemini) is actually serving this chat.
+  console.log(
+    `[code-chat] starting agent loop  model=${model}  forceOpenRouter=true  tools=${CODE_CHAT_TOOL_DEFS.length}  history=${messages.length}`,
+  );
+
+  let emptyToolIters = 0;
+
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     if (signal?.aborted) {
       emit({ kind: "error", message: "Cancelled." });
@@ -44,10 +61,20 @@ export async function runCodeChat(opts: RunCodeChatOptions): Promise<void> {
     const body = await streamChatCompletion(messages, {
       model,
       tools: CODE_CHAT_TOOL_DEFS,
-      tool_choice: "auto",
+      // On iterations where the model just narrated without calling tools,
+      // upgrade tool_choice to "required" so it's forced to actually invoke
+      // a tool on the next turn. Without this, models that prefer prose
+      // (e.g. DeepSeek-style chains that have been silently routed in)
+      // can monologue indefinitely.
+      tool_choice: emptyToolIters > 0 ? "required" : "auto",
       temperature: 0.2,
       max_tokens: 4096,
       reasoning: { enabled: true },
+      // Critical: tool-calling protocol differs between providers. The UI
+      // assumes OpenAI / Anthropic tool_calls delta shape (which OpenRouter
+      // normalises). DeepSeek direct emits a different shape and hangs the
+      // chat. Pin this route to OpenRouter regardless of DEEPSEEK_API_KEY.
+      forceOpenRouter: true,
     });
 
     let assistantContent = "";
@@ -117,10 +144,43 @@ export async function runCodeChat(opts: RunCodeChatOptions): Promise<void> {
     }
 
     if (toolCalls.size === 0) {
+      // If we got real prose back AND the model decided it was done (finish
+      // reason wasn't "tool_calls"), respect that and return — typical
+      // happy-path "final reply" termination.
+      if (assistantContent.trim() && finishReason && finishReason !== "tool_calls") {
+        messages.push({ role: "assistant", content: assistantContent });
+        emit({ kind: "done", iterations: iter + 1 });
+        return;
+      }
+
+      // Otherwise we just got narration with no action — likely the model
+      // is monologuing instead of using its tools. Bump the counter, force
+      // tools next turn (see tool_choice above), and only bail with a
+      // human-readable error if it keeps happening.
+      emptyToolIters++;
       messages.push({ role: "assistant", content: assistantContent });
-      emit({ kind: "done", iterations: iter + 1 });
-      return;
+      if (emptyToolIters >= MAX_EMPTY_TOOL_ITERATIONS) {
+        emit({
+          kind: "error",
+          message:
+            `Model produced ${emptyToolIters} consecutive replies without using any tool — it can't fix the project without reading or editing files. ` +
+            `Try sending a more specific message, or set CODE_CHAT_MODEL to a model with stronger tool-use (e.g. anthropic/claude-sonnet-4, anthropic/claude-opus-4).`,
+        });
+        emit({ kind: "done", iterations: iter + 1 });
+        return;
+      }
+      // Nudge the model with a tool-use reminder; this is invisible to the
+      // user but unblocks looping models on the next iteration.
+      messages.push({
+        role: "user",
+        content:
+          "You did not call any tool. Take action by calling read_file / list_files / grep / edit_file / write_file with the necessary arguments now — do not just describe what you would check.",
+      });
+      continue;
     }
+
+    // Reset the counter once we see real tool activity.
+    emptyToolIters = 0;
 
     const orderedCalls = [...toolCalls.entries()]
       .sort((a, b) => a[0] - b[0])

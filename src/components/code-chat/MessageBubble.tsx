@@ -1,11 +1,29 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
 import FileDiffBlock from "./FileDiffBlock";
 import type { UiMessage } from "./types";
+
+/**
+ * Drives a 1Hz tick so the "streaming for Xs" indicator updates without
+ * needing a global timer or shoving derived state into the store. Hook
+ * lives at the bubble level — only mounted while a streaming message
+ * exists, so idle conversations don't waste a setInterval.
+ */
+function useElapsedSecond(active: boolean): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const start = Date.now();
+    const handle = setInterval(() => setTick(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(handle);
+  }, [active]);
+  return tick;
+}
 
 /**
  * Some models stream prose without ever emitting blank lines, so a chain of
@@ -51,13 +69,16 @@ export default function MessageBubble({ message, codeOutputDir, onReverted }: Pr
     );
   }
 
+  const isStreaming = message.status === "streaming";
+  const elapsedS = useElapsedSecond(isStreaming);
+
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-full text-[12.5px] leading-relaxed text-zinc-800">
-        {message.segments.length === 0 && message.status === "streaming" && (
+        {message.segments.length === 0 && isStreaming && (
           <div className="flex items-center gap-2 text-[11px] text-zinc-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" />
-            Working…
+            Working… ({elapsedS}s)
           </div>
         )}
         {message.segments.map((seg) => {
@@ -92,6 +113,17 @@ export default function MessageBubble({ message, codeOutputDir, onReverted }: Pr
           }
           return null;
         })}
+        {isStreaming && message.segments.length > 0 && (
+          <div className="my-1 flex items-center gap-2 text-[10px] text-zinc-400">
+            <span className="h-1 w-1 animate-pulse rounded-full bg-zinc-400" />
+            streaming… {elapsedS}s
+            {elapsedS >= 30 && (
+              <span className="text-amber-500">
+                · slow upstream — hit Reset if it stays stuck past ~60s
+              </span>
+            )}
+          </div>
+        )}
         {message.status === "error" && (
           <div className="my-1 rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">
             {message.errorText || "Something went wrong."}

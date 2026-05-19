@@ -73,6 +73,11 @@ export function useCodeChat({ codeOutputDir }: UseCodeChatOptions) {
         { role: "user" as const, content: text.trim() },
       ];
 
+      const startedAt = Date.now();
+      console.log(
+        `[code-chat client] POST start  history=${wire.length}  attachedCtx=${attachedContext ? "yes" : "no"}`,
+      );
+
       try {
         const resp = await fetch("/api/agents/code-chat", {
           method: "POST",
@@ -86,6 +91,9 @@ export function useCodeChat({ codeOutputDir }: UseCodeChatOptions) {
         });
         if (!resp.ok || !resp.body) {
           const errText = (await resp.text().catch(() => "")) || `HTTP ${resp.status}`;
+          console.error(
+            `[code-chat client] non-OK response  status=${resp.status}  body=${errText.slice(0, 200)}`,
+          );
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId && m.role === "assistant"
@@ -95,6 +103,9 @@ export function useCodeChat({ codeOutputDir }: UseCodeChatOptions) {
           );
           return;
         }
+        console.log(
+          `[code-chat client] response headers received  status=${resp.status}  elapsed=${Date.now() - startedAt}ms`,
+        );
         let stalled = false;
         await consumeSse(
           resp.body,
@@ -102,7 +113,13 @@ export function useCodeChat({ codeOutputDir }: UseCodeChatOptions) {
           controller,
           () => {
             stalled = true;
+            console.warn(
+              `[code-chat client] stream stalled  elapsed=${Date.now() - startedAt}ms`,
+            );
           },
+        );
+        console.log(
+          `[code-chat client] stream finished  stalled=${stalled}  total=${Date.now() - startedAt}ms`,
         );
         setMessages((prev) =>
           prev.map((m) => {

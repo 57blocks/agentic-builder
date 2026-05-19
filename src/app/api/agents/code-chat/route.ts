@@ -10,6 +10,11 @@ import type { CodeChatEvent, CodeChatTurnRequest } from "@/lib/agents/code-chat/
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Module-load marker — prints once per dev-server boot / hot-reload of this
+// route. If you bump `route.ts` but never see this, Next is not rebuilding
+// the handler and a manual dev-server restart is needed.
+console.log("[code-chat route] module loaded");
+
 const FRONTEND_SUBDIR_CANDIDATES = [
   "frontend",
   "apps/web",
@@ -44,16 +49,27 @@ function sseEncode(event: CodeChatEvent): string {
 const HEARTBEAT_MS = 15_000;
 
 export async function POST(request: NextRequest) {
+  // First-touch log so the operator can confirm the request actually reaches
+  // this handler — separates "browser never POSTed" from "POST arrived but
+  // the agent loop hung".
+  console.log("[code-chat route] POST /api/agents/code-chat received");
+
   let body: CodeChatTurnRequest;
   try {
     body = (await request.json()) as CodeChatTurnRequest;
   } catch {
+    console.error("[code-chat route] invalid JSON body");
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (!body?.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+    console.error("[code-chat route] missing messages array");
     return Response.json({ error: "messages is required" }, { status: 400 });
   }
+
+  console.log(
+    `[code-chat route] dispatching  msgs=${body.messages.length}  model=${body.model ?? "(default)"}  ctx=${body.codeOutputDir ?? "(default)"}  attachedCtx=${body.attachedContext ? "yes" : "no"}`,
+  );
 
   const outputRoot = resolveCodeOutputRoot(process.cwd(), body.codeOutputDir);
   const appDir = await resolveAppDir(outputRoot);

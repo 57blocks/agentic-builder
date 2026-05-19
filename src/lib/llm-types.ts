@@ -82,6 +82,17 @@ export interface OpenRouterOptions {
   /** Provider-specific thinking config (e.g. GPT-5 gateway). */
   thinking?: OpenRouterThinkingOptions | false;
   /**
+   * Force the request through OpenRouter even when DEEPSEEK_API_KEY (or
+   * other direct-provider keys) is set. Use for call sites that depend on
+   * a specific model's tool-calling protocol — e.g. the in-IDE code-chat
+   * agent, which needs Claude-style tool_calls deltas and breaks if
+   * silently rerouted to DeepSeek V4 direct.
+   *
+   * Defaults to false to preserve the existing "DEEPSEEK_API_KEY wins"
+   * behaviour for everything else.
+   */
+  forceOpenRouter?: boolean;
+  /**
    * Per-call request timeout in milliseconds.
    * Overrides the global OPENROUTER_CHAT_TIMEOUT_MS env var.
    * On timeout the call throws a ModelTimeoutError which chatCompletionWithFallback
