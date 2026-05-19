@@ -56,7 +56,7 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 
 function shouldForceOpenRouter(variant?: CodegenOpenRouterVariant): boolean {
   const codegenProvider = process.env.CODEGEN_PROVIDER?.trim().toLowerCase();
-  if (variant === "codeGen" && codegenProvider === "deepseek") {
+  if ((variant === "codeGen" || variant === "codeGenFrontend") && codegenProvider === "deepseek") {
     return false;
   }
 
@@ -258,7 +258,7 @@ async function chatCompletionsOpenAICompatible(
   };
 }
 
-export type CodegenOpenRouterVariant = "codeGen" | "codeFix";
+export type CodegenOpenRouterVariant = "codeGen" | "codeGenFrontend" | "codeFix";
 
 /**
  * Provider priority for codegen:
@@ -285,7 +285,7 @@ export async function invokeCodegenOrOpenRouter(
   // CODEGEN_PROVIDER=deepseek also signals intent to use DeepSeek direct;
   // emit a warning if the key is missing so the fallback isn't silent.
   const wantsDeepSeekDirect =
-    key === "codeGen" &&
+    (key === "codeGen" || key === "codeGenFrontend") &&
     process.env.CODEGEN_PROVIDER?.trim().toLowerCase() === "deepseek";
 
   if (isDeepSeekV4Provider() && !shouldForceOpenRouter(key)) {
