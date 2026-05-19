@@ -109,7 +109,7 @@ export default function FileDiffBlock({ edit, codeOutputDir, onReverted }: Props
               <div key={i} className={`flex gap-2 px-2 ${bg}`}>
                 <span className="shrink-0 select-none text-[9.5px] text-zinc-400">{lineNo}</span>
                 <span className="shrink-0 select-none text-zinc-500">{sign}</span>
-                <span className="whitespace-pre text-zinc-800">{line.text}</span>
+                <span className="whitespace-pre-wrap break-all text-zinc-800">{line.text}</span>
               </div>
             );
           })}
