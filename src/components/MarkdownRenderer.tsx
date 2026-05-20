@@ -23,7 +23,14 @@ function MermaidBlock({ code }: { code: string }) {
     mermaid
       .render(id, code)
       .then(({ svg }) => {
-        if (!cancelled) setSvg(svg);
+        if (cancelled) return;
+        // mermaid.render can succeed (resolve) but return an SVG containing error text
+        // instead of a proper diagram — treat those as render failures.
+        if (/class="error[^"]*"|Syntax error|diagram error|aria-roledescription="error"/i.test(svg)) {
+          setError("Mermaid syntax error in diagram source");
+        } else {
+          setSvg(svg);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err.message ?? String(err));
@@ -33,9 +40,15 @@ function MermaidBlock({ code }: { code: string }) {
 
   if (error) {
     return (
-      <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-red-200 bg-red-50 p-4 text-[13px] leading-relaxed">
-        <code className="text-red-600">{error}</code>
-      </pre>
+      <div className="mb-4 overflow-hidden rounded-md border border-amber-200">
+        <div className="flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700 font-medium border-b border-amber-200">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Diagram render error — showing source
+        </div>
+        <pre className="m-0 overflow-x-auto bg-[#f6f8fa] p-4 text-[13px] leading-relaxed">
+          <code className="text-[#1f2328]">{code}</code>
+        </pre>
+      </div>
     );
   }
 
@@ -373,6 +386,8 @@ export default function MarkdownRenderer({
 
   return (
     <div className={`${proseClass} ${className}`}>
+      {/* Hide Mermaid error SVGs that may leak before React catches up */}
+      <style>{`svg[aria-roledescription="error"] { display: none !important; }`}</style>
       {chunks.map((chunk, idx) => {
         const md = (
           <ReactMarkdown
