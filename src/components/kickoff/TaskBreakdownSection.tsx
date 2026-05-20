@@ -138,7 +138,7 @@ function TaskRow({ task: t }: { task: KickoffWorkItem }) {
           </p>
         </td>
         <td className="whitespace-nowrap px-3 py-2.5 font-medium text-zinc-800">
-          {t.estimatedHours}h
+          {t.estimatedHours.toFixed(1)}h
         </td>
         <td className="px-3 py-2.5">
           <PriorityBadge priority={t.priority} />
@@ -313,8 +313,8 @@ export default function TaskBreakdownSection({
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 text-center text-xs sm:grid-cols-4 lg:grid-cols-6">
         <StatCard label="Total tasks" value={String(tasks.length)} />
-        <StatCard label="Total estimate" value={`${totalHours}h`} accent="zinc" />
-        <StatCard label="AI-autonomous" value={`${aiHours}h`} accent="indigo" />
+        <StatCard label="Total estimate" value={`${totalHours.toFixed(1)}h`} accent="zinc" />
+        <StatCard label="AI-autonomous" value={`${aiHours.toFixed(1)}h`} accent="indigo" />
         <StatCard label="Human gates" value={`${humanHours}h`} accent="amber" />
         {totalTokens > 0 && (
           <StatCard

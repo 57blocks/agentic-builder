@@ -316,11 +316,11 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
     }
   };
 
+  const totalHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
   const aiTasks = tasks.filter((t) => t.executionKind === "ai_autonomous");
-  const aiHours = tasks.reduce((s, t) => s + t.estimatedHours, 0);
-  const totalHours = aiHours;
+  const aiHours = aiTasks.reduce((s, t) => s + t.estimatedHours, 0);
   const efficiencyPct = tasks.length > 0 ? Math.round((aiTasks.length / tasks.length) * 100) : 0;
-  const estimatedCost = (totalHours * 8.5).toFixed(0);
+  const estimatedCost = tasks.reduce((s, t) => s + (t.tokenEstimate?.estimatedCostUsd ?? 0), 0);
   const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
   const pageTasks = tasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -328,7 +328,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const totalInputTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.inputTokens ?? 0), 0);
   const totalOutputTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.outputTokens ?? 0), 0);
   const totalTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.totalTokens ?? 0), 0);
-  const tokenCost = tasks.reduce((s, t) => s + (t.tokenEstimate?.estimatedCostUsd ?? 0), 0);
   const hasTokenData = totalTokens > 0;
 
   function formatTokens(n: number): string {
@@ -440,10 +439,10 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 <div className="grid grid-cols-5 divide-x divide-[#f1f5f9]">
                   {[
                     { label: "TOTAL TASKS", value: String(tasks.length) },
-                    { label: "AI ESTIMATE", value: `${aiHours}h` },
-                    { label: "TOTAL HOURS", value: `${totalHours}h` },
+                    { label: "AI ESTIMATE", value: `${aiHours.toFixed(1)}h` },
+                    { label: "TOTAL HOURS", value: `${totalHours.toFixed(1)}h` },
                     { label: "EFFICIENCY", value: `${efficiencyPct}%`, highlight: true },
-                    { label: "EST. COST", value: `$${estimatedCost}` },
+                    { label: "EST. COST", value: `$${estimatedCost.toFixed(2)}` },
                   ].map(({ label, value, highlight }) => (
                     <div key={label} className="px-4 py-3 text-center">
                       <p className={`text-[17px] font-bold ${highlight ? "text-[#712ae2]" : "text-[#0b1c30]"}`}>{value}</p>
@@ -456,12 +455,11 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     <div className="px-5 py-2 border-b border-[#f1f5f9]">
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-[#712ae2]">Token Usage</p>
                     </div>
-                    <div className="grid grid-cols-4 divide-x divide-[#f1f5f9]">
+                    <div className="grid grid-cols-3 divide-x divide-[#f1f5f9]">
                       {[
                         { label: "INPUT TOKENS", value: formatTokens(totalInputTokens) },
                         { label: "OUTPUT TOKENS", value: formatTokens(totalOutputTokens) },
                         { label: "TOTAL TOKENS", value: formatTokens(totalTokens), highlight: true },
-                        { label: "TOKEN COST", value: `$${tokenCost.toFixed(2)}` },
                       ].map(({ label, value, highlight }) => (
                         <div key={label} className="px-4 py-3 text-center">
                           <p className={`text-[15px] font-bold ${highlight ? "text-[#712ae2]" : "text-[#0b1c30]"}`}>{value}</p>
