@@ -1,62 +1,62 @@
 ---
-{"id":"DK-img-auto-ai-2026-05-16-3-jasper-ai","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Jasper AI (ai)","tags":["industry:ai","source:trend-capture","image:auto-ai-2026-05-16-3-jasper-ai.png","site:jasper.ai","url:https://www.jasper.ai","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778926071971,"updatedAt":1778926071971,"schemaVersion":1}
+{"id":"DK-img-auto-ai-2026-05-16-3-jasper-ai","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-ai-2026-05-16-3-jasper-ai.png","tags":["industry:generic","source:vision-distill","image:auto-ai-2026-05-16-3-jasper-ai.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778926071971,"updatedAt":1779236053687,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
-  "industry": "ai",
-  "summary": "A polished AI marketing homepage with a light editorial feel, combining oversized serif hero typography, crisp sans-serif navigation, and bold coral CTAs against a soft gray background. The design feels premium and spacious, with restrained color usage and subtle rounded surfaces.",
+  "industry": "generic",
+  "summary": "A clean, editorial-style SaaS landing page with generous whitespace, oversized serif hero typography, and sharp high-contrast CTAs. The design mixes soft neutral surfaces with deep navy text, vivid orange action accents, and a playful pastel grid motif near the footer.",
   "vibe": [
     "minimal",
     "editorial",
-    "premium",
-    "airy",
+    "clean",
+    "confident",
     "modern"
   ],
   "palette": {
     "primary": {
-      "hex": "#11185c",
+      "hex": "#0c1459",
       "label": "deep navy"
     },
     "secondary": {
-      "hex": "#ff4a2f",
-      "label": "bright coral"
+      "hex": "#ff4b2b",
+      "label": "bright orange-red"
     },
     "accent": {
-      "hex": "#dff7c8",
-      "label": "pale green"
+      "hex": "#d8efc3",
+      "label": "soft lime tag"
     },
     "background": {
-      "hex": "#f4f4f4",
-      "label": "soft gray"
+      "hex": "#f2f2f2",
+      "label": "light gray page background"
     },
     "surface": {
       "hex": "#ffffff",
-      "label": "white"
+      "label": "white cards and header"
     },
     "text": {
-      "hex": "#11185c",
-      "label": "deep navy text"
+      "hex": "#0c1459",
+      "label": "primary navy text"
     },
     "textMuted": {
-      "hex": "#4c4f75",
-      "label": "muted indigo gray"
+      "hex": "#3f456f",
+      "label": "muted indigo-gray"
     },
     "border": {
-      "hex": "#cfcfd6",
-      "label": "light gray border"
+      "hex": "#cfcfcf",
+      "label": "soft gray border"
     }
   },
   "typography": {
-    "headingFont": "Georgia",
+    "headingFont": "Canela",
     "bodyFont": "Inter",
     "headingWeight": 500,
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized serif hero headline",
-      "clean sans-serif navigation and body copy",
-      "high contrast display typography"
+      "oversized serif hero heading",
+      "compact sans-serif navigation",
+      "centered marketing layout"
     ]
   },
   "spacing": {
@@ -82,18 +82,56 @@
     "0 1px 2px rgba(0,0,0,0.04)",
     "0 8px 24px rgba(0,0,0,0.10)"
   ],
+  "surfaceEffects": [
+    {
+      "name": "soft card elevation",
+      "description": "cookie consent modal uses a white surface with subtle border and low shadow for gentle separation from the page",
+      "cssHints": [
+        "background: #ffffff",
+        "border: 1px solid rgba(0,0,0,0.08)",
+        "box-shadow: 0 8px 24px rgba(0,0,0,0.10)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid orange-red fill with white text and crisp rectangular shape"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker orange-red fill with minimal transition and preserved high contrast"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin navy or blue focus ring outside button bounds"
+    },
+    {
+      "component": "button.secondary",
+      "state": "default",
+      "treatment": "light background with navy border and navy text"
+    },
+    {
+      "component": "nav.link",
+      "state": "hover",
+      "treatment": "text remains navy with subtle opacity shift or underline emphasis"
+    }
+  ],
   "components": {
     "button": {
-      "description": "Two primary button styles: a filled coral rectangular CTA with white text and minimal radius, and an outlined white button with navy border/text; cookie banner buttons use pill-shaped outlined styles with blue-violet borders."
+      "description": "Rectangular CTA buttons with medium padding; primary uses solid orange-red fill, secondary uses light surface with navy outline, while cookie buttons use pill shapes with blue outlines."
     },
     "card": {
-      "description": "Cookie consent modal styled as a large white floating card with soft shadow, rounded corners, generous padding, and horizontally aligned actions."
+      "description": "Cookie consent card is a rounded white panel with subtle gray border, soft shadow, and horizontally arranged actions."
     },
     "navigation": {
-      "description": "Top horizontal navigation bar on white with left-aligned wordmark, centered nav links, and right-aligned utility links plus standout demo CTA."
+      "description": "Top navigation bar on a white strip with left-aligned wordmark, centered nav links, and right-aligned auth links plus standout demo CTA."
     }
   },
-  "layout": "top navigation + centered promo badge + oversized hero headline + supporting copy + dual CTA row + floating cookie consent modal",
+  "layout": "top navigation + centered hero stack with announcement pill and dual CTAs + bottom cookie consent modal + decorative pastel grid accents near footer edges",
   "visualElements": [
     {
       "name": "brand logo",
@@ -102,39 +140,39 @@
       "zoom": 3.5
     },
     {
-      "name": "navigation bar",
+      "name": "top navigation",
       "col": 2,
       "row": 1,
-      "zoom": 3
-    },
-    {
-      "name": "promo badge",
-      "col": 2,
-      "row": 1,
-      "zoom": 4
+      "zoom": 2.8
     },
     {
       "name": "hero headline",
       "col": 2,
-      "row": 2,
-      "zoom": 2
+      "row": 1,
+      "zoom": 2.2
     },
     {
-      "name": "primary cta",
+      "name": "cta buttons",
       "col": 2,
       "row": 2,
-      "zoom": 4
+      "zoom": 3.8
     },
     {
       "name": "cookie modal",
       "col": 2,
       "row": 3,
-      "zoom": 2.2
+      "zoom": 2.4
+    },
+    {
+      "name": "pastel grid accent",
+      "col": 1,
+      "row": 3,
+      "zoom": 3.2
     }
   ],
   "imagePath": "/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png",
   "imageName": "auto-ai-2026-05-16-3-jasper-ai.png",
-  "capturedAt": "2026-05-16T10:07:51.971Z",
+  "capturedAt": "2026-05-20T00:14:13.686Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -143,29 +181,29 @@
 
 ## Style Spec (Markdown)
 
-**Industry**: ai
+**Industry**: generic
 **Image**: auto-ai-2026-05-16-3-jasper-ai.png
-**Vibe**: minimal, editorial, premium, airy, modern
+**Vibe**: minimal, editorial, clean, confident, modern
 
-**Summary**: A polished AI marketing homepage with a light editorial feel, combining oversized serif hero typography, crisp sans-serif navigation, and bold coral CTAs against a soft gray background. The design feels premium and spacious, with restrained color usage and subtle rounded surfaces.
+**Summary**: A clean, editorial-style SaaS landing page with generous whitespace, oversized serif hero typography, and sharp high-contrast CTAs. The design mixes soft neutral surfaces with deep navy text, vivid orange action accents, and a playful pastel grid motif near the footer.
 
 ### Palette
-- Primary: `#11185c` — deep navy
-- Secondary: `#ff4a2f` — bright coral
-- Accent: `#dff7c8` — pale green
-- Background: `#f4f4f4` — soft gray
-- Surface: `#ffffff` — white
-- Text: `#11185c` — deep navy text
-- Text muted: `#4c4f75` — muted indigo gray
-- Border: `#cfcfd6` — light gray border
+- Primary: `#0c1459` — deep navy
+- Secondary: `#ff4b2b` — bright orange-red
+- Accent: `#d8efc3` — soft lime tag
+- Background: `#f2f2f2` — light gray page background
+- Surface: `#ffffff` — white cards and header
+- Text: `#0c1459` — primary navy text
+- Text muted: `#3f456f` — muted indigo-gray
+- Border: `#cfcfcf` — soft gray border
 
 ### Typography
-- Heading font: Georgia (weight 500)
+- Heading font: Canela (weight 500)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized serif hero headline
-- Note: clean sans-serif navigation and body copy
-- Note: high contrast display typography
+- Note: oversized serif hero heading
+- Note: compact sans-serif navigation
+- Note: centered marketing layout
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
@@ -174,22 +212,35 @@
   - `0 1px 2px rgba(0,0,0,0.04)`
   - `0 8px 24px rgba(0,0,0,0.10)`
 
+### Surface Effects
+- **soft card elevation**: cookie consent modal uses a white surface with subtle border and low shadow for gentle separation from the page
+  - `background: #ffffff`
+  - `border: 1px solid rgba(0,0,0,0.08)`
+  - `box-shadow: 0 8px 24px rgba(0,0,0,0.10)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid orange-red fill with white text and crisp rectangular shape
+- **button.primary.hover**: slightly darker orange-red fill with minimal transition and preserved high contrast
+- **button.primary.focus**: thin navy or blue focus ring outside button bounds
+- **button.secondary.default**: light background with navy border and navy text
+- **nav.link.hover**: text remains navy with subtle opacity shift or underline emphasis
+
 ### Components
-- **button**: Two primary button styles: a filled coral rectangular CTA with white text and minimal radius, and an outlined white button with navy border/text; cookie banner buttons use pill-shaped outlined styles with blue-violet borders.
-- **card**: Cookie consent modal styled as a large white floating card with soft shadow, rounded corners, generous padding, and horizontally aligned actions.
-- **navigation**: Top horizontal navigation bar on white with left-aligned wordmark, centered nav links, and right-aligned utility links plus standout demo CTA.
+- **button**: Rectangular CTA buttons with medium padding; primary uses solid orange-red fill, secondary uses light surface with navy outline, while cookie buttons use pill shapes with blue outlines.
+- **card**: Cookie consent card is a rounded white panel with subtle gray border, soft shadow, and horizontally arranged actions.
+- **navigation**: Top navigation bar on a white strip with left-aligned wordmark, centered nav links, and right-aligned auth links plus standout demo CTA.
 
 ### Layout
-top navigation + centered promo badge + oversized hero headline + supporting copy + dual CTA row + floating cookie consent modal
+top navigation + centered hero stack with announcement pill and dual CTAs + bottom cookie consent modal + decorative pastel grid accents near footer edges
 
 ### UI Elements
 Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 - **brand logo** — col 1, row 1, zoom 3.5×
-- **navigation bar** — col 2, row 1, zoom 3×
-- **promo badge** — col 2, row 1, zoom 4×
-- **hero headline** — col 2, row 2, zoom 2×
-- **primary cta** — col 2, row 2, zoom 4×
-- **cookie modal** — col 2, row 3, zoom 2.2×
+- **top navigation** — col 2, row 1, zoom 2.8×
+- **hero headline** — col 2, row 1, zoom 2.2×
+- **cta buttons** — col 2, row 2, zoom 3.8×
+- **cookie modal** — col 2, row 3, zoom 2.4×
+- **pastel grid accent** — col 1, row 3, zoom 3.2×
 
 ## Style Spec (HTML)
 
@@ -202,21 +253,21 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 <title>Style Spec — auto-ai-2026-05-16-3-jasper-ai.png</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Georgia:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Canela:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #11185c;
-    --color-secondary:  #ff4a2f;
-    --color-accent:     #dff7c8;
-    --color-background: #f4f4f4;
+    --color-primary:    #0c1459;
+    --color-secondary:  #ff4b2b;
+    --color-accent:     #d8efc3;
+    --color-background: #f2f2f2;
     --color-surface:    #ffffff;
-    --color-text:       #11185c;
-    --color-text-muted: #4c4f75;
-    --color-border:     #cfcfd6;
+    --color-text:       #0c1459;
+    --color-text-muted: #3f456f;
+    --color-border:     #cfcfcf;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
-    --font-heading: 'Georgia', system-ui, sans-serif;
+    --font-heading: 'Canela', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
     --font-mono:    'JetBrains Mono', ui-monospace, monospace;
     --weight-heading: 500;
@@ -299,6 +350,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -318,11 +390,11 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="header">
     <img src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png" alt="auto-ai-2026-05-16-3-jasper-ai.png">
     <div class="header__body">
-      <div class="kicker">ai</div>
+      <div class="kicker">generic</div>
       <h1>auto-ai-2026-05-16-3-jasper-ai.png</h1>
-      <p class="muted">A polished AI marketing homepage with a light editorial feel, combining oversized serif hero typography, crisp sans-serif navigation, and bold coral CTAs against a soft gray background. The design feels premium and spacious, with restrained color usage and subtle rounded surfaces.</p>
+      <p class="muted">A clean, editorial-style SaaS landing page with generous whitespace, oversized serif hero typography, and sharp high-contrast CTAs. The design mixes soft neutral surfaces with deep navy text, vivid orange action accents, and a playful pastel grid motif near the footer.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">editorial</span><span class="tag">premium</span><span class="tag">airy</span><span class="tag">modern</span>
+        <span class="tag">minimal</span><span class="tag">editorial</span><span class="tag">clean</span><span class="tag">confident</span><span class="tag">modern</span>
       </div>
     </div>
   </div>
@@ -331,38 +403,38 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#11185c"></div>
+      <div class="swatch__chip" style="background:#0c1459"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#11185c</div>
+        <div class="swatch__hex">#0c1459</div>
         <div class="swatch__name">deep navy</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ff4a2f"></div>
+      <div class="swatch__chip" style="background:#ff4b2b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#ff4a2f</div>
-        <div class="swatch__name">bright coral</div>
+        <div class="swatch__hex">#ff4b2b</div>
+        <div class="swatch__name">bright orange-red</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#dff7c8"></div>
+      <div class="swatch__chip" style="background:#d8efc3"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#dff7c8</div>
-        <div class="swatch__name">pale green</div>
+        <div class="swatch__hex">#d8efc3</div>
+        <div class="swatch__name">soft lime tag</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f4f4f4"></div>
+      <div class="swatch__chip" style="background:#f2f2f2"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f4f4f4</div>
-        <div class="swatch__name">soft gray</div>
+        <div class="swatch__hex">#f2f2f2</div>
+        <div class="swatch__name">light gray page background</div>
       </div>
     </div>
 
@@ -371,34 +443,34 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
         <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white</div>
+        <div class="swatch__name">white cards and header</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#11185c"></div>
+      <div class="swatch__chip" style="background:#0c1459"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#11185c</div>
-        <div class="swatch__name">deep navy text</div>
+        <div class="swatch__hex">#0c1459</div>
+        <div class="swatch__name">primary navy text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#4c4f75"></div>
+      <div class="swatch__chip" style="background:#3f456f"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#4c4f75</div>
-        <div class="swatch__name">muted indigo gray</div>
+        <div class="swatch__hex">#3f456f</div>
+        <div class="swatch__name">muted indigo-gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#cfcfd6"></div>
+      <div class="swatch__chip" style="background:#cfcfcf"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#cfcfd6</div>
-        <div class="swatch__name">light gray border</div>
+        <div class="swatch__hex">#cfcfcf</div>
+        <div class="swatch__name">soft gray border</div>
       </div>
     </div></div>
   </div>
@@ -407,8 +479,8 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div>
       <h2>Typography</h2>
       <div class="type-stack">
-        <h3 style="font-size: 2rem;">Heading — Georgia 500</h3>
-        <h3 style="font-size: 1.4rem;">Subhead — Georgia 500</h3>
+        <h3 style="font-size: 2rem;">Heading — Canela 500</h3>
+        <h3 style="font-size: 1.4rem;">Subhead — Canela 500</h3>
         <p style="font-size: 1rem; margin: 0;">Body — Inter 400 at 16px</p>
         <p class="muted" style="font-size: 0.85rem; margin: 0;">Caption / muted text uses --color-text-muted.</p>
         
@@ -454,6 +526,59 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 
   <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.10)">0 8px 24px rgba(0,0,0,0.10)</div></div>
 
+  
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft card elevation</div>
+        <div class="signal-meta">cookie consent modal uses a white surface with subtle border and low shadow for gentle separation from the page</div>
+        <div class="signal-code">background: #ffffff<br/>border: 1px solid rgba(0,0,0,0.08)<br/>box-shadow: 0 8px 24px rgba(0,0,0,0.10)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid orange-red fill with white text and crisp rectangular shape</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker orange-red fill with minimal transition and preserved high contrast</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin navy or blue focus ring outside button bounds</td>
+      </tr>
+      <tr>
+        <td>button.secondary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>light background with navy border and navy text</td>
+      </tr>
+      <tr>
+        <td>nav.link</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>text remains navy with subtle opacity shift or underline emphasis</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="section">
     <h2>UI Element Details</h2>
     <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
@@ -473,30 +598,19 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
-            alt="navigation bar"
-            style="--ox:50%;--oy:0%;--zoom:3;"
+            alt="top navigation"
+            style="--ox:50%;--oy:0%;--zoom:2.8;"
             draggable="false"
           />
         </div>
-        <figcaption>navigation bar</figcaption>
-      </figure>
-      <figure class="crop-tile">
-        <div class="crop-tile__viewport">
-          <img
-            src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
-            alt="promo badge"
-            style="--ox:50%;--oy:0%;--zoom:4;"
-            draggable="false"
-          />
-        </div>
-        <figcaption>promo badge</figcaption>
+        <figcaption>top navigation</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
             alt="hero headline"
-            style="--ox:50%;--oy:50%;--zoom:2;"
+            style="--ox:50%;--oy:0%;--zoom:2.2;"
             draggable="false"
           />
         </div>
@@ -506,23 +620,34 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
-            alt="primary cta"
-            style="--ox:50%;--oy:50%;--zoom:4;"
+            alt="cta buttons"
+            style="--ox:50%;--oy:50%;--zoom:3.8;"
             draggable="false"
           />
         </div>
-        <figcaption>primary cta</figcaption>
+        <figcaption>cta buttons</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
             alt="cookie modal"
-            style="--ox:50%;--oy:100%;--zoom:2.2;"
+            style="--ox:50%;--oy:100%;--zoom:2.4;"
             draggable="false"
           />
         </div>
         <figcaption>cookie modal</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-ai-2026-05-16-3-jasper-ai.png"
+            alt="pastel grid accent"
+            style="--ox:0%;--oy:100%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>pastel grid accent</figcaption>
       </figure></div>
   </div>
 
@@ -546,18 +671,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Two primary button styles: a filled coral rectangular CTA with white text and minimal radius, and an outlined white button with navy border/text; cookie banner buttons use pill-shaped outlined styles with blue-violet borders.</div>
+        <div class="component__desc">Rectangular CTA buttons with medium padding; primary uses solid orange-red fill, secondary uses light surface with navy outline, while cookie buttons use pill shapes with blue outlines.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Cookie consent modal styled as a large white floating card with soft shadow, rounded corners, generous padding, and horizontally aligned actions.</div>
+        <div class="component__desc">Cookie consent card is a rounded white panel with subtle gray border, soft shadow, and horizontally arranged actions.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top horizontal navigation bar on white with left-aligned wordmark, centered nav links, and right-aligned utility links plus standout demo CTA.</div>
+        <div class="component__desc">Top navigation bar on a white strip with left-aligned wordmark, centered nav links, and right-aligned auth links plus standout demo CTA.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered promo badge + oversized hero headline + supporting copy + dual CTA row + floating cookie consent modal</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered hero stack with announcement pill and dual CTAs + bottom cookie consent modal + decorative pastel grid accents near footer edges</p></div>
 </body>
 </html>
 ```

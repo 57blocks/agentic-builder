@@ -1,62 +1,62 @@
 ---
-{"id":"DK-img-auto-ai-2026-05-16-2-claude-ai","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Claude AI (ai)","tags":["industry:ai","source:trend-capture","image:auto-ai-2026-05-16-2-claude-ai.png","site:claude.ai","url:https://claude.ai","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778926042687,"updatedAt":1778926042687,"schemaVersion":1}
+{"id":"DK-img-auto-ai-2026-05-16-2-claude-ai","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-ai-2026-05-16-2-claude-ai.png","tags":["industry:ai","source:vision-distill","image:auto-ai-2026-05-16-2-claude-ai.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778926042687,"updatedAt":1779236031795,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "ai",
-  "summary": "A refined AI product landing page with a warm neutral palette, editorial-style hero typography, and soft bordered interface panels. The design balances premium minimalism with approachable productivity UI elements and subtle accent color pops.",
+  "summary": "A calm, editorial landing page with generous whitespace, soft neutrals, and restrained product UI framing. The aesthetic balances premium serif typography with minimal form controls and subtle utility-card surfaces.",
   "vibe": [
     "minimal",
     "editorial",
-    "warm",
+    "soft",
     "premium",
-    "calm"
+    "clean"
   ],
   "palette": {
     "primary": {
-      "hex": "#d16d41",
-      "label": "burnt orange"
+      "hex": "#d06f47",
+      "label": "warm brand orange"
     },
     "secondary": {
-      "hex": "#2d74da",
+      "hex": "#1a73e8",
       "label": "google blue"
     },
     "accent": {
-      "hex": "#171717",
-      "label": "charcoal black"
+      "hex": "#111111",
+      "label": "near-black CTA"
     },
     "background": {
       "hex": "#f7f5f2",
-      "label": "warm ivory"
+      "label": "warm off-white"
     },
     "surface": {
-      "hex": "#f9f7f4",
-      "label": "soft cream"
+      "hex": "#fcfbf9",
+      "label": "light panel"
     },
     "text": {
-      "hex": "#1d1c1a",
-      "label": "near-black"
+      "hex": "#1f1a17",
+      "label": "deep charcoal"
     },
     "textMuted": {
-      "hex": "#7c7973",
+      "hex": "#6f6963",
       "label": "muted taupe gray"
     },
     "border": {
-      "hex": "#d9d2c8",
-      "label": "warm light beige"
+      "hex": "#d9d3cb",
+      "label": "soft warm border"
     }
   },
   "typography": {
     "headingFont": "Georgia",
     "bodyFont": "Inter",
-    "headingWeight": 500,
+    "headingWeight": 400,
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "large editorial serif hero heading",
-      "clean sans-serif UI text",
-      "high contrast oversized headline"
+      "large serif hero headline",
+      "lightweight sans-serif UI copy",
+      "mixed editorial and product typography"
     ]
   },
   "spacing": {
@@ -79,30 +79,78 @@
     "pillPx": 999
   },
   "shadows": [
-    "0 1px 2px rgba(0,0,0,0.04)",
-    "0 8px 24px rgba(0,0,0,0.10)"
+    "0 1px 2px rgba(31,26,23,0.04)",
+    "0 4px 16px rgba(31,26,23,0.08)"
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft card elevation",
+      "description": "panels use warm white fills, faint outlines, and subtle shadow for a low-contrast premium look",
+      "cssHints": [
+        "background: #fcfbf9",
+        "border: 1px solid #d9d3cb",
+        "box-shadow: 0 4px 16px rgba(31,26,23,0.08)"
+      ]
+    },
+    {
+      "name": "grid canvas",
+      "description": "the right-side product preview sits on a faint square grid over the page background",
+      "cssHints": [
+        "background-color: #f7f5f2",
+        "background-image: linear-gradient(rgba(31,26,23,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(31,26,23,0.06) 1px, transparent 1px)",
+        "background-size: 31px 31px"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid near-black fill with white text and rounded medium corners"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly lighter black fill with stronger shadow and preserved white text"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin dark focus ring or outer outline around the button"
+    },
+    {
+      "component": "input",
+      "state": "focus",
+      "treatment": "light surface field gains darker border for subtle emphasis"
+    }
   ],
   "components": {
     "button": {
-      "description": "Rounded rectangular buttons with generous horizontal padding; primary actions use solid charcoal or burnt orange fills with white text, while secondary actions are white with thin warm-gray borders."
+      "description": "Buttons are simple rounded rectangles with thin borders or solid fills; primary actions use near-black or warm orange fills with white text, while secondary actions are light surfaces with muted borders."
     },
     "card": {
-      "description": "Large soft-white cards with subtle warm borders, large corner radii, and minimal shadow; used for sign-in forms and floating modal surfaces."
+      "description": "Cards are large, softly rounded white panels with warm gray outlines, light shadows, and generous internal padding."
     },
     "input": {
-      "description": "Single-line inputs with white fill, light warm-gray stroke, medium corner radius, and muted placeholder text."
+      "description": "Inputs are full-width rounded fields with pale fill, thin warm-gray border, muted placeholder text, and low visual noise."
     },
     "navigation": {
-      "description": "Top navigation with a left-aligned wordmark, centered menu links with small chevrons, and a clean low-chrome layout on a light background."
+      "description": "Top navigation is a minimal horizontal bar with small sans-serif links, subtle dropdown chevrons, and a left-aligned wordmark."
     }
   },
-  "layout": "top navigation + left hero and sign-in card + right product preview canvas with floating auth modal",
+  "layout": "top navigation with left editorial hero and sign-in form, paired with a right-side product preview canvas and floating auth modal",
   "visualElements": [
     {
-      "name": "brand logo",
+      "name": "brand wordmark",
       "col": 1,
       "row": 1,
-      "zoom": 3.5
+      "zoom": 4
+    },
+    {
+      "name": "top navigation",
+      "col": 2,
+      "row": 1,
+      "zoom": 3
     },
     {
       "name": "hero headline",
@@ -117,27 +165,21 @@
       "zoom": 2.2
     },
     {
-      "name": "top navigation",
-      "col": 2,
-      "row": 1,
-      "zoom": 3
-    },
-    {
-      "name": "floating auth modal",
-      "col": 3,
-      "row": 1,
-      "zoom": 2.2
-    },
-    {
-      "name": "workspace panel",
+      "name": "product canvas",
       "col": 3,
       "row": 2,
-      "zoom": 2.3
+      "zoom": 2.1
+    },
+    {
+      "name": "google modal",
+      "col": 3,
+      "row": 1,
+      "zoom": 2.8
     }
   ],
   "imagePath": "/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png",
   "imageName": "auto-ai-2026-05-16-2-claude-ai.png",
-  "capturedAt": "2026-05-16T10:07:22.686Z",
+  "capturedAt": "2026-05-20T00:13:51.794Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -148,52 +190,68 @@
 
 **Industry**: ai
 **Image**: auto-ai-2026-05-16-2-claude-ai.png
-**Vibe**: minimal, editorial, warm, premium, calm
+**Vibe**: minimal, editorial, soft, premium, clean
 
-**Summary**: A refined AI product landing page with a warm neutral palette, editorial-style hero typography, and soft bordered interface panels. The design balances premium minimalism with approachable productivity UI elements and subtle accent color pops.
+**Summary**: A calm, editorial landing page with generous whitespace, soft neutrals, and restrained product UI framing. The aesthetic balances premium serif typography with minimal form controls and subtle utility-card surfaces.
 
 ### Palette
-- Primary: `#d16d41` — burnt orange
-- Secondary: `#2d74da` — google blue
-- Accent: `#171717` — charcoal black
-- Background: `#f7f5f2` — warm ivory
-- Surface: `#f9f7f4` — soft cream
-- Text: `#1d1c1a` — near-black
-- Text muted: `#7c7973` — muted taupe gray
-- Border: `#d9d2c8` — warm light beige
+- Primary: `#d06f47` — warm brand orange
+- Secondary: `#1a73e8` — google blue
+- Accent: `#111111` — near-black CTA
+- Background: `#f7f5f2` — warm off-white
+- Surface: `#fcfbf9` — light panel
+- Text: `#1f1a17` — deep charcoal
+- Text muted: `#6f6963` — muted taupe gray
+- Border: `#d9d3cb` — soft warm border
 
 ### Typography
-- Heading font: Georgia (weight 500)
+- Heading font: Georgia (weight 400)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: large editorial serif hero heading
-- Note: clean sans-serif UI text
-- Note: high contrast oversized headline
+- Note: large serif hero headline
+- Note: lightweight sans-serif UI copy
+- Note: mixed editorial and product typography
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
 - Radius: sm 6px, md 12px, lg 24px, pill 999px
 - Shadows: 2 variant(s)
-  - `0 1px 2px rgba(0,0,0,0.04)`
-  - `0 8px 24px rgba(0,0,0,0.10)`
+  - `0 1px 2px rgba(31,26,23,0.04)`
+  - `0 4px 16px rgba(31,26,23,0.08)`
+
+### Surface Effects
+- **soft card elevation**: panels use warm white fills, faint outlines, and subtle shadow for a low-contrast premium look
+  - `background: #fcfbf9`
+  - `border: 1px solid #d9d3cb`
+  - `box-shadow: 0 4px 16px rgba(31,26,23,0.08)`
+- **grid canvas**: the right-side product preview sits on a faint square grid over the page background
+  - `background-color: #f7f5f2`
+  - `background-image: linear-gradient(rgba(31,26,23,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(31,26,23,0.06) 1px, transparent 1px)`
+  - `background-size: 31px 31px`
+
+### Interaction State Tokens
+- **button.primary.default**: solid near-black fill with white text and rounded medium corners
+- **button.primary.hover**: slightly lighter black fill with stronger shadow and preserved white text
+- **button.primary.focus**: thin dark focus ring or outer outline around the button
+- **input.focus**: light surface field gains darker border for subtle emphasis
 
 ### Components
-- **button**: Rounded rectangular buttons with generous horizontal padding; primary actions use solid charcoal or burnt orange fills with white text, while secondary actions are white with thin warm-gray borders.
-- **card**: Large soft-white cards with subtle warm borders, large corner radii, and minimal shadow; used for sign-in forms and floating modal surfaces.
-- **input**: Single-line inputs with white fill, light warm-gray stroke, medium corner radius, and muted placeholder text.
-- **navigation**: Top navigation with a left-aligned wordmark, centered menu links with small chevrons, and a clean low-chrome layout on a light background.
+- **button**: Buttons are simple rounded rectangles with thin borders or solid fills; primary actions use near-black or warm orange fills with white text, while secondary actions are light surfaces with muted borders.
+- **card**: Cards are large, softly rounded white panels with warm gray outlines, light shadows, and generous internal padding.
+- **input**: Inputs are full-width rounded fields with pale fill, thin warm-gray border, muted placeholder text, and low visual noise.
+- **navigation**: Top navigation is a minimal horizontal bar with small sans-serif links, subtle dropdown chevrons, and a left-aligned wordmark.
 
 ### Layout
-top navigation + left hero and sign-in card + right product preview canvas with floating auth modal
+top navigation with left editorial hero and sign-in form, paired with a right-side product preview canvas and floating auth modal
 
 ### UI Elements
 Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
-- **brand logo** — col 1, row 1, zoom 3.5×
+- **brand wordmark** — col 1, row 1, zoom 4×
+- **top navigation** — col 2, row 1, zoom 3×
 - **hero headline** — col 1, row 1, zoom 2.4×
 - **sign-in card** — col 1, row 2, zoom 2.2×
-- **top navigation** — col 2, row 1, zoom 3×
-- **floating auth modal** — col 3, row 1, zoom 2.2×
-- **workspace panel** — col 3, row 2, zoom 2.3×
+- **product canvas** — col 3, row 2, zoom 2.1×
+- **google modal** — col 3, row 1, zoom 2.8×
 
 ## Style Spec (HTML)
 
@@ -209,21 +267,21 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #d16d41;
-    --color-secondary:  #2d74da;
-    --color-accent:     #171717;
+    --color-primary:    #d06f47;
+    --color-secondary:  #1a73e8;
+    --color-accent:     #111111;
     --color-background: #f7f5f2;
-    --color-surface:    #f9f7f4;
-    --color-text:       #1d1c1a;
-    --color-text-muted: #7c7973;
-    --color-border:     #d9d2c8;
+    --color-surface:    #fcfbf9;
+    --color-text:       #1f1a17;
+    --color-text-muted: #6f6963;
+    --color-border:     #d9d3cb;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
     --font-heading: 'Georgia', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
     --font-mono:    'JetBrains Mono', ui-monospace, monospace;
-    --weight-heading: 500;
+    --weight-heading: 400;
     --weight-body:    400;
     --size-base:      16px;
     --radius-sm: 6px;
@@ -303,6 +361,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -324,9 +403,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">ai</div>
       <h1>auto-ai-2026-05-16-2-claude-ai.png</h1>
-      <p class="muted">A refined AI product landing page with a warm neutral palette, editorial-style hero typography, and soft bordered interface panels. The design balances premium minimalism with approachable productivity UI elements and subtle accent color pops.</p>
+      <p class="muted">A calm, editorial landing page with generous whitespace, soft neutrals, and restrained product UI framing. The aesthetic balances premium serif typography with minimal form controls and subtle utility-card surfaces.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">editorial</span><span class="tag">warm</span><span class="tag">premium</span><span class="tag">calm</span>
+        <span class="tag">minimal</span><span class="tag">editorial</span><span class="tag">soft</span><span class="tag">premium</span><span class="tag">clean</span>
       </div>
     </div>
   </div>
@@ -335,29 +414,29 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#d16d41"></div>
+      <div class="swatch__chip" style="background:#d06f47"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#d16d41</div>
-        <div class="swatch__name">burnt orange</div>
+        <div class="swatch__hex">#d06f47</div>
+        <div class="swatch__name">warm brand orange</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#2d74da"></div>
+      <div class="swatch__chip" style="background:#1a73e8"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#2d74da</div>
+        <div class="swatch__hex">#1a73e8</div>
         <div class="swatch__name">google blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#171717"></div>
+      <div class="swatch__chip" style="background:#111111"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#171717</div>
-        <div class="swatch__name">charcoal black</div>
+        <div class="swatch__hex">#111111</div>
+        <div class="swatch__name">near-black CTA</div>
       </div>
     </div>
 
@@ -366,43 +445,43 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
         <div class="swatch__hex">#f7f5f2</div>
-        <div class="swatch__name">warm ivory</div>
+        <div class="swatch__name">warm off-white</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f9f7f4"></div>
+      <div class="swatch__chip" style="background:#fcfbf9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#f9f7f4</div>
-        <div class="swatch__name">soft cream</div>
+        <div class="swatch__hex">#fcfbf9</div>
+        <div class="swatch__name">light panel</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1d1c1a"></div>
+      <div class="swatch__chip" style="background:#1f1a17"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#1d1c1a</div>
-        <div class="swatch__name">near-black</div>
+        <div class="swatch__hex">#1f1a17</div>
+        <div class="swatch__name">deep charcoal</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#7c7973"></div>
+      <div class="swatch__chip" style="background:#6f6963"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#7c7973</div>
+        <div class="swatch__hex">#6f6963</div>
         <div class="swatch__name">muted taupe gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#d9d2c8"></div>
+      <div class="swatch__chip" style="background:#d9d3cb"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#d9d2c8</div>
-        <div class="swatch__name">warm light beige</div>
+        <div class="swatch__hex">#d9d3cb</div>
+        <div class="swatch__name">soft warm border</div>
       </div>
     </div></div>
   </div>
@@ -411,8 +490,8 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div>
       <h2>Typography</h2>
       <div class="type-stack">
-        <h3 style="font-size: 2rem;">Heading — Georgia 500</h3>
-        <h3 style="font-size: 1.4rem;">Subhead — Georgia 500</h3>
+        <h3 style="font-size: 2rem;">Heading — Georgia 400</h3>
+        <h3 style="font-size: 1.4rem;">Subhead — Georgia 400</h3>
         <p style="font-size: 1rem; margin: 0;">Body — Inter 400 at 16px</p>
         <p class="muted" style="font-size: 0.85rem; margin: 0;">Caption / muted text uses --color-text-muted.</p>
         
@@ -456,7 +535,60 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.10)">0 8px 24px rgba(0,0,0,0.10)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(31,26,23,0.04)">0 1px 2px rgba(31,26,23,0.04)</div><div class="shadow-card" style="box-shadow:0 4px 16px rgba(31,26,23,0.08)">0 4px 16px rgba(31,26,23,0.08)</div></div>
+
+  
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft card elevation</div>
+        <div class="signal-meta">panels use warm white fills, faint outlines, and subtle shadow for a low-contrast premium look</div>
+        <div class="signal-code">background: #fcfbf9<br/>border: 1px solid #d9d3cb<br/>box-shadow: 0 4px 16px rgba(31,26,23,0.08)</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-title">grid canvas</div>
+        <div class="signal-meta">the right-side product preview sits on a faint square grid over the page background</div>
+        <div class="signal-code">background-color: #f7f5f2<br/>background-image: linear-gradient(rgba(31,26,23,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(31,26,23,0.06) 1px, transparent 1px)<br/>background-size: 31px 31px</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid near-black fill with white text and rounded medium corners</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly lighter black fill with stronger shadow and preserved white text</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin dark focus ring or outer outline around the button</td>
+      </tr>
+      <tr>
+        <td>input</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>light surface field gains darker border for subtle emphasis</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="section">
     <h2>UI Element Details</h2>
@@ -466,12 +598,23 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png"
-            alt="brand logo"
-            style="--ox:0%;--oy:0%;--zoom:3.5;"
+            alt="brand wordmark"
+            style="--ox:0%;--oy:0%;--zoom:4;"
             draggable="false"
           />
         </div>
-        <figcaption>brand logo</figcaption>
+        <figcaption>brand wordmark</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png"
+            alt="top navigation"
+            style="--ox:50%;--oy:0%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>top navigation</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
@@ -499,34 +642,23 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png"
-            alt="top navigation"
-            style="--ox:50%;--oy:0%;--zoom:3;"
+            alt="product canvas"
+            style="--ox:100%;--oy:50%;--zoom:2.1;"
             draggable="false"
           />
         </div>
-        <figcaption>top navigation</figcaption>
+        <figcaption>product canvas</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png"
-            alt="floating auth modal"
-            style="--ox:100%;--oy:0%;--zoom:2.2;"
+            alt="google modal"
+            style="--ox:100%;--oy:0%;--zoom:2.8;"
             draggable="false"
           />
         </div>
-        <figcaption>floating auth modal</figcaption>
-      </figure>
-      <figure class="crop-tile">
-        <div class="crop-tile__viewport">
-          <img
-            src="/knowledge-refs/auto-ai-2026-05-16-2-claude-ai.png"
-            alt="workspace panel"
-            style="--ox:100%;--oy:50%;--zoom:2.3;"
-            draggable="false"
-          />
-        </div>
-        <figcaption>workspace panel</figcaption>
+        <figcaption>google modal</figcaption>
       </figure></div>
   </div>
 
@@ -550,22 +682,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Rounded rectangular buttons with generous horizontal padding; primary actions use solid charcoal or burnt orange fills with white text, while secondary actions are white with thin warm-gray borders.</div>
+        <div class="component__desc">Buttons are simple rounded rectangles with thin borders or solid fills; primary actions use near-black or warm orange fills with white text, while secondary actions are light surfaces with muted borders.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Large soft-white cards with subtle warm borders, large corner radii, and minimal shadow; used for sign-in forms and floating modal surfaces.</div>
+        <div class="component__desc">Cards are large, softly rounded white panels with warm gray outlines, light shadows, and generous internal padding.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Single-line inputs with white fill, light warm-gray stroke, medium corner radius, and muted placeholder text.</div>
+        <div class="component__desc">Inputs are full-width rounded fields with pale fill, thin warm-gray border, muted placeholder text, and low visual noise.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top navigation with a left-aligned wordmark, centered menu links with small chevrons, and a clean low-chrome layout on a light background.</div>
+        <div class="component__desc">Top navigation is a minimal horizontal bar with small sans-serif links, subtle dropdown chevrons, and a left-aligned wordmark.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + left hero and sign-in card + right product preview canvas with floating auth modal</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation with left editorial hero and sign-in form, paired with a right-side product preview canvas and floating auth modal</p></div>
 </body>
 </html>
 ```

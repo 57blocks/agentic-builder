@@ -1,46 +1,50 @@
 ---
-{"id":"DK-img-ai-7-playex","layer":"L1","kind":"design-knowledge","title":"Style Spec — ai-7-playex.png","tags":["industry:ai","source:vision-distill","image:ai-7-playex.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922785924,"updatedAt":1778922785924,"schemaVersion":1}
+{"id":"DK-img-ai-7-playex","layer":"L1","kind":"design-knowledge","title":"Style Spec — ai-7-playex.png","tags":["industry:ai","source:vision-distill","image:ai-7-playex.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922785924,"updatedAt":1779235926957,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "ai",
-  "summary": "A clean AI landing page with a soft light monochrome palette, oversized geometric typography, and rounded UI elements. The design balances spacious hero messaging with subtle decorative cards and a simple conversion-focused CTA flow.",
+  "summary": "A clean AI landing page with a soft light-gray backdrop, oversized geometric typography, and restrained black-and-white UI. The design uses subtle gradients, rounded containers, and sparse accent imagery to feel polished, modern, and approachable.",
   "vibe": [
     "minimal",
+    "clean",
     "soft",
     "modern",
-    "editorial",
-    "clean"
+    "editorial"
   ],
   "palette": {
     "primary": {
       "hex": "#000000",
-      "label": "black"
+      "label": "jet black"
     },
     "secondary": {
-      "hex": "#f3f1ee",
-      "label": "warm light gray"
+      "hex": "#d9d9d9",
+      "label": "mist gray"
+    },
+    "accent": {
+      "hex": "#a23ad9",
+      "label": "thumbnail purple"
     },
     "background": {
-      "hex": "#f6f5f3",
-      "label": "off-white"
+      "hex": "#ececec",
+      "label": "soft light gray"
     },
     "surface": {
-      "hex": "#ffffff",
-      "label": "white"
+      "hex": "#f4f4f4",
+      "label": "frosted off-white"
     },
     "text": {
       "hex": "#111111",
       "label": "near-black"
     },
     "textMuted": {
-      "hex": "#8e8b88",
-      "label": "muted gray"
+      "hex": "#7b7b7b",
+      "label": "cool gray"
     },
     "border": {
-      "hex": "#dfdcd8",
-      "label": "light gray"
+      "hex": "#d6d6d6",
+      "label": "light gray border"
     }
   },
   "typography": {
@@ -51,8 +55,8 @@
     "baseSizePx": 16,
     "notes": [
       "oversized hero headline",
-      "rounded geometric sans styling",
-      "lightweight secondary copy"
+      "clean geometric sans",
+      "lightweight supporting copy"
     ]
   },
   "spacing": {
@@ -78,24 +82,133 @@
     "0 1px 2px rgba(0,0,0,0.06)",
     "0 8px 24px rgba(0,0,0,0.08)"
   ],
+  "gradients": [
+    {
+      "id": "page-bg",
+      "type": "linear",
+      "angleDeg": 180,
+      "stops": [
+        {
+          "color": "#f2f2f2",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#e7e7e7",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "main page background"
+    },
+    {
+      "id": "hero-arch",
+      "type": "radial",
+      "angleDeg": 0,
+      "stops": [
+        {
+          "color": "#d8d8d8",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#efefef",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "large circular hero illustration backdrop"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft glass panel",
+      "description": "cards and floating pills use pale translucent fills with thin borders and very soft shadows",
+      "cssHints": [
+        "background: rgba(255,255,255,0.55)",
+        "border: 1px solid rgba(0,0,0,0.10)",
+        "box-shadow: 0 8px 24px rgba(0,0,0,0.06)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid black pill button with white text and subtle shadow"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly lifted black fill with stronger shadow and preserved high contrast"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin light-gray outer ring around the dark pill shape"
+    },
+    {
+      "component": "input.url",
+      "state": "focus",
+      "treatment": "white field with darkened border and soft outer glow"
+    }
+  ],
   "components": {
     "button": {
-      "description": "Primary buttons are solid black with white text, medium height, pill-rounded corners, and minimal icon support; secondary nav buttons use white surfaces with thin gray borders."
+      "description": "Rounded pill buttons with black fill for primary actions, white text, medium weight, and compact horizontal padding; secondary buttons use light surfaces with subtle gray borders."
     },
     "card": {
-      "description": "Floating thumbnail/sample cards use white backgrounds, light gray borders, soft shadows, and rounded corners; decorative content sits around the hero for social proof and product examples."
+      "description": "Small floating promo and testimonial cards with off-white backgrounds, rounded corners, thin gray borders, and light drop shadows."
     },
     "input": {
-      "description": "Large centered URL input with white fill, subtle gray border, pill radius, and paired black generate button in an inline horizontal form."
+      "description": "Wide rounded URL input with white fill, light border, muted placeholder text, and paired CTA button aligned inline."
     },
     "navigation": {
-      "description": "Top navigation is a slim horizontal bar with small text links on the left, a centered logo badge, and utility actions on the right including theme icon, login, and primary CTA."
+      "description": "Minimal top navigation with small muted links, centered logo badge, and utility actions on the right including theme icon, login, and primary CTA."
     }
   },
-  "layout": "top navigation + centered hero + inline URL input CTA + floating preview cards + bottom KPI stats row",
+  "layout": "top navigation + centered hero headline and CTA + floating proof cards around a circular input module + bottom KPI strip",
+  "visualElements": [
+    {
+      "name": "top navigation",
+      "col": 2,
+      "row": 1,
+      "zoom": 3
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.2
+    },
+    {
+      "name": "primary CTA",
+      "col": 2,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "left promo card",
+      "col": 1,
+      "row": 2,
+      "zoom": 3.2
+    },
+    {
+      "name": "url input module",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.4
+    },
+    {
+      "name": "kpi stats strip",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.8
+    }
+  ],
   "imagePath": "/knowledge-refs/ai-7-playex.png",
   "imageName": "ai-7-playex.png",
-  "capturedAt": "2026-05-16T09:13:05.924Z",
+  "capturedAt": "2026-05-20T00:12:06.957Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -106,26 +219,27 @@
 
 **Industry**: ai
 **Image**: ai-7-playex.png
-**Vibe**: minimal, soft, modern, editorial, clean
+**Vibe**: minimal, clean, soft, modern, editorial
 
-**Summary**: A clean AI landing page with a soft light monochrome palette, oversized geometric typography, and rounded UI elements. The design balances spacious hero messaging with subtle decorative cards and a simple conversion-focused CTA flow.
+**Summary**: A clean AI landing page with a soft light-gray backdrop, oversized geometric typography, and restrained black-and-white UI. The design uses subtle gradients, rounded containers, and sparse accent imagery to feel polished, modern, and approachable.
 
 ### Palette
-- Primary: `#000000` — black
-- Secondary: `#f3f1ee` — warm light gray
-- Background: `#f6f5f3` — off-white
-- Surface: `#ffffff` — white
+- Primary: `#000000` — jet black
+- Secondary: `#d9d9d9` — mist gray
+- Accent: `#a23ad9` — thumbnail purple
+- Background: `#ececec` — soft light gray
+- Surface: `#f4f4f4` — frosted off-white
 - Text: `#111111` — near-black
-- Text muted: `#8e8b88` — muted gray
-- Border: `#dfdcd8` — light gray
+- Text muted: `#7b7b7b` — cool gray
+- Border: `#d6d6d6` — light gray border
 
 ### Typography
 - Heading font: Inter (weight 500)
 - Body font: Inter (weight 400)
 - Base size: 16px
 - Note: oversized hero headline
-- Note: rounded geometric sans styling
-- Note: lightweight secondary copy
+- Note: clean geometric sans
+- Note: lightweight supporting copy
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
@@ -134,14 +248,43 @@
   - `0 1px 2px rgba(0,0,0,0.06)`
   - `0 8px 24px rgba(0,0,0,0.08)`
 
+### Gradients
+- **page-bg** (linear, 180deg) — main page background
+  - stop 0%: `#f2f2f2`, alpha 1
+  - stop 100%: `#e7e7e7`, alpha 1
+- **hero-arch** (radial) — large circular hero illustration backdrop
+  - stop 0%: `#d8d8d8`, alpha 1
+  - stop 100%: `#efefef`, alpha 1
+
+### Surface Effects
+- **soft glass panel**: cards and floating pills use pale translucent fills with thin borders and very soft shadows
+  - `background: rgba(255,255,255,0.55)`
+  - `border: 1px solid rgba(0,0,0,0.10)`
+  - `box-shadow: 0 8px 24px rgba(0,0,0,0.06)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid black pill button with white text and subtle shadow
+- **button.primary.hover**: slightly lifted black fill with stronger shadow and preserved high contrast
+- **button.primary.focus**: thin light-gray outer ring around the dark pill shape
+- **input.url.focus**: white field with darkened border and soft outer glow
+
 ### Components
-- **button**: Primary buttons are solid black with white text, medium height, pill-rounded corners, and minimal icon support; secondary nav buttons use white surfaces with thin gray borders.
-- **card**: Floating thumbnail/sample cards use white backgrounds, light gray borders, soft shadows, and rounded corners; decorative content sits around the hero for social proof and product examples.
-- **input**: Large centered URL input with white fill, subtle gray border, pill radius, and paired black generate button in an inline horizontal form.
-- **navigation**: Top navigation is a slim horizontal bar with small text links on the left, a centered logo badge, and utility actions on the right including theme icon, login, and primary CTA.
+- **button**: Rounded pill buttons with black fill for primary actions, white text, medium weight, and compact horizontal padding; secondary buttons use light surfaces with subtle gray borders.
+- **card**: Small floating promo and testimonial cards with off-white backgrounds, rounded corners, thin gray borders, and light drop shadows.
+- **input**: Wide rounded URL input with white fill, light border, muted placeholder text, and paired CTA button aligned inline.
+- **navigation**: Minimal top navigation with small muted links, centered logo badge, and utility actions on the right including theme icon, login, and primary CTA.
 
 ### Layout
-top navigation + centered hero + inline URL input CTA + floating preview cards + bottom KPI stats row
+top navigation + centered hero headline and CTA + floating proof cards around a circular input module + bottom KPI strip
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **top navigation** — col 2, row 1, zoom 3×
+- **hero headline** — col 2, row 1, zoom 2.2×
+- **primary CTA** — col 2, row 2, zoom 4×
+- **left promo card** — col 1, row 2, zoom 3.2×
+- **url input module** — col 2, row 3, zoom 2.4×
+- **kpi stats strip** — col 2, row 3, zoom 2.8×
 
 ## Style Spec (HTML)
 
@@ -158,13 +301,13 @@ top navigation + centered hero + inline URL input CTA + floating preview cards +
 <style>
 :root {
     --color-primary:    #000000;
-    --color-secondary:  #f3f1ee;
-    --color-accent:     #000000;
-    --color-background: #f6f5f3;
-    --color-surface:    #ffffff;
+    --color-secondary:  #d9d9d9;
+    --color-accent:     #a23ad9;
+    --color-background: #ececec;
+    --color-surface:    #f4f4f4;
     --color-text:       #111111;
-    --color-text-muted: #8e8b88;
-    --color-border:     #dfdcd8;
+    --color-text-muted: #7b7b7b;
+    --color-border:     #d6d6d6;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
@@ -251,9 +394,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -262,9 +436,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">ai</div>
       <h1>ai-7-playex.png</h1>
-      <p class="muted">A clean AI landing page with a soft light monochrome palette, oversized geometric typography, and rounded UI elements. The design balances spacious hero messaging with subtle decorative cards and a simple conversion-focused CTA flow.</p>
+      <p class="muted">A clean AI landing page with a soft light-gray backdrop, oversized geometric typography, and restrained black-and-white UI. The design uses subtle gradients, rounded containers, and sparse accent imagery to feel polished, modern, and approachable.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">soft</span><span class="tag">modern</span><span class="tag">editorial</span><span class="tag">clean</span>
+        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">soft</span><span class="tag">modern</span><span class="tag">editorial</span>
       </div>
     </div>
   </div>
@@ -277,34 +451,43 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
         <div class="swatch__hex">#000000</div>
-        <div class="swatch__name">black</div>
+        <div class="swatch__name">jet black</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f3f1ee"></div>
+      <div class="swatch__chip" style="background:#d9d9d9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#f3f1ee</div>
-        <div class="swatch__name">warm light gray</div>
+        <div class="swatch__hex">#d9d9d9</div>
+        <div class="swatch__name">mist gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f6f5f3"></div>
+      <div class="swatch__chip" style="background:#a23ad9"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Accent</div>
+        <div class="swatch__hex">#a23ad9</div>
+        <div class="swatch__name">thumbnail purple</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#ececec"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f6f5f3</div>
-        <div class="swatch__name">off-white</div>
+        <div class="swatch__hex">#ececec</div>
+        <div class="swatch__name">soft light gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ffffff"></div>
+      <div class="swatch__chip" style="background:#f4f4f4"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white</div>
+        <div class="swatch__hex">#f4f4f4</div>
+        <div class="swatch__name">frosted off-white</div>
       </div>
     </div>
 
@@ -318,20 +501,20 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8e8b88"></div>
+      <div class="swatch__chip" style="background:#7b7b7b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#8e8b88</div>
-        <div class="swatch__name">muted gray</div>
+        <div class="swatch__hex">#7b7b7b</div>
+        <div class="swatch__name">cool gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#dfdcd8"></div>
+      <div class="swatch__chip" style="background:#d6d6d6"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#dfdcd8</div>
-        <div class="swatch__name">light gray</div>
+        <div class="swatch__hex">#d6d6d6</div>
+        <div class="swatch__name">light gray border</div>
       </div>
     </div></div>
   </div>
@@ -388,6 +571,141 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.06)">0 1px 2px rgba(0,0,0,0.06)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.08)">0 8px 24px rgba(0,0,0,0.08)</div></div>
 
   <div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(180deg, #f2f2f2 0%, #e7e7e7 100%);"></div>
+        <div class="signal-title">page-bg</div>
+        <div class="signal-meta">linear 180deg · main page background</div>
+        <div class="signal-code">0% #f2f2f2 @1  |  100% #e7e7e7 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:radial-gradient(circle at center, #d8d8d8 0%, #efefef 100%);"></div>
+        <div class="signal-title">hero-arch</div>
+        <div class="signal-meta">radial · large circular hero illustration backdrop</div>
+        <div class="signal-code">0% #d8d8d8 @1  |  100% #efefef @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft glass panel</div>
+        <div class="signal-meta">cards and floating pills use pale translucent fills with thin borders and very soft shadows</div>
+        <div class="signal-code">background: rgba(255,255,255,0.55)<br/>border: 1px solid rgba(0,0,0,0.10)<br/>box-shadow: 0 8px 24px rgba(0,0,0,0.06)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid black pill button with white text and subtle shadow</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly lifted black fill with stronger shadow and preserved high contrast</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin light-gray outer ring around the dark pill shape</td>
+      </tr>
+      <tr>
+        <td>input.url</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>white field with darkened border and soft outer glow</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="top navigation"
+            style="--ox:50%;--oy:0%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>top navigation</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="primary CTA"
+            style="--ox:50%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="left promo card"
+            style="--ox:0%;--oy:50%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>left promo card</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="url input module"
+            style="--ox:50%;--oy:100%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>url input module</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-7-playex.png"
+            alt="kpi stats strip"
+            style="--ox:50%;--oy:100%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>kpi stats strip</figcaption>
+      </figure></div>
+  </div>
+
+  <div class="section">
     <h2>Component Preview</h2>
     <div class="preview">
       <div class="btn-row">
@@ -407,22 +725,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Primary buttons are solid black with white text, medium height, pill-rounded corners, and minimal icon support; secondary nav buttons use white surfaces with thin gray borders.</div>
+        <div class="component__desc">Rounded pill buttons with black fill for primary actions, white text, medium weight, and compact horizontal padding; secondary buttons use light surfaces with subtle gray borders.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Floating thumbnail/sample cards use white backgrounds, light gray borders, soft shadows, and rounded corners; decorative content sits around the hero for social proof and product examples.</div>
+        <div class="component__desc">Small floating promo and testimonial cards with off-white backgrounds, rounded corners, thin gray borders, and light drop shadows.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Large centered URL input with white fill, subtle gray border, pill radius, and paired black generate button in an inline horizontal form.</div>
+        <div class="component__desc">Wide rounded URL input with white fill, light border, muted placeholder text, and paired CTA button aligned inline.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top navigation is a slim horizontal bar with small text links on the left, a centered logo badge, and utility actions on the right including theme icon, login, and primary CTA.</div>
+        <div class="component__desc">Minimal top navigation with small muted links, centered logo badge, and utility actions on the right including theme icon, login, and primary CTA.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered hero + inline URL input CTA + floating preview cards + bottom KPI stats row</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered hero headline and CTA + floating proof cards around a circular input module + bottom KPI strip</p></div>
 </body>
 </html>
 ```

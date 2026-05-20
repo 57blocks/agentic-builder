@@ -1,33 +1,33 @@
 ---
-{"id":"DK-img-s1-saas","layer":"L1","kind":"design-knowledge","title":"Style Spec — s1-saas.png","tags":["industry:saas","source:vision-distill","image:s1-saas.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922871673,"updatedAt":1778922871673,"schemaVersion":1}
+{"id":"DK-img-s1-saas","layer":"L1","kind":"design-knowledge","title":"Style Spec — s1-saas.png","tags":["industry:saas","source:vision-distill","image:s1-saas.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922871673,"updatedAt":1779236462422,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "saas",
-  "summary": "A soft, pastel SaaS landing page with airy spacing, rounded white surfaces, and subtle gradient-tinted sections. The design feels polished and approachable, combining minimal navigation with card-based product highlights, testimonials, and FAQ content.",
+  "summary": "A soft, modern SaaS landing page with airy whitespace, pastel gradients, rounded cards, and clean product-marketing sections. The aesthetic feels polished and friendly, blending subtle glassy surfaces with warm pink-blue highlights.",
   "vibe": [
     "minimal",
     "soft",
     "clean",
-    "modern",
-    "friendly"
+    "friendly",
+    "premium"
   ],
   "palette": {
     "primary": {
-      "hex": "#1d2f6f",
-      "label": "deep navy"
+      "hex": "#1f3f86",
+      "label": "deep navy blue"
     },
     "secondary": {
-      "hex": "#f6d8d6",
-      "label": "soft blush"
+      "hex": "#f3d9d8",
+      "label": "soft blush pink"
     },
     "accent": {
-      "hex": "#f57f79",
-      "label": "coral gradient accent"
+      "hex": "#f28f8b",
+      "label": "coral peach"
     },
     "background": {
-      "hex": "#f8f6f3",
+      "hex": "#f6f5f3",
       "label": "warm off-white"
     },
     "surface": {
@@ -35,16 +35,20 @@
       "label": "white"
     },
     "text": {
-      "hex": "#21253a",
-      "label": "dark slate"
+      "hex": "#18233d",
+      "label": "dark navy text"
     },
     "textMuted": {
-      "hex": "#7f8396",
-      "label": "muted lavender gray"
+      "hex": "#707585",
+      "label": "muted slate gray"
     },
     "border": {
-      "hex": "#ebe7e3",
-      "label": "soft light gray"
+      "hex": "#e8e3e1",
+      "label": "light warm gray"
+    },
+    "success": {
+      "hex": "#8bc8b2",
+      "label": "mint green"
     }
   },
   "typography": {
@@ -54,9 +58,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "large centered hero heading",
-      "small muted supporting copy",
-      "clean sans-serif throughout"
+      "large centered hero headings",
+      "clean sans serif marketing typography",
+      "small muted supporting copy"
     ]
   },
   "spacing": {
@@ -79,24 +83,154 @@
     "pillPx": 999
   },
   "shadows": [
-    "0 8px 24px rgba(29,47,111,0.08)",
-    "0 16px 40px rgba(245,127,121,0.10)"
+    "0 2px 8px rgba(24,35,61,0.06)",
+    "0 12px 32px rgba(24,35,61,0.08)"
+  ],
+  "gradients": [
+    {
+      "id": "hero-panel",
+      "type": "linear",
+      "angleDeg": 135,
+      "stops": [
+        {
+          "color": "#eef2fb",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#f5edf0",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "main hero card background"
+    },
+    {
+      "id": "faq-card",
+      "type": "linear",
+      "angleDeg": 180,
+      "stops": [
+        {
+          "color": "#eef8fb",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#f8f2f5",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "illustration panel in FAQ section"
+    },
+    {
+      "id": "cta-band",
+      "type": "linear",
+      "angleDeg": 180,
+      "stops": [
+        {
+          "color": "#f5dedd",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#f7ebe7",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "bottom call-to-action section background"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft-glass",
+      "description": "large panels use translucent pastel fills with gentle blur-like softness and very light borders",
+      "cssHints": [
+        "background: rgba(255,255,255,0.72)",
+        "border: 1px solid rgba(232,227,225,0.9)",
+        "box-shadow: 0 12px 32px rgba(24,35,61,0.08)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid deep navy fill with white text and subtle shadow"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker navy fill with stronger shadow for lift"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "2px soft coral or blue outer ring around rounded button"
+    },
+    {
+      "component": "input",
+      "state": "focus",
+      "treatment": "light surface fill with coral gradient outline and faint glow"
+    }
   ],
   "components": {
     "button": {
-      "description": "Rounded pill buttons with solid deep navy primary treatment and subtle white secondary treatment; compact height with centered label and minimal border."
+      "description": "Rounded medium-height buttons; primary uses dark navy filled style, secondary is white or ghost with dark text and minimal border."
     },
     "card": {
-      "description": "White rounded cards with soft shadows, generous padding, and occasional pastel gradient glow backgrounds; used for dashboard previews, testimonials, and stats."
+      "description": "Floating cards with white backgrounds, large rounded corners, soft shadows, and sparse content such as stats, testimonials, and product snippets."
+    },
+    "input": {
+      "description": "Pill-shaped prompt/input bar with white fill, subtle border, embedded icon button, and coral highlight ring."
     },
     "navigation": {
-      "description": "Top horizontal navbar inside a rounded white container with logo on the left, centered text links, and a compact sign-up button on the right."
+      "description": "Top navigation sits inside a rounded white bar with logo left, compact center links, and a small sign-up button on the right."
     }
   },
-  "layout": "centered marketing landing page with top navigation, large hero panel, partner logo strip, feature cards, testimonial grid, FAQ section, and CTA footer",
+  "layout": "top navigation + centered hero panel + floating product cards + partner logos + testimonial cards + FAQ split layout + bottom CTA band",
+  "visualElements": [
+    {
+      "name": "navigation bar",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.8
+    },
+    {
+      "name": "hero headline",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.4
+    },
+    {
+      "name": "primary CTA",
+      "col": 1,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "floating stat card",
+      "col": 1,
+      "row": 2,
+      "zoom": 3.6
+    },
+    {
+      "name": "testimonial cards",
+      "col": 3,
+      "row": 2,
+      "zoom": 2.8
+    },
+    {
+      "name": "faq panel",
+      "col": 3,
+      "row": 3,
+      "zoom": 2.7
+    }
+  ],
   "imagePath": "/knowledge-refs/s1-saas.png",
   "imageName": "s1-saas.png",
-  "capturedAt": "2026-05-16T09:14:31.673Z",
+  "capturedAt": "2026-05-20T00:21:02.421Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -107,42 +241,76 @@
 
 **Industry**: saas
 **Image**: s1-saas.png
-**Vibe**: minimal, soft, clean, modern, friendly
+**Vibe**: minimal, soft, clean, friendly, premium
 
-**Summary**: A soft, pastel SaaS landing page with airy spacing, rounded white surfaces, and subtle gradient-tinted sections. The design feels polished and approachable, combining minimal navigation with card-based product highlights, testimonials, and FAQ content.
+**Summary**: A soft, modern SaaS landing page with airy whitespace, pastel gradients, rounded cards, and clean product-marketing sections. The aesthetic feels polished and friendly, blending subtle glassy surfaces with warm pink-blue highlights.
 
 ### Palette
-- Primary: `#1d2f6f` — deep navy
-- Secondary: `#f6d8d6` — soft blush
-- Accent: `#f57f79` — coral gradient accent
-- Background: `#f8f6f3` — warm off-white
+- Primary: `#1f3f86` — deep navy blue
+- Secondary: `#f3d9d8` — soft blush pink
+- Accent: `#f28f8b` — coral peach
+- Background: `#f6f5f3` — warm off-white
 - Surface: `#ffffff` — white
-- Text: `#21253a` — dark slate
-- Text muted: `#7f8396` — muted lavender gray
-- Border: `#ebe7e3` — soft light gray
+- Text: `#18233d` — dark navy text
+- Text muted: `#707585` — muted slate gray
+- Border: `#e8e3e1` — light warm gray
+- Success: `#8bc8b2` — mint green
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: large centered hero heading
+- Note: large centered hero headings
+- Note: clean sans serif marketing typography
 - Note: small muted supporting copy
-- Note: clean sans-serif throughout
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
 - Radius: sm 6px, md 12px, lg 24px, pill 999px
 - Shadows: 2 variant(s)
-  - `0 8px 24px rgba(29,47,111,0.08)`
-  - `0 16px 40px rgba(245,127,121,0.10)`
+  - `0 2px 8px rgba(24,35,61,0.06)`
+  - `0 12px 32px rgba(24,35,61,0.08)`
+
+### Gradients
+- **hero-panel** (linear, 135deg) — main hero card background
+  - stop 0%: `#eef2fb`, alpha 1
+  - stop 100%: `#f5edf0`, alpha 1
+- **faq-card** (linear, 180deg) — illustration panel in FAQ section
+  - stop 0%: `#eef8fb`, alpha 1
+  - stop 100%: `#f8f2f5`, alpha 1
+- **cta-band** (linear, 180deg) — bottom call-to-action section background
+  - stop 0%: `#f5dedd`, alpha 1
+  - stop 100%: `#f7ebe7`, alpha 1
+
+### Surface Effects
+- **soft-glass**: large panels use translucent pastel fills with gentle blur-like softness and very light borders
+  - `background: rgba(255,255,255,0.72)`
+  - `border: 1px solid rgba(232,227,225,0.9)`
+  - `box-shadow: 0 12px 32px rgba(24,35,61,0.08)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid deep navy fill with white text and subtle shadow
+- **button.primary.hover**: slightly darker navy fill with stronger shadow for lift
+- **button.primary.focus**: 2px soft coral or blue outer ring around rounded button
+- **input.focus**: light surface fill with coral gradient outline and faint glow
 
 ### Components
-- **button**: Rounded pill buttons with solid deep navy primary treatment and subtle white secondary treatment; compact height with centered label and minimal border.
-- **card**: White rounded cards with soft shadows, generous padding, and occasional pastel gradient glow backgrounds; used for dashboard previews, testimonials, and stats.
-- **navigation**: Top horizontal navbar inside a rounded white container with logo on the left, centered text links, and a compact sign-up button on the right.
+- **button**: Rounded medium-height buttons; primary uses dark navy filled style, secondary is white or ghost with dark text and minimal border.
+- **card**: Floating cards with white backgrounds, large rounded corners, soft shadows, and sparse content such as stats, testimonials, and product snippets.
+- **input**: Pill-shaped prompt/input bar with white fill, subtle border, embedded icon button, and coral highlight ring.
+- **navigation**: Top navigation sits inside a rounded white bar with logo left, compact center links, and a small sign-up button on the right.
 
 ### Layout
-centered marketing landing page with top navigation, large hero panel, partner logo strip, feature cards, testimonial grid, FAQ section, and CTA footer
+top navigation + centered hero panel + floating product cards + partner logos + testimonial cards + FAQ split layout + bottom CTA band
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **navigation bar** — col 1, row 1, zoom 2.8×
+- **hero headline** — col 1, row 1, zoom 2.4×
+- **primary CTA** — col 1, row 2, zoom 4×
+- **floating stat card** — col 1, row 2, zoom 3.6×
+- **testimonial cards** — col 3, row 2, zoom 2.8×
+- **faq panel** — col 3, row 3, zoom 2.7×
 
 ## Style Spec (HTML)
 
@@ -158,15 +326,15 @@ centered marketing landing page with top navigation, large hero panel, partner l
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #1d2f6f;
-    --color-secondary:  #f6d8d6;
-    --color-accent:     #f57f79;
-    --color-background: #f8f6f3;
+    --color-primary:    #1f3f86;
+    --color-secondary:  #f3d9d8;
+    --color-accent:     #f28f8b;
+    --color-background: #f6f5f3;
     --color-surface:    #ffffff;
-    --color-text:       #21253a;
-    --color-text-muted: #7f8396;
-    --color-border:     #ebe7e3;
-    --color-success:    #22c55e;
+    --color-text:       #18233d;
+    --color-text-muted: #707585;
+    --color-border:     #e8e3e1;
+    --color-success:    #8bc8b2;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
     --font-heading: 'Inter', system-ui, sans-serif;
@@ -252,9 +420,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -263,9 +462,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">saas</div>
       <h1>s1-saas.png</h1>
-      <p class="muted">A soft, pastel SaaS landing page with airy spacing, rounded white surfaces, and subtle gradient-tinted sections. The design feels polished and approachable, combining minimal navigation with card-based product highlights, testimonials, and FAQ content.</p>
+      <p class="muted">A soft, modern SaaS landing page with airy whitespace, pastel gradients, rounded cards, and clean product-marketing sections. The aesthetic feels polished and friendly, blending subtle glassy surfaces with warm pink-blue highlights.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">soft</span><span class="tag">clean</span><span class="tag">modern</span><span class="tag">friendly</span>
+        <span class="tag">minimal</span><span class="tag">soft</span><span class="tag">clean</span><span class="tag">friendly</span><span class="tag">premium</span>
       </div>
     </div>
   </div>
@@ -274,37 +473,37 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1d2f6f"></div>
+      <div class="swatch__chip" style="background:#1f3f86"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#1d2f6f</div>
-        <div class="swatch__name">deep navy</div>
+        <div class="swatch__hex">#1f3f86</div>
+        <div class="swatch__name">deep navy blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f6d8d6"></div>
+      <div class="swatch__chip" style="background:#f3d9d8"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#f6d8d6</div>
-        <div class="swatch__name">soft blush</div>
+        <div class="swatch__hex">#f3d9d8</div>
+        <div class="swatch__name">soft blush pink</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f57f79"></div>
+      <div class="swatch__chip" style="background:#f28f8b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#f57f79</div>
-        <div class="swatch__name">coral gradient accent</div>
+        <div class="swatch__hex">#f28f8b</div>
+        <div class="swatch__name">coral peach</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f8f6f3"></div>
+      <div class="swatch__chip" style="background:#f6f5f3"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f8f6f3</div>
+        <div class="swatch__hex">#f6f5f3</div>
         <div class="swatch__name">warm off-white</div>
       </div>
     </div>
@@ -319,29 +518,38 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#21253a"></div>
+      <div class="swatch__chip" style="background:#18233d"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#21253a</div>
-        <div class="swatch__name">dark slate</div>
+        <div class="swatch__hex">#18233d</div>
+        <div class="swatch__name">dark navy text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#7f8396"></div>
+      <div class="swatch__chip" style="background:#707585"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#7f8396</div>
-        <div class="swatch__name">muted lavender gray</div>
+        <div class="swatch__hex">#707585</div>
+        <div class="swatch__name">muted slate gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ebe7e3"></div>
+      <div class="swatch__chip" style="background:#e8e3e1"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#ebe7e3</div>
-        <div class="swatch__name">soft light gray</div>
+        <div class="swatch__hex">#e8e3e1</div>
+        <div class="swatch__name">light warm gray</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#8bc8b2"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Success</div>
+        <div class="swatch__hex">#8bc8b2</div>
+        <div class="swatch__name">mint green</div>
       </div>
     </div></div>
   </div>
@@ -395,7 +603,148 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 8px 24px rgba(29,47,111,0.08)">0 8px 24px rgba(29,47,111,0.08)</div><div class="shadow-card" style="box-shadow:0 16px 40px rgba(245,127,121,0.10)">0 16px 40px rgba(245,127,121,0.10)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 2px 8px rgba(24,35,61,0.06)">0 2px 8px rgba(24,35,61,0.06)</div><div class="shadow-card" style="box-shadow:0 12px 32px rgba(24,35,61,0.08)">0 12px 32px rgba(24,35,61,0.08)</div></div>
+
+  <div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(135deg, #eef2fb 0%, #f5edf0 100%);"></div>
+        <div class="signal-title">hero-panel</div>
+        <div class="signal-meta">linear 135deg · main hero card background</div>
+        <div class="signal-code">0% #eef2fb @1  |  100% #f5edf0 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(180deg, #eef8fb 0%, #f8f2f5 100%);"></div>
+        <div class="signal-title">faq-card</div>
+        <div class="signal-meta">linear 180deg · illustration panel in FAQ section</div>
+        <div class="signal-code">0% #eef8fb @1  |  100% #f8f2f5 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(180deg, #f5dedd 0%, #f7ebe7 100%);"></div>
+        <div class="signal-title">cta-band</div>
+        <div class="signal-meta">linear 180deg · bottom call-to-action section background</div>
+        <div class="signal-code">0% #f5dedd @1  |  100% #f7ebe7 @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft-glass</div>
+        <div class="signal-meta">large panels use translucent pastel fills with gentle blur-like softness and very light borders</div>
+        <div class="signal-code">background: rgba(255,255,255,0.72)<br/>border: 1px solid rgba(232,227,225,0.9)<br/>box-shadow: 0 12px 32px rgba(24,35,61,0.08)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid deep navy fill with white text and subtle shadow</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker navy fill with stronger shadow for lift</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>2px soft coral or blue outer ring around rounded button</td>
+      </tr>
+      <tr>
+        <td>input</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>light surface fill with coral gradient outline and faint glow</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="navigation bar"
+            style="--ox:0%;--oy:0%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>navigation bar</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="hero headline"
+            style="--ox:0%;--oy:0%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="primary CTA"
+            style="--ox:0%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="floating stat card"
+            style="--ox:0%;--oy:50%;--zoom:3.6;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>floating stat card</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="testimonial cards"
+            style="--ox:100%;--oy:50%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>testimonial cards</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/s1-saas.png"
+            alt="faq panel"
+            style="--ox:100%;--oy:100%;--zoom:2.7;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>faq panel</figcaption>
+      </figure></div>
+  </div>
 
   <div class="section">
     <h2>Component Preview</h2>
@@ -417,18 +766,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Rounded pill buttons with solid deep navy primary treatment and subtle white secondary treatment; compact height with centered label and minimal border.</div>
+        <div class="component__desc">Rounded medium-height buttons; primary uses dark navy filled style, secondary is white or ghost with dark text and minimal border.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">White rounded cards with soft shadows, generous padding, and occasional pastel gradient glow backgrounds; used for dashboard previews, testimonials, and stats.</div>
+        <div class="component__desc">Floating cards with white backgrounds, large rounded corners, soft shadows, and sparse content such as stats, testimonials, and product snippets.</div>
+      </div>
+      <div class="component">
+        <div class="component__name">input</div>
+        <div class="component__desc">Pill-shaped prompt/input bar with white fill, subtle border, embedded icon button, and coral highlight ring.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top horizontal navbar inside a rounded white container with logo on the left, centered text links, and a compact sign-up button on the right.</div>
+        <div class="component__desc">Top navigation sits inside a rounded white bar with logo left, compact center links, and a small sign-up button on the right.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>centered marketing landing page with top navigation, large hero panel, partner logo strip, feature cards, testimonial grid, FAQ section, and CTA footer</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered hero panel + floating product cards + partner logos + testimonial cards + FAQ split layout + bottom CTA band</p></div>
 </body>
 </html>
 ```

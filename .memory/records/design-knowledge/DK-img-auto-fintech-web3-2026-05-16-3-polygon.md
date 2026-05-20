@@ -1,18 +1,17 @@
 ---
-{"id":"DK-img-auto-fintech-web3-2026-05-16-3-polygon","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Polygon (fintech-web3)","tags":["industry:fintech-web3","source:trend-capture","image:auto-fintech-web3-2026-05-16-3-polygon.png","site:polygon.technology","url:https://polygon.technology","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778925620594,"updatedAt":1778925620594,"schemaVersion":1}
+{"id":"DK-img-auto-fintech-web3-2026-05-16-3-polygon","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-fintech-web3-2026-05-16-3-polygon.png","tags":["industry:fintech-web3","source:vision-distill","image:auto-fintech-web3-2026-05-16-3-polygon.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778925620594,"updatedAt":1779236235120,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "fintech-web3",
-  "summary": "A polished web3 landing page combining a clean white framing system with a bold neon-gradient hero scene. The aesthetic is futuristic and premium, using oversized typography, clipped geometric shapes, and high-contrast CTAs.",
+  "summary": "A bold web3 landing page with a futuristic 3D hero scene, cool neon gradients, and sharp geometric UI. The layout pairs a clean monochrome navigation shell with high-contrast electric blues, violets, and pink highlights.",
   "vibe": [
     "futuristic",
-    "premium",
     "bold",
-    "geometric",
     "neon",
-    "editorial"
+    "geometric",
+    "high-contrast"
   ],
   "palette": {
     "primary": {
@@ -20,45 +19,44 @@
       "label": "electric violet"
     },
     "secondary": {
-      "hex": "#2453d9",
-      "label": "royal blue"
+      "hex": "#1e57d8",
+      "label": "saturated cobalt"
     },
     "accent": {
-      "hex": "#e29ad9",
-      "label": "soft magenta"
+      "hex": "#f3a2ea",
+      "label": "neon pink"
     },
     "background": {
-      "hex": "#f5f4f5",
-      "label": "off-white grid"
+      "hex": "#efeff1",
+      "label": "light gray shell"
     },
     "surface": {
       "hex": "#ffffff",
-      "label": "clean white"
+      "label": "white UI panel"
     },
     "text": {
-      "hex": "#111018",
-      "label": "near-black"
+      "hex": "#ffffff",
+      "label": "hero white"
     },
     "textMuted": {
-      "hex": "#6b6a73",
-      "label": "cool gray"
+      "hex": "#cfd6ff",
+      "label": "cool pale blue"
     },
     "border": {
-      "hex": "#ddd9e3",
+      "hex": "#d9d9df",
       "label": "soft gray border"
     }
   },
   "typography": {
     "headingFont": "Inter",
     "bodyFont": "Inter",
-    "monoFont": "IBM Plex Mono",
-    "headingWeight": 500,
+    "headingWeight": 400,
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized hero headline",
-      "uppercase mono labels and buttons",
-      "clean grotesk navigation"
+      "oversized hero heading",
+      "all-caps compact nav labels",
+      "clean grotesk sans styling"
     ]
   },
   "spacing": {
@@ -75,37 +73,181 @@
     ]
   },
   "radius": {
-    "smPx": 4,
-    "mdPx": 8,
-    "lgPx": 16,
+    "smPx": 2,
+    "mdPx": 6,
+    "lgPx": 12,
     "pillPx": 999
   },
   "shadows": [
-    "0 8px 24px rgba(27,18,72,0.18)",
-    "0 16px 40px rgba(20,16,60,0.28)"
+    "0 8px 24px rgba(0,0,0,0.18)",
+    "0 20px 48px rgba(0,0,0,0.35)"
+  ],
+  "gradients": [
+    {
+      "id": "hero-scene",
+      "type": "linear",
+      "angleDeg": 45,
+      "stops": [
+        {
+          "color": "#1d4ec4",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#2337a7",
+          "positionPct": 35,
+          "opacity": 1
+        },
+        {
+          "color": "#6f1cff",
+          "positionPct": 72,
+          "opacity": 0.95
+        },
+        {
+          "color": "#f3a2ea",
+          "positionPct": 100,
+          "opacity": 0.95
+        }
+      ],
+      "usage": "main hero artwork and illuminated 3D surfaces"
+    },
+    {
+      "id": "cta-button",
+      "type": "linear",
+      "angleDeg": 0,
+      "stops": [
+        {
+          "color": "#7b1fff",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#5c12e8",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "top-right book a call button and consent action"
+    },
+    {
+      "id": "cyan-floor-glow",
+      "type": "linear",
+      "angleDeg": 90,
+      "stops": [
+        {
+          "color": "#5bd4ff",
+          "positionPct": 0,
+          "opacity": 0.85
+        },
+        {
+          "color": "#2e9fe9",
+          "positionPct": 55,
+          "opacity": 0.75
+        },
+        {
+          "color": "#0a0a19",
+          "positionPct": 100,
+          "opacity": 0.95
+        }
+      ],
+      "usage": "3D corridor planes and glow transitions"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "neonGlow",
+      "description": "3D blocks and planes use vivid bloom with soft edge glow in blue, violet, and pink tones",
+      "cssHints": [
+        "box-shadow: 0 0 24px rgba(111,28,255,0.35)",
+        "box-shadow: 0 0 32px rgba(91,212,255,0.28)",
+        "background: linear-gradient(45deg, #1e57d8, #6f1cff, #f3a2ea)"
+      ]
+    },
+    {
+      "name": "hardPanel",
+      "description": "UI panels and dropdowns use solid white fills with crisp light gray borders and minimal softness",
+      "cssHints": [
+        "background: #ffffff",
+        "border: 1px solid #d9d9df",
+        "box-shadow: 0 4px 12px rgba(0,0,0,0.06)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid violet gradient fill with white text and clipped angular right edge"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly brighter violet fill with stronger glow and elevated shadow"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin high-contrast outline around the angular button silhouette"
+    },
+    {
+      "component": "navigation.item",
+      "state": "active",
+      "treatment": "small violet dot indicator next to compact uppercase label"
+    }
   ],
   "components": {
     "button": {
-      "description": "Large clipped-corner CTA buttons with uppercase mono text; primary uses white fill with purple text, secondary uses near-black fill with white text, and top-right CTA uses a purple gradient."
+      "description": "Rectangular CTA buttons with subtle corner radius, uppercase mono-like labels, and some clipped/angular right edges; primary uses violet gradient, secondary uses near-black fill."
     },
     "card": {
-      "description": "Floating white brand-trust panel with minimal border treatment, sharp rectangular body, and small corner notch details."
+      "description": "Floating white information panels and dropdown surfaces with thin gray borders, sparse content, and strong contrast against the colorful hero."
     },
     "navigation": {
-      "description": "Horizontal top navigation on a white bar with widely spaced uppercase links, monochrome logo, and segmented action buttons on the right."
+      "description": "Top horizontal navigation bar on a white background with tightly spaced uppercase links, minimal branding on the left, and utility actions on the right."
     }
   },
-  "layout": "top navigation + oversized left-aligned hero copy + dual CTA row + floating trust logo card + right-edge social rail",
-  "imageMotifs": [
-    "abstract 3d blocks",
-    "neon gradient prism",
-    "futuristic finance",
-    "digital corridor",
-    "polygon crystal"
+  "layout": "top navigation over a full-width hero with oversized left-aligned headline, supporting copy and CTA row, plus floating utility panels and side widgets",
+  "visualElements": [
+    {
+      "name": "brand nav",
+      "col": 1,
+      "row": 1,
+      "zoom": 3
+    },
+    {
+      "name": "hero headline",
+      "col": 1,
+      "row": 2,
+      "zoom": 2.2
+    },
+    {
+      "name": "cta buttons",
+      "col": 1,
+      "row": 3,
+      "zoom": 3.2
+    },
+    {
+      "name": "trusted panel",
+      "col": 3,
+      "row": 1,
+      "zoom": 3.1
+    },
+    {
+      "name": "3d corridor",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.4
+    },
+    {
+      "name": "side social bar",
+      "col": 3,
+      "row": 3,
+      "zoom": 3.8
+    }
   ],
   "imagePath": "/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png",
   "imageName": "auto-fintech-web3-2026-05-16-3-polygon.png",
-  "capturedAt": "2026-05-16T10:00:20.593Z",
+  "capturedAt": "2026-05-20T00:17:15.119Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -116,51 +258,81 @@
 
 **Industry**: fintech-web3
 **Image**: auto-fintech-web3-2026-05-16-3-polygon.png
-**Vibe**: futuristic, premium, bold, geometric, neon, editorial
+**Vibe**: futuristic, bold, neon, geometric, high-contrast
 
-**Summary**: A polished web3 landing page combining a clean white framing system with a bold neon-gradient hero scene. The aesthetic is futuristic and premium, using oversized typography, clipped geometric shapes, and high-contrast CTAs.
+**Summary**: A bold web3 landing page with a futuristic 3D hero scene, cool neon gradients, and sharp geometric UI. The layout pairs a clean monochrome navigation shell with high-contrast electric blues, violets, and pink highlights.
 
 ### Palette
 - Primary: `#6f1cff` — electric violet
-- Secondary: `#2453d9` — royal blue
-- Accent: `#e29ad9` — soft magenta
-- Background: `#f5f4f5` — off-white grid
-- Surface: `#ffffff` — clean white
-- Text: `#111018` — near-black
-- Text muted: `#6b6a73` — cool gray
-- Border: `#ddd9e3` — soft gray border
+- Secondary: `#1e57d8` — saturated cobalt
+- Accent: `#f3a2ea` — neon pink
+- Background: `#efeff1` — light gray shell
+- Surface: `#ffffff` — white UI panel
+- Text: `#ffffff` — hero white
+- Text muted: `#cfd6ff` — cool pale blue
+- Border: `#d9d9df` — soft gray border
 
 ### Typography
-- Heading font: Inter (weight 500)
+- Heading font: Inter (weight 400)
 - Body font: Inter (weight 400)
-- Mono font: IBM Plex Mono
 - Base size: 16px
-- Note: oversized hero headline
-- Note: uppercase mono labels and buttons
-- Note: clean grotesk navigation
+- Note: oversized hero heading
+- Note: all-caps compact nav labels
+- Note: clean grotesk sans styling
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 8px, lg 16px, pill 999px
+- Radius: sm 2px, md 6px, lg 12px, pill 999px
 - Shadows: 2 variant(s)
-  - `0 8px 24px rgba(27,18,72,0.18)`
-  - `0 16px 40px rgba(20,16,60,0.28)`
+  - `0 8px 24px rgba(0,0,0,0.18)`
+  - `0 20px 48px rgba(0,0,0,0.35)`
+
+### Gradients
+- **hero-scene** (linear, 45deg) — main hero artwork and illuminated 3D surfaces
+  - stop 0%: `#1d4ec4`, alpha 1
+  - stop 35%: `#2337a7`, alpha 1
+  - stop 72%: `#6f1cff`, alpha 0.95
+  - stop 100%: `#f3a2ea`, alpha 0.95
+- **cta-button** (linear, 0deg) — top-right book a call button and consent action
+  - stop 0%: `#7b1fff`, alpha 1
+  - stop 100%: `#5c12e8`, alpha 1
+- **cyan-floor-glow** (linear, 90deg) — 3D corridor planes and glow transitions
+  - stop 0%: `#5bd4ff`, alpha 0.85
+  - stop 55%: `#2e9fe9`, alpha 0.75
+  - stop 100%: `#0a0a19`, alpha 0.95
+
+### Surface Effects
+- **neonGlow**: 3D blocks and planes use vivid bloom with soft edge glow in blue, violet, and pink tones
+  - `box-shadow: 0 0 24px rgba(111,28,255,0.35)`
+  - `box-shadow: 0 0 32px rgba(91,212,255,0.28)`
+  - `background: linear-gradient(45deg, #1e57d8, #6f1cff, #f3a2ea)`
+- **hardPanel**: UI panels and dropdowns use solid white fills with crisp light gray borders and minimal softness
+  - `background: #ffffff`
+  - `border: 1px solid #d9d9df`
+  - `box-shadow: 0 4px 12px rgba(0,0,0,0.06)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid violet gradient fill with white text and clipped angular right edge
+- **button.primary.hover**: slightly brighter violet fill with stronger glow and elevated shadow
+- **button.primary.focus**: thin high-contrast outline around the angular button silhouette
+- **navigation.item.active**: small violet dot indicator next to compact uppercase label
 
 ### Components
-- **button**: Large clipped-corner CTA buttons with uppercase mono text; primary uses white fill with purple text, secondary uses near-black fill with white text, and top-right CTA uses a purple gradient.
-- **card**: Floating white brand-trust panel with minimal border treatment, sharp rectangular body, and small corner notch details.
-- **navigation**: Horizontal top navigation on a white bar with widely spaced uppercase links, monochrome logo, and segmented action buttons on the right.
+- **button**: Rectangular CTA buttons with subtle corner radius, uppercase mono-like labels, and some clipped/angular right edges; primary uses violet gradient, secondary uses near-black fill.
+- **card**: Floating white information panels and dropdown surfaces with thin gray borders, sparse content, and strong contrast against the colorful hero.
+- **navigation**: Top horizontal navigation bar on a white background with tightly spaced uppercase links, minimal branding on the left, and utility actions on the right.
 
 ### Layout
-top navigation + oversized left-aligned hero copy + dual CTA row + floating trust logo card + right-edge social rail
+top navigation over a full-width hero with oversized left-aligned headline, supporting copy and CTA row, plus floating utility panels and side widgets
 
-### Imagery & Motifs
-On-theme photography subjects that pair well with this style:
-- abstract 3d blocks
-- neon gradient prism
-- futuristic finance
-- digital corridor
-- polygon crystal
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **brand nav** — col 1, row 1, zoom 3×
+- **hero headline** — col 1, row 2, zoom 2.2×
+- **cta buttons** — col 1, row 3, zoom 3.2×
+- **trusted panel** — col 3, row 1, zoom 3.1×
+- **3d corridor** — col 2, row 3, zoom 2.4×
+- **side social bar** — col 3, row 3, zoom 3.8×
 
 ## Style Spec (HTML)
 
@@ -173,29 +345,29 @@ On-theme photography subjects that pair well with this style:
 <title>Style Spec — auto-fintech-web3-2026-05-16-3-polygon.png</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM%20Plex%20Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
     --color-primary:    #6f1cff;
-    --color-secondary:  #2453d9;
-    --color-accent:     #e29ad9;
-    --color-background: #f5f4f5;
+    --color-secondary:  #1e57d8;
+    --color-accent:     #f3a2ea;
+    --color-background: #efeff1;
     --color-surface:    #ffffff;
-    --color-text:       #111018;
-    --color-text-muted: #6b6a73;
-    --color-border:     #ddd9e3;
+    --color-text:       #ffffff;
+    --color-text-muted: #cfd6ff;
+    --color-border:     #d9d9df;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
     --font-heading: 'Inter', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
-    --font-mono:    'IBM Plex Mono', ui-monospace, monospace;
-    --weight-heading: 500;
+    --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+    --weight-heading: 400;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 16px;
+    --radius-sm: 2px;
+    --radius-md: 6px;
+    --radius-lg: 12px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -270,15 +442,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
-.motif-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.motif { margin: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border);
-  background: var(--color-surface); position: relative; }
-.motif img { display: block; width: 100%; aspect-ratio: 3/2; object-fit: cover; }
-.motif figcaption { padding: 8px 12px; font-size: 12px; color: var(--color-text-muted);
-  background: var(--color-surface); border-top: 1px solid var(--color-border); }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -287,9 +484,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">fintech-web3</div>
       <h1>auto-fintech-web3-2026-05-16-3-polygon.png</h1>
-      <p class="muted">A polished web3 landing page combining a clean white framing system with a bold neon-gradient hero scene. The aesthetic is futuristic and premium, using oversized typography, clipped geometric shapes, and high-contrast CTAs.</p>
+      <p class="muted">A bold web3 landing page with a futuristic 3D hero scene, cool neon gradients, and sharp geometric UI. The layout pairs a clean monochrome navigation shell with high-contrast electric blues, violets, and pink highlights.</p>
       <div class="tags">
-        <span class="tag">futuristic</span><span class="tag">premium</span><span class="tag">bold</span><span class="tag">geometric</span><span class="tag">neon</span><span class="tag">editorial</span>
+        <span class="tag">futuristic</span><span class="tag">bold</span><span class="tag">neon</span><span class="tag">geometric</span><span class="tag">high-contrast</span>
       </div>
     </div>
   </div>
@@ -307,29 +504,29 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#2453d9"></div>
+      <div class="swatch__chip" style="background:#1e57d8"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#2453d9</div>
-        <div class="swatch__name">royal blue</div>
+        <div class="swatch__hex">#1e57d8</div>
+        <div class="swatch__name">saturated cobalt</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#e29ad9"></div>
+      <div class="swatch__chip" style="background:#f3a2ea"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#e29ad9</div>
-        <div class="swatch__name">soft magenta</div>
+        <div class="swatch__hex">#f3a2ea</div>
+        <div class="swatch__name">neon pink</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f5f4f5"></div>
+      <div class="swatch__chip" style="background:#efeff1"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f5f4f5</div>
-        <div class="swatch__name">off-white grid</div>
+        <div class="swatch__hex">#efeff1</div>
+        <div class="swatch__name">light gray shell</div>
       </div>
     </div>
 
@@ -338,33 +535,33 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
         <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">clean white</div>
+        <div class="swatch__name">white UI panel</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#111018"></div>
+      <div class="swatch__chip" style="background:#ffffff"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#111018</div>
-        <div class="swatch__name">near-black</div>
+        <div class="swatch__hex">#ffffff</div>
+        <div class="swatch__name">hero white</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#6b6a73"></div>
+      <div class="swatch__chip" style="background:#cfd6ff"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#6b6a73</div>
-        <div class="swatch__name">cool gray</div>
+        <div class="swatch__hex">#cfd6ff</div>
+        <div class="swatch__name">cool pale blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ddd9e3"></div>
+      <div class="swatch__chip" style="background:#d9d9df"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#ddd9e3</div>
+        <div class="swatch__hex">#d9d9df</div>
         <div class="swatch__name">soft gray border</div>
       </div>
     </div></div>
@@ -374,11 +571,11 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div>
       <h2>Typography</h2>
       <div class="type-stack">
-        <h3 style="font-size: 2rem;">Heading — Inter 500</h3>
-        <h3 style="font-size: 1.4rem;">Subhead — Inter 500</h3>
+        <h3 style="font-size: 2rem;">Heading — Inter 400</h3>
+        <h3 style="font-size: 1.4rem;">Subhead — Inter 400</h3>
         <p style="font-size: 1rem; margin: 0;">Body — Inter 400 at 16px</p>
         <p class="muted" style="font-size: 0.85rem; margin: 0;">Caption / muted text uses --color-text-muted.</p>
-        <code style="font-family:IBM Plex Mono; font-size: 13px;">const monoExample = "IBM Plex Mono";</code>
+        
       </div>
     </div>
     <div>
@@ -419,66 +616,151 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 8px 24px rgba(27,18,72,0.18)">0 8px 24px rgba(27,18,72,0.18)</div><div class="shadow-card" style="box-shadow:0 16px 40px rgba(20,16,60,0.28)">0 16px 40px rgba(20,16,60,0.28)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.18)">0 8px 24px rgba(0,0,0,0.18)</div><div class="shadow-card" style="box-shadow:0 20px 48px rgba(0,0,0,0.35)">0 20px 48px rgba(0,0,0,0.35)</div></div>
 
   <div class="section">
-    <h2>Imagery &amp; Motifs</h2>
-    <p class="muted" style="margin-top:-4px;">On-theme photography suggested for this style — keywords feed Unsplash (live) with picsum as fallback so the slots always render.</p>
-    <div class="motif-grid">
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?abstract%203d%20blocks"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-3-p-1/600/400"
-          alt="abstract 3d blocks"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>abstract 3d blocks</figcaption>
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(45deg, #1d4ec4 0%, #2337a7 35%, rgba(111, 28, 255, 0.95) 72%, rgba(243, 162, 234, 0.95) 100%);"></div>
+        <div class="signal-title">hero-scene</div>
+        <div class="signal-meta">linear 45deg · main hero artwork and illuminated 3D surfaces</div>
+        <div class="signal-code">0% #1d4ec4 @1  |  35% #2337a7 @1  |  72% #6f1cff @0.95  |  100% #f3a2ea @0.95</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(0deg, #7b1fff 0%, #5c12e8 100%);"></div>
+        <div class="signal-title">cta-button</div>
+        <div class="signal-meta">linear 0deg · top-right book a call button and consent action</div>
+        <div class="signal-code">0% #7b1fff @1  |  100% #5c12e8 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(90deg, rgba(91, 212, 255, 0.85) 0%, rgba(46, 159, 233, 0.75) 55%, rgba(10, 10, 25, 0.95) 100%);"></div>
+        <div class="signal-title">cyan-floor-glow</div>
+        <div class="signal-meta">linear 90deg · 3D corridor planes and glow transitions</div>
+        <div class="signal-code">0% #5bd4ff @0.85  |  55% #2e9fe9 @0.75  |  100% #0a0a19 @0.95</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">neonGlow</div>
+        <div class="signal-meta">3D blocks and planes use vivid bloom with soft edge glow in blue, violet, and pink tones</div>
+        <div class="signal-code">box-shadow: 0 0 24px rgba(111,28,255,0.35)<br/>box-shadow: 0 0 32px rgba(91,212,255,0.28)<br/>background: linear-gradient(45deg, #1e57d8, #6f1cff, #f3a2ea)</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-title">hardPanel</div>
+        <div class="signal-meta">UI panels and dropdowns use solid white fills with crisp light gray borders and minimal softness</div>
+        <div class="signal-code">background: #ffffff<br/>border: 1px solid #d9d9df<br/>box-shadow: 0 4px 12px rgba(0,0,0,0.06)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid violet gradient fill with white text and clipped angular right edge</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly brighter violet fill with stronger glow and elevated shadow</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin high-contrast outline around the angular button silhouette</td>
+      </tr>
+      <tr>
+        <td>navigation.item</td>
+        <td><span class="state-pill state-active">active</span></td>
+        <td>small violet dot indicator next to compact uppercase label</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="brand nav"
+            style="--ox:0%;--oy:0%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand nav</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?neon%20gradient%20prism"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-3-p-2/600/400"
-          alt="neon gradient prism"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>neon gradient prism</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="hero headline"
+            style="--ox:0%;--oy:50%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?futuristic%20finance"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-3-p-3/600/400"
-          alt="futuristic finance"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>futuristic finance</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="cta buttons"
+            style="--ox:0%;--oy:100%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>cta buttons</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?digital%20corridor"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-3-p-4/600/400"
-          alt="digital corridor"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>digital corridor</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="trusted panel"
+            style="--ox:100%;--oy:0%;--zoom:3.1;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>trusted panel</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?polygon%20crystal"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-3-p-5/600/400"
-          alt="polygon crystal"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>polygon crystal</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="3d corridor"
+            style="--ox:50%;--oy:100%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>3d corridor</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-3-polygon.png"
+            alt="side social bar"
+            style="--ox:100%;--oy:100%;--zoom:3.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>side social bar</figcaption>
       </figure></div>
   </div>
 
@@ -493,7 +775,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 12px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -502,18 +784,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Large clipped-corner CTA buttons with uppercase mono text; primary uses white fill with purple text, secondary uses near-black fill with white text, and top-right CTA uses a purple gradient.</div>
+        <div class="component__desc">Rectangular CTA buttons with subtle corner radius, uppercase mono-like labels, and some clipped/angular right edges; primary uses violet gradient, secondary uses near-black fill.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Floating white brand-trust panel with minimal border treatment, sharp rectangular body, and small corner notch details.</div>
+        <div class="component__desc">Floating white information panels and dropdown surfaces with thin gray borders, sparse content, and strong contrast against the colorful hero.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Horizontal top navigation on a white bar with widely spaced uppercase links, monochrome logo, and segmented action buttons on the right.</div>
+        <div class="component__desc">Top horizontal navigation bar on a white background with tightly spaced uppercase links, minimal branding on the left, and utility actions on the right.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + oversized left-aligned hero copy + dual CTA row + floating trust logo card + right-edge social rail</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation over a full-width hero with oversized left-aligned headline, supporting copy and CTA row, plus floating utility panels and side widgets</p></div>
 </body>
 </html>
 ```

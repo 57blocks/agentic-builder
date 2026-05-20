@@ -1,51 +1,50 @@
 ---
-{"id":"DK-img-auto-ai-2026-05-16-4-copy-ai","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Copy.ai (ai)","tags":["industry:ai","source:trend-capture","image:auto-ai-2026-05-16-4-copy-ai.png","site:copy.ai","url:https://www.copy.ai","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778926092115,"updatedAt":1778926092115,"schemaVersion":1}
+{"id":"DK-img-auto-ai-2026-05-16-4-copy-ai","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-ai-2026-05-16-4-copy-ai.png","tags":["industry:generic","source:vision-distill","image:auto-ai-2026-05-16-4-copy-ai.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778926092115,"updatedAt":1779236083818,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
-  "industry": "ai",
-  "summary": "A clean AI landing page with a bright, minimal layout anchored by oversized bold typography and layered purple workflow graphics. The design mixes soft cool-gray surfaces with strong violet accents for a polished, product-led feel.",
+  "industry": "generic",
+  "summary": "A clean enterprise landing page with a light neutral canvas, oversized black typography, and bold purple pipeline graphics cutting across the hero. The aesthetic balances editorial minimalism with vivid product-brand accents and clear conversion-focused UI.",
   "vibe": [
     "minimal",
-    "modern",
-    "confident",
     "editorial",
+    "bold",
     "clean",
-    "tech-forward"
+    "corporate"
   ],
   "palette": {
     "primary": {
-      "hex": "#5f31df",
-      "label": "brand violet"
+      "hex": "#6c4ae4",
+      "label": "brand purple"
     },
     "secondary": {
-      "hex": "#351088",
-      "label": "deep purple"
+      "hex": "#32008b",
+      "label": "deep violet"
     },
     "accent": {
-      "hex": "#8f73db",
-      "label": "lavender"
+      "hex": "#8f7ae0",
+      "label": "soft lavender"
     },
     "background": {
-      "hex": "#ffffff",
-      "label": "white"
+      "hex": "#f8f9fa",
+      "label": "off-white page"
     },
     "surface": {
-      "hex": "#eef5fa",
-      "label": "cool light gray"
+      "hex": "#e9eef1",
+      "label": "cool light gray panel"
     },
     "text": {
-      "hex": "#121212",
-      "label": "near-black"
+      "hex": "#111111",
+      "label": "near-black text"
     },
     "textMuted": {
-      "hex": "#617b8f",
-      "label": "slate blue-gray"
+      "hex": "#647788",
+      "label": "muted slate"
     },
     "border": {
-      "hex": "#dce6ef",
-      "label": "pale blue-gray"
+      "hex": "#dfe5e8",
+      "label": "light gray border"
     }
   },
   "typography": {
@@ -55,9 +54,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized hero headline",
-      "bold editorial sans headings",
-      "muted blue-gray supporting copy"
+      "oversized multi-line hero heading",
+      "clean sans serif throughout",
+      "muted paragraph copy with generous line height"
     ]
   },
   "spacing": {
@@ -74,56 +73,141 @@
     ]
   },
   "radius": {
-    "smPx": 4,
-    "mdPx": 8,
-    "lgPx": 16,
+    "smPx": 2,
+    "mdPx": 6,
+    "lgPx": 12,
     "pillPx": 999
   },
+  "shadows": [
+    "0 1px 2px rgba(0,0,0,0.04)",
+    "0 8px 24px rgba(0,0,0,0.08)"
+  ],
+  "gradients": [
+    {
+      "id": "promo-banner",
+      "type": "linear",
+      "angleDeg": 0,
+      "stops": [
+        {
+          "color": "#111111",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#2b175a",
+          "positionPct": 45,
+          "opacity": 1
+        },
+        {
+          "color": "#111111",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "top announcement strip background"
+    },
+    {
+      "id": "pipeline-bars",
+      "type": "linear",
+      "angleDeg": 0,
+      "stops": [
+        {
+          "color": "#9b86ea",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#6c4ae4",
+          "positionPct": 45,
+          "opacity": 1
+        },
+        {
+          "color": "#32008b",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "hero pipeline illustration ribbons"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "flat editorial panels",
+      "description": "large sections use crisp light-gray blocks with thin borders and almost no elevation",
+      "cssHints": [
+        "background: #e9eef1",
+        "border: 1px solid #dfe5e8",
+        "box-shadow: none"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid brand purple fill with white text and softly rounded rectangle shape"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker or richer purple fill with maintained white text"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "subtle outer focus ring in a pale purple tint around button bounds"
+    },
+    {
+      "component": "input",
+      "state": "focus",
+      "treatment": "light field gains darker border emphasis while preserving minimal flat appearance"
+    }
+  ],
   "components": {
     "button": {
-      "description": "Primary buttons use solid violet fills with white semibold text and medium corner radius; secondary CTA appears as a black rectangular button with white text."
+      "description": "Primary CTA uses a compact rounded rectangle with solid purple fill and medium-weight white text; secondary dark button appears in the embedded form with square corners and black fill."
     },
     "card": {
-      "description": "Minimal white form card inset over the hero graphic, with subtle border and no heavy shadow."
+      "description": "Form module appears as a simple white rectangular panel inset over the purple hero graphic, using minimal decoration and clear spacing."
     },
     "input": {
-      "description": "Large single-line email input with pale cool-gray background, thin border, generous padding, and muted placeholder text."
+      "description": "Single-line email field uses a pale gray background, thin border, low radius, and muted placeholder text."
     },
     "navigation": {
-      "description": "Top navigation bar on white with centered menu items, black text links, brand wordmark at left, and a prominent violet CTA on the right."
+      "description": "Top navigation is a horizontal white bar with left-aligned wordmark, centered menu items with subtle dropdown chevrons, and right-side login plus prominent CTA button."
     }
   },
-  "layout": "top announcement bar + horizontal header nav + split hero with oversized headline, supporting copy, abstract workflow illustration, and embedded lead form",
+  "layout": "top promo strip + horizontal navigation + split hero with oversized headline, supporting copy, embedded signup form, and diagonal pipeline illustration",
   "visualElements": [
     {
-      "name": "announcement bar",
+      "name": "promo banner",
       "col": 2,
       "row": 1,
       "zoom": 3.2
     },
     {
-      "name": "navigation bar",
-      "col": 2,
+      "name": "logo nav",
+      "col": 1,
       "row": 1,
-      "zoom": 2.4
+      "zoom": 2.8
     },
     {
       "name": "hero headline",
       "col": 2,
       "row": 1,
+      "zoom": 2.4
+    },
+    {
+      "name": "pipeline graphic",
+      "col": 1,
+      "row": 2,
       "zoom": 2.2
     },
     {
-      "name": "workflow graphic",
-      "col": 1,
-      "row": 3,
-      "zoom": 2.1
-    },
-    {
-      "name": "email form card",
+      "name": "email form",
       "col": 3,
-      "row": 3,
-      "zoom": 3.1
+      "row": 2,
+      "zoom": 3.4
     },
     {
       "name": "primary cta",
@@ -134,7 +218,7 @@
   ],
   "imagePath": "/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png",
   "imageName": "auto-ai-2026-05-16-4-copy-ai.png",
-  "capturedAt": "2026-05-16T10:08:12.114Z",
+  "capturedAt": "2026-05-20T00:14:43.817Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -143,50 +227,75 @@
 
 ## Style Spec (Markdown)
 
-**Industry**: ai
+**Industry**: generic
 **Image**: auto-ai-2026-05-16-4-copy-ai.png
-**Vibe**: minimal, modern, confident, editorial, clean, tech-forward
+**Vibe**: minimal, editorial, bold, clean, corporate
 
-**Summary**: A clean AI landing page with a bright, minimal layout anchored by oversized bold typography and layered purple workflow graphics. The design mixes soft cool-gray surfaces with strong violet accents for a polished, product-led feel.
+**Summary**: A clean enterprise landing page with a light neutral canvas, oversized black typography, and bold purple pipeline graphics cutting across the hero. The aesthetic balances editorial minimalism with vivid product-brand accents and clear conversion-focused UI.
 
 ### Palette
-- Primary: `#5f31df` — brand violet
-- Secondary: `#351088` — deep purple
-- Accent: `#8f73db` — lavender
-- Background: `#ffffff` — white
-- Surface: `#eef5fa` — cool light gray
-- Text: `#121212` — near-black
-- Text muted: `#617b8f` — slate blue-gray
-- Border: `#dce6ef` — pale blue-gray
+- Primary: `#6c4ae4` — brand purple
+- Secondary: `#32008b` — deep violet
+- Accent: `#8f7ae0` — soft lavender
+- Background: `#f8f9fa` — off-white page
+- Surface: `#e9eef1` — cool light gray panel
+- Text: `#111111` — near-black text
+- Text muted: `#647788` — muted slate
+- Border: `#dfe5e8` — light gray border
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized hero headline
-- Note: bold editorial sans headings
-- Note: muted blue-gray supporting copy
+- Note: oversized multi-line hero heading
+- Note: clean sans serif throughout
+- Note: muted paragraph copy with generous line height
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 8px, lg 16px, pill 999px
+- Radius: sm 2px, md 6px, lg 12px, pill 999px
+- Shadows: 2 variant(s)
+  - `0 1px 2px rgba(0,0,0,0.04)`
+  - `0 8px 24px rgba(0,0,0,0.08)`
+
+### Gradients
+- **promo-banner** (linear, 0deg) — top announcement strip background
+  - stop 0%: `#111111`, alpha 1
+  - stop 45%: `#2b175a`, alpha 1
+  - stop 100%: `#111111`, alpha 1
+- **pipeline-bars** (linear, 0deg) — hero pipeline illustration ribbons
+  - stop 0%: `#9b86ea`, alpha 1
+  - stop 45%: `#6c4ae4`, alpha 1
+  - stop 100%: `#32008b`, alpha 1
+
+### Surface Effects
+- **flat editorial panels**: large sections use crisp light-gray blocks with thin borders and almost no elevation
+  - `background: #e9eef1`
+  - `border: 1px solid #dfe5e8`
+  - `box-shadow: none`
+
+### Interaction State Tokens
+- **button.primary.default**: solid brand purple fill with white text and softly rounded rectangle shape
+- **button.primary.hover**: slightly darker or richer purple fill with maintained white text
+- **button.primary.focus**: subtle outer focus ring in a pale purple tint around button bounds
+- **input.focus**: light field gains darker border emphasis while preserving minimal flat appearance
 
 ### Components
-- **button**: Primary buttons use solid violet fills with white semibold text and medium corner radius; secondary CTA appears as a black rectangular button with white text.
-- **card**: Minimal white form card inset over the hero graphic, with subtle border and no heavy shadow.
-- **input**: Large single-line email input with pale cool-gray background, thin border, generous padding, and muted placeholder text.
-- **navigation**: Top navigation bar on white with centered menu items, black text links, brand wordmark at left, and a prominent violet CTA on the right.
+- **button**: Primary CTA uses a compact rounded rectangle with solid purple fill and medium-weight white text; secondary dark button appears in the embedded form with square corners and black fill.
+- **card**: Form module appears as a simple white rectangular panel inset over the purple hero graphic, using minimal decoration and clear spacing.
+- **input**: Single-line email field uses a pale gray background, thin border, low radius, and muted placeholder text.
+- **navigation**: Top navigation is a horizontal white bar with left-aligned wordmark, centered menu items with subtle dropdown chevrons, and right-side login plus prominent CTA button.
 
 ### Layout
-top announcement bar + horizontal header nav + split hero with oversized headline, supporting copy, abstract workflow illustration, and embedded lead form
+top promo strip + horizontal navigation + split hero with oversized headline, supporting copy, embedded signup form, and diagonal pipeline illustration
 
 ### UI Elements
 Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
-- **announcement bar** — col 2, row 1, zoom 3.2×
-- **navigation bar** — col 2, row 1, zoom 2.4×
-- **hero headline** — col 2, row 1, zoom 2.2×
-- **workflow graphic** — col 1, row 3, zoom 2.1×
-- **email form card** — col 3, row 3, zoom 3.1×
+- **promo banner** — col 2, row 1, zoom 3.2×
+- **logo nav** — col 1, row 1, zoom 2.8×
+- **hero headline** — col 2, row 1, zoom 2.4×
+- **pipeline graphic** — col 1, row 2, zoom 2.2×
+- **email form** — col 3, row 2, zoom 3.4×
 - **primary cta** — col 3, row 1, zoom 4×
 
 ## Style Spec (HTML)
@@ -203,14 +312,14 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #5f31df;
-    --color-secondary:  #351088;
-    --color-accent:     #8f73db;
-    --color-background: #ffffff;
-    --color-surface:    #eef5fa;
-    --color-text:       #121212;
-    --color-text-muted: #617b8f;
-    --color-border:     #dce6ef;
+    --color-primary:    #6c4ae4;
+    --color-secondary:  #32008b;
+    --color-accent:     #8f7ae0;
+    --color-background: #f8f9fa;
+    --color-surface:    #e9eef1;
+    --color-text:       #111111;
+    --color-text-muted: #647788;
+    --color-border:     #dfe5e8;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
@@ -220,9 +329,9 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
     --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 16px;
+    --radius-sm: 2px;
+    --radius-md: 6px;
+    --radius-lg: 12px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -297,6 +406,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -316,11 +446,11 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="header">
     <img src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png" alt="auto-ai-2026-05-16-4-copy-ai.png">
     <div class="header__body">
-      <div class="kicker">ai</div>
+      <div class="kicker">generic</div>
       <h1>auto-ai-2026-05-16-4-copy-ai.png</h1>
-      <p class="muted">A clean AI landing page with a bright, minimal layout anchored by oversized bold typography and layered purple workflow graphics. The design mixes soft cool-gray surfaces with strong violet accents for a polished, product-led feel.</p>
+      <p class="muted">A clean enterprise landing page with a light neutral canvas, oversized black typography, and bold purple pipeline graphics cutting across the hero. The aesthetic balances editorial minimalism with vivid product-brand accents and clear conversion-focused UI.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">modern</span><span class="tag">confident</span><span class="tag">editorial</span><span class="tag">clean</span><span class="tag">tech-forward</span>
+        <span class="tag">minimal</span><span class="tag">editorial</span><span class="tag">bold</span><span class="tag">clean</span><span class="tag">corporate</span>
       </div>
     </div>
   </div>
@@ -329,74 +459,74 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#5f31df"></div>
+      <div class="swatch__chip" style="background:#6c4ae4"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#5f31df</div>
-        <div class="swatch__name">brand violet</div>
+        <div class="swatch__hex">#6c4ae4</div>
+        <div class="swatch__name">brand purple</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#351088"></div>
+      <div class="swatch__chip" style="background:#32008b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#351088</div>
-        <div class="swatch__name">deep purple</div>
+        <div class="swatch__hex">#32008b</div>
+        <div class="swatch__name">deep violet</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8f73db"></div>
+      <div class="swatch__chip" style="background:#8f7ae0"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#8f73db</div>
-        <div class="swatch__name">lavender</div>
+        <div class="swatch__hex">#8f7ae0</div>
+        <div class="swatch__name">soft lavender</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ffffff"></div>
+      <div class="swatch__chip" style="background:#f8f9fa"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white</div>
+        <div class="swatch__hex">#f8f9fa</div>
+        <div class="swatch__name">off-white page</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#eef5fa"></div>
+      <div class="swatch__chip" style="background:#e9eef1"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#eef5fa</div>
-        <div class="swatch__name">cool light gray</div>
+        <div class="swatch__hex">#e9eef1</div>
+        <div class="swatch__name">cool light gray panel</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#121212"></div>
+      <div class="swatch__chip" style="background:#111111"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#121212</div>
-        <div class="swatch__name">near-black</div>
+        <div class="swatch__hex">#111111</div>
+        <div class="swatch__name">near-black text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#617b8f"></div>
+      <div class="swatch__chip" style="background:#647788"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#617b8f</div>
-        <div class="swatch__name">slate blue-gray</div>
+        <div class="swatch__hex">#647788</div>
+        <div class="swatch__name">muted slate</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#dce6ef"></div>
+      <div class="swatch__chip" style="background:#dfe5e8"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#dce6ef</div>
-        <div class="swatch__name">pale blue-gray</div>
+        <div class="swatch__hex">#dfe5e8</div>
+        <div class="swatch__name">light gray border</div>
       </div>
     </div></div>
   </div>
@@ -450,7 +580,70 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.08)">0 8px 24px rgba(0,0,0,0.08)</div></div>
+
+  <div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(0deg, #111111 0%, #2b175a 45%, #111111 100%);"></div>
+        <div class="signal-title">promo-banner</div>
+        <div class="signal-meta">linear 0deg · top announcement strip background</div>
+        <div class="signal-code">0% #111111 @1  |  45% #2b175a @1  |  100% #111111 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(0deg, #9b86ea 0%, #6c4ae4 45%, #32008b 100%);"></div>
+        <div class="signal-title">pipeline-bars</div>
+        <div class="signal-meta">linear 0deg · hero pipeline illustration ribbons</div>
+        <div class="signal-code">0% #9b86ea @1  |  45% #6c4ae4 @1  |  100% #32008b @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">flat editorial panels</div>
+        <div class="signal-meta">large sections use crisp light-gray blocks with thin borders and almost no elevation</div>
+        <div class="signal-code">background: #e9eef1<br/>border: 1px solid #dfe5e8<br/>box-shadow: none</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid brand purple fill with white text and softly rounded rectangle shape</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker or richer purple fill with maintained white text</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>subtle outer focus ring in a pale purple tint around button bounds</td>
+      </tr>
+      <tr>
+        <td>input</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>light field gains darker border emphasis while preserving minimal flat appearance</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="section">
     <h2>UI Element Details</h2>
@@ -460,30 +653,30 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png"
-            alt="announcement bar"
+            alt="promo banner"
             style="--ox:50%;--oy:0%;--zoom:3.2;"
             draggable="false"
           />
         </div>
-        <figcaption>announcement bar</figcaption>
+        <figcaption>promo banner</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png"
-            alt="navigation bar"
-            style="--ox:50%;--oy:0%;--zoom:2.4;"
+            alt="logo nav"
+            style="--ox:0%;--oy:0%;--zoom:2.8;"
             draggable="false"
           />
         </div>
-        <figcaption>navigation bar</figcaption>
+        <figcaption>logo nav</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png"
             alt="hero headline"
-            style="--ox:50%;--oy:0%;--zoom:2.2;"
+            style="--ox:50%;--oy:0%;--zoom:2.4;"
             draggable="false"
           />
         </div>
@@ -493,23 +686,23 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png"
-            alt="workflow graphic"
-            style="--ox:0%;--oy:100%;--zoom:2.1;"
+            alt="pipeline graphic"
+            style="--ox:0%;--oy:50%;--zoom:2.2;"
             draggable="false"
           />
         </div>
-        <figcaption>workflow graphic</figcaption>
+        <figcaption>pipeline graphic</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-4-copy-ai.png"
-            alt="email form card"
-            style="--ox:100%;--oy:100%;--zoom:3.1;"
+            alt="email form"
+            style="--ox:100%;--oy:50%;--zoom:3.4;"
             draggable="false"
           />
         </div>
-        <figcaption>email form card</figcaption>
+        <figcaption>email form</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
@@ -535,7 +728,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 12px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -544,22 +737,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Primary buttons use solid violet fills with white semibold text and medium corner radius; secondary CTA appears as a black rectangular button with white text.</div>
+        <div class="component__desc">Primary CTA uses a compact rounded rectangle with solid purple fill and medium-weight white text; secondary dark button appears in the embedded form with square corners and black fill.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Minimal white form card inset over the hero graphic, with subtle border and no heavy shadow.</div>
+        <div class="component__desc">Form module appears as a simple white rectangular panel inset over the purple hero graphic, using minimal decoration and clear spacing.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Large single-line email input with pale cool-gray background, thin border, generous padding, and muted placeholder text.</div>
+        <div class="component__desc">Single-line email field uses a pale gray background, thin border, low radius, and muted placeholder text.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top navigation bar on white with centered menu items, black text links, brand wordmark at left, and a prominent violet CTA on the right.</div>
+        <div class="component__desc">Top navigation is a horizontal white bar with left-aligned wordmark, centered menu items with subtle dropdown chevrons, and right-side login plus prominent CTA button.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top announcement bar + horizontal header nav + split hero with oversized headline, supporting copy, abstract workflow illustration, and embedded lead form</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top promo strip + horizontal navigation + split hero with oversized headline, supporting copy, embedded signup form, and diagonal pipeline illustration</p></div>
 </body>
 </html>
 ```

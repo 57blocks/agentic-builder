@@ -622,6 +622,7 @@ export default function PipelinePage() {
             tasks,
             codeOutputDir,
             undefined,
+            undefined,
             steps.prd?.content,
           );
           setActiveOverridePhase("coding");

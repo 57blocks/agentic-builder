@@ -1,46 +1,50 @@
 ---
-{"id":"DK-img-auto-ai-2026-05-16-1-chatgpt","layer":"L1","kind":"design-knowledge","title":"Trend Capture — ChatGPT (ai)","tags":["industry:ai","source:trend-capture","image:auto-ai-2026-05-16-1-chatgpt.png","site:openai.com","url:https://www.openai.com/chatgpt","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778926016077,"updatedAt":1778926016077,"schemaVersion":1}
+{"id":"DK-img-auto-ai-2026-05-16-1-chatgpt","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-ai-2026-05-16-1-chatgpt.png","tags":["industry:generic","source:vision-distill","image:auto-ai-2026-05-16-1-chatgpt.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778926016077,"updatedAt":1779236014280,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
-  "industry": "ai",
-  "summary": "A clean, highly minimal AI chat interface with a bright neutral canvas, soft outlines, and restrained monochrome styling. The layout emphasizes spaciousness, rounded controls, and a centered conversational input experience.",
+  "industry": "generic",
+  "summary": "A highly minimal light-theme conversational interface with generous whitespace, soft neutral surfaces, and understated monochrome controls. The design relies on subtle borders, rounded pills, and sparse iconography rather than strong color or decoration.",
   "vibe": [
     "minimal",
     "clean",
-    "airy",
+    "soft",
     "neutral",
-    "friendly"
+    "editorial"
   ],
   "palette": {
     "primary": {
-      "hex": "#1f1f1f",
-      "label": "charcoal"
+      "hex": "#111111",
+      "label": "near-black UI ink"
     },
     "secondary": {
-      "hex": "#ececec",
-      "label": "light gray"
+      "hex": "#e9e9e9",
+      "label": "soft neutral panel"
+    },
+    "accent": {
+      "hex": "#000000",
+      "label": "solid black CTA"
     },
     "background": {
-      "hex": "#ffffff",
-      "label": "white"
+      "hex": "#f4f4f4",
+      "label": "app canvas"
     },
     "surface": {
-      "hex": "#f9f9f9",
-      "label": "off-white"
+      "hex": "#ffffff",
+      "label": "card and input surface"
     },
     "text": {
-      "hex": "#1f1f1f",
-      "label": "near-black"
+      "hex": "#202020",
+      "label": "primary text"
     },
     "textMuted": {
-      "hex": "#8f8f8f",
-      "label": "muted gray"
+      "hex": "#8a8a8a",
+      "label": "muted placeholder and supporting text"
     },
     "border": {
       "hex": "#d9d9d9",
-      "label": "soft gray"
+      "label": "hairline border"
     }
   },
   "typography": {
@@ -50,8 +54,8 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "large centered prompt headline",
-      "lightweight UI labels",
+      "medium-weight sans headings",
+      "small muted utility text",
       "minimal typographic hierarchy"
     ]
   },
@@ -69,42 +73,80 @@
     ]
   },
   "radius": {
-    "smPx": 4,
-    "mdPx": 8,
-    "lgPx": 16,
+    "smPx": 6,
+    "mdPx": 12,
+    "lgPx": 24,
     "pillPx": 999
   },
   "shadows": [
     "0 1px 2px rgba(0,0,0,0.04)",
-    "0 4px 16px rgba(0,0,0,0.06)"
+    "0 0 0 1px rgba(0,0,0,0.06)"
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft-outline",
+      "description": "surfaces use very light borders and almost no elevation, creating a quiet flat appearance",
+      "cssHints": [
+        "background: #ffffff",
+        "border: 1px solid #d9d9d9",
+        "box-shadow: 0 1px 2px rgba(0,0,0,0.04)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid black pill with white text and no visible border"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly softened black fill with subtle elevation increase"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin dark outer ring around the pill"
+    },
+    {
+      "component": "input",
+      "state": "default",
+      "treatment": "white pill field with light gray border and muted placeholder"
+    },
+    {
+      "component": "input",
+      "state": "focus",
+      "treatment": "clearer gray border and slightly darker text/icons"
+    }
   ],
   "components": {
     "button": {
-      "description": "Rounded pill buttons with thin gray borders or solid dark fill; minimal labels and generous horizontal padding."
+      "description": "Rounded pill buttons; primary action is black with white text, secondary actions are white or very light gray with thin gray outlines and dark text."
     },
     "card": {
-      "description": "Sidebar panels and highlighted nav rows use very subtle tonal fills with little to no visible shadow, relying on spacing and borders for separation."
+      "description": "Large framed content canvas and sidebar panels use flat white or very pale gray surfaces with subtle strokes and modest corner rounding."
     },
     "input": {
-      "description": "Large centered pill-shaped chat input with soft gray outline, muted placeholder text, leading add icon, and embedded rounded action chips on the right."
+      "description": "Long horizontal pill input centered on the page, with left utility icon, muted placeholder, and compact right-side voice action cluster."
     },
     "navigation": {
-      "description": "Fixed left sidebar with icon-plus-label navigation, soft active state background, utility links at the bottom, and a simple top bar brand/title area."
+      "description": "Left sidebar with icon-plus-label nav items, light selected row highlight, and top bar branding with utility auth buttons on the right."
     }
   },
-  "layout": "fixed left sidebar + top header + centered hero prompt + large pill input + footer legal text",
+  "layout": "fixed left sidebar + top app bar + centered prompt headline + wide composer input + footer legal text",
   "visualElements": [
     {
       "name": "sidebar nav",
       "col": 1,
       "row": 1,
-      "zoom": 2.5
+      "zoom": 2.6
     },
     {
       "name": "brand header",
       "col": 2,
       "row": 1,
-      "zoom": 3
+      "zoom": 3.2
     },
     {
       "name": "auth buttons",
@@ -116,24 +158,24 @@
       "name": "hero headline",
       "col": 2,
       "row": 2,
-      "zoom": 2.5
+      "zoom": 3.2
     },
     {
-      "name": "chat input",
+      "name": "prompt input",
       "col": 2,
       "row": 2,
-      "zoom": 2
+      "zoom": 2.4
     },
     {
-      "name": "footer note",
-      "col": 2,
+      "name": "login panel",
+      "col": 1,
       "row": 3,
-      "zoom": 3.5
+      "zoom": 2.8
     }
   ],
   "imagePath": "/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png",
   "imageName": "auto-ai-2026-05-16-1-chatgpt.png",
-  "capturedAt": "2026-05-16T10:06:56.075Z",
+  "capturedAt": "2026-05-20T00:13:34.279Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -142,53 +184,67 @@
 
 ## Style Spec (Markdown)
 
-**Industry**: ai
+**Industry**: generic
 **Image**: auto-ai-2026-05-16-1-chatgpt.png
-**Vibe**: minimal, clean, airy, neutral, friendly
+**Vibe**: minimal, clean, soft, neutral, editorial
 
-**Summary**: A clean, highly minimal AI chat interface with a bright neutral canvas, soft outlines, and restrained monochrome styling. The layout emphasizes spaciousness, rounded controls, and a centered conversational input experience.
+**Summary**: A highly minimal light-theme conversational interface with generous whitespace, soft neutral surfaces, and understated monochrome controls. The design relies on subtle borders, rounded pills, and sparse iconography rather than strong color or decoration.
 
 ### Palette
-- Primary: `#1f1f1f` — charcoal
-- Secondary: `#ececec` — light gray
-- Background: `#ffffff` — white
-- Surface: `#f9f9f9` — off-white
-- Text: `#1f1f1f` — near-black
-- Text muted: `#8f8f8f` — muted gray
-- Border: `#d9d9d9` — soft gray
+- Primary: `#111111` — near-black UI ink
+- Secondary: `#e9e9e9` — soft neutral panel
+- Accent: `#000000` — solid black CTA
+- Background: `#f4f4f4` — app canvas
+- Surface: `#ffffff` — card and input surface
+- Text: `#202020` — primary text
+- Text muted: `#8a8a8a` — muted placeholder and supporting text
+- Border: `#d9d9d9` — hairline border
 
 ### Typography
 - Heading font: Inter (weight 500)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: large centered prompt headline
-- Note: lightweight UI labels
+- Note: medium-weight sans headings
+- Note: small muted utility text
 - Note: minimal typographic hierarchy
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 8px, lg 16px, pill 999px
+- Radius: sm 6px, md 12px, lg 24px, pill 999px
 - Shadows: 2 variant(s)
   - `0 1px 2px rgba(0,0,0,0.04)`
-  - `0 4px 16px rgba(0,0,0,0.06)`
+  - `0 0 0 1px rgba(0,0,0,0.06)`
+
+### Surface Effects
+- **soft-outline**: surfaces use very light borders and almost no elevation, creating a quiet flat appearance
+  - `background: #ffffff`
+  - `border: 1px solid #d9d9d9`
+  - `box-shadow: 0 1px 2px rgba(0,0,0,0.04)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid black pill with white text and no visible border
+- **button.primary.hover**: slightly softened black fill with subtle elevation increase
+- **button.primary.focus**: thin dark outer ring around the pill
+- **input.default**: white pill field with light gray border and muted placeholder
+- **input.focus**: clearer gray border and slightly darker text/icons
 
 ### Components
-- **button**: Rounded pill buttons with thin gray borders or solid dark fill; minimal labels and generous horizontal padding.
-- **card**: Sidebar panels and highlighted nav rows use very subtle tonal fills with little to no visible shadow, relying on spacing and borders for separation.
-- **input**: Large centered pill-shaped chat input with soft gray outline, muted placeholder text, leading add icon, and embedded rounded action chips on the right.
-- **navigation**: Fixed left sidebar with icon-plus-label navigation, soft active state background, utility links at the bottom, and a simple top bar brand/title area.
+- **button**: Rounded pill buttons; primary action is black with white text, secondary actions are white or very light gray with thin gray outlines and dark text.
+- **card**: Large framed content canvas and sidebar panels use flat white or very pale gray surfaces with subtle strokes and modest corner rounding.
+- **input**: Long horizontal pill input centered on the page, with left utility icon, muted placeholder, and compact right-side voice action cluster.
+- **navigation**: Left sidebar with icon-plus-label nav items, light selected row highlight, and top bar branding with utility auth buttons on the right.
 
 ### Layout
-fixed left sidebar + top header + centered hero prompt + large pill input + footer legal text
+fixed left sidebar + top app bar + centered prompt headline + wide composer input + footer legal text
 
 ### UI Elements
 Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
-- **sidebar nav** — col 1, row 1, zoom 2.5×
-- **brand header** — col 2, row 1, zoom 3×
+- **sidebar nav** — col 1, row 1, zoom 2.6×
+- **brand header** — col 2, row 1, zoom 3.2×
 - **auth buttons** — col 3, row 1, zoom 3.5×
-- **hero headline** — col 2, row 2, zoom 2.5×
-- **chat input** — col 2, row 2, zoom 2×
-- **footer note** — col 2, row 3, zoom 3.5×
+- **hero headline** — col 2, row 2, zoom 3.2×
+- **prompt input** — col 2, row 2, zoom 2.4×
+- **login panel** — col 1, row 3, zoom 2.8×
 
 ## Style Spec (HTML)
 
@@ -204,13 +260,13 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #1f1f1f;
-    --color-secondary:  #ececec;
-    --color-accent:     #1f1f1f;
-    --color-background: #ffffff;
-    --color-surface:    #f9f9f9;
-    --color-text:       #1f1f1f;
-    --color-text-muted: #8f8f8f;
+    --color-primary:    #111111;
+    --color-secondary:  #e9e9e9;
+    --color-accent:     #000000;
+    --color-background: #f4f4f4;
+    --color-surface:    #ffffff;
+    --color-text:       #202020;
+    --color-text-muted: #8a8a8a;
     --color-border:     #d9d9d9;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
@@ -221,9 +277,9 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
     --weight-heading: 500;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 16px;
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 24px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -298,6 +354,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -317,11 +394,11 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="header">
     <img src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png" alt="auto-ai-2026-05-16-1-chatgpt.png">
     <div class="header__body">
-      <div class="kicker">ai</div>
+      <div class="kicker">generic</div>
       <h1>auto-ai-2026-05-16-1-chatgpt.png</h1>
-      <p class="muted">A clean, highly minimal AI chat interface with a bright neutral canvas, soft outlines, and restrained monochrome styling. The layout emphasizes spaciousness, rounded controls, and a centered conversational input experience.</p>
+      <p class="muted">A highly minimal light-theme conversational interface with generous whitespace, soft neutral surfaces, and understated monochrome controls. The design relies on subtle borders, rounded pills, and sparse iconography rather than strong color or decoration.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">airy</span><span class="tag">neutral</span><span class="tag">friendly</span>
+        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">soft</span><span class="tag">neutral</span><span class="tag">editorial</span>
       </div>
     </div>
   </div>
@@ -330,56 +407,65 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1f1f1f"></div>
+      <div class="swatch__chip" style="background:#111111"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#1f1f1f</div>
-        <div class="swatch__name">charcoal</div>
+        <div class="swatch__hex">#111111</div>
+        <div class="swatch__name">near-black UI ink</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ececec"></div>
+      <div class="swatch__chip" style="background:#e9e9e9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#ececec</div>
-        <div class="swatch__name">light gray</div>
+        <div class="swatch__hex">#e9e9e9</div>
+        <div class="swatch__name">soft neutral panel</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#000000"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Accent</div>
+        <div class="swatch__hex">#000000</div>
+        <div class="swatch__name">solid black CTA</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#f4f4f4"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Background</div>
+        <div class="swatch__hex">#f4f4f4</div>
+        <div class="swatch__name">app canvas</div>
       </div>
     </div>
 
     <div class="swatch">
       <div class="swatch__chip" style="background:#ffffff"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#f9f9f9"></div>
-      <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#f9f9f9</div>
-        <div class="swatch__name">off-white</div>
+        <div class="swatch__hex">#ffffff</div>
+        <div class="swatch__name">card and input surface</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1f1f1f"></div>
+      <div class="swatch__chip" style="background:#202020"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#1f1f1f</div>
-        <div class="swatch__name">near-black</div>
+        <div class="swatch__hex">#202020</div>
+        <div class="swatch__name">primary text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8f8f8f"></div>
+      <div class="swatch__chip" style="background:#8a8a8a"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#8f8f8f</div>
-        <div class="swatch__name">muted gray</div>
+        <div class="swatch__hex">#8a8a8a</div>
+        <div class="swatch__name">muted placeholder and supporting text</div>
       </div>
     </div>
 
@@ -388,7 +474,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
         <div class="swatch__hex">#d9d9d9</div>
-        <div class="swatch__name">soft gray</div>
+        <div class="swatch__name">hairline border</div>
       </div>
     </div></div>
   </div>
@@ -442,7 +528,60 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 4px 16px rgba(0,0,0,0.06)">0 4px 16px rgba(0,0,0,0.06)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 0 0 1px rgba(0,0,0,0.06)">0 0 0 1px rgba(0,0,0,0.06)</div></div>
+
+  
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft-outline</div>
+        <div class="signal-meta">surfaces use very light borders and almost no elevation, creating a quiet flat appearance</div>
+        <div class="signal-code">background: #ffffff<br/>border: 1px solid #d9d9d9<br/>box-shadow: 0 1px 2px rgba(0,0,0,0.04)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid black pill with white text and no visible border</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly softened black fill with subtle elevation increase</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin dark outer ring around the pill</td>
+      </tr>
+      <tr>
+        <td>input</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>white pill field with light gray border and muted placeholder</td>
+      </tr>
+      <tr>
+        <td>input</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>clearer gray border and slightly darker text/icons</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="section">
     <h2>UI Element Details</h2>
@@ -453,7 +592,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png"
             alt="sidebar nav"
-            style="--ox:0%;--oy:0%;--zoom:2.5;"
+            style="--ox:0%;--oy:0%;--zoom:2.6;"
             draggable="false"
           />
         </div>
@@ -464,7 +603,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png"
             alt="brand header"
-            style="--ox:50%;--oy:0%;--zoom:3;"
+            style="--ox:50%;--oy:0%;--zoom:3.2;"
             draggable="false"
           />
         </div>
@@ -486,7 +625,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png"
             alt="hero headline"
-            style="--ox:50%;--oy:50%;--zoom:2.5;"
+            style="--ox:50%;--oy:50%;--zoom:3.2;"
             draggable="false"
           />
         </div>
@@ -496,23 +635,23 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png"
-            alt="chat input"
-            style="--ox:50%;--oy:50%;--zoom:2;"
+            alt="prompt input"
+            style="--ox:50%;--oy:50%;--zoom:2.4;"
             draggable="false"
           />
         </div>
-        <figcaption>chat input</figcaption>
+        <figcaption>prompt input</figcaption>
       </figure>
       <figure class="crop-tile">
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-1-chatgpt.png"
-            alt="footer note"
-            style="--ox:50%;--oy:100%;--zoom:3.5;"
+            alt="login panel"
+            style="--ox:0%;--oy:100%;--zoom:2.8;"
             draggable="false"
           />
         </div>
-        <figcaption>footer note</figcaption>
+        <figcaption>login panel</figcaption>
       </figure></div>
   </div>
 
@@ -527,7 +666,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 24px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -536,22 +675,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Rounded pill buttons with thin gray borders or solid dark fill; minimal labels and generous horizontal padding.</div>
+        <div class="component__desc">Rounded pill buttons; primary action is black with white text, secondary actions are white or very light gray with thin gray outlines and dark text.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Sidebar panels and highlighted nav rows use very subtle tonal fills with little to no visible shadow, relying on spacing and borders for separation.</div>
+        <div class="component__desc">Large framed content canvas and sidebar panels use flat white or very pale gray surfaces with subtle strokes and modest corner rounding.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Large centered pill-shaped chat input with soft gray outline, muted placeholder text, leading add icon, and embedded rounded action chips on the right.</div>
+        <div class="component__desc">Long horizontal pill input centered on the page, with left utility icon, muted placeholder, and compact right-side voice action cluster.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Fixed left sidebar with icon-plus-label navigation, soft active state background, utility links at the bottom, and a simple top bar brand/title area.</div>
+        <div class="component__desc">Left sidebar with icon-plus-label nav items, light selected row highlight, and top bar branding with utility auth buttons on the right.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>fixed left sidebar + top header + centered hero prompt + large pill input + footer legal text</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>fixed left sidebar + top app bar + centered prompt headline + wide composer input + footer legal text</p></div>
 </body>
 </html>
 ```

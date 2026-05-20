@@ -9,6 +9,11 @@ import {
   readTddEvidenceSummary,
   type TddEvidenceSummary,
 } from "@/lib/pipeline/tdd-evidence";
+import {
+  calculateCodingOutcomeScores,
+  type CodingOutcomeScores,
+  type ScoreBreakdown,
+} from "@/lib/pipeline/coding-outcome-score";
 
 const execFileAsync = promisify(execFile);
 
@@ -151,12 +156,6 @@ interface AggregatedModelUsage {
   completionTokens: number;
   totalTokens: number;
   stages: string[];
-}
-
-interface ScoreBreakdown {
-  score: number;
-  grade: string;
-  reasons: string[];
 }
 
 interface CodingSessionReportHistoryEntry {
@@ -2007,6 +2006,7 @@ function formatMarkdownReport(input: {
   status: "pass" | "fail" | "aborted";
   terminalSummary: string;
   score: ScoreBreakdown;
+  outcomeScores: CodingOutcomeScores;
   modelUsage: AggregatedModelUsage[];
   modelPerformance: ModelPerformanceSummary[];
   stageUsage: StageUsageSummary[];
@@ -2066,7 +2066,11 @@ function formatMarkdownReport(input: {
     "",
     `- Session ID: \`${input.sessionId}\``,
     `- Status: **${input.status.toUpperCase()}**`,
-    `- Score: **${input.score.score}/100 (${input.score.grade})**`,
+    `- Overall score: **${input.outcomeScores.overall.score}/100 (${input.outcomeScores.overall.grade})**`,
+    `- Generated baseline: **${input.outcomeScores.generatedBaseline.score}/100 (${input.outcomeScores.generatedBaseline.grade})**`,
+    `- Final usability: **${input.outcomeScores.finalUsability.score}/100 (${input.outcomeScores.finalUsability.grade})**`,
+    `- Session health: **${input.outcomeScores.sessionHealth.score}/100 (${input.outcomeScores.sessionHealth.grade})**`,
+    `- Repair burden: **${input.outcomeScores.repairBurden.score}/100 (${input.outcomeScores.repairBurden.grade})**`,
     `- Runtime readiness: ${readinessHeader}`,
     `- Started at: ${input.startedAt}`,
     `- Ended at: ${input.endedAt}`,
@@ -2188,7 +2192,50 @@ function formatMarkdownReport(input: {
   );
 
   // ── Scoring breakdown table ───────────────────────────────────────────
-  lines.push("## Scoring Breakdown");
+  lines.push("## Outcome Scoring");
+  lines.push("");
+  lines.push(
+    "The primary score now prioritizes final app usability. Session interruptions and repair churn are still visible, but they no longer dominate the final quality verdict when the app is recoverable.",
+  );
+  lines.push("");
+  lines.push("| Dimension | Weight | Score | Meaning |");
+  lines.push("| --- | ---: | ---: | --- |");
+  lines.push(
+    `| Generated baseline | info | **${input.outcomeScores.generatedBaseline.score}/100 (${input.outcomeScores.generatedBaseline.grade})** | Estimated initial quality after discounting repair burden |`,
+  );
+  lines.push(
+    `| Final usability | 50% | **${input.outcomeScores.finalUsability.score}/100 (${input.outcomeScores.finalUsability.grade})** | Final build/runtime/gate state and blocking defects |`,
+  );
+  lines.push(
+    `| Requirement coverage | 20% | **${input.outcomeScores.requirementCoverage.score}/100 (${input.outcomeScores.requirementCoverage.grade})** | PRD hard/soft coverage after audit |`,
+  );
+  lines.push(
+    `| Evidence completeness | 15% | **${input.outcomeScores.evidence.score}/100 (${input.outcomeScores.evidence.grade})** | Whether validation evidence actually ran |`,
+  );
+  lines.push(
+    `| Repair burden | 10% | **${input.outcomeScores.repairBurden.score}/100 (${input.outcomeScores.repairBurden.grade})** | How much fix-loop/self-heal effort was required |`,
+  );
+  lines.push(
+    `| Cost/speed | 5% | **${input.outcomeScores.costSpeed.score}/100 (${input.outcomeScores.costSpeed.grade})** | Call volume, token volume, and spend |`,
+  );
+  lines.push("");
+  lines.push(`**Overall formula:** \`${input.outcomeScores.overall.reasons[0]?.replace(/^Score formula:\s*/, "") ?? ""}\``);
+  lines.push("");
+  lines.push("### Outcome Notes");
+  for (const [label, breakdown] of [
+    ["Generated baseline", input.outcomeScores.generatedBaseline],
+    ["Final usability", input.outcomeScores.finalUsability],
+    ["Requirement coverage", input.outcomeScores.requirementCoverage],
+    ["Evidence completeness", input.outcomeScores.evidence],
+    ["Repair burden", input.outcomeScores.repairBurden],
+    ["Cost/speed", input.outcomeScores.costSpeed],
+  ] as const) {
+    const notes = breakdown.reasons.slice(1, 4);
+    lines.push(`- **${label}**: ${notes.join(" | ")}`);
+  }
+  lines.push("");
+
+  lines.push("## Session Health Breakdown");
   lines.push("");
   // First line of reasons is the formula; the rest are per-rule explanations.
   const [formulaLine, ...ruleBullets] = input.score.reasons;
@@ -2813,6 +2860,23 @@ export async function writeCodingSessionReport(
     taskResults: input.taskResults,
     repairSummary,
   });
+  const outcomeScores = calculateCodingOutcomeScores({
+    status: input.status,
+    sessionHealth: score,
+    integrationErrors: input.integrationErrors,
+    runtimeVerifyErrors: input.runtimeVerifyErrors,
+    e2eVerifyErrors: input.e2eVerifyErrors,
+    finalAudit: input.finalAudit,
+    taskResults: input.taskResults,
+    repairSummary,
+    runtimeReadiness,
+    migrationCoverage,
+    tddEvidenceSummary,
+    gatesExecuted: input.gatesExecuted,
+    modelUsage,
+    scaffoldFixAttempts: input.scaffoldFixAttempts,
+    integrationFixAttempts: input.integrationFixAttempts,
+  });
   const suggestions = buildImprovementSuggestions({
     integrationErrors: input.integrationErrors,
     runtimeVerifyErrors: input.runtimeVerifyErrors,
@@ -2867,7 +2931,9 @@ export async function writeCodingSessionReport(
     generatorGitSha: generatorGitSha ?? null,
     scaffoldFixAttempts: input.scaffoldFixAttempts ?? 0,
     integrationFixAttempts: input.integrationFixAttempts ?? 0,
-    score,
+    score: outcomeScores.overall,
+    scores: outcomeScores,
+    sessionHealthScore: score,
     gateErrors: {
       integrationErrors: input.integrationErrors ?? "",
       runtimeVerifyErrors: input.runtimeVerifyErrors ?? "",
@@ -2922,6 +2988,7 @@ export async function writeCodingSessionReport(
     status: input.status,
     terminalSummary: input.terminalSummary,
     score,
+    outcomeScores,
     modelUsage,
     modelPerformance,
     stageUsage,
@@ -2979,8 +3046,8 @@ export async function writeCodingSessionReport(
     startedAt: input.startedAt,
     endedAt: input.endedAt,
     status: input.status,
-    score: score.score,
-    grade: score.grade,
+    score: outcomeScores.overall.score,
+    grade: outcomeScores.overall.grade,
     durationMs: Math.max(
       0,
       Date.parse(input.endedAt) - Date.parse(input.startedAt),
@@ -3028,8 +3095,8 @@ export async function writeCodingSessionReport(
       projectId:       input.projectId ?? null,
       outputDir:       input.outputDir,
       status:          input.status,
-      score:           score.score,
-      grade:           score.grade,
+      score:           outcomeScores.overall.score,
+      grade:           outcomeScores.overall.grade,
       primaryModel:
         modelPerformance[0]?.model ?? modelUsage[0]?.model ?? null,
       totalCalls,

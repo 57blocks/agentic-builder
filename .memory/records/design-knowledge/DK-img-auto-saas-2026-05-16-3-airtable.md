@@ -1,45 +1,49 @@
 ---
-{"id":"DK-img-auto-saas-2026-05-16-3-airtable","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Airtable (saas)","tags":["industry:saas","source:trend-capture","image:auto-saas-2026-05-16-3-airtable.png","site:airtable.com","url:https://airtable.com","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778924914243,"updatedAt":1778924914243,"schemaVersion":1}
+{"id":"DK-img-auto-saas-2026-05-16-3-airtable","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-saas-2026-05-16-3-airtable.png","tags":["industry:saas","source:vision-distill","image:auto-saas-2026-05-16-3-airtable.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778924914243,"updatedAt":1779236281850,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "saas",
-  "summary": "A clean enterprise SaaS landing page with expansive white space, large editorial-style hero typography, and restrained monochrome UI accented by subtle blue promotional highlights. The design feels polished and conversion-focused, using simple outlined and filled buttons with trust-building logo rows.",
+  "summary": "A clean enterprise SaaS landing page with a bright neutral canvas, restrained dark accents, and generous whitespace. The design emphasizes clarity, trust, and conversion with simple typography, outlined secondary actions, and logo-driven social proof.",
   "vibe": [
     "minimal",
     "clean",
     "corporate",
-    "modern",
+    "trustworthy",
     "airy"
   ],
   "palette": {
     "primary": {
-      "hex": "#1f2530",
-      "label": "charcoal navy"
+      "hex": "#111827",
+      "label": "deep navy"
     },
     "secondary": {
-      "hex": "#2f6fec",
+      "hex": "#d9e4f7",
+      "label": "pale blue banner"
+    },
+    "accent": {
+      "hex": "#2563eb",
       "label": "link blue"
     },
     "background": {
-      "hex": "#fefefe",
-      "label": "white"
+      "hex": "#ffffff",
+      "label": "white page"
     },
     "surface": {
-      "hex": "#ffffff",
-      "label": "page white"
+      "hex": "#f8fafc",
+      "label": "soft cool gray"
     },
     "text": {
-      "hex": "#1f2530",
-      "label": "dark charcoal"
+      "hex": "#1f2937",
+      "label": "charcoal text"
     },
     "textMuted": {
       "hex": "#6b7280",
-      "label": "cool gray"
+      "label": "muted gray"
     },
     "border": {
-      "hex": "#cfd5de",
+      "hex": "#d1d5db",
       "label": "light gray border"
     }
   },
@@ -50,9 +54,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized centered hero heading",
-      "neutral grotesk sans serif",
-      "medium-weight navigation and buttons"
+      "large centered hero heading",
+      "neutral grotesk sans styling",
+      "subdued body copy with medium line height"
     ]
   },
   "spacing": {
@@ -71,27 +75,92 @@
   "radius": {
     "smPx": 4,
     "mdPx": 8,
-    "lgPx": 16,
+    "lgPx": 12,
     "pillPx": 999
   },
   "shadows": [
-    "0 1px 2px rgba(15,23,42,0.08)"
+    "0 1px 2px rgba(17,24,39,0.04)"
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid deep navy fill with white text and subtle borderless appearance"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker or richer navy fill with preserved white text"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "subtle outer ring in pale blue or gray around the rounded button"
+    },
+    {
+      "component": "button.secondary",
+      "state": "default",
+      "treatment": "white fill with dark text and 1px gray outline"
+    },
+    {
+      "component": "navigation.link",
+      "state": "hover",
+      "treatment": "text darkens slightly and chevron remains understated"
+    }
   ],
   "components": {
     "button": {
-      "description": "Large pill-shaped CTA buttons; primary uses dark charcoal fill with white text, secondary uses white fill with thin dark outline and dark text. Header CTAs mirror the same system with generous horizontal padding."
+      "description": "Rounded rectangular CTA buttons with medium corner radius; primary uses dark navy fill and white text, secondary uses white background with thin gray border and dark text."
     },
     "navigation": {
-      "description": "Top navigation bar with left-aligned logo, horizontal menu links, and right-aligned actions. Includes a slim announcement bar above with pale blue background and blue text link."
+      "description": "Top horizontal navigation with left-aligned brand, simple text links with small chevrons for dropdown items, and right-aligned utility actions including outlined and filled buttons plus login link."
     },
     "card": {
-      "description": "No prominent cards in the visible area; content sits directly on the white page with section-based spacing and a logo strip acting as a trust band."
+      "description": "No strong card system is visible; content sits directly on the page with sections separated by whitespace rather than elevated panels."
     }
   },
-  "layout": "top announcement bar + fixed-style horizontal header + centered hero with dual CTAs + trusted-by logo row + next section intro",
+  "layout": "top promo bar + horizontal header navigation + centered hero + dual CTA row + logo cloud social proof",
+  "visualElements": [
+    {
+      "name": "promo bar",
+      "col": 2,
+      "row": 1,
+      "zoom": 3.2
+    },
+    {
+      "name": "brand nav",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.8
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.2
+    },
+    {
+      "name": "primary CTA",
+      "col": 2,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "signup button",
+      "col": 3,
+      "row": 1,
+      "zoom": 3.5
+    },
+    {
+      "name": "logo cloud",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.1
+    }
+  ],
   "imagePath": "/knowledge-refs/auto-saas-2026-05-16-3-airtable.png",
   "imageName": "auto-saas-2026-05-16-3-airtable.png",
-  "capturedAt": "2026-05-16T09:48:34.242Z",
+  "capturedAt": "2026-05-20T00:18:01.849Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -102,40 +171,57 @@
 
 **Industry**: saas
 **Image**: auto-saas-2026-05-16-3-airtable.png
-**Vibe**: minimal, clean, corporate, modern, airy
+**Vibe**: minimal, clean, corporate, trustworthy, airy
 
-**Summary**: A clean enterprise SaaS landing page with expansive white space, large editorial-style hero typography, and restrained monochrome UI accented by subtle blue promotional highlights. The design feels polished and conversion-focused, using simple outlined and filled buttons with trust-building logo rows.
+**Summary**: A clean enterprise SaaS landing page with a bright neutral canvas, restrained dark accents, and generous whitespace. The design emphasizes clarity, trust, and conversion with simple typography, outlined secondary actions, and logo-driven social proof.
 
 ### Palette
-- Primary: `#1f2530` — charcoal navy
-- Secondary: `#2f6fec` — link blue
-- Background: `#fefefe` — white
-- Surface: `#ffffff` — page white
-- Text: `#1f2530` — dark charcoal
-- Text muted: `#6b7280` — cool gray
-- Border: `#cfd5de` — light gray border
+- Primary: `#111827` — deep navy
+- Secondary: `#d9e4f7` — pale blue banner
+- Accent: `#2563eb` — link blue
+- Background: `#ffffff` — white page
+- Surface: `#f8fafc` — soft cool gray
+- Text: `#1f2937` — charcoal text
+- Text muted: `#6b7280` — muted gray
+- Border: `#d1d5db` — light gray border
 
 ### Typography
 - Heading font: Inter (weight 500)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized centered hero heading
-- Note: neutral grotesk sans serif
-- Note: medium-weight navigation and buttons
+- Note: large centered hero heading
+- Note: neutral grotesk sans styling
+- Note: subdued body copy with medium line height
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 8px, lg 16px, pill 999px
+- Radius: sm 4px, md 8px, lg 12px, pill 999px
 - Shadows: 1 variant(s)
-  - `0 1px 2px rgba(15,23,42,0.08)`
+  - `0 1px 2px rgba(17,24,39,0.04)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid deep navy fill with white text and subtle borderless appearance
+- **button.primary.hover**: slightly darker or richer navy fill with preserved white text
+- **button.primary.focus**: subtle outer ring in pale blue or gray around the rounded button
+- **button.secondary.default**: white fill with dark text and 1px gray outline
+- **navigation.link.hover**: text darkens slightly and chevron remains understated
 
 ### Components
-- **button**: Large pill-shaped CTA buttons; primary uses dark charcoal fill with white text, secondary uses white fill with thin dark outline and dark text. Header CTAs mirror the same system with generous horizontal padding.
-- **navigation**: Top navigation bar with left-aligned logo, horizontal menu links, and right-aligned actions. Includes a slim announcement bar above with pale blue background and blue text link.
-- **card**: No prominent cards in the visible area; content sits directly on the white page with section-based spacing and a logo strip acting as a trust band.
+- **button**: Rounded rectangular CTA buttons with medium corner radius; primary uses dark navy fill and white text, secondary uses white background with thin gray border and dark text.
+- **navigation**: Top horizontal navigation with left-aligned brand, simple text links with small chevrons for dropdown items, and right-aligned utility actions including outlined and filled buttons plus login link.
+- **card**: No strong card system is visible; content sits directly on the page with sections separated by whitespace rather than elevated panels.
 
 ### Layout
-top announcement bar + fixed-style horizontal header + centered hero with dual CTAs + trusted-by logo row + next section intro
+top promo bar + horizontal header navigation + centered hero + dual CTA row + logo cloud social proof
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **promo bar** — col 2, row 1, zoom 3.2×
+- **brand nav** — col 1, row 1, zoom 2.8×
+- **hero headline** — col 2, row 1, zoom 2.2×
+- **primary CTA** — col 2, row 2, zoom 4×
+- **signup button** — col 3, row 1, zoom 3.5×
+- **logo cloud** — col 2, row 3, zoom 2.1×
 
 ## Style Spec (HTML)
 
@@ -151,14 +237,14 @@ top announcement bar + fixed-style horizontal header + centered hero with dual C
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #1f2530;
-    --color-secondary:  #2f6fec;
-    --color-accent:     #1f2530;
-    --color-background: #fefefe;
-    --color-surface:    #ffffff;
-    --color-text:       #1f2530;
+    --color-primary:    #111827;
+    --color-secondary:  #d9e4f7;
+    --color-accent:     #2563eb;
+    --color-background: #ffffff;
+    --color-surface:    #f8fafc;
+    --color-text:       #1f2937;
     --color-text-muted: #6b7280;
-    --color-border:     #cfd5de;
+    --color-border:     #d1d5db;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
@@ -170,7 +256,7 @@ top announcement bar + fixed-style horizontal header + centered hero with dual C
     --size-base:      16px;
     --radius-sm: 4px;
     --radius-md: 8px;
-    --radius-lg: 16px;
+    --radius-lg: 12px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -245,9 +331,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -256,9 +373,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">saas</div>
       <h1>auto-saas-2026-05-16-3-airtable.png</h1>
-      <p class="muted">A clean enterprise SaaS landing page with expansive white space, large editorial-style hero typography, and restrained monochrome UI accented by subtle blue promotional highlights. The design feels polished and conversion-focused, using simple outlined and filled buttons with trust-building logo rows.</p>
+      <p class="muted">A clean enterprise SaaS landing page with a bright neutral canvas, restrained dark accents, and generous whitespace. The design emphasizes clarity, trust, and conversion with simple typography, outlined secondary actions, and logo-driven social proof.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">corporate</span><span class="tag">modern</span><span class="tag">airy</span>
+        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">corporate</span><span class="tag">trustworthy</span><span class="tag">airy</span>
       </div>
     </div>
   </div>
@@ -267,47 +384,56 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1f2530"></div>
+      <div class="swatch__chip" style="background:#111827"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#1f2530</div>
-        <div class="swatch__name">charcoal navy</div>
+        <div class="swatch__hex">#111827</div>
+        <div class="swatch__name">deep navy</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#2f6fec"></div>
+      <div class="swatch__chip" style="background:#d9e4f7"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#2f6fec</div>
-        <div class="swatch__name">link blue</div>
+        <div class="swatch__hex">#d9e4f7</div>
+        <div class="swatch__name">pale blue banner</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#fefefe"></div>
+      <div class="swatch__chip" style="background:#2563eb"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#fefefe</div>
-        <div class="swatch__name">white</div>
+        <div class="swatch__label">Accent</div>
+        <div class="swatch__hex">#2563eb</div>
+        <div class="swatch__name">link blue</div>
       </div>
     </div>
 
     <div class="swatch">
       <div class="swatch__chip" style="background:#ffffff"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Surface</div>
+        <div class="swatch__label">Background</div>
         <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">page white</div>
+        <div class="swatch__name">white page</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1f2530"></div>
+      <div class="swatch__chip" style="background:#f8fafc"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Surface</div>
+        <div class="swatch__hex">#f8fafc</div>
+        <div class="swatch__name">soft cool gray</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#1f2937"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#1f2530</div>
-        <div class="swatch__name">dark charcoal</div>
+        <div class="swatch__hex">#1f2937</div>
+        <div class="swatch__name">charcoal text</div>
       </div>
     </div>
 
@@ -316,15 +442,15 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
         <div class="swatch__hex">#6b7280</div>
-        <div class="swatch__name">cool gray</div>
+        <div class="swatch__name">muted gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#cfd5de"></div>
+      <div class="swatch__chip" style="background:#d1d5db"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#cfd5de</div>
+        <div class="swatch__hex">#d1d5db</div>
         <div class="swatch__name">light gray border</div>
       </div>
     </div></div>
@@ -379,7 +505,124 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(15,23,42,0.08)">0 1px 2px rgba(15,23,42,0.08)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(17,24,39,0.04)">0 1px 2px rgba(17,24,39,0.04)</div></div>
+
+  
+
+  
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid deep navy fill with white text and subtle borderless appearance</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker or richer navy fill with preserved white text</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>subtle outer ring in pale blue or gray around the rounded button</td>
+      </tr>
+      <tr>
+        <td>button.secondary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>white fill with dark text and 1px gray outline</td>
+      </tr>
+      <tr>
+        <td>navigation.link</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>text darkens slightly and chevron remains understated</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="promo bar"
+            style="--ox:50%;--oy:0%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>promo bar</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="brand nav"
+            style="--ox:0%;--oy:0%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand nav</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="primary CTA"
+            style="--ox:50%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="signup button"
+            style="--ox:100%;--oy:0%;--zoom:3.5;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>signup button</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-3-airtable.png"
+            alt="logo cloud"
+            style="--ox:50%;--oy:100%;--zoom:2.1;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>logo cloud</figcaption>
+      </figure></div>
+  </div>
 
   <div class="section">
     <h2>Component Preview</h2>
@@ -392,7 +635,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 12px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -401,18 +644,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Large pill-shaped CTA buttons; primary uses dark charcoal fill with white text, secondary uses white fill with thin dark outline and dark text. Header CTAs mirror the same system with generous horizontal padding.</div>
+        <div class="component__desc">Rounded rectangular CTA buttons with medium corner radius; primary uses dark navy fill and white text, secondary uses white background with thin gray border and dark text.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top navigation bar with left-aligned logo, horizontal menu links, and right-aligned actions. Includes a slim announcement bar above with pale blue background and blue text link.</div>
+        <div class="component__desc">Top horizontal navigation with left-aligned brand, simple text links with small chevrons for dropdown items, and right-aligned utility actions including outlined and filled buttons plus login link.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">No prominent cards in the visible area; content sits directly on the white page with section-based spacing and a logo strip acting as a trust band.</div>
+        <div class="component__desc">No strong card system is visible; content sits directly on the page with sections separated by whitespace rather than elevated panels.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top announcement bar + fixed-style horizontal header + centered hero with dual CTAs + trusted-by logo row + next section intro</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top promo bar + horizontal header navigation + centered hero + dual CTA row + logo cloud social proof</p></div>
 </body>
 </html>
 ```

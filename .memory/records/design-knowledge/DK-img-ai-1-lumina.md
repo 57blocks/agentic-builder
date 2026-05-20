@@ -1,50 +1,50 @@
 ---
-{"id":"DK-img-ai-1-lumina","layer":"L1","kind":"design-knowledge","title":"Style Spec — ai-1-lumina.png","tags":["industry:ai","source:vision-distill","image:ai-1-lumina.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922739441,"updatedAt":1778922739441,"schemaVersion":1}
+{"id":"DK-img-ai-1-lumina","layer":"L1","kind":"design-knowledge","title":"Style Spec — ai-1-lumina.png","tags":["industry:ai","source:vision-distill","image:ai-1-lumina.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778922739441,"updatedAt":1779235826892,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "ai",
-  "summary": "A clean AI prompt interface with a soft light theme, oversized friendly hero copy, and subtle purple gradients used as the primary brand accent. The layout feels minimal and approachable, with rounded cards and restrained controls centered on a spacious canvas.",
+  "summary": "A clean AI assistant landing/input screen with a soft light-gray background, large conversational headline, and subtle card-based prompt suggestions. The interface feels approachable and minimal, using a purple gradient accent to add personality without overwhelming the layout.",
   "vibe": [
     "minimal",
     "clean",
     "friendly",
-    "soft",
-    "modern"
+    "modern",
+    "soft"
   ],
   "palette": {
     "primary": {
-      "hex": "#7357f6",
-      "label": "violet brand"
+      "hex": "#7a4fe0",
+      "label": "assistant purple"
     },
     "secondary": {
-      "hex": "#b34f8e",
-      "label": "magenta gradient"
+      "hex": "#b34b8d",
+      "label": "magenta gradient start"
     },
     "accent": {
-      "hex": "#8a6cf7",
-      "label": "purple action"
+      "hex": "#8a63f6",
+      "label": "cta violet"
     },
     "background": {
-      "hex": "#f6f6f7",
-      "label": "light gray app background"
+      "hex": "#f2f2f2",
+      "label": "app background"
     },
     "surface": {
-      "hex": "#ffffff",
-      "label": "white card surface"
+      "hex": "#f7f7f7",
+      "label": "card and input surface"
     },
     "text": {
-      "hex": "#1d1721",
-      "label": "near-black text"
+      "hex": "#1f1f1f",
+      "label": "primary text"
     },
     "textMuted": {
-      "hex": "#8e8a92",
-      "label": "muted gray text"
+      "hex": "#8f8f8f",
+      "label": "secondary text"
     },
     "border": {
-      "hex": "#ece9ef",
-      "label": "soft gray border"
+      "hex": "#e3e3e3",
+      "label": "subtle border"
     }
   },
   "typography": {
@@ -54,10 +54,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized hero heading",
-      "gradient-highlighted name and headline fragment",
-      "compact card labels",
-      "small muted helper text"
+      "oversized greeting headline",
+      "gradient-filled emphasis text",
+      "small muted helper copy"
     ]
   },
   "spacing": {
@@ -74,30 +73,152 @@
     ]
   },
   "radius": {
-    "smPx": 4,
-    "mdPx": 10,
+    "smPx": 6,
+    "mdPx": 12,
     "lgPx": 16,
     "pillPx": 999
   },
   "shadows": [
     "0 1px 2px rgba(0,0,0,0.04)",
-    "0 8px 24px rgba(0,0,0,0.06)"
+    "0 4px 12px rgba(0,0,0,0.05)"
+  ],
+  "gradients": [
+    {
+      "id": "headline-accent",
+      "type": "linear",
+      "angleDeg": 90,
+      "stops": [
+        {
+          "color": "#b34b8d",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#8a4fd8",
+          "positionPct": 55,
+          "opacity": 1
+        },
+        {
+          "color": "#6b5cf0",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "highlighted name and question text in hero heading"
+    },
+    {
+      "id": "cta-button",
+      "type": "linear",
+      "angleDeg": 135,
+      "stops": [
+        {
+          "color": "#8d62f5",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#6d47d8",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "send arrow button background"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft-flat-card",
+      "description": "cards and input areas use barely elevated light surfaces with thin borders and minimal shadow",
+      "cssHints": [
+        "background: #f7f7f7",
+        "border: 1px solid #e3e3e3",
+        "box-shadow: 0 1px 2px rgba(0,0,0,0.04)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "small rounded square button with violet gradient fill and white arrow icon"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly deeper purple gradient with stronger shadow for lift"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "subtle purple outer ring around the compact button"
+    },
+    {
+      "component": "card.prompt",
+      "state": "hover",
+      "treatment": "light border darkens slightly and surface becomes marginally brighter"
+    },
+    {
+      "component": "input.chat",
+      "state": "focus",
+      "treatment": "clean light field with more visible border and soft purple focus glow"
+    }
   ],
   "components": {
     "button": {
-      "description": "Small rounded-square purple submit button with white arrow icon; secondary text actions are icon-led and low emphasis."
+      "description": "Primary action is a compact icon-only send button with rounded corners and violet gradient fill; secondary actions are text-plus-icon ghost controls in muted gray."
     },
     "card": {
-      "description": "Prompt suggestion cards use white backgrounds, thin light-gray borders, subtle shadow, and medium rounded corners with compact text and small line icons."
+      "description": "Prompt suggestion cards are small rounded rectangles with light gray fill, subtle border, concise multiline labels, and tiny monochrome icons anchored near the lower left."
     },
     "input": {
-      "description": "Large white multi-action prompt composer with generous padding, muted placeholder text, bottom utility actions, top-right model/source selector, character count, and embedded send action."
+      "description": "Large chat input container spans most of the content width, with generous padding, top-left placeholder prompt, utility actions along the bottom left, and model selector plus character counter on the right."
+    },
+    "navigation": {
+      "description": "No full navigation bar is visible; utility controls are lightweight inline labels and icon buttons integrated directly into the content area."
     }
   },
-  "layout": "centered hero heading + prompt suggestion card row + refresh action + large composer input",
+  "layout": "centered single-column assistant welcome layout with large hero text, four prompt cards in a row, a refresh utility link, and a wide chat composer beneath",
+  "visualElements": [
+    {
+      "name": "hero headline",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.6
+    },
+    {
+      "name": "prompt cards",
+      "col": 2,
+      "row": 2,
+      "zoom": 2.8
+    },
+    {
+      "name": "refresh link",
+      "col": 1,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "chat input",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.3
+    },
+    {
+      "name": "model selector",
+      "col": 3,
+      "row": 3,
+      "zoom": 4.2
+    },
+    {
+      "name": "send button",
+      "col": 3,
+      "row": 3,
+      "zoom": 4.8
+    }
+  ],
   "imagePath": "/knowledge-refs/ai-1-lumina.png",
   "imageName": "ai-1-lumina.png",
-  "capturedAt": "2026-05-16T09:12:19.440Z",
+  "capturedAt": "2026-05-20T00:10:26.889Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -108,43 +229,74 @@
 
 **Industry**: ai
 **Image**: ai-1-lumina.png
-**Vibe**: minimal, clean, friendly, soft, modern
+**Vibe**: minimal, clean, friendly, modern, soft
 
-**Summary**: A clean AI prompt interface with a soft light theme, oversized friendly hero copy, and subtle purple gradients used as the primary brand accent. The layout feels minimal and approachable, with rounded cards and restrained controls centered on a spacious canvas.
+**Summary**: A clean AI assistant landing/input screen with a soft light-gray background, large conversational headline, and subtle card-based prompt suggestions. The interface feels approachable and minimal, using a purple gradient accent to add personality without overwhelming the layout.
 
 ### Palette
-- Primary: `#7357f6` — violet brand
-- Secondary: `#b34f8e` — magenta gradient
-- Accent: `#8a6cf7` — purple action
-- Background: `#f6f6f7` — light gray app background
-- Surface: `#ffffff` — white card surface
-- Text: `#1d1721` — near-black text
-- Text muted: `#8e8a92` — muted gray text
-- Border: `#ece9ef` — soft gray border
+- Primary: `#7a4fe0` — assistant purple
+- Secondary: `#b34b8d` — magenta gradient start
+- Accent: `#8a63f6` — cta violet
+- Background: `#f2f2f2` — app background
+- Surface: `#f7f7f7` — card and input surface
+- Text: `#1f1f1f` — primary text
+- Text muted: `#8f8f8f` — secondary text
+- Border: `#e3e3e3` — subtle border
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized hero heading
-- Note: gradient-highlighted name and headline fragment
-- Note: compact card labels
-- Note: small muted helper text
+- Note: oversized greeting headline
+- Note: gradient-filled emphasis text
+- Note: small muted helper copy
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 10px, lg 16px, pill 999px
+- Radius: sm 6px, md 12px, lg 16px, pill 999px
 - Shadows: 2 variant(s)
   - `0 1px 2px rgba(0,0,0,0.04)`
-  - `0 8px 24px rgba(0,0,0,0.06)`
+  - `0 4px 12px rgba(0,0,0,0.05)`
+
+### Gradients
+- **headline-accent** (linear, 90deg) — highlighted name and question text in hero heading
+  - stop 0%: `#b34b8d`, alpha 1
+  - stop 55%: `#8a4fd8`, alpha 1
+  - stop 100%: `#6b5cf0`, alpha 1
+- **cta-button** (linear, 135deg) — send arrow button background
+  - stop 0%: `#8d62f5`, alpha 1
+  - stop 100%: `#6d47d8`, alpha 1
+
+### Surface Effects
+- **soft-flat-card**: cards and input areas use barely elevated light surfaces with thin borders and minimal shadow
+  - `background: #f7f7f7`
+  - `border: 1px solid #e3e3e3`
+  - `box-shadow: 0 1px 2px rgba(0,0,0,0.04)`
+
+### Interaction State Tokens
+- **button.primary.default**: small rounded square button with violet gradient fill and white arrow icon
+- **button.primary.hover**: slightly deeper purple gradient with stronger shadow for lift
+- **button.primary.focus**: subtle purple outer ring around the compact button
+- **card.prompt.hover**: light border darkens slightly and surface becomes marginally brighter
+- **input.chat.focus**: clean light field with more visible border and soft purple focus glow
 
 ### Components
-- **button**: Small rounded-square purple submit button with white arrow icon; secondary text actions are icon-led and low emphasis.
-- **card**: Prompt suggestion cards use white backgrounds, thin light-gray borders, subtle shadow, and medium rounded corners with compact text and small line icons.
-- **input**: Large white multi-action prompt composer with generous padding, muted placeholder text, bottom utility actions, top-right model/source selector, character count, and embedded send action.
+- **button**: Primary action is a compact icon-only send button with rounded corners and violet gradient fill; secondary actions are text-plus-icon ghost controls in muted gray.
+- **card**: Prompt suggestion cards are small rounded rectangles with light gray fill, subtle border, concise multiline labels, and tiny monochrome icons anchored near the lower left.
+- **input**: Large chat input container spans most of the content width, with generous padding, top-left placeholder prompt, utility actions along the bottom left, and model selector plus character counter on the right.
+- **navigation**: No full navigation bar is visible; utility controls are lightweight inline labels and icon buttons integrated directly into the content area.
 
 ### Layout
-centered hero heading + prompt suggestion card row + refresh action + large composer input
+centered single-column assistant welcome layout with large hero text, four prompt cards in a row, a refresh utility link, and a wide chat composer beneath
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **hero headline** — col 1, row 1, zoom 2.6×
+- **prompt cards** — col 2, row 2, zoom 2.8×
+- **refresh link** — col 1, row 2, zoom 4×
+- **chat input** — col 2, row 3, zoom 2.3×
+- **model selector** — col 3, row 3, zoom 4.2×
+- **send button** — col 3, row 3, zoom 4.8×
 
 ## Style Spec (HTML)
 
@@ -160,14 +312,14 @@ centered hero heading + prompt suggestion card row + refresh action + large comp
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #7357f6;
-    --color-secondary:  #b34f8e;
-    --color-accent:     #8a6cf7;
-    --color-background: #f6f6f7;
-    --color-surface:    #ffffff;
-    --color-text:       #1d1721;
-    --color-text-muted: #8e8a92;
-    --color-border:     #ece9ef;
+    --color-primary:    #7a4fe0;
+    --color-secondary:  #b34b8d;
+    --color-accent:     #8a63f6;
+    --color-background: #f2f2f2;
+    --color-surface:    #f7f7f7;
+    --color-text:       #1f1f1f;
+    --color-text-muted: #8f8f8f;
+    --color-border:     #e3e3e3;
     --color-success:    #22c55e;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
@@ -177,8 +329,8 @@ centered hero heading + prompt suggestion card row + refresh action + large comp
     --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
-    --radius-md: 10px;
+    --radius-sm: 6px;
+    --radius-md: 12px;
     --radius-lg: 16px;
     --radius-pill: 999px;
   }
@@ -254,9 +406,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -265,9 +448,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">ai</div>
       <h1>ai-1-lumina.png</h1>
-      <p class="muted">A clean AI prompt interface with a soft light theme, oversized friendly hero copy, and subtle purple gradients used as the primary brand accent. The layout feels minimal and approachable, with rounded cards and restrained controls centered on a spacious canvas.</p>
+      <p class="muted">A clean AI assistant landing/input screen with a soft light-gray background, large conversational headline, and subtle card-based prompt suggestions. The interface feels approachable and minimal, using a purple gradient accent to add personality without overwhelming the layout.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">friendly</span><span class="tag">soft</span><span class="tag">modern</span>
+        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">friendly</span><span class="tag">modern</span><span class="tag">soft</span>
       </div>
     </div>
   </div>
@@ -276,74 +459,74 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#7357f6"></div>
+      <div class="swatch__chip" style="background:#7a4fe0"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#7357f6</div>
-        <div class="swatch__name">violet brand</div>
+        <div class="swatch__hex">#7a4fe0</div>
+        <div class="swatch__name">assistant purple</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#b34f8e"></div>
+      <div class="swatch__chip" style="background:#b34b8d"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#b34f8e</div>
-        <div class="swatch__name">magenta gradient</div>
+        <div class="swatch__hex">#b34b8d</div>
+        <div class="swatch__name">magenta gradient start</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8a6cf7"></div>
+      <div class="swatch__chip" style="background:#8a63f6"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#8a6cf7</div>
-        <div class="swatch__name">purple action</div>
+        <div class="swatch__hex">#8a63f6</div>
+        <div class="swatch__name">cta violet</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f6f6f7"></div>
+      <div class="swatch__chip" style="background:#f2f2f2"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f6f6f7</div>
-        <div class="swatch__name">light gray app background</div>
+        <div class="swatch__hex">#f2f2f2</div>
+        <div class="swatch__name">app background</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ffffff"></div>
+      <div class="swatch__chip" style="background:#f7f7f7"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white card surface</div>
+        <div class="swatch__hex">#f7f7f7</div>
+        <div class="swatch__name">card and input surface</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#1d1721"></div>
+      <div class="swatch__chip" style="background:#1f1f1f"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#1d1721</div>
-        <div class="swatch__name">near-black text</div>
+        <div class="swatch__hex">#1f1f1f</div>
+        <div class="swatch__name">primary text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8e8a92"></div>
+      <div class="swatch__chip" style="background:#8f8f8f"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#8e8a92</div>
-        <div class="swatch__name">muted gray text</div>
+        <div class="swatch__hex">#8f8f8f</div>
+        <div class="swatch__name">secondary text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ece9ef"></div>
+      <div class="swatch__chip" style="background:#e3e3e3"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#ece9ef</div>
-        <div class="swatch__name">soft gray border</div>
+        <div class="swatch__hex">#e3e3e3</div>
+        <div class="swatch__name">subtle border</div>
       </div>
     </div></div>
   </div>
@@ -397,7 +580,147 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.06)">0 8px 24px rgba(0,0,0,0.06)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 4px 12px rgba(0,0,0,0.05)">0 4px 12px rgba(0,0,0,0.05)</div></div>
+
+  <div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(90deg, #b34b8d 0%, #8a4fd8 55%, #6b5cf0 100%);"></div>
+        <div class="signal-title">headline-accent</div>
+        <div class="signal-meta">linear 90deg · highlighted name and question text in hero heading</div>
+        <div class="signal-code">0% #b34b8d @1  |  55% #8a4fd8 @1  |  100% #6b5cf0 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(135deg, #8d62f5 0%, #6d47d8 100%);"></div>
+        <div class="signal-title">cta-button</div>
+        <div class="signal-meta">linear 135deg · send arrow button background</div>
+        <div class="signal-code">0% #8d62f5 @1  |  100% #6d47d8 @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft-flat-card</div>
+        <div class="signal-meta">cards and input areas use barely elevated light surfaces with thin borders and minimal shadow</div>
+        <div class="signal-code">background: #f7f7f7<br/>border: 1px solid #e3e3e3<br/>box-shadow: 0 1px 2px rgba(0,0,0,0.04)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>small rounded square button with violet gradient fill and white arrow icon</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly deeper purple gradient with stronger shadow for lift</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>subtle purple outer ring around the compact button</td>
+      </tr>
+      <tr>
+        <td>card.prompt</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>light border darkens slightly and surface becomes marginally brighter</td>
+      </tr>
+      <tr>
+        <td>input.chat</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>clean light field with more visible border and soft purple focus glow</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="hero headline"
+            style="--ox:0%;--oy:0%;--zoom:2.6;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="prompt cards"
+            style="--ox:50%;--oy:50%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>prompt cards</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="refresh link"
+            style="--ox:0%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>refresh link</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="chat input"
+            style="--ox:50%;--oy:100%;--zoom:2.3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>chat input</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="model selector"
+            style="--ox:100%;--oy:100%;--zoom:4.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>model selector</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/ai-1-lumina.png"
+            alt="send button"
+            style="--ox:100%;--oy:100%;--zoom:4.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>send button</figcaption>
+      </figure></div>
+  </div>
 
   <div class="section">
     <h2>Component Preview</h2>
@@ -419,18 +742,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Small rounded-square purple submit button with white arrow icon; secondary text actions are icon-led and low emphasis.</div>
+        <div class="component__desc">Primary action is a compact icon-only send button with rounded corners and violet gradient fill; secondary actions are text-plus-icon ghost controls in muted gray.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Prompt suggestion cards use white backgrounds, thin light-gray borders, subtle shadow, and medium rounded corners with compact text and small line icons.</div>
+        <div class="component__desc">Prompt suggestion cards are small rounded rectangles with light gray fill, subtle border, concise multiline labels, and tiny monochrome icons anchored near the lower left.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Large white multi-action prompt composer with generous padding, muted placeholder text, bottom utility actions, top-right model/source selector, character count, and embedded send action.</div>
+        <div class="component__desc">Large chat input container spans most of the content width, with generous padding, top-left placeholder prompt, utility actions along the bottom left, and model selector plus character counter on the right.</div>
+      </div>
+      <div class="component">
+        <div class="component__name">navigation</div>
+        <div class="component__desc">No full navigation bar is visible; utility controls are lightweight inline labels and icon buttons integrated directly into the content area.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>centered hero heading + prompt suggestion card row + refresh action + large composer input</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>centered single-column assistant welcome layout with large hero text, four prompt cards in a row, a refresh utility link, and a wide chat composer beneath</p></div>
 </body>
 </html>
 ```
