@@ -1,53 +1,57 @@
 ---
-{"id":"DK-img-auto-fintech-web3-2026-05-16-5-chainalysis","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Chainalysis (fintech-web3)","tags":["industry:fintech-web3","source:trend-capture","image:auto-fintech-web3-2026-05-16-5-chainalysis.png","site:chainalysis.com","url:https://chainalysis.com","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778925651127,"updatedAt":1778925651127,"schemaVersion":1}
+{"id":"DK-img-auto-fintech-web3-2026-05-16-5-chainalysis","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-fintech-web3-2026-05-16-5-chainalysis.png","tags":["industry:fintech-web3","source:vision-distill","image:auto-fintech-web3-2026-05-16-5-chainalysis.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778925651127,"updatedAt":1779236250424,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "fintech-web3",
-  "summary": "A clean enterprise fintech landing page with a bright white canvas, bold navy typography, and selective orange calls-to-action. The visual language feels trustworthy and analytical, pairing minimal navigation with soft-shadowed data cards and diagrammatic illustrations.",
+  "summary": "A clean enterprise landing page with a bright neutral canvas, bold indigo typography, and strong orange CTAs. The design feels corporate and trustworthy, using soft shadows and floating product cards to showcase the platform UI.",
   "vibe": [
     "clean",
     "corporate",
-    "analytical",
     "minimal",
-    "trustworthy"
+    "trustworthy",
+    "modern"
   ],
   "palette": {
     "primary": {
-      "hex": "#304289",
-      "label": "deep indigo"
+      "hex": "#2d4187",
+      "label": "brand indigo"
     },
     "secondary": {
-      "hex": "#ff5a00",
-      "label": "vivid orange"
+      "hex": "#ff5c02",
+      "label": "cta orange"
     },
     "accent": {
-      "hex": "#b9cbf7",
-      "label": "soft periwinkle"
+      "hex": "#6f8cc9",
+      "label": "soft blue accent"
     },
     "background": {
-      "hex": "#fefefe",
-      "label": "white"
+      "hex": "#f5f5f5",
+      "label": "light gray page background"
     },
     "surface": {
       "hex": "#ffffff",
-      "label": "card white"
+      "label": "white cards and panels"
     },
     "text": {
-      "hex": "#304289",
-      "label": "navy text"
+      "hex": "#34467a",
+      "label": "deep blue text"
     },
     "textMuted": {
-      "hex": "#6377b0",
-      "label": "muted blue-gray"
+      "hex": "#6d78a0",
+      "label": "muted slate blue"
     },
     "border": {
-      "hex": "#e8eef9",
-      "label": "pale blue border"
+      "hex": "#e7eaef",
+      "label": "light card border"
+    },
+    "warning": {
+      "hex": "#f0c45c",
+      "label": "gold chart accent"
     },
     "danger": {
-      "hex": "#c3131f",
+      "hex": "#c50b0b",
       "label": "alert red"
     }
   },
@@ -58,9 +62,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized bold hero heading",
-      "rounded modern sans-serif",
-      "high-contrast CTA labels"
+      "large centered hero heading",
+      "sentence-case navigation and CTA labels",
+      "brand-heavy use of bold indigo headlines"
     ]
   },
   "spacing": {
@@ -77,37 +81,106 @@
     ]
   },
   "radius": {
-    "smPx": 6,
-    "mdPx": 12,
-    "lgPx": 24,
+    "smPx": 4,
+    "mdPx": 8,
+    "lgPx": 16,
     "pillPx": 999
   },
   "shadows": [
-    "0 6px 20px rgba(48,66,137,0.08)",
-    "0 12px 32px rgba(48,66,137,0.12)"
+    "0 2px 8px rgba(39,57,102,0.08)",
+    "0 10px 24px rgba(39,57,102,0.12)"
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft floating cards",
+      "description": "UI panels float over the page with white fills, faint borders, and diffused shadows for a polished SaaS marketing look",
+      "cssHints": [
+        "background: #ffffff",
+        "border: 1px solid #e7eaef",
+        "box-shadow: 0 10px 24px rgba(39,57,102,0.12)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid orange pill button with white text and no visible border"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker orange fill with stronger shadow emphasis"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "high-contrast outline or glow ring around the pill button in a soft blue tone"
+    },
+    {
+      "component": "navigation.link",
+      "state": "default",
+      "treatment": "plain text links in dark neutral blue-gray on white background"
+    },
+    {
+      "component": "navigation.link",
+      "state": "hover",
+      "treatment": "text shifts toward brand indigo with subtle underline or opacity emphasis"
+    }
   ],
   "components": {
     "button": {
-      "description": "Primary CTA uses a bright orange filled pill with white bold text; secondary header CTA uses a navy filled pill. Large horizontal padding and no visible border."
+      "description": "Large pill-shaped CTAs in solid orange or indigo; white medium-weight text, generous horizontal padding, and minimal chrome."
     },
     "card": {
-      "description": "Floating white insight cards with rounded corners, subtle pale-blue borders or soft shadows, and compact headings. Cards overlay the hero illustration for a layered product-demo effect."
+      "description": "Floating white product-preview cards with rounded corners, thin light borders, soft shadows, and concise labels or data visuals."
     },
     "navigation": {
-      "description": "Top navigation with a slim announcement bar in deep indigo, followed by a white navbar containing logo, centered text links, language/login items, and a prominent pill CTA on the right."
+      "description": "Top horizontal navigation with left-aligned logo, centered primary links, and right-side utility actions including language, login, and a pill CTA."
     }
   },
-  "layout": "announcement bar + top navigation + centered hero copy + primary CTA + overlapping product illustration cards",
-  "imageMotifs": [
-    "blockchain network",
-    "risk analysis",
-    "forensic data",
-    "minimal workspace",
-    "secure finance"
+  "layout": "top announcement bar + horizontal header navigation + centered hero section + layered product illustration with floating analytics cards",
+  "visualElements": [
+    {
+      "name": "announcement bar",
+      "col": 2,
+      "row": 1,
+      "zoom": 3.2
+    },
+    {
+      "name": "brand logo",
+      "col": 1,
+      "row": 1,
+      "zoom": 3.4
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.2
+    },
+    {
+      "name": "primary CTA",
+      "col": 2,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "pie chart card",
+      "col": 1,
+      "row": 3,
+      "zoom": 3
+    },
+    {
+      "name": "summary card",
+      "col": 3,
+      "row": 2,
+      "zoom": 3.2
+    }
   ],
   "imagePath": "/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png",
   "imageName": "auto-fintech-web3-2026-05-16-5-chainalysis.png",
-  "capturedAt": "2026-05-16T10:00:51.126Z",
+  "capturedAt": "2026-05-20T00:17:30.423Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -118,51 +191,66 @@
 
 **Industry**: fintech-web3
 **Image**: auto-fintech-web3-2026-05-16-5-chainalysis.png
-**Vibe**: clean, corporate, analytical, minimal, trustworthy
+**Vibe**: clean, corporate, minimal, trustworthy, modern
 
-**Summary**: A clean enterprise fintech landing page with a bright white canvas, bold navy typography, and selective orange calls-to-action. The visual language feels trustworthy and analytical, pairing minimal navigation with soft-shadowed data cards and diagrammatic illustrations.
+**Summary**: A clean enterprise landing page with a bright neutral canvas, bold indigo typography, and strong orange CTAs. The design feels corporate and trustworthy, using soft shadows and floating product cards to showcase the platform UI.
 
 ### Palette
-- Primary: `#304289` — deep indigo
-- Secondary: `#ff5a00` — vivid orange
-- Accent: `#b9cbf7` — soft periwinkle
-- Background: `#fefefe` — white
-- Surface: `#ffffff` — card white
-- Text: `#304289` — navy text
-- Text muted: `#6377b0` — muted blue-gray
-- Border: `#e8eef9` — pale blue border
-- Danger: `#c3131f` — alert red
+- Primary: `#2d4187` — brand indigo
+- Secondary: `#ff5c02` — cta orange
+- Accent: `#6f8cc9` — soft blue accent
+- Background: `#f5f5f5` — light gray page background
+- Surface: `#ffffff` — white cards and panels
+- Text: `#34467a` — deep blue text
+- Text muted: `#6d78a0` — muted slate blue
+- Border: `#e7eaef` — light card border
+- Warning: `#f0c45c` — gold chart accent
+- Danger: `#c50b0b` — alert red
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized bold hero heading
-- Note: rounded modern sans-serif
-- Note: high-contrast CTA labels
+- Note: large centered hero heading
+- Note: sentence-case navigation and CTA labels
+- Note: brand-heavy use of bold indigo headlines
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 6px, md 12px, lg 24px, pill 999px
+- Radius: sm 4px, md 8px, lg 16px, pill 999px
 - Shadows: 2 variant(s)
-  - `0 6px 20px rgba(48,66,137,0.08)`
-  - `0 12px 32px rgba(48,66,137,0.12)`
+  - `0 2px 8px rgba(39,57,102,0.08)`
+  - `0 10px 24px rgba(39,57,102,0.12)`
+
+### Surface Effects
+- **soft floating cards**: UI panels float over the page with white fills, faint borders, and diffused shadows for a polished SaaS marketing look
+  - `background: #ffffff`
+  - `border: 1px solid #e7eaef`
+  - `box-shadow: 0 10px 24px rgba(39,57,102,0.12)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid orange pill button with white text and no visible border
+- **button.primary.hover**: slightly darker orange fill with stronger shadow emphasis
+- **button.primary.focus**: high-contrast outline or glow ring around the pill button in a soft blue tone
+- **navigation.link.default**: plain text links in dark neutral blue-gray on white background
+- **navigation.link.hover**: text shifts toward brand indigo with subtle underline or opacity emphasis
 
 ### Components
-- **button**: Primary CTA uses a bright orange filled pill with white bold text; secondary header CTA uses a navy filled pill. Large horizontal padding and no visible border.
-- **card**: Floating white insight cards with rounded corners, subtle pale-blue borders or soft shadows, and compact headings. Cards overlay the hero illustration for a layered product-demo effect.
-- **navigation**: Top navigation with a slim announcement bar in deep indigo, followed by a white navbar containing logo, centered text links, language/login items, and a prominent pill CTA on the right.
+- **button**: Large pill-shaped CTAs in solid orange or indigo; white medium-weight text, generous horizontal padding, and minimal chrome.
+- **card**: Floating white product-preview cards with rounded corners, thin light borders, soft shadows, and concise labels or data visuals.
+- **navigation**: Top horizontal navigation with left-aligned logo, centered primary links, and right-side utility actions including language, login, and a pill CTA.
 
 ### Layout
-announcement bar + top navigation + centered hero copy + primary CTA + overlapping product illustration cards
+top announcement bar + horizontal header navigation + centered hero section + layered product illustration with floating analytics cards
 
-### Imagery & Motifs
-On-theme photography subjects that pair well with this style:
-- blockchain network
-- risk analysis
-- forensic data
-- minimal workspace
-- secure finance
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **announcement bar** — col 2, row 1, zoom 3.2×
+- **brand logo** — col 1, row 1, zoom 3.4×
+- **hero headline** — col 2, row 1, zoom 2.2×
+- **primary CTA** — col 2, row 2, zoom 4×
+- **pie chart card** — col 1, row 3, zoom 3×
+- **summary card** — col 3, row 2, zoom 3.2×
 
 ## Style Spec (HTML)
 
@@ -178,26 +266,26 @@ On-theme photography subjects that pair well with this style:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #304289;
-    --color-secondary:  #ff5a00;
-    --color-accent:     #b9cbf7;
-    --color-background: #fefefe;
+    --color-primary:    #2d4187;
+    --color-secondary:  #ff5c02;
+    --color-accent:     #6f8cc9;
+    --color-background: #f5f5f5;
     --color-surface:    #ffffff;
-    --color-text:       #304289;
-    --color-text-muted: #6377b0;
-    --color-border:     #e8eef9;
+    --color-text:       #34467a;
+    --color-text-muted: #6d78a0;
+    --color-border:     #e7eaef;
     --color-success:    #22c55e;
-    --color-warning:    #f59e0b;
-    --color-danger:     #c3131f;
+    --color-warning:    #f0c45c;
+    --color-danger:     #c50b0b;
     --font-heading: 'Inter', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
     --font-mono:    'JetBrains Mono', ui-monospace, monospace;
     --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 6px;
-    --radius-md: 12px;
-    --radius-lg: 24px;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 16px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -272,15 +360,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
-.motif-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.motif { margin: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border);
-  background: var(--color-surface); position: relative; }
-.motif img { display: block; width: 100%; aspect-ratio: 3/2; object-fit: cover; }
-.motif figcaption { padding: 8px 12px; font-size: 12px; color: var(--color-text-muted);
-  background: var(--color-surface); border-top: 1px solid var(--color-border); }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -289,9 +402,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">fintech-web3</div>
       <h1>auto-fintech-web3-2026-05-16-5-chainalysis.png</h1>
-      <p class="muted">A clean enterprise fintech landing page with a bright white canvas, bold navy typography, and selective orange calls-to-action. The visual language feels trustworthy and analytical, pairing minimal navigation with soft-shadowed data cards and diagrammatic illustrations.</p>
+      <p class="muted">A clean enterprise landing page with a bright neutral canvas, bold indigo typography, and strong orange CTAs. The design feels corporate and trustworthy, using soft shadows and floating product cards to showcase the platform UI.</p>
       <div class="tags">
-        <span class="tag">clean</span><span class="tag">corporate</span><span class="tag">analytical</span><span class="tag">minimal</span><span class="tag">trustworthy</span>
+        <span class="tag">clean</span><span class="tag">corporate</span><span class="tag">minimal</span><span class="tag">trustworthy</span><span class="tag">modern</span>
       </div>
     </div>
   </div>
@@ -300,38 +413,38 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#304289"></div>
+      <div class="swatch__chip" style="background:#2d4187"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#304289</div>
-        <div class="swatch__name">deep indigo</div>
+        <div class="swatch__hex">#2d4187</div>
+        <div class="swatch__name">brand indigo</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ff5a00"></div>
+      <div class="swatch__chip" style="background:#ff5c02"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#ff5a00</div>
-        <div class="swatch__name">vivid orange</div>
+        <div class="swatch__hex">#ff5c02</div>
+        <div class="swatch__name">cta orange</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#b9cbf7"></div>
+      <div class="swatch__chip" style="background:#6f8cc9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#b9cbf7</div>
-        <div class="swatch__name">soft periwinkle</div>
+        <div class="swatch__hex">#6f8cc9</div>
+        <div class="swatch__name">soft blue accent</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#fefefe"></div>
+      <div class="swatch__chip" style="background:#f5f5f5"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#fefefe</div>
-        <div class="swatch__name">white</div>
+        <div class="swatch__hex">#f5f5f5</div>
+        <div class="swatch__name">light gray page background</div>
       </div>
     </div>
 
@@ -340,42 +453,51 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
         <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">card white</div>
+        <div class="swatch__name">white cards and panels</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#304289"></div>
+      <div class="swatch__chip" style="background:#34467a"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#304289</div>
-        <div class="swatch__name">navy text</div>
+        <div class="swatch__hex">#34467a</div>
+        <div class="swatch__name">deep blue text</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#6377b0"></div>
+      <div class="swatch__chip" style="background:#6d78a0"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#6377b0</div>
-        <div class="swatch__name">muted blue-gray</div>
+        <div class="swatch__hex">#6d78a0</div>
+        <div class="swatch__name">muted slate blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#e8eef9"></div>
+      <div class="swatch__chip" style="background:#e7eaef"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#e8eef9</div>
-        <div class="swatch__name">pale blue border</div>
+        <div class="swatch__hex">#e7eaef</div>
+        <div class="swatch__name">light card border</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#c3131f"></div>
+      <div class="swatch__chip" style="background:#f0c45c"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Warning</div>
+        <div class="swatch__hex">#f0c45c</div>
+        <div class="swatch__name">gold chart accent</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#c50b0b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Danger</div>
-        <div class="swatch__hex">#c3131f</div>
+        <div class="swatch__hex">#c50b0b</div>
         <div class="swatch__name">alert red</div>
       </div>
     </div></div>
@@ -430,66 +552,130 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 6px 20px rgba(48,66,137,0.08)">0 6px 20px rgba(48,66,137,0.08)</div><div class="shadow-card" style="box-shadow:0 12px 32px rgba(48,66,137,0.12)">0 12px 32px rgba(48,66,137,0.12)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 2px 8px rgba(39,57,102,0.08)">0 2px 8px rgba(39,57,102,0.08)</div><div class="shadow-card" style="box-shadow:0 10px 24px rgba(39,57,102,0.12)">0 10px 24px rgba(39,57,102,0.12)</div></div>
+
+  
 
   <div class="section">
-    <h2>Imagery &amp; Motifs</h2>
-    <p class="muted" style="margin-top:-4px;">On-theme photography suggested for this style — keywords feed Unsplash (live) with picsum as fallback so the slots always render.</p>
-    <div class="motif-grid">
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?blockchain%20network"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-5-c-1/600/400"
-          alt="blockchain network"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>blockchain network</figcaption>
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft floating cards</div>
+        <div class="signal-meta">UI panels float over the page with white fills, faint borders, and diffused shadows for a polished SaaS marketing look</div>
+        <div class="signal-code">background: #ffffff<br/>border: 1px solid #e7eaef<br/>box-shadow: 0 10px 24px rgba(39,57,102,0.12)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid orange pill button with white text and no visible border</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker orange fill with stronger shadow emphasis</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>high-contrast outline or glow ring around the pill button in a soft blue tone</td>
+      </tr>
+      <tr>
+        <td>navigation.link</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>plain text links in dark neutral blue-gray on white background</td>
+      </tr>
+      <tr>
+        <td>navigation.link</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>text shifts toward brand indigo with subtle underline or opacity emphasis</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="announcement bar"
+            style="--ox:50%;--oy:0%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>announcement bar</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?risk%20analysis"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-5-c-2/600/400"
-          alt="risk analysis"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>risk analysis</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="brand logo"
+            style="--ox:0%;--oy:0%;--zoom:3.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand logo</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?forensic%20data"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-5-c-3/600/400"
-          alt="forensic data"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>forensic data</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?minimal%20workspace"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-5-c-4/600/400"
-          alt="minimal workspace"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>minimal workspace</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="primary CTA"
+            style="--ox:50%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?secure%20finance"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-5-c-5/600/400"
-          alt="secure finance"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>secure finance</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="pie chart card"
+            style="--ox:0%;--oy:100%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>pie chart card</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-5-chainalysis.png"
+            alt="summary card"
+            style="--ox:100%;--oy:50%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>summary card</figcaption>
       </figure></div>
   </div>
 
@@ -504,7 +690,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 24px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -513,18 +699,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Primary CTA uses a bright orange filled pill with white bold text; secondary header CTA uses a navy filled pill. Large horizontal padding and no visible border.</div>
+        <div class="component__desc">Large pill-shaped CTAs in solid orange or indigo; white medium-weight text, generous horizontal padding, and minimal chrome.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Floating white insight cards with rounded corners, subtle pale-blue borders or soft shadows, and compact headings. Cards overlay the hero illustration for a layered product-demo effect.</div>
+        <div class="component__desc">Floating white product-preview cards with rounded corners, thin light borders, soft shadows, and concise labels or data visuals.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top navigation with a slim announcement bar in deep indigo, followed by a white navbar containing logo, centered text links, language/login items, and a prominent pill CTA on the right.</div>
+        <div class="component__desc">Top horizontal navigation with left-aligned logo, centered primary links, and right-side utility actions including language, login, and a pill CTA.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>announcement bar + top navigation + centered hero copy + primary CTA + overlapping product illustration cards</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top announcement bar + horizontal header navigation + centered hero section + layered product illustration with floating analytics cards</p></div>
 </body>
 </html>
 ```

@@ -7,6 +7,7 @@ import type {
   CodingTask,
   KickoffWorkItem,
 } from "@/lib/pipeline/types";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
 
 import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
 
@@ -68,12 +69,14 @@ interface CodingState {
   supervisorLogs: AgentLogEntry[];
   /** Set when integration_verify_fix is waiting for a human to pick an action. */
   pendingHumanDecision: PendingHumanDecision | null;
+  codingMode: CodingMode;
 
   startCoding: (
     runId: string,
     tasks: KickoffWorkItem[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -87,6 +90,7 @@ interface CodingState {
     failedTaskIds: string[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -101,6 +105,7 @@ interface CodingState {
     tasks: KickoffWorkItem[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -199,6 +204,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   gapAnalysis: null,
   supervisorLogs: [],
   pendingHumanDecision: null,
+  codingMode: "normal",
 
   setProjectId: (id) => {
     const current = get();
@@ -218,6 +224,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         e2eVerify: null,
         supervisorLogs: [],
         pendingHumanDecision: null,
+        codingMode: "normal",
       });
       return;
     }
@@ -241,7 +248,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     }
   },
 
-  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  startCoding: (
+    runId,
+    taskItems,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     set({
       status: "running",
       error: null,
@@ -254,6 +269,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     // Clear the last-session checkpoint so the "Retry Failed Tasks" button
@@ -274,7 +290,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent, stitchMeta }),
+      body: JSON.stringify({
+        runId,
+        tasks: taskItems,
+        codeOutputDir,
+        projectTier,
+        codingMode,
+        prd: prdContent,
+        stitchMeta,
+      }),
     })
       .then(async (resp) => {
         if (!resp.ok) {
@@ -340,7 +364,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       });
   },
 
-  rerunCoding: (runId, tasks, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  rerunCoding: (
+    runId,
+    tasks,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     const { projectId } = get();
 
     // 1. Abort any active SSE connection. The backend coding pipeline reads
@@ -383,6 +415,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     get().startCoding(
@@ -390,12 +423,22 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       tasks,
       codeOutputDir,
       projectTier,
+      codingMode,
       prdContent,
       stitchMeta,
     );
   },
 
-  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  retryFailedTasks: (
+    runId,
+    tasks,
+    failedTaskIds,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     const retrySet = new Set(failedTaskIds);
     const existingTasks = get().tasks;
 
@@ -439,6 +482,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     // Abort any previous coding session before starting retry.
@@ -458,6 +502,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks,
         codeOutputDir,
         projectTier,
+        codingMode,
         prd: prdContent,
         stitchMeta,
         retryFailedTaskIds: failedTaskIds,
@@ -549,6 +594,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks: current.tasks,
         codeOutputDir,
         projectTier,
+        codingMode: current.codingMode,
       }),
     })
       .then(async (resp) => {
@@ -632,6 +678,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks: current.tasks,
         codeOutputDir,
         projectTier,
+        codingMode: current.codingMode,
       }),
     })
       .then(async (resp) => {

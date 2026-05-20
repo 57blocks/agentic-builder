@@ -1,54 +1,54 @@
 ---
-{"id":"DK-img-auto-ai-2026-05-16-5-notion-ai","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Notion AI (ai)","tags":["industry:ai","source:trend-capture","image:auto-ai-2026-05-16-5-notion-ai.png","site:notion.so","url:https://www.notion.so/product/ai","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778926118923,"updatedAt":1778926118923,"schemaVersion":1}
+{"id":"DK-img-auto-ai-2026-05-16-5-notion-ai","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-ai-2026-05-16-5-notion-ai.png","tags":["industry:generic","source:vision-distill","image:auto-ai-2026-05-16-5-notion-ai.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778926118923,"updatedAt":1779236099012,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
-  "industry": "ai",
-  "summary": "A bright, editorial SaaS-style landing page with generous whitespace, bold typography, and playful illustrated AI imagery. The interface blends clean enterprise layout patterns with approachable accent colors and soft card surfaces.",
+  "industry": "generic",
+  "summary": "A clean, editorial SaaS-style landing page with generous whitespace, bold black typography, soft neutral surfaces, and restrained blue accent CTAs. Playful illustrated hero graphics add personality while the UI remains minimal and highly legible.",
   "vibe": [
     "minimal",
-    "playful",
-    "editorial",
     "clean",
-    "friendly"
+    "editorial",
+    "playful",
+    "modern"
   ],
   "palette": {
     "primary": {
-      "hex": "#0b7be6",
+      "hex": "#0b6ddf",
       "label": "brand blue"
     },
     "secondary": {
-      "hex": "#ff432d",
-      "label": "warm red-orange"
+      "hex": "#f7c59f",
+      "label": "soft peach"
     },
     "accent": {
-      "hex": "#ffbd16",
-      "label": "gold yellow"
+      "hex": "#ff4b2e",
+      "label": "signal orange"
     },
     "background": {
-      "hex": "#ffffff",
-      "label": "page white"
+      "hex": "#f5f5f5",
+      "label": "warm light gray"
     },
     "surface": {
-      "hex": "#f4f4f4",
-      "label": "light gray surface"
+      "hex": "#ffffff",
+      "label": "white card"
     },
     "text": {
       "hex": "#111111",
-      "label": "near-black text"
+      "label": "near-black"
     },
     "textMuted": {
-      "hex": "#9a968f",
-      "label": "muted gray"
+      "hex": "#4a4a4a",
+      "label": "muted graphite"
     },
     "border": {
-      "hex": "#dddddd",
-      "label": "soft gray border"
+      "hex": "#d9d9d9",
+      "label": "light gray border"
     },
-    "success": {
-      "hex": "#76b900",
-      "label": "green brand accent"
+    "warning": {
+      "hex": "#f0b323",
+      "label": "gold yellow"
     }
   },
   "typography": {
@@ -58,9 +58,10 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized bold hero heading",
-      "clean sans serif throughout",
-      "navigation uses medium weight"
+      "very large bold hero heading",
+      "clean neo-grotesk UI typography",
+      "body copy uses comfortable line height",
+      "navigation and card labels use medium weight"
     ]
   },
   "spacing": {
@@ -77,68 +78,101 @@
     ]
   },
   "radius": {
-    "smPx": 4,
+    "smPx": 6,
     "mdPx": 10,
     "lgPx": 16,
     "pillPx": 999
   },
   "shadows": [
     "0 1px 2px rgba(0,0,0,0.04)",
-    "0 0 0 1px rgba(0,0,0,0.06)"
+    "0 2px 8px rgba(0,0,0,0.06)"
+  ],
+  "surfaceEffects": [
+    {
+      "name": "paper grain",
+      "description": "lower feature panel uses a soft peach surface with subtle grain texture",
+      "cssHints": [
+        "background: #f7c59f",
+        "background-image: radial-gradient(rgba(255,255,255,0.25) 1px, transparent 1px)",
+        "opacity: 0.9"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid blue fill with white text and minimal border"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker blue fill with subtle elevation"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "2px soft blue focus ring outside rounded bounds"
+    },
+    {
+      "component": "button.secondary",
+      "state": "default",
+      "treatment": "pale blue-tinted surface with blue text and no strong border"
+    }
   ],
   "components": {
     "button": {
-      "description": "Rounded medium-large buttons with solid blue primary fill and pale blue secondary fill; simple text labels, minimal shadow, generous horizontal padding."
+      "description": "Rounded rectangular buttons with medium height, clear horizontal padding, primary solid blue CTA and secondary soft-tint variant."
     },
     "card": {
-      "description": "Feature cards use white backgrounds, subtle gray borders, large rounded corners, light icon accents, and bold labels with ample internal spacing."
+      "description": "Feature cards are white with light gray borders, medium corner radius, minimal shadow, and left-aligned icon plus label."
     },
     "navigation": {
-      "description": "Top horizontal navbar with compact wordmark on the left, centered text links, and right-aligned CTA plus login link; very clean white background."
+      "description": "Top navigation bar with centered product links, compact text, subtle dropdown chevrons, right-aligned CTA, and a slim announcement strip above."
     }
   },
-  "layout": "top announcement bar + horizontal navigation + split hero with left text/CTA and right illustration + trusted-by logo row + four-card feature grid",
+  "layout": "announcement bar + top navigation + two-column hero with left text/CTAs and right illustration + trusted-by logo row + four-card feature grid + large textured content panel",
   "visualElements": [
     {
       "name": "announcement bar",
       "col": 2,
       "row": 1,
-      "zoom": 3.4
-    },
-    {
-      "name": "navigation bar",
-      "col": 2,
-      "row": 1,
-      "zoom": 2.8
+      "zoom": 3.2
     },
     {
       "name": "hero headline",
       "col": 1,
       "row": 1,
-      "zoom": 2.3
+      "zoom": 2.2
+    },
+    {
+      "name": "hero illustration",
+      "col": 3,
+      "row": 1,
+      "zoom": 2.4
     },
     {
       "name": "primary CTA",
       "col": 1,
       "row": 2,
-      "zoom": 3.6
+      "zoom": 4
     },
     {
-      "name": "hero illustration",
-      "col": 3,
+      "name": "logo row",
+      "col": 2,
       "row": 2,
-      "zoom": 2.1
+      "zoom": 2.8
     },
     {
       "name": "feature card",
-      "col": 2,
+      "col": 3,
       "row": 3,
-      "zoom": 2.7
+      "zoom": 3.2
     }
   ],
   "imagePath": "/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png",
   "imageName": "auto-ai-2026-05-16-5-notion-ai.png",
-  "capturedAt": "2026-05-16T10:08:38.923Z",
+  "capturedAt": "2026-05-20T00:14:59.011Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -147,54 +181,67 @@
 
 ## Style Spec (Markdown)
 
-**Industry**: ai
+**Industry**: generic
 **Image**: auto-ai-2026-05-16-5-notion-ai.png
-**Vibe**: minimal, playful, editorial, clean, friendly
+**Vibe**: minimal, clean, editorial, playful, modern
 
-**Summary**: A bright, editorial SaaS-style landing page with generous whitespace, bold typography, and playful illustrated AI imagery. The interface blends clean enterprise layout patterns with approachable accent colors and soft card surfaces.
+**Summary**: A clean, editorial SaaS-style landing page with generous whitespace, bold black typography, soft neutral surfaces, and restrained blue accent CTAs. Playful illustrated hero graphics add personality while the UI remains minimal and highly legible.
 
 ### Palette
-- Primary: `#0b7be6` — brand blue
-- Secondary: `#ff432d` — warm red-orange
-- Accent: `#ffbd16` — gold yellow
-- Background: `#ffffff` — page white
-- Surface: `#f4f4f4` — light gray surface
-- Text: `#111111` — near-black text
-- Text muted: `#9a968f` — muted gray
-- Border: `#dddddd` — soft gray border
-- Success: `#76b900` — green brand accent
+- Primary: `#0b6ddf` — brand blue
+- Secondary: `#f7c59f` — soft peach
+- Accent: `#ff4b2e` — signal orange
+- Background: `#f5f5f5` — warm light gray
+- Surface: `#ffffff` — white card
+- Text: `#111111` — near-black
+- Text muted: `#4a4a4a` — muted graphite
+- Border: `#d9d9d9` — light gray border
+- Warning: `#f0b323` — gold yellow
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized bold hero heading
-- Note: clean sans serif throughout
-- Note: navigation uses medium weight
+- Note: very large bold hero heading
+- Note: clean neo-grotesk UI typography
+- Note: body copy uses comfortable line height
+- Note: navigation and card labels use medium weight
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 10px, lg 16px, pill 999px
+- Radius: sm 6px, md 10px, lg 16px, pill 999px
 - Shadows: 2 variant(s)
   - `0 1px 2px rgba(0,0,0,0.04)`
-  - `0 0 0 1px rgba(0,0,0,0.06)`
+  - `0 2px 8px rgba(0,0,0,0.06)`
+
+### Surface Effects
+- **paper grain**: lower feature panel uses a soft peach surface with subtle grain texture
+  - `background: #f7c59f`
+  - `background-image: radial-gradient(rgba(255,255,255,0.25) 1px, transparent 1px)`
+  - `opacity: 0.9`
+
+### Interaction State Tokens
+- **button.primary.default**: solid blue fill with white text and minimal border
+- **button.primary.hover**: slightly darker blue fill with subtle elevation
+- **button.primary.focus**: 2px soft blue focus ring outside rounded bounds
+- **button.secondary.default**: pale blue-tinted surface with blue text and no strong border
 
 ### Components
-- **button**: Rounded medium-large buttons with solid blue primary fill and pale blue secondary fill; simple text labels, minimal shadow, generous horizontal padding.
-- **card**: Feature cards use white backgrounds, subtle gray borders, large rounded corners, light icon accents, and bold labels with ample internal spacing.
-- **navigation**: Top horizontal navbar with compact wordmark on the left, centered text links, and right-aligned CTA plus login link; very clean white background.
+- **button**: Rounded rectangular buttons with medium height, clear horizontal padding, primary solid blue CTA and secondary soft-tint variant.
+- **card**: Feature cards are white with light gray borders, medium corner radius, minimal shadow, and left-aligned icon plus label.
+- **navigation**: Top navigation bar with centered product links, compact text, subtle dropdown chevrons, right-aligned CTA, and a slim announcement strip above.
 
 ### Layout
-top announcement bar + horizontal navigation + split hero with left text/CTA and right illustration + trusted-by logo row + four-card feature grid
+announcement bar + top navigation + two-column hero with left text/CTAs and right illustration + trusted-by logo row + four-card feature grid + large textured content panel
 
 ### UI Elements
 Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
-- **announcement bar** — col 2, row 1, zoom 3.4×
-- **navigation bar** — col 2, row 1, zoom 2.8×
-- **hero headline** — col 1, row 1, zoom 2.3×
-- **primary CTA** — col 1, row 2, zoom 3.6×
-- **hero illustration** — col 3, row 2, zoom 2.1×
-- **feature card** — col 2, row 3, zoom 2.7×
+- **announcement bar** — col 2, row 1, zoom 3.2×
+- **hero headline** — col 1, row 1, zoom 2.2×
+- **hero illustration** — col 3, row 1, zoom 2.4×
+- **primary CTA** — col 1, row 2, zoom 4×
+- **logo row** — col 2, row 2, zoom 2.8×
+- **feature card** — col 3, row 3, zoom 3.2×
 
 ## Style Spec (HTML)
 
@@ -210,16 +257,16 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #0b7be6;
-    --color-secondary:  #ff432d;
-    --color-accent:     #ffbd16;
-    --color-background: #ffffff;
-    --color-surface:    #f4f4f4;
+    --color-primary:    #0b6ddf;
+    --color-secondary:  #f7c59f;
+    --color-accent:     #ff4b2e;
+    --color-background: #f5f5f5;
+    --color-surface:    #ffffff;
     --color-text:       #111111;
-    --color-text-muted: #9a968f;
-    --color-border:     #dddddd;
-    --color-success:    #76b900;
-    --color-warning:    #f59e0b;
+    --color-text-muted: #4a4a4a;
+    --color-border:     #d9d9d9;
+    --color-success:    #22c55e;
+    --color-warning:    #f0b323;
     --color-danger:     #ef4444;
     --font-heading: 'Inter', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
@@ -227,7 +274,7 @@ Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
     --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
+    --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 16px;
     --radius-pill: 999px;
@@ -304,6 +351,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -323,11 +391,11 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="header">
     <img src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png" alt="auto-ai-2026-05-16-5-notion-ai.png">
     <div class="header__body">
-      <div class="kicker">ai</div>
+      <div class="kicker">generic</div>
       <h1>auto-ai-2026-05-16-5-notion-ai.png</h1>
-      <p class="muted">A bright, editorial SaaS-style landing page with generous whitespace, bold typography, and playful illustrated AI imagery. The interface blends clean enterprise layout patterns with approachable accent colors and soft card surfaces.</p>
+      <p class="muted">A clean, editorial SaaS-style landing page with generous whitespace, bold black typography, soft neutral surfaces, and restrained blue accent CTAs. Playful illustrated hero graphics add personality while the UI remains minimal and highly legible.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">playful</span><span class="tag">editorial</span><span class="tag">clean</span><span class="tag">friendly</span>
+        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">editorial</span><span class="tag">playful</span><span class="tag">modern</span>
       </div>
     </div>
   </div>
@@ -336,47 +404,47 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#0b7be6"></div>
+      <div class="swatch__chip" style="background:#0b6ddf"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#0b7be6</div>
+        <div class="swatch__hex">#0b6ddf</div>
         <div class="swatch__name">brand blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ff432d"></div>
+      <div class="swatch__chip" style="background:#f7c59f"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#ff432d</div>
-        <div class="swatch__name">warm red-orange</div>
+        <div class="swatch__hex">#f7c59f</div>
+        <div class="swatch__name">soft peach</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ffbd16"></div>
+      <div class="swatch__chip" style="background:#ff4b2e"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#ffbd16</div>
-        <div class="swatch__name">gold yellow</div>
+        <div class="swatch__hex">#ff4b2e</div>
+        <div class="swatch__name">signal orange</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#f5f5f5"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Background</div>
+        <div class="swatch__hex">#f5f5f5</div>
+        <div class="swatch__name">warm light gray</div>
       </div>
     </div>
 
     <div class="swatch">
       <div class="swatch__chip" style="background:#ffffff"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">page white</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#f4f4f4"></div>
-      <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#f4f4f4</div>
-        <div class="swatch__name">light gray surface</div>
+        <div class="swatch__hex">#ffffff</div>
+        <div class="swatch__name">white card</div>
       </div>
     </div>
 
@@ -385,34 +453,34 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
         <div class="swatch__hex">#111111</div>
-        <div class="swatch__name">near-black text</div>
+        <div class="swatch__name">near-black</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#9a968f"></div>
+      <div class="swatch__chip" style="background:#4a4a4a"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#9a968f</div>
-        <div class="swatch__name">muted gray</div>
+        <div class="swatch__hex">#4a4a4a</div>
+        <div class="swatch__name">muted graphite</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#dddddd"></div>
+      <div class="swatch__chip" style="background:#d9d9d9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#dddddd</div>
-        <div class="swatch__name">soft gray border</div>
+        <div class="swatch__hex">#d9d9d9</div>
+        <div class="swatch__name">light gray border</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#76b900"></div>
+      <div class="swatch__chip" style="background:#f0b323"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Success</div>
-        <div class="swatch__hex">#76b900</div>
-        <div class="swatch__name">green brand accent</div>
+        <div class="swatch__label">Warning</div>
+        <div class="swatch__hex">#f0b323</div>
+        <div class="swatch__name">gold yellow</div>
       </div>
     </div></div>
   </div>
@@ -466,7 +534,55 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 0 0 1px rgba(0,0,0,0.06)">0 0 0 1px rgba(0,0,0,0.06)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 2px 8px rgba(0,0,0,0.06)">0 2px 8px rgba(0,0,0,0.06)</div></div>
+
+  
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">paper grain</div>
+        <div class="signal-meta">lower feature panel uses a soft peach surface with subtle grain texture</div>
+        <div class="signal-code">background: #f7c59f<br/>background-image: radial-gradient(rgba(255,255,255,0.25) 1px, transparent 1px)<br/>opacity: 0.9</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid blue fill with white text and minimal border</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker blue fill with subtle elevation</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>2px soft blue focus ring outside rounded bounds</td>
+      </tr>
+      <tr>
+        <td>button.secondary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>pale blue-tinted surface with blue text and no strong border</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="section">
     <h2>UI Element Details</h2>
@@ -477,7 +593,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
             alt="announcement bar"
-            style="--ox:50%;--oy:0%;--zoom:3.4;"
+            style="--ox:50%;--oy:0%;--zoom:3.2;"
             draggable="false"
           />
         </div>
@@ -487,19 +603,8 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
-            alt="navigation bar"
-            style="--ox:50%;--oy:0%;--zoom:2.8;"
-            draggable="false"
-          />
-        </div>
-        <figcaption>navigation bar</figcaption>
-      </figure>
-      <figure class="crop-tile">
-        <div class="crop-tile__viewport">
-          <img
-            src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
             alt="hero headline"
-            style="--ox:0%;--oy:0%;--zoom:2.3;"
+            style="--ox:0%;--oy:0%;--zoom:2.2;"
             draggable="false"
           />
         </div>
@@ -509,19 +614,8 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
-            alt="primary CTA"
-            style="--ox:0%;--oy:50%;--zoom:3.6;"
-            draggable="false"
-          />
-        </div>
-        <figcaption>primary CTA</figcaption>
-      </figure>
-      <figure class="crop-tile">
-        <div class="crop-tile__viewport">
-          <img
-            src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
             alt="hero illustration"
-            style="--ox:100%;--oy:50%;--zoom:2.1;"
+            style="--ox:100%;--oy:0%;--zoom:2.4;"
             draggable="false"
           />
         </div>
@@ -531,8 +625,30 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
         <div class="crop-tile__viewport">
           <img
             src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
+            alt="primary CTA"
+            style="--ox:0%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
+            alt="logo row"
+            style="--ox:50%;--oy:50%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>logo row</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-ai-2026-05-16-5-notion-ai.png"
             alt="feature card"
-            style="--ox:50%;--oy:100%;--zoom:2.7;"
+            style="--ox:100%;--oy:100%;--zoom:3.2;"
             draggable="false"
           />
         </div>
@@ -560,18 +676,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Rounded medium-large buttons with solid blue primary fill and pale blue secondary fill; simple text labels, minimal shadow, generous horizontal padding.</div>
+        <div class="component__desc">Rounded rectangular buttons with medium height, clear horizontal padding, primary solid blue CTA and secondary soft-tint variant.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Feature cards use white backgrounds, subtle gray borders, large rounded corners, light icon accents, and bold labels with ample internal spacing.</div>
+        <div class="component__desc">Feature cards are white with light gray borders, medium corner radius, minimal shadow, and left-aligned icon plus label.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top horizontal navbar with compact wordmark on the left, centered text links, and right-aligned CTA plus login link; very clean white background.</div>
+        <div class="component__desc">Top navigation bar with centered product links, compact text, subtle dropdown chevrons, right-aligned CTA, and a slim announcement strip above.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top announcement bar + horizontal navigation + split hero with left text/CTA and right illustration + trusted-by logo row + four-card feature grid</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>announcement bar + top navigation + two-column hero with left text/CTAs and right illustration + trusted-by logo row + four-card feature grid + large textured content panel</p></div>
 </body>
 </html>
 ```

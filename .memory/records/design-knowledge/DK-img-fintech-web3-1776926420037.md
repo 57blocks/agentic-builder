@@ -1,54 +1,62 @@
 ---
-{"id":"DK-img-fintech-web3-1776926420037","layer":"L1","kind":"design-knowledge","title":"Style Spec — fintech-web3-1776926420037.jpg","tags":["industry:fintech-web3","source:vision-distill","image:fintech-web3-1776926420037.jpg","manual:approved"],"source":"distill","refs":{},"createdAt":1778923024116,"updatedAt":1778923024116,"schemaVersion":1}
+{"id":"DK-img-fintech-web3-1776926420037","layer":"L1","kind":"design-knowledge","title":"Style Spec — fintech-web3-1776926420037.jpg","tags":["industry:fintech-web3","source:vision-distill","image:fintech-web3-1776926420037.jpg","manual:approved"],"source":"distill","refs":{},"createdAt":1778923024116,"updatedAt":1779236447165,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "fintech-web3",
-  "summary": "A retro-terminal inspired fintech interface combining muted utility tones with a high-contrast orange brand strip and dark green system panels. The layout feels like a market scanning dashboard with minimalist structure, monospaced details, and bold uppercase messaging.",
+  "summary": "A retro-terminal inspired market discovery dashboard that combines muted utility tones with sharp safety-orange highlights. The layout feels like an institutional trading tool reimagined with editorial hero messaging and low-noise, command-line interface styling.",
   "vibe": [
     "retro",
     "terminal",
+    "utilitarian",
     "minimal",
-    "industrial",
-    "tactical"
+    "editorial"
   ],
   "palette": {
     "primary": {
-      "hex": "#fb5102",
-      "label": "signal orange"
+      "hex": "#fa4c00",
+      "label": "safety orange"
     },
     "secondary": {
-      "hex": "#00351f",
+      "hex": "#003f25",
       "label": "deep terminal green"
     },
     "accent": {
-      "hex": "#eea68b",
-      "label": "soft salmon"
+      "hex": "#9bea00",
+      "label": "neon lime"
     },
     "background": {
-      "hex": "#d8d7c7",
-      "label": "warm fog"
+      "hex": "#c1c2b4",
+      "label": "muted sage gray"
     },
     "surface": {
-      "hex": "#ebe9dc",
-      "label": "pale canvas"
+      "hex": "#f2f1ef",
+      "label": "soft off-white"
     },
     "text": {
-      "hex": "#0d2f24",
-      "label": "dark pine"
+      "hex": "#002d1b",
+      "label": "dark green-black"
     },
     "textMuted": {
-      "hex": "#7f8776",
-      "label": "muted olive gray"
+      "hex": "#7c7f74",
+      "label": "faded gray olive"
     },
     "border": {
-      "hex": "#6a7c61",
-      "label": "faded moss"
+      "hex": "#9ca08f",
+      "label": "dusty olive border"
     },
     "success": {
-      "hex": "#91da10",
+      "hex": "#9bea00",
       "label": "neon lime"
+    },
+    "warning": {
+      "hex": "#e3a185",
+      "label": "dusty peach"
+    },
+    "danger": {
+      "hex": "#fa4c00",
+      "label": "alert orange"
     }
   },
   "typography": {
@@ -59,9 +67,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "bold uppercase hero headlines",
-      "monospaced UI labels and system text",
-      "condensed terminal-style secondary copy"
+      "condensed uppercase hero headings",
+      "mono UI labels and system text",
+      "wide letter spacing on metadata"
     ]
   },
   "spacing": {
@@ -78,32 +86,98 @@
     ]
   },
   "radius": {
-    "smPx": 0,
-    "mdPx": 2,
-    "lgPx": 4,
+    "smPx": 2,
+    "mdPx": 4,
+    "lgPx": 8,
     "pillPx": 999
   },
   "shadows": [
-    "0 1px 2px rgba(0,0,0,0.06)"
+    "0 1px 0 rgba(0,45,27,0.10)",
+    "0 2px 6px rgba(0,45,27,0.08)"
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "muted peach fill with thin olive border and uppercase label"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly stronger orange tint with darker border and increased contrast"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin high-contrast outline using bright lime or orange around the rectangular button"
+    },
+    {
+      "component": "sidebar.navItem",
+      "state": "active",
+      "treatment": "dark green inset panel with subtle border and lime status dot"
+    },
+    {
+      "component": "input.urlField",
+      "state": "focus",
+      "treatment": "clean light surface with sharper border and restrained glow-free emphasis"
+    }
   ],
   "components": {
     "button": {
-      "description": "Rectangular flat buttons with thin borders, muted salmon fill for the primary action, uppercase monospaced labels, and almost no corner rounding."
+      "description": "Rectangular action button with muted peach fill, fine border, uppercase mono label, and minimal radius; visually aligned with industrial control panels."
     },
     "card": {
-      "description": "Large flat terminal-style panels in deep green with subtle borders, minimal elevation, and monospaced status rows in lime and orange accents."
+      "description": "Terminal-style dark green panel with thin divider line, tiny status indicator, mono text, and low-radius corners."
     },
     "input": {
-      "description": "Wide white input field with thin gray border, left icon, uppercase/URL content, and adjacent filled action button; designed as a horizontal command bar."
+      "description": "Wide horizontal input bar on an off-white surface with dark text, subtle border, left icon, and spacious internal padding."
     },
     "navigation": {
-      "description": "Fixed left sidebar in dark green with stacked icon-and-label links, thin dividers, uppercase section headers, and an active item highlighted by a slightly lighter green block with lime indicator."
+      "description": "Fixed left sidebar in deep green with stacked icon-label nav items, uppercase section labels, and one highlighted active row."
     }
   },
-  "layout": "top brand bar + fixed left sidebar + centered hero headline + horizontal input/action row + filter chips + terminal output panel",
+  "layout": "top utility bar + fixed left sidebar navigation + centered hero copy + wide URL input with CTA + tag filters + terminal progress panel",
+  "visualElements": [
+    {
+      "name": "brand top bar",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.6
+    },
+    {
+      "name": "sidebar nav",
+      "col": 1,
+      "row": 2,
+      "zoom": 2.2
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.4
+    },
+    {
+      "name": "url input",
+      "col": 2,
+      "row": 2,
+      "zoom": 3.2
+    },
+    {
+      "name": "scan button",
+      "col": 3,
+      "row": 2,
+      "zoom": 4.2
+    },
+    {
+      "name": "terminal status",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.8
+    }
+  ],
   "imagePath": "/knowledge-refs/fintech-web3-1776926420037.jpg",
   "imageName": "fintech-web3-1776926420037.jpg",
-  "capturedAt": "2026-05-16T09:17:04.115Z",
+  "capturedAt": "2026-05-20T00:20:47.165Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -114,44 +188,63 @@
 
 **Industry**: fintech-web3
 **Image**: fintech-web3-1776926420037.jpg
-**Vibe**: retro, terminal, minimal, industrial, tactical
+**Vibe**: retro, terminal, utilitarian, minimal, editorial
 
-**Summary**: A retro-terminal inspired fintech interface combining muted utility tones with a high-contrast orange brand strip and dark green system panels. The layout feels like a market scanning dashboard with minimalist structure, monospaced details, and bold uppercase messaging.
+**Summary**: A retro-terminal inspired market discovery dashboard that combines muted utility tones with sharp safety-orange highlights. The layout feels like an institutional trading tool reimagined with editorial hero messaging and low-noise, command-line interface styling.
 
 ### Palette
-- Primary: `#fb5102` — signal orange
-- Secondary: `#00351f` — deep terminal green
-- Accent: `#eea68b` — soft salmon
-- Background: `#d8d7c7` — warm fog
-- Surface: `#ebe9dc` — pale canvas
-- Text: `#0d2f24` — dark pine
-- Text muted: `#7f8776` — muted olive gray
-- Border: `#6a7c61` — faded moss
-- Success: `#91da10` — neon lime
+- Primary: `#fa4c00` — safety orange
+- Secondary: `#003f25` — deep terminal green
+- Accent: `#9bea00` — neon lime
+- Background: `#c1c2b4` — muted sage gray
+- Surface: `#f2f1ef` — soft off-white
+- Text: `#002d1b` — dark green-black
+- Text muted: `#7c7f74` — faded gray olive
+- Border: `#9ca08f` — dusty olive border
+- Success: `#9bea00` — neon lime
+- Warning: `#e3a185` — dusty peach
+- Danger: `#fa4c00` — alert orange
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Mono font: JetBrains Mono
 - Base size: 16px
-- Note: bold uppercase hero headlines
-- Note: monospaced UI labels and system text
-- Note: condensed terminal-style secondary copy
+- Note: condensed uppercase hero headings
+- Note: mono UI labels and system text
+- Note: wide letter spacing on metadata
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 0px, md 2px, lg 4px, pill 999px
-- Shadows: 1 variant(s)
-  - `0 1px 2px rgba(0,0,0,0.06)`
+- Radius: sm 2px, md 4px, lg 8px, pill 999px
+- Shadows: 2 variant(s)
+  - `0 1px 0 rgba(0,45,27,0.10)`
+  - `0 2px 6px rgba(0,45,27,0.08)`
+
+### Interaction State Tokens
+- **button.primary.default**: muted peach fill with thin olive border and uppercase label
+- **button.primary.hover**: slightly stronger orange tint with darker border and increased contrast
+- **button.primary.focus**: thin high-contrast outline using bright lime or orange around the rectangular button
+- **sidebar.navItem.active**: dark green inset panel with subtle border and lime status dot
+- **input.urlField.focus**: clean light surface with sharper border and restrained glow-free emphasis
 
 ### Components
-- **button**: Rectangular flat buttons with thin borders, muted salmon fill for the primary action, uppercase monospaced labels, and almost no corner rounding.
-- **card**: Large flat terminal-style panels in deep green with subtle borders, minimal elevation, and monospaced status rows in lime and orange accents.
-- **input**: Wide white input field with thin gray border, left icon, uppercase/URL content, and adjacent filled action button; designed as a horizontal command bar.
-- **navigation**: Fixed left sidebar in dark green with stacked icon-and-label links, thin dividers, uppercase section headers, and an active item highlighted by a slightly lighter green block with lime indicator.
+- **button**: Rectangular action button with muted peach fill, fine border, uppercase mono label, and minimal radius; visually aligned with industrial control panels.
+- **card**: Terminal-style dark green panel with thin divider line, tiny status indicator, mono text, and low-radius corners.
+- **input**: Wide horizontal input bar on an off-white surface with dark text, subtle border, left icon, and spacious internal padding.
+- **navigation**: Fixed left sidebar in deep green with stacked icon-label nav items, uppercase section labels, and one highlighted active row.
 
 ### Layout
-top brand bar + fixed left sidebar + centered hero headline + horizontal input/action row + filter chips + terminal output panel
+top utility bar + fixed left sidebar navigation + centered hero copy + wide URL input with CTA + tag filters + terminal progress panel
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **brand top bar** — col 1, row 1, zoom 2.6×
+- **sidebar nav** — col 1, row 2, zoom 2.2×
+- **hero headline** — col 2, row 1, zoom 2.4×
+- **url input** — col 2, row 2, zoom 3.2×
+- **scan button** — col 3, row 2, zoom 4.2×
+- **terminal status** — col 2, row 3, zoom 2.8×
 
 ## Style Spec (HTML)
 
@@ -167,26 +260,26 @@ top brand bar + fixed left sidebar + centered hero headline + horizontal input/a
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains%20Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #fb5102;
-    --color-secondary:  #00351f;
-    --color-accent:     #eea68b;
-    --color-background: #d8d7c7;
-    --color-surface:    #ebe9dc;
-    --color-text:       #0d2f24;
-    --color-text-muted: #7f8776;
-    --color-border:     #6a7c61;
-    --color-success:    #91da10;
-    --color-warning:    #f59e0b;
-    --color-danger:     #ef4444;
+    --color-primary:    #fa4c00;
+    --color-secondary:  #003f25;
+    --color-accent:     #9bea00;
+    --color-background: #c1c2b4;
+    --color-surface:    #f2f1ef;
+    --color-text:       #002d1b;
+    --color-text-muted: #7c7f74;
+    --color-border:     #9ca08f;
+    --color-success:    #9bea00;
+    --color-warning:    #e3a185;
+    --color-danger:     #fa4c00;
     --font-heading: 'Inter', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
     --font-mono:    'JetBrains Mono', ui-monospace, monospace;
     --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 0px;
-    --radius-md: 2px;
-    --radius-lg: 4px;
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -261,9 +354,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -272,9 +396,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">fintech-web3</div>
       <h1>fintech-web3-1776926420037.jpg</h1>
-      <p class="muted">A retro-terminal inspired fintech interface combining muted utility tones with a high-contrast orange brand strip and dark green system panels. The layout feels like a market scanning dashboard with minimalist structure, monospaced details, and bold uppercase messaging.</p>
+      <p class="muted">A retro-terminal inspired market discovery dashboard that combines muted utility tones with sharp safety-orange highlights. The layout feels like an institutional trading tool reimagined with editorial hero messaging and low-noise, command-line interface styling.</p>
       <div class="tags">
-        <span class="tag">retro</span><span class="tag">terminal</span><span class="tag">minimal</span><span class="tag">industrial</span><span class="tag">tactical</span>
+        <span class="tag">retro</span><span class="tag">terminal</span><span class="tag">utilitarian</span><span class="tag">minimal</span><span class="tag">editorial</span>
       </div>
     </div>
   </div>
@@ -283,83 +407,101 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#fb5102"></div>
+      <div class="swatch__chip" style="background:#fa4c00"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#fb5102</div>
-        <div class="swatch__name">signal orange</div>
+        <div class="swatch__hex">#fa4c00</div>
+        <div class="swatch__name">safety orange</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#00351f"></div>
+      <div class="swatch__chip" style="background:#003f25"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#00351f</div>
+        <div class="swatch__hex">#003f25</div>
         <div class="swatch__name">deep terminal green</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#eea68b"></div>
+      <div class="swatch__chip" style="background:#9bea00"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#eea68b</div>
-        <div class="swatch__name">soft salmon</div>
+        <div class="swatch__hex">#9bea00</div>
+        <div class="swatch__name">neon lime</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#d8d7c7"></div>
+      <div class="swatch__chip" style="background:#c1c2b4"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#d8d7c7</div>
-        <div class="swatch__name">warm fog</div>
+        <div class="swatch__hex">#c1c2b4</div>
+        <div class="swatch__name">muted sage gray</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ebe9dc"></div>
+      <div class="swatch__chip" style="background:#f2f1ef"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#ebe9dc</div>
-        <div class="swatch__name">pale canvas</div>
+        <div class="swatch__hex">#f2f1ef</div>
+        <div class="swatch__name">soft off-white</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#0d2f24"></div>
+      <div class="swatch__chip" style="background:#002d1b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#0d2f24</div>
-        <div class="swatch__name">dark pine</div>
+        <div class="swatch__hex">#002d1b</div>
+        <div class="swatch__name">dark green-black</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#7f8776"></div>
+      <div class="swatch__chip" style="background:#7c7f74"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#7f8776</div>
-        <div class="swatch__name">muted olive gray</div>
+        <div class="swatch__hex">#7c7f74</div>
+        <div class="swatch__name">faded gray olive</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#6a7c61"></div>
+      <div class="swatch__chip" style="background:#9ca08f"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#6a7c61</div>
-        <div class="swatch__name">faded moss</div>
+        <div class="swatch__hex">#9ca08f</div>
+        <div class="swatch__name">dusty olive border</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#91da10"></div>
+      <div class="swatch__chip" style="background:#9bea00"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Success</div>
-        <div class="swatch__hex">#91da10</div>
+        <div class="swatch__hex">#9bea00</div>
         <div class="swatch__name">neon lime</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#e3a185"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Warning</div>
+        <div class="swatch__hex">#e3a185</div>
+        <div class="swatch__name">dusty peach</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#fa4c00"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Danger</div>
+        <div class="swatch__hex">#fa4c00</div>
+        <div class="swatch__name">alert orange</div>
       </div>
     </div></div>
   </div>
@@ -413,7 +555,124 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.06)">0 1px 2px rgba(0,0,0,0.06)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 0 rgba(0,45,27,0.10)">0 1px 0 rgba(0,45,27,0.10)</div><div class="shadow-card" style="box-shadow:0 2px 6px rgba(0,45,27,0.08)">0 2px 6px rgba(0,45,27,0.08)</div></div>
+
+  
+
+  
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>muted peach fill with thin olive border and uppercase label</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly stronger orange tint with darker border and increased contrast</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin high-contrast outline using bright lime or orange around the rectangular button</td>
+      </tr>
+      <tr>
+        <td>sidebar.navItem</td>
+        <td><span class="state-pill state-active">active</span></td>
+        <td>dark green inset panel with subtle border and lime status dot</td>
+      </tr>
+      <tr>
+        <td>input.urlField</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>clean light surface with sharper border and restrained glow-free emphasis</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="brand top bar"
+            style="--ox:0%;--oy:0%;--zoom:2.6;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand top bar</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="sidebar nav"
+            style="--ox:0%;--oy:50%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>sidebar nav</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="url input"
+            style="--ox:50%;--oy:50%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>url input</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="scan button"
+            style="--ox:100%;--oy:50%;--zoom:4.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>scan button</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/fintech-web3-1776926420037.jpg"
+            alt="terminal status"
+            style="--ox:50%;--oy:100%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>terminal status</figcaption>
+      </figure></div>
+  </div>
 
   <div class="section">
     <h2>Component Preview</h2>
@@ -426,7 +685,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 4px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 8px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -435,22 +694,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Rectangular flat buttons with thin borders, muted salmon fill for the primary action, uppercase monospaced labels, and almost no corner rounding.</div>
+        <div class="component__desc">Rectangular action button with muted peach fill, fine border, uppercase mono label, and minimal radius; visually aligned with industrial control panels.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Large flat terminal-style panels in deep green with subtle borders, minimal elevation, and monospaced status rows in lime and orange accents.</div>
+        <div class="component__desc">Terminal-style dark green panel with thin divider line, tiny status indicator, mono text, and low-radius corners.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Wide white input field with thin gray border, left icon, uppercase/URL content, and adjacent filled action button; designed as a horizontal command bar.</div>
+        <div class="component__desc">Wide horizontal input bar on an off-white surface with dark text, subtle border, left icon, and spacious internal padding.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Fixed left sidebar in dark green with stacked icon-and-label links, thin dividers, uppercase section headers, and an active item highlighted by a slightly lighter green block with lime indicator.</div>
+        <div class="component__desc">Fixed left sidebar in deep green with stacked icon-label nav items, uppercase section labels, and one highlighted active row.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top brand bar + fixed left sidebar + centered hero headline + horizontal input/action row + filter chips + terminal output panel</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top utility bar + fixed left sidebar navigation + centered hero copy + wide URL input with CTA + tag filters + terminal progress panel</p></div>
 </body>
 </html>
 ```

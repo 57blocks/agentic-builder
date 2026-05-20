@@ -1,54 +1,55 @@
 ---
-{"id":"DK-img-auto-fintech-web3-2026-05-16-1-aave","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Aave (fintech-web3)","tags":["industry:fintech-web3","source:trend-capture","image:auto-fintech-web3-2026-05-16-1-aave.png","site:aave.com","url:https://aave.com","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778925551522,"updatedAt":1778925551522,"schemaVersion":1}
+{"id":"DK-img-auto-fintech-web3-2026-05-16-1-aave","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-fintech-web3-2026-05-16-1-aave.png","tags":["industry:fintech-web3","source:vision-distill","image:auto-fintech-web3-2026-05-16-1-aave.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778925551522,"updatedAt":1779236194898,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "fintech-web3",
-  "summary": "A clean fintech landing page with a soft premium feel, combining spacious white layouts, muted lavender gradients, and polished mobile product imagery. The aesthetic is minimal and trust-oriented, with gentle purple accents that add a subtle web3 sensibility.",
+  "summary": "Clean fintech landing page with a soft lavender-tinted background, oversized geometric headline, and polished mobile app mockups as the hero centerpiece. The aesthetic is minimal and premium, relying on subtle gradients, rounded controls, and restrained monochrome text with periwinkle accents.",
   "vibe": [
     "minimal",
     "premium",
     "soft",
-    "clean",
-    "trustworthy"
+    "modern",
+    "fintech",
+    "airy"
   ],
   "palette": {
     "primary": {
-      "hex": "#8f85f7",
-      "label": "soft violet"
+      "hex": "#8c85f7",
+      "label": "periwinkle purple"
     },
     "secondary": {
-      "hex": "#dcd9ff",
-      "label": "pale lavender"
+      "hex": "#2a262a",
+      "label": "charcoal"
     },
     "accent": {
-      "hex": "#3b82f6",
+      "hex": "#2e90ff",
       "label": "link blue"
     },
     "background": {
-      "hex": "#fcfcff",
-      "label": "near-white"
+      "hex": "#f3f3f4",
+      "label": "warm light gray"
     },
     "surface": {
-      "hex": "#f3f1ff",
-      "label": "mist lavender"
+      "hex": "#eeedf9",
+      "label": "pale lavender surface"
     },
     "text": {
-      "hex": "#231f20",
-      "label": "charcoal"
+      "hex": "#231e23",
+      "label": "near-black"
     },
     "textMuted": {
-      "hex": "#8d8a93",
-      "label": "cool gray"
+      "hex": "#8f8b91",
+      "label": "muted gray"
     },
     "border": {
-      "hex": "#e8e5f4",
+      "hex": "#e4e0ee",
       "label": "soft lilac border"
     },
     "success": {
-      "hex": "#2ecc71",
-      "label": "bright green"
+      "hex": "#35c96d",
+      "label": "green positive"
     }
   },
   "typography": {
@@ -58,10 +59,10 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized hero headline",
-      "rounded geometric sans",
-      "medium-weight navigation",
-      "large numeric balances"
+      "extra-large hero headline",
+      "rounded geometric sans styling",
+      "muted supporting paragraph",
+      "medium-weight navigation and buttons"
     ]
   },
   "spacing": {
@@ -84,31 +85,132 @@
     "pillPx": 999
   },
   "shadows": [
-    "0 8px 24px rgba(143,133,247,0.12)",
-    "0 24px 60px rgba(35,31,32,0.10)"
+    "0 2px 8px rgba(0,0,0,0.06)",
+    "0 12px 32px rgba(35,30,35,0.12)"
+  ],
+  "gradients": [
+    {
+      "id": "hero-panel",
+      "type": "linear",
+      "angleDeg": 180,
+      "stops": [
+        {
+          "color": "#f5f5f6",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#eeedf9",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "large hero background panel"
+    },
+    {
+      "id": "button-primary",
+      "type": "linear",
+      "angleDeg": 0,
+      "stops": [
+        {
+          "color": "#8d86f7",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#9b8cf7",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "primary CTA fill"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft device shadow",
+      "description": "phone mockups use realistic dark drop shadows and metallic edges to create depth over the pale hero panel",
+      "cssHints": [
+        "box-shadow: 0 18px 40px rgba(0,0,0,0.18)",
+        "border: 1px solid rgba(35,30,35,0.12)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid periwinkle fill with white text and pill radius"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly deeper purple fill with stronger shadow for lift"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "subtle 2px lavender focus ring outside rounded pill"
+    },
+    {
+      "component": "button.secondary",
+      "state": "default",
+      "treatment": "very light lavender fill with purple text and no visible hard border"
+    }
   ],
   "components": {
     "button": {
-      "description": "Large pill-shaped CTA buttons; primary uses solid soft-violet fill with white text and icon, secondary uses very light lavender fill with violet text."
+      "description": "Pill-shaped CTAs; primary uses filled lavender-purple background with white label and icon, secondary uses pale tinted surface with purple text."
     },
     "card": {
-      "description": "In-device UI cards use white rounded panels with subtle borders/shadows, floating stat chips, and soft color-coded highlights for balances and earnings."
+      "description": "App UI cards inside the phone mockups use white or dark charcoal panels with rounded corners, subtle separators, and compact metric/content blocks."
     },
     "navigation": {
-      "description": "Minimal top navigation with wordmark on the left, evenly spaced text links centered/right, and a dark pill CTA button for the primary action."
+      "description": "Minimal top navigation with logo on the left, centered text links, and a dark pill action button on the right."
     }
   },
-  "layout": "centered top navigation + large hero headline and subcopy + dual CTA row + overlapping mobile mockups on a soft gradient field",
-  "imageMotifs": [
-    "mobile finance app",
-    "soft gradient glow",
-    "premium smartphone mockup",
-    "minimal workspace",
-    "future banking"
+  "layout": "top navigation above a centered hero with eyebrow label, oversized headline, supporting copy, dual CTAs, and three overlapping mobile app mockups anchored in the lower hero area",
+  "visualElements": [
+    {
+      "name": "brand logo",
+      "col": 1,
+      "row": 1,
+      "zoom": 4
+    },
+    {
+      "name": "navigation bar",
+      "col": 2,
+      "row": 1,
+      "zoom": 3
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.4
+    },
+    {
+      "name": "primary CTA",
+      "col": 2,
+      "row": 2,
+      "zoom": 4
+    },
+    {
+      "name": "phone mockup",
+      "col": 2,
+      "row": 3,
+      "zoom": 2.1
+    },
+    {
+      "name": "dark app screen",
+      "col": 3,
+      "row": 3,
+      "zoom": 2.6
+    }
   ],
   "imagePath": "/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png",
   "imageName": "auto-fintech-web3-2026-05-16-1-aave.png",
-  "capturedAt": "2026-05-16T09:59:11.519Z",
+  "capturedAt": "2026-05-20T00:16:34.897Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -119,52 +221,72 @@
 
 **Industry**: fintech-web3
 **Image**: auto-fintech-web3-2026-05-16-1-aave.png
-**Vibe**: minimal, premium, soft, clean, trustworthy
+**Vibe**: minimal, premium, soft, modern, fintech, airy
 
-**Summary**: A clean fintech landing page with a soft premium feel, combining spacious white layouts, muted lavender gradients, and polished mobile product imagery. The aesthetic is minimal and trust-oriented, with gentle purple accents that add a subtle web3 sensibility.
+**Summary**: Clean fintech landing page with a soft lavender-tinted background, oversized geometric headline, and polished mobile app mockups as the hero centerpiece. The aesthetic is minimal and premium, relying on subtle gradients, rounded controls, and restrained monochrome text with periwinkle accents.
 
 ### Palette
-- Primary: `#8f85f7` — soft violet
-- Secondary: `#dcd9ff` — pale lavender
-- Accent: `#3b82f6` — link blue
-- Background: `#fcfcff` — near-white
-- Surface: `#f3f1ff` — mist lavender
-- Text: `#231f20` — charcoal
-- Text muted: `#8d8a93` — cool gray
-- Border: `#e8e5f4` — soft lilac border
-- Success: `#2ecc71` — bright green
+- Primary: `#8c85f7` — periwinkle purple
+- Secondary: `#2a262a` — charcoal
+- Accent: `#2e90ff` — link blue
+- Background: `#f3f3f4` — warm light gray
+- Surface: `#eeedf9` — pale lavender surface
+- Text: `#231e23` — near-black
+- Text muted: `#8f8b91` — muted gray
+- Border: `#e4e0ee` — soft lilac border
+- Success: `#35c96d` — green positive
 
 ### Typography
 - Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized hero headline
-- Note: rounded geometric sans
-- Note: medium-weight navigation
-- Note: large numeric balances
+- Note: extra-large hero headline
+- Note: rounded geometric sans styling
+- Note: muted supporting paragraph
+- Note: medium-weight navigation and buttons
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
 - Radius: sm 4px, md 8px, lg 16px, pill 999px
 - Shadows: 2 variant(s)
-  - `0 8px 24px rgba(143,133,247,0.12)`
-  - `0 24px 60px rgba(35,31,32,0.10)`
+  - `0 2px 8px rgba(0,0,0,0.06)`
+  - `0 12px 32px rgba(35,30,35,0.12)`
+
+### Gradients
+- **hero-panel** (linear, 180deg) — large hero background panel
+  - stop 0%: `#f5f5f6`, alpha 1
+  - stop 100%: `#eeedf9`, alpha 1
+- **button-primary** (linear, 0deg) — primary CTA fill
+  - stop 0%: `#8d86f7`, alpha 1
+  - stop 100%: `#9b8cf7`, alpha 1
+
+### Surface Effects
+- **soft device shadow**: phone mockups use realistic dark drop shadows and metallic edges to create depth over the pale hero panel
+  - `box-shadow: 0 18px 40px rgba(0,0,0,0.18)`
+  - `border: 1px solid rgba(35,30,35,0.12)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid periwinkle fill with white text and pill radius
+- **button.primary.hover**: slightly deeper purple fill with stronger shadow for lift
+- **button.primary.focus**: subtle 2px lavender focus ring outside rounded pill
+- **button.secondary.default**: very light lavender fill with purple text and no visible hard border
 
 ### Components
-- **button**: Large pill-shaped CTA buttons; primary uses solid soft-violet fill with white text and icon, secondary uses very light lavender fill with violet text.
-- **card**: In-device UI cards use white rounded panels with subtle borders/shadows, floating stat chips, and soft color-coded highlights for balances and earnings.
-- **navigation**: Minimal top navigation with wordmark on the left, evenly spaced text links centered/right, and a dark pill CTA button for the primary action.
+- **button**: Pill-shaped CTAs; primary uses filled lavender-purple background with white label and icon, secondary uses pale tinted surface with purple text.
+- **card**: App UI cards inside the phone mockups use white or dark charcoal panels with rounded corners, subtle separators, and compact metric/content blocks.
+- **navigation**: Minimal top navigation with logo on the left, centered text links, and a dark pill action button on the right.
 
 ### Layout
-centered top navigation + large hero headline and subcopy + dual CTA row + overlapping mobile mockups on a soft gradient field
+top navigation above a centered hero with eyebrow label, oversized headline, supporting copy, dual CTAs, and three overlapping mobile app mockups anchored in the lower hero area
 
-### Imagery & Motifs
-On-theme photography subjects that pair well with this style:
-- mobile finance app
-- soft gradient glow
-- premium smartphone mockup
-- minimal workspace
-- future banking
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **brand logo** — col 1, row 1, zoom 4×
+- **navigation bar** — col 2, row 1, zoom 3×
+- **hero headline** — col 2, row 1, zoom 2.4×
+- **primary CTA** — col 2, row 2, zoom 4×
+- **phone mockup** — col 2, row 3, zoom 2.1×
+- **dark app screen** — col 3, row 3, zoom 2.6×
 
 ## Style Spec (HTML)
 
@@ -180,15 +302,15 @@ On-theme photography subjects that pair well with this style:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #8f85f7;
-    --color-secondary:  #dcd9ff;
-    --color-accent:     #3b82f6;
-    --color-background: #fcfcff;
-    --color-surface:    #f3f1ff;
-    --color-text:       #231f20;
-    --color-text-muted: #8d8a93;
-    --color-border:     #e8e5f4;
-    --color-success:    #2ecc71;
+    --color-primary:    #8c85f7;
+    --color-secondary:  #2a262a;
+    --color-accent:     #2e90ff;
+    --color-background: #f3f3f4;
+    --color-surface:    #eeedf9;
+    --color-text:       #231e23;
+    --color-text-muted: #8f8b91;
+    --color-border:     #e4e0ee;
+    --color-success:    #35c96d;
     --color-warning:    #f59e0b;
     --color-danger:     #ef4444;
     --font-heading: 'Inter', system-ui, sans-serif;
@@ -274,15 +396,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
-.motif-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.motif { margin: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border);
-  background: var(--color-surface); position: relative; }
-.motif img { display: block; width: 100%; aspect-ratio: 3/2; object-fit: cover; }
-.motif figcaption { padding: 8px 12px; font-size: 12px; color: var(--color-text-muted);
-  background: var(--color-surface); border-top: 1px solid var(--color-border); }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -291,9 +438,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">fintech-web3</div>
       <h1>auto-fintech-web3-2026-05-16-1-aave.png</h1>
-      <p class="muted">A clean fintech landing page with a soft premium feel, combining spacious white layouts, muted lavender gradients, and polished mobile product imagery. The aesthetic is minimal and trust-oriented, with gentle purple accents that add a subtle web3 sensibility.</p>
+      <p class="muted">Clean fintech landing page with a soft lavender-tinted background, oversized geometric headline, and polished mobile app mockups as the hero centerpiece. The aesthetic is minimal and premium, relying on subtle gradients, rounded controls, and restrained monochrome text with periwinkle accents.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">premium</span><span class="tag">soft</span><span class="tag">clean</span><span class="tag">trustworthy</span>
+        <span class="tag">minimal</span><span class="tag">premium</span><span class="tag">soft</span><span class="tag">modern</span><span class="tag">fintech</span><span class="tag">airy</span>
       </div>
     </div>
   </div>
@@ -302,83 +449,83 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8f85f7"></div>
+      <div class="swatch__chip" style="background:#8c85f7"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#8f85f7</div>
-        <div class="swatch__name">soft violet</div>
+        <div class="swatch__hex">#8c85f7</div>
+        <div class="swatch__name">periwinkle purple</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#dcd9ff"></div>
+      <div class="swatch__chip" style="background:#2a262a"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#dcd9ff</div>
-        <div class="swatch__name">pale lavender</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#3b82f6"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#3b82f6</div>
-        <div class="swatch__name">link blue</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#fcfcff"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#fcfcff</div>
-        <div class="swatch__name">near-white</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#f3f1ff"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#f3f1ff</div>
-        <div class="swatch__name">mist lavender</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#231f20"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#231f20</div>
+        <div class="swatch__hex">#2a262a</div>
         <div class="swatch__name">charcoal</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#8d8a93"></div>
+      <div class="swatch__chip" style="background:#2e90ff"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#8d8a93</div>
-        <div class="swatch__name">cool gray</div>
+        <div class="swatch__label">Accent</div>
+        <div class="swatch__hex">#2e90ff</div>
+        <div class="swatch__name">link blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#e8e5f4"></div>
+      <div class="swatch__chip" style="background:#f3f3f4"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Background</div>
+        <div class="swatch__hex">#f3f3f4</div>
+        <div class="swatch__name">warm light gray</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#eeedf9"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Surface</div>
+        <div class="swatch__hex">#eeedf9</div>
+        <div class="swatch__name">pale lavender surface</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#231e23"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Text</div>
+        <div class="swatch__hex">#231e23</div>
+        <div class="swatch__name">near-black</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#8f8b91"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Text muted</div>
+        <div class="swatch__hex">#8f8b91</div>
+        <div class="swatch__name">muted gray</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#e4e0ee"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#e8e5f4</div>
+        <div class="swatch__hex">#e4e0ee</div>
         <div class="swatch__name">soft lilac border</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#2ecc71"></div>
+      <div class="swatch__chip" style="background:#35c96d"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Success</div>
-        <div class="swatch__hex">#2ecc71</div>
-        <div class="swatch__name">bright green</div>
+        <div class="swatch__hex">#35c96d</div>
+        <div class="swatch__name">green positive</div>
       </div>
     </div></div>
   </div>
@@ -432,66 +579,140 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 8px 24px rgba(143,133,247,0.12)">0 8px 24px rgba(143,133,247,0.12)</div><div class="shadow-card" style="box-shadow:0 24px 60px rgba(35,31,32,0.10)">0 24px 60px rgba(35,31,32,0.10)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 2px 8px rgba(0,0,0,0.06)">0 2px 8px rgba(0,0,0,0.06)</div><div class="shadow-card" style="box-shadow:0 12px 32px rgba(35,30,35,0.12)">0 12px 32px rgba(35,30,35,0.12)</div></div>
 
   <div class="section">
-    <h2>Imagery &amp; Motifs</h2>
-    <p class="muted" style="margin-top:-4px;">On-theme photography suggested for this style — keywords feed Unsplash (live) with picsum as fallback so the slots always render.</p>
-    <div class="motif-grid">
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?mobile%20finance%20app"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-1-a-1/600/400"
-          alt="mobile finance app"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>mobile finance app</figcaption>
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(180deg, #f5f5f6 0%, #eeedf9 100%);"></div>
+        <div class="signal-title">hero-panel</div>
+        <div class="signal-meta">linear 180deg · large hero background panel</div>
+        <div class="signal-code">0% #f5f5f6 @1  |  100% #eeedf9 @1</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(0deg, #8d86f7 0%, #9b8cf7 100%);"></div>
+        <div class="signal-title">button-primary</div>
+        <div class="signal-meta">linear 0deg · primary CTA fill</div>
+        <div class="signal-code">0% #8d86f7 @1  |  100% #9b8cf7 @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft device shadow</div>
+        <div class="signal-meta">phone mockups use realistic dark drop shadows and metallic edges to create depth over the pale hero panel</div>
+        <div class="signal-code">box-shadow: 0 18px 40px rgba(0,0,0,0.18)<br/>border: 1px solid rgba(35,30,35,0.12)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid periwinkle fill with white text and pill radius</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly deeper purple fill with stronger shadow for lift</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>subtle 2px lavender focus ring outside rounded pill</td>
+      </tr>
+      <tr>
+        <td>button.secondary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>very light lavender fill with purple text and no visible hard border</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="brand logo"
+            style="--ox:0%;--oy:0%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand logo</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?soft%20gradient%20glow"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-1-a-2/600/400"
-          alt="soft gradient glow"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>soft gradient glow</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="navigation bar"
+            style="--ox:50%;--oy:0%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>navigation bar</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?premium%20smartphone%20mockup"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-1-a-3/600/400"
-          alt="premium smartphone mockup"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>premium smartphone mockup</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?minimal%20workspace"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-1-a-4/600/400"
-          alt="minimal workspace"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>minimal workspace</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="primary CTA"
+            style="--ox:50%;--oy:50%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary CTA</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?future%20banking"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-1-a-5/600/400"
-          alt="future banking"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>future banking</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="phone mockup"
+            style="--ox:50%;--oy:100%;--zoom:2.1;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>phone mockup</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-1-aave.png"
+            alt="dark app screen"
+            style="--ox:100%;--oy:100%;--zoom:2.6;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>dark app screen</figcaption>
       </figure></div>
   </div>
 
@@ -515,18 +736,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Large pill-shaped CTA buttons; primary uses solid soft-violet fill with white text and icon, secondary uses very light lavender fill with violet text.</div>
+        <div class="component__desc">Pill-shaped CTAs; primary uses filled lavender-purple background with white label and icon, secondary uses pale tinted surface with purple text.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">In-device UI cards use white rounded panels with subtle borders/shadows, floating stat chips, and soft color-coded highlights for balances and earnings.</div>
+        <div class="component__desc">App UI cards inside the phone mockups use white or dark charcoal panels with rounded corners, subtle separators, and compact metric/content blocks.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Minimal top navigation with wordmark on the left, evenly spaced text links centered/right, and a dark pill CTA button for the primary action.</div>
+        <div class="component__desc">Minimal top navigation with logo on the left, centered text links, and a dark pill action button on the right.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>centered top navigation + large hero headline and subcopy + dual CTA row + overlapping mobile mockups on a soft gradient field</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation above a centered hero with eyebrow label, oversized headline, supporting copy, dual CTAs, and three overlapping mobile app mockups anchored in the lower hero area</p></div>
 </body>
 </html>
 ```

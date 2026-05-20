@@ -26,6 +26,7 @@ import {
   readPencilDesignDoc,
 } from "@/lib/pipeline/frontend-design-context";
 import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
+import { normalizeCodingMode } from "@/lib/pipeline/coding-mode";
 
 export const maxDuration = 600;
 
@@ -97,13 +98,16 @@ export async function POST(request: NextRequest) {
     codeOutputDir,
     projectTier,
     ralph: ralphOverride,
+    codingMode: codingModeRaw,
   } = body as {
     runId?: string;
     tasks?: KickoffWorkItem[];
     codeOutputDir?: string;
     projectTier?: string;
     ralph?: Partial<RalphConfig>;
+    codingMode?: string;
   };
+  const codingMode = normalizeCodingMode(codingModeRaw);
 
   if (!codeOutputDir || !String(codeOutputDir).trim()) {
     return Response.json(
@@ -209,9 +213,7 @@ export async function POST(request: NextRequest) {
   }));
 
   const sessionId = uuidv4();
-  const mapper = new EventMapper(sessionId, {
-    emitGapAnalysisAfterIntegration: false,
-  });
+  const mapper = new EventMapper(sessionId);
   const encoder = new TextEncoder();
 
   let clientAborted = false;
@@ -256,6 +258,7 @@ export async function POST(request: NextRequest) {
             tasks: codingTasks,
             outputDir: outputRoot,
             projectContext,
+            codingMode,
             frontendDesignContext,
             scaffoldProtectedPaths,
             ralphConfig,

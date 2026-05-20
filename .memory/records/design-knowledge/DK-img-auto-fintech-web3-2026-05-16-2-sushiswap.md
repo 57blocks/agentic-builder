@@ -1,50 +1,50 @@
 ---
-{"id":"DK-img-auto-fintech-web3-2026-05-16-2-sushiswap","layer":"L1","kind":"design-knowledge","title":"Trend Capture — SushiSwap (fintech-web3)","tags":["industry:fintech-web3","source:trend-capture","image:auto-fintech-web3-2026-05-16-2-sushiswap.png","site:sushi.com","url:https://sushi.com","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778925570124,"updatedAt":1778925570124,"schemaVersion":1}
+{"id":"DK-img-auto-fintech-web3-2026-05-16-2-sushiswap","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-fintech-web3-2026-05-16-2-sushiswap.png","tags":["industry:fintech-web3","source:vision-distill","image:auto-fintech-web3-2026-05-16-2-sushiswap.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778925570124,"updatedAt":1779236213175,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "fintech-web3",
-  "summary": "A bright, minimalist DeFi trading interface with generous whitespace, soft rounded containers, and subtle crypto-native accent colors. The design feels approachable and polished, prioritizing clarity over dense market-data complexity.",
+  "summary": "A clean, airy DeFi swap interface with soft gray surfaces, rounded controls, and restrained blue-pink brand accents. The layout is minimal and centered around a single transaction card with subtle elevation and high whitespace.",
   "vibe": [
     "minimal",
+    "light",
+    "rounded",
     "clean",
-    "soft",
-    "modern",
-    "airy"
+    "financial"
   ],
   "palette": {
     "primary": {
-      "hex": "#427de1",
-      "label": "action blue"
+      "hex": "#3b82f6",
+      "label": "wallet blue"
     },
     "secondary": {
-      "hex": "#667fe7",
-      "label": "token blue"
+      "hex": "#e879f9",
+      "label": "cross-chain pink"
     },
     "accent": {
-      "hex": "#d95cff",
-      "label": "cross-chain magenta"
+      "hex": "#637eea",
+      "label": "ethereum blue"
     },
     "background": {
-      "hex": "#f8f8f8",
-      "label": "app background"
+      "hex": "#f3f3f5",
+      "label": "app gray background"
     },
     "surface": {
-      "hex": "#ffffff",
-      "label": "card white"
+      "hex": "#f8f8f8",
+      "label": "card surface"
     },
     "text": {
-      "hex": "#111111",
+      "hex": "#171717",
       "label": "primary text"
     },
     "textMuted": {
       "hex": "#6b7280",
-      "label": "muted slate"
+      "label": "muted label gray"
     },
     "border": {
       "hex": "#e5e7eb",
-      "label": "soft gray border"
+      "label": "soft divider gray"
     }
   },
   "typography": {
@@ -54,9 +54,9 @@
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "large numeric amount fields",
-      "compact navigation labels",
-      "medium-weight pill tab labels"
+      "compact navigation text",
+      "large numeric token amounts",
+      "medium-weight tab labels"
     ]
   },
   "spacing": {
@@ -73,39 +73,109 @@
     ]
   },
   "radius": {
-    "smPx": 4,
-    "mdPx": 8,
-    "lgPx": 16,
+    "smPx": 8,
+    "mdPx": 12,
+    "lgPx": 20,
     "pillPx": 999
   },
   "shadows": [
     "0 1px 2px rgba(0,0,0,0.04)",
-    "0 8px 24px rgba(0,0,0,0.06)"
+    "0 8px 24px rgba(0,0,0,0.05)"
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft card elevation",
+      "description": "main swap panel uses an off-white fill with very subtle shadow and rounded corners",
+      "cssHints": [
+        "background: #f8f8f8",
+        "border-radius: 20px",
+        "box-shadow: 0 8px 24px rgba(0,0,0,0.05)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid blue fill with white centered label and rounded rectangle shape"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly darker or more saturated blue fill while preserving white text"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "subtle outer ring in pale blue around the rounded button"
+    },
+    {
+      "component": "tab.active",
+      "state": "default",
+      "treatment": "light gray pill background with darker text to indicate selection"
+    },
+    {
+      "component": "input.token",
+      "state": "focus",
+      "treatment": "soft blue border emphasis around the token amount panel"
+    }
   ],
   "components": {
     "button": {
-      "description": "Large full-width primary CTA with solid blue fill, white text, medium corner radius, and minimal elevation; secondary buttons appear as light-gray pill buttons in the top nav and token selectors."
+      "description": "Primary CTA is a full-width rounded button in vivid blue with medium-weight white text; header buttons are smaller pill buttons in light gray."
     },
     "card": {
-      "description": "Centered swap module inside a white rounded card with very soft border/shadow, containing segmented tabs, two stacked token amount panels, and a circular swap-direction control between panels."
+      "description": "Central swap module is a large rounded card containing stacked token panels, tab navigation, and a bottom CTA; inner panels use subtle borders and very light fills."
     },
     "input": {
-      "description": "Token amount inputs are embedded within large bordered panels; labels sit above oversized numeric values, with token selector pills aligned to the right and small muted balance rows underneath."
+      "description": "Token amount inputs are embedded within rounded rectangular panels with small muted labels, oversized numeric value text, token selector pills on the right, and tiny helper balance rows."
     },
     "navigation": {
-      "description": "Top horizontal navigation bar with logo on the left, spaced text links across the header, and rounded utility pills for network selection and wallet connection on the right."
+      "description": "Top navigation is a slim horizontal bar with logo on the left, spaced text links across the top, and pill-style utility actions on the right."
     }
   },
-  "layout": "top navigation + centered swap card with segmented tabs + stacked trade panels + full-width CTA",
-  "imageMotifs": [
-    "crypto tokens",
-    "minimal workspace",
-    "soft gradient",
-    "futuristic finance"
+  "layout": "top navigation bar with centered swap card containing tabs, two stacked token panels, a middle switch control, and a full-width bottom CTA",
+  "visualElements": [
+    {
+      "name": "brand logo",
+      "col": 1,
+      "row": 1,
+      "zoom": 3.5
+    },
+    {
+      "name": "top navigation",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.8
+    },
+    {
+      "name": "wallet button",
+      "col": 3,
+      "row": 1,
+      "zoom": 3.2
+    },
+    {
+      "name": "swap tabs",
+      "col": 2,
+      "row": 1,
+      "zoom": 4
+    },
+    {
+      "name": "token panel",
+      "col": 2,
+      "row": 2,
+      "zoom": 3
+    },
+    {
+      "name": "primary cta",
+      "col": 2,
+      "row": 3,
+      "zoom": 3.5
+    }
   ],
   "imagePath": "/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png",
   "imageName": "auto-fintech-web3-2026-05-16-2-sushiswap.png",
-  "capturedAt": "2026-05-16T09:59:30.123Z",
+  "capturedAt": "2026-05-20T00:16:53.174Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -116,50 +186,65 @@
 
 **Industry**: fintech-web3
 **Image**: auto-fintech-web3-2026-05-16-2-sushiswap.png
-**Vibe**: minimal, clean, soft, modern, airy
+**Vibe**: minimal, light, rounded, clean, financial
 
-**Summary**: A bright, minimalist DeFi trading interface with generous whitespace, soft rounded containers, and subtle crypto-native accent colors. The design feels approachable and polished, prioritizing clarity over dense market-data complexity.
+**Summary**: A clean, airy DeFi swap interface with soft gray surfaces, rounded controls, and restrained blue-pink brand accents. The layout is minimal and centered around a single transaction card with subtle elevation and high whitespace.
 
 ### Palette
-- Primary: `#427de1` — action blue
-- Secondary: `#667fe7` — token blue
-- Accent: `#d95cff` — cross-chain magenta
-- Background: `#f8f8f8` — app background
-- Surface: `#ffffff` — card white
-- Text: `#111111` — primary text
-- Text muted: `#6b7280` — muted slate
-- Border: `#e5e7eb` — soft gray border
+- Primary: `#3b82f6` — wallet blue
+- Secondary: `#e879f9` — cross-chain pink
+- Accent: `#637eea` — ethereum blue
+- Background: `#f3f3f5` — app gray background
+- Surface: `#f8f8f8` — card surface
+- Text: `#171717` — primary text
+- Text muted: `#6b7280` — muted label gray
+- Border: `#e5e7eb` — soft divider gray
 
 ### Typography
 - Heading font: Inter (weight 600)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: large numeric amount fields
-- Note: compact navigation labels
-- Note: medium-weight pill tab labels
+- Note: compact navigation text
+- Note: large numeric token amounts
+- Note: medium-weight tab labels
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 4px, md 8px, lg 16px, pill 999px
+- Radius: sm 8px, md 12px, lg 20px, pill 999px
 - Shadows: 2 variant(s)
   - `0 1px 2px rgba(0,0,0,0.04)`
-  - `0 8px 24px rgba(0,0,0,0.06)`
+  - `0 8px 24px rgba(0,0,0,0.05)`
+
+### Surface Effects
+- **soft card elevation**: main swap panel uses an off-white fill with very subtle shadow and rounded corners
+  - `background: #f8f8f8`
+  - `border-radius: 20px`
+  - `box-shadow: 0 8px 24px rgba(0,0,0,0.05)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid blue fill with white centered label and rounded rectangle shape
+- **button.primary.hover**: slightly darker or more saturated blue fill while preserving white text
+- **button.primary.focus**: subtle outer ring in pale blue around the rounded button
+- **tab.active.default**: light gray pill background with darker text to indicate selection
+- **input.token.focus**: soft blue border emphasis around the token amount panel
 
 ### Components
-- **button**: Large full-width primary CTA with solid blue fill, white text, medium corner radius, and minimal elevation; secondary buttons appear as light-gray pill buttons in the top nav and token selectors.
-- **card**: Centered swap module inside a white rounded card with very soft border/shadow, containing segmented tabs, two stacked token amount panels, and a circular swap-direction control between panels.
-- **input**: Token amount inputs are embedded within large bordered panels; labels sit above oversized numeric values, with token selector pills aligned to the right and small muted balance rows underneath.
-- **navigation**: Top horizontal navigation bar with logo on the left, spaced text links across the header, and rounded utility pills for network selection and wallet connection on the right.
+- **button**: Primary CTA is a full-width rounded button in vivid blue with medium-weight white text; header buttons are smaller pill buttons in light gray.
+- **card**: Central swap module is a large rounded card containing stacked token panels, tab navigation, and a bottom CTA; inner panels use subtle borders and very light fills.
+- **input**: Token amount inputs are embedded within rounded rectangular panels with small muted labels, oversized numeric value text, token selector pills on the right, and tiny helper balance rows.
+- **navigation**: Top navigation is a slim horizontal bar with logo on the left, spaced text links across the top, and pill-style utility actions on the right.
 
 ### Layout
-top navigation + centered swap card with segmented tabs + stacked trade panels + full-width CTA
+top navigation bar with centered swap card containing tabs, two stacked token panels, a middle switch control, and a full-width bottom CTA
 
-### Imagery & Motifs
-On-theme photography subjects that pair well with this style:
-- crypto tokens
-- minimal workspace
-- soft gradient
-- futuristic finance
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **brand logo** — col 1, row 1, zoom 3.5×
+- **top navigation** — col 2, row 1, zoom 2.8×
+- **wallet button** — col 3, row 1, zoom 3.2×
+- **swap tabs** — col 2, row 1, zoom 4×
+- **token panel** — col 2, row 2, zoom 3×
+- **primary cta** — col 2, row 3, zoom 3.5×
 
 ## Style Spec (HTML)
 
@@ -175,12 +260,12 @@ On-theme photography subjects that pair well with this style:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #427de1;
-    --color-secondary:  #667fe7;
-    --color-accent:     #d95cff;
-    --color-background: #f8f8f8;
-    --color-surface:    #ffffff;
-    --color-text:       #111111;
+    --color-primary:    #3b82f6;
+    --color-secondary:  #e879f9;
+    --color-accent:     #637eea;
+    --color-background: #f3f3f5;
+    --color-surface:    #f8f8f8;
+    --color-text:       #171717;
     --color-text-muted: #6b7280;
     --color-border:     #e5e7eb;
     --color-success:    #22c55e;
@@ -192,9 +277,9 @@ On-theme photography subjects that pair well with this style:
     --weight-heading: 600;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 16px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -269,15 +354,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
-.motif-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.motif { margin: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border);
-  background: var(--color-surface); position: relative; }
-.motif img { display: block; width: 100%; aspect-ratio: 3/2; object-fit: cover; }
-.motif figcaption { padding: 8px 12px; font-size: 12px; color: var(--color-text-muted);
-  background: var(--color-surface); border-top: 1px solid var(--color-border); }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -286,9 +396,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">fintech-web3</div>
       <h1>auto-fintech-web3-2026-05-16-2-sushiswap.png</h1>
-      <p class="muted">A bright, minimalist DeFi trading interface with generous whitespace, soft rounded containers, and subtle crypto-native accent colors. The design feels approachable and polished, prioritizing clarity over dense market-data complexity.</p>
+      <p class="muted">A clean, airy DeFi swap interface with soft gray surfaces, rounded controls, and restrained blue-pink brand accents. The layout is minimal and centered around a single transaction card with subtle elevation and high whitespace.</p>
       <div class="tags">
-        <span class="tag">minimal</span><span class="tag">clean</span><span class="tag">soft</span><span class="tag">modern</span><span class="tag">airy</span>
+        <span class="tag">minimal</span><span class="tag">light</span><span class="tag">rounded</span><span class="tag">clean</span><span class="tag">financial</span>
       </div>
     </div>
   </div>
@@ -297,55 +407,55 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#427de1"></div>
+      <div class="swatch__chip" style="background:#3b82f6"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#427de1</div>
-        <div class="swatch__name">action blue</div>
+        <div class="swatch__hex">#3b82f6</div>
+        <div class="swatch__name">wallet blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#667fe7"></div>
+      <div class="swatch__chip" style="background:#e879f9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#667fe7</div>
-        <div class="swatch__name">token blue</div>
+        <div class="swatch__hex">#e879f9</div>
+        <div class="swatch__name">cross-chain pink</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#d95cff"></div>
+      <div class="swatch__chip" style="background:#637eea"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#d95cff</div>
-        <div class="swatch__name">cross-chain magenta</div>
+        <div class="swatch__hex">#637eea</div>
+        <div class="swatch__name">ethereum blue</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#f3f3f5"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Background</div>
+        <div class="swatch__hex">#f3f3f5</div>
+        <div class="swatch__name">app gray background</div>
       </div>
     </div>
 
     <div class="swatch">
       <div class="swatch__chip" style="background:#f8f8f8"></div>
       <div class="swatch__meta">
-        <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#f8f8f8</div>
-        <div class="swatch__name">app background</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#ffffff"></div>
-      <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">card white</div>
+        <div class="swatch__hex">#f8f8f8</div>
+        <div class="swatch__name">card surface</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#111111"></div>
+      <div class="swatch__chip" style="background:#171717"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#111111</div>
+        <div class="swatch__hex">#171717</div>
         <div class="swatch__name">primary text</div>
       </div>
     </div>
@@ -355,7 +465,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
         <div class="swatch__hex">#6b7280</div>
-        <div class="swatch__name">muted slate</div>
+        <div class="swatch__name">muted label gray</div>
       </div>
     </div>
 
@@ -364,7 +474,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
         <div class="swatch__hex">#e5e7eb</div>
-        <div class="swatch__name">soft gray border</div>
+        <div class="swatch__name">soft divider gray</div>
       </div>
     </div></div>
   </div>
@@ -418,55 +528,130 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.06)">0 8px 24px rgba(0,0,0,0.06)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 1px 2px rgba(0,0,0,0.04)">0 1px 2px rgba(0,0,0,0.04)</div><div class="shadow-card" style="box-shadow:0 8px 24px rgba(0,0,0,0.05)">0 8px 24px rgba(0,0,0,0.05)</div></div>
+
+  
 
   <div class="section">
-    <h2>Imagery &amp; Motifs</h2>
-    <p class="muted" style="margin-top:-4px;">On-theme photography suggested for this style — keywords feed Unsplash (live) with picsum as fallback so the slots always render.</p>
-    <div class="motif-grid">
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?crypto%20tokens"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-2-s-1/600/400"
-          alt="crypto tokens"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>crypto tokens</figcaption>
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft card elevation</div>
+        <div class="signal-meta">main swap panel uses an off-white fill with very subtle shadow and rounded corners</div>
+        <div class="signal-code">background: #f8f8f8<br/>border-radius: 20px<br/>box-shadow: 0 8px 24px rgba(0,0,0,0.05)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid blue fill with white centered label and rounded rectangle shape</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly darker or more saturated blue fill while preserving white text</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>subtle outer ring in pale blue around the rounded button</td>
+      </tr>
+      <tr>
+        <td>tab.active</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>light gray pill background with darker text to indicate selection</td>
+      </tr>
+      <tr>
+        <td>input.token</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>soft blue border emphasis around the token amount panel</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="brand logo"
+            style="--ox:0%;--oy:0%;--zoom:3.5;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>brand logo</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?minimal%20workspace"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-2-s-2/600/400"
-          alt="minimal workspace"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>minimal workspace</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="top navigation"
+            style="--ox:50%;--oy:0%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>top navigation</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?soft%20gradient"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-2-s-3/600/400"
-          alt="soft gradient"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>soft gradient</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="wallet button"
+            style="--ox:100%;--oy:0%;--zoom:3.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>wallet button</figcaption>
       </figure>
-      <figure class="motif">
-        <img
-          src="https://source.unsplash.com/600x400/?futuristic%20finance"
-          data-fallback="https://picsum.photos/seed/auto-fintech-web3-2026-05-16-2-s-4/600/400"
-          alt="futuristic finance"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}"
-        />
-        <figcaption>futuristic finance</figcaption>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="swap tabs"
+            style="--ox:50%;--oy:0%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>swap tabs</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="token panel"
+            style="--ox:50%;--oy:50%;--zoom:3;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>token panel</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-fintech-web3-2026-05-16-2-sushiswap.png"
+            alt="primary cta"
+            style="--ox:50%;--oy:100%;--zoom:3.5;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary cta</figcaption>
       </figure></div>
   </div>
 
@@ -481,7 +666,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 16px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 20px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -490,22 +675,22 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Large full-width primary CTA with solid blue fill, white text, medium corner radius, and minimal elevation; secondary buttons appear as light-gray pill buttons in the top nav and token selectors.</div>
+        <div class="component__desc">Primary CTA is a full-width rounded button in vivid blue with medium-weight white text; header buttons are smaller pill buttons in light gray.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Centered swap module inside a white rounded card with very soft border/shadow, containing segmented tabs, two stacked token amount panels, and a circular swap-direction control between panels.</div>
+        <div class="component__desc">Central swap module is a large rounded card containing stacked token panels, tab navigation, and a bottom CTA; inner panels use subtle borders and very light fills.</div>
       </div>
       <div class="component">
         <div class="component__name">input</div>
-        <div class="component__desc">Token amount inputs are embedded within large bordered panels; labels sit above oversized numeric values, with token selector pills aligned to the right and small muted balance rows underneath.</div>
+        <div class="component__desc">Token amount inputs are embedded within rounded rectangular panels with small muted labels, oversized numeric value text, token selector pills on the right, and tiny helper balance rows.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Top horizontal navigation bar with logo on the left, spaced text links across the header, and rounded utility pills for network selection and wallet connection on the right.</div>
+        <div class="component__desc">Top navigation is a slim horizontal bar with logo on the left, spaced text links across the top, and pill-style utility actions on the right.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered swap card with segmented tabs + stacked trade panels + full-width CTA</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>top navigation bar with centered swap card containing tabs, two stacked token panels, a middle switch control, and a full-width bottom CTA</p></div>
 </body>
 </html>
 ```

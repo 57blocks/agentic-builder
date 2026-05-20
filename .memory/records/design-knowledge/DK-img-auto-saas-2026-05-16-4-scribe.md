@@ -1,76 +1,62 @@
 ---
-{"id":"DK-img-auto-saas-2026-05-16-4-scribe","layer":"L1","kind":"design-knowledge","title":"Trend Capture — Scribe (saas)","tags":["industry:saas","source:trend-capture","image:auto-saas-2026-05-16-4-scribe.png","site:scribehow.com","url:https://scribehow.com","captured:2026-05-16","manual:approved"],"source":"distill","refs":{},"createdAt":1778924950012,"updatedAt":1778924950012,"schemaVersion":1}
+{"id":"DK-img-auto-saas-2026-05-16-4-scribe","layer":"L1","kind":"design-knowledge","title":"Style Spec — auto-saas-2026-05-16-4-scribe.png","tags":["industry:saas","source:vision-distill","image:auto-saas-2026-05-16-4-scribe.png","manual:approved"],"source":"distill","refs":{},"createdAt":1778924950012,"updatedAt":1779236307810,"schemaVersion":1}
 ---
 
 <!-- style-spec:json
 {
   "industry": "saas",
-  "summary": "Modern SaaS landing page with a luminous blue-to-magenta gradient backdrop, oversized bold hero typography, and soft glassy panels. The interface blends enterprise polish with playful color accents and subtle depth through shadows, rings, and rounded cards.",
+  "summary": "A polished SaaS landing hero with a vibrant blue-to-magenta gradient background, oversized centered headline, and soft elevated UI cards. The design mixes friendly enterprise trust cues with subtle glow, rounded geometry, and clean modern typography.",
   "vibe": [
     "modern",
-    "vibrant",
-    "polished",
+    "bright",
     "friendly",
-    "premium",
+    "polished",
     "gradient-rich"
   ],
   "palette": {
     "primary": {
-      "hex": "#3e4df4",
-      "label": "electric indigo"
+      "hex": "#3a41e0",
+      "label": "brand blue"
     },
     "secondary": {
-      "hex": "#b04cb8",
-      "label": "orchid purple"
+      "hex": "#8d43bf",
+      "label": "violet"
     },
     "accent": {
-      "hex": "#e2a158",
+      "hex": "#d89b4b",
       "label": "warm amber"
     },
     "background": {
-      "hex": "#3537c7",
-      "label": "blue violet gradient"
+      "hex": "#364bcf",
+      "label": "gradient blue base"
     },
     "surface": {
-      "hex": "#f4f3f7",
-      "label": "soft white"
+      "hex": "#ebebf0",
+      "label": "light card surface"
     },
     "text": {
-      "hex": "#ffffff",
-      "label": "white"
+      "hex": "#f3f2f2",
+      "label": "soft white"
     },
     "textMuted": {
-      "hex": "#ddd6ef",
-      "label": "soft lavender white"
+      "hex": "#d4d1e7",
+      "label": "muted lavender white"
     },
     "border": {
-      "hex": "#b79ad5",
-      "label": "frosted lavender border"
-    },
-    "success": {
-      "hex": "#88df9d",
-      "label": "mint green"
-    },
-    "warning": {
-      "hex": "#f8bb43",
-      "label": "gold star"
-    },
-    "danger": {
-      "hex": "#f19ac4",
-      "label": "soft pink"
+      "hex": "#9b91d9",
+      "label": "soft lilac border"
     }
   },
   "typography": {
     "headingFont": "Inter",
     "bodyFont": "Inter",
-    "headingWeight": 800,
+    "headingWeight": 700,
     "bodyWeight": 400,
     "baseSizePx": 16,
     "notes": [
-      "oversized hero headline",
-      "rounded geometric sans",
-      "white text with soft shadow on hero",
-      "medium-weight navigation labels"
+      "oversized centered hero headline",
+      "clean geometric sans-serif",
+      "semi-bold navigation and CTA text"
     ]
   },
   "spacing": {
@@ -87,31 +73,162 @@
     ]
   },
   "radius": {
-    "smPx": 8,
-    "mdPx": 16,
-    "lgPx": 24,
+    "smPx": 4,
+    "mdPx": 10,
+    "lgPx": 18,
     "pillPx": 999
   },
   "shadows": [
-    "0 2px 8px rgba(26,17,91,0.18)",
-    "0 12px 32px rgba(33,22,122,0.28)",
-    "0 10px 24px rgba(52,67,219,0.35)"
+    "0 2px 6px rgba(32,24,98,0.18)",
+    "0 10px 24px rgba(49,58,188,0.28)"
+  ],
+  "gradients": [
+    {
+      "id": "hero-bg",
+      "type": "linear",
+      "angleDeg": 25,
+      "stops": [
+        {
+          "color": "#2b2fc2",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#3b63d7",
+          "positionPct": 22,
+          "opacity": 1
+        },
+        {
+          "color": "#7c35bb",
+          "positionPct": 72,
+          "opacity": 1
+        },
+        {
+          "color": "#d69b47",
+          "positionPct": 100,
+          "opacity": 0.95
+        }
+      ],
+      "usage": "main page background"
+    },
+    {
+      "id": "primary-button",
+      "type": "linear",
+      "angleDeg": 180,
+      "stops": [
+        {
+          "color": "#4a5bf1",
+          "positionPct": 0,
+          "opacity": 1
+        },
+        {
+          "color": "#3940dc",
+          "positionPct": 100,
+          "opacity": 1
+        }
+      ],
+      "usage": "primary CTA fill"
+    }
+  ],
+  "surfaceEffects": [
+    {
+      "name": "soft glow",
+      "description": "CTA buttons and hero elements use a subtle luminous edge and shadow over the gradient backdrop",
+      "cssHints": [
+        "box-shadow: 0 10px 24px rgba(49,58,188,0.28)",
+        "border: 1px solid rgba(255,255,255,0.18)"
+      ]
+    },
+    {
+      "name": "frosted panel",
+      "description": "the segmented option tray appears as a translucent lilac panel behind solid cards",
+      "cssHints": [
+        "background: rgba(219,214,245,0.22)",
+        "border: 1px solid rgba(255,255,255,0.18)",
+        "backdrop-filter: blur(6px)"
+      ]
+    }
+  ],
+  "stateTokens": [
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid blue gradient pill with white semi-bold text and soft outer shadow"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly brighter blue-violet gradient with stronger glow and lift"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "thin light-lilac outer ring around pill boundary"
+    },
+    {
+      "component": "navigation.link",
+      "state": "default",
+      "treatment": "small white text with reduced opacity over transparent background"
+    },
+    {
+      "component": "navigation.link",
+      "state": "hover",
+      "treatment": "full-opacity white text with subtle underline or brighter contrast"
+    }
   ],
   "components": {
     "button": {
-      "description": "Large pill buttons with blue gradient fill for primary actions, white text, subtle outer glow/shadow, and rounded corners; secondary nav action uses a translucent frosted pink surface."
+      "description": "Rounded pill buttons with blue gradient fills for primary actions and muted translucent fills for secondary actions; white text, medium shadow, and generous horizontal padding."
     },
     "card": {
-      "description": "Horizontal selector cards in a segmented tray, each with white background, large rounded corners, thin lavender border, centered pastel icon, and dark text label."
+      "description": "Small rounded rectangular option cards with very light gray backgrounds, thin cool-gray borders, centered pastel icons, and dark label text, grouped inside a translucent rounded container."
     },
     "navigation": {
-      "description": "Centered top navigation with simple text links and small chevrons, logo on the left, and two CTA buttons on the right over the gradient background."
+      "description": "Minimal top navigation bar with centered text links, subtle dropdown chevrons, left-aligned logo, and right-aligned sign-in and primary CTA buttons."
     }
   },
-  "layout": "top navigation + centered hero + social proof badge + segmented option card row + primary CTA + customer logo strip",
+  "layout": "centered top navigation above a full-width hero with large centered headline, supporting copy, segmented use-case card row, primary CTA, and trust-logo strip at the bottom",
+  "visualElements": [
+    {
+      "name": "logo and nav",
+      "col": 1,
+      "row": 1,
+      "zoom": 2.8
+    },
+    {
+      "name": "hero headline",
+      "col": 2,
+      "row": 1,
+      "zoom": 2.2
+    },
+    {
+      "name": "review badge",
+      "col": 2,
+      "row": 1,
+      "zoom": 4
+    },
+    {
+      "name": "use-case cards",
+      "col": 2,
+      "row": 2,
+      "zoom": 2.4
+    },
+    {
+      "name": "primary cta",
+      "col": 2,
+      "row": 3,
+      "zoom": 4
+    },
+    {
+      "name": "trust logos",
+      "col": 3,
+      "row": 3,
+      "zoom": 2.8
+    }
+  ],
   "imagePath": "/knowledge-refs/auto-saas-2026-05-16-4-scribe.png",
   "imageName": "auto-saas-2026-05-16-4-scribe.png",
-  "capturedAt": "2026-05-16T09:49:10.011Z",
+  "capturedAt": "2026-05-20T00:18:27.809Z",
   "model": "openai/gpt-5.4-20260305"
 }
 -->
@@ -122,47 +239,77 @@
 
 **Industry**: saas
 **Image**: auto-saas-2026-05-16-4-scribe.png
-**Vibe**: modern, vibrant, polished, friendly, premium, gradient-rich
+**Vibe**: modern, bright, friendly, polished, gradient-rich
 
-**Summary**: Modern SaaS landing page with a luminous blue-to-magenta gradient backdrop, oversized bold hero typography, and soft glassy panels. The interface blends enterprise polish with playful color accents and subtle depth through shadows, rings, and rounded cards.
+**Summary**: A polished SaaS landing hero with a vibrant blue-to-magenta gradient background, oversized centered headline, and soft elevated UI cards. The design mixes friendly enterprise trust cues with subtle glow, rounded geometry, and clean modern typography.
 
 ### Palette
-- Primary: `#3e4df4` — electric indigo
-- Secondary: `#b04cb8` — orchid purple
-- Accent: `#e2a158` — warm amber
-- Background: `#3537c7` — blue violet gradient
-- Surface: `#f4f3f7` — soft white
-- Text: `#ffffff` — white
-- Text muted: `#ddd6ef` — soft lavender white
-- Border: `#b79ad5` — frosted lavender border
-- Success: `#88df9d` — mint green
-- Warning: `#f8bb43` — gold star
-- Danger: `#f19ac4` — soft pink
+- Primary: `#3a41e0` — brand blue
+- Secondary: `#8d43bf` — violet
+- Accent: `#d89b4b` — warm amber
+- Background: `#364bcf` — gradient blue base
+- Surface: `#ebebf0` — light card surface
+- Text: `#f3f2f2` — soft white
+- Text muted: `#d4d1e7` — muted lavender white
+- Border: `#9b91d9` — soft lilac border
 
 ### Typography
-- Heading font: Inter (weight 800)
+- Heading font: Inter (weight 700)
 - Body font: Inter (weight 400)
 - Base size: 16px
-- Note: oversized hero headline
-- Note: rounded geometric sans
-- Note: white text with soft shadow on hero
-- Note: medium-weight navigation labels
+- Note: oversized centered hero headline
+- Note: clean geometric sans-serif
+- Note: semi-bold navigation and CTA text
 
 ### Spacing & Radius
 - Spacing base: 8px; scale: 4, 8, 12, 16, 24, 32, 48, 64
-- Radius: sm 8px, md 16px, lg 24px, pill 999px
-- Shadows: 3 variant(s)
-  - `0 2px 8px rgba(26,17,91,0.18)`
-  - `0 12px 32px rgba(33,22,122,0.28)`
-  - `0 10px 24px rgba(52,67,219,0.35)`
+- Radius: sm 4px, md 10px, lg 18px, pill 999px
+- Shadows: 2 variant(s)
+  - `0 2px 6px rgba(32,24,98,0.18)`
+  - `0 10px 24px rgba(49,58,188,0.28)`
+
+### Gradients
+- **hero-bg** (linear, 25deg) — main page background
+  - stop 0%: `#2b2fc2`, alpha 1
+  - stop 22%: `#3b63d7`, alpha 1
+  - stop 72%: `#7c35bb`, alpha 1
+  - stop 100%: `#d69b47`, alpha 0.95
+- **primary-button** (linear, 180deg) — primary CTA fill
+  - stop 0%: `#4a5bf1`, alpha 1
+  - stop 100%: `#3940dc`, alpha 1
+
+### Surface Effects
+- **soft glow**: CTA buttons and hero elements use a subtle luminous edge and shadow over the gradient backdrop
+  - `box-shadow: 0 10px 24px rgba(49,58,188,0.28)`
+  - `border: 1px solid rgba(255,255,255,0.18)`
+- **frosted panel**: the segmented option tray appears as a translucent lilac panel behind solid cards
+  - `background: rgba(219,214,245,0.22)`
+  - `border: 1px solid rgba(255,255,255,0.18)`
+  - `backdrop-filter: blur(6px)`
+
+### Interaction State Tokens
+- **button.primary.default**: solid blue gradient pill with white semi-bold text and soft outer shadow
+- **button.primary.hover**: slightly brighter blue-violet gradient with stronger glow and lift
+- **button.primary.focus**: thin light-lilac outer ring around pill boundary
+- **navigation.link.default**: small white text with reduced opacity over transparent background
+- **navigation.link.hover**: full-opacity white text with subtle underline or brighter contrast
 
 ### Components
-- **button**: Large pill buttons with blue gradient fill for primary actions, white text, subtle outer glow/shadow, and rounded corners; secondary nav action uses a translucent frosted pink surface.
-- **card**: Horizontal selector cards in a segmented tray, each with white background, large rounded corners, thin lavender border, centered pastel icon, and dark text label.
-- **navigation**: Centered top navigation with simple text links and small chevrons, logo on the left, and two CTA buttons on the right over the gradient background.
+- **button**: Rounded pill buttons with blue gradient fills for primary actions and muted translucent fills for secondary actions; white text, medium shadow, and generous horizontal padding.
+- **card**: Small rounded rectangular option cards with very light gray backgrounds, thin cool-gray borders, centered pastel icons, and dark label text, grouped inside a translucent rounded container.
+- **navigation**: Minimal top navigation bar with centered text links, subtle dropdown chevrons, left-aligned logo, and right-aligned sign-in and primary CTA buttons.
 
 ### Layout
-top navigation + centered hero + social proof badge + segmented option card row + primary CTA + customer logo strip
+centered top navigation above a full-width hero with large centered headline, supporting copy, segmented use-case card row, primary CTA, and trust-logo strip at the bottom
+
+### UI Elements
+Named UI regions identified in the reference screenshot (col/row = 3×3 grid):
+- **logo and nav** — col 1, row 1, zoom 2.8×
+- **hero headline** — col 2, row 1, zoom 2.2×
+- **review badge** — col 2, row 1, zoom 4×
+- **use-case cards** — col 2, row 2, zoom 2.4×
+- **primary cta** — col 2, row 3, zoom 4×
+- **trust logos** — col 3, row 3, zoom 2.8×
 
 ## Style Spec (HTML)
 
@@ -178,26 +325,26 @@ top navigation + centered hero + social proof badge + segmented option card row 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-    --color-primary:    #3e4df4;
-    --color-secondary:  #b04cb8;
-    --color-accent:     #e2a158;
-    --color-background: #3537c7;
-    --color-surface:    #f4f3f7;
-    --color-text:       #ffffff;
-    --color-text-muted: #ddd6ef;
-    --color-border:     #b79ad5;
-    --color-success:    #88df9d;
-    --color-warning:    #f8bb43;
-    --color-danger:     #f19ac4;
+    --color-primary:    #3a41e0;
+    --color-secondary:  #8d43bf;
+    --color-accent:     #d89b4b;
+    --color-background: #364bcf;
+    --color-surface:    #ebebf0;
+    --color-text:       #f3f2f2;
+    --color-text-muted: #d4d1e7;
+    --color-border:     #9b91d9;
+    --color-success:    #22c55e;
+    --color-warning:    #f59e0b;
+    --color-danger:     #ef4444;
     --font-heading: 'Inter', system-ui, sans-serif;
     --font-body:    'Inter', system-ui, sans-serif;
     --font-mono:    'JetBrains Mono', ui-monospace, monospace;
-    --weight-heading: 800;
+    --weight-heading: 700;
     --weight-body:    400;
     --size-base:      16px;
-    --radius-sm: 8px;
-    --radius-md: 16px;
-    --radius-lg: 24px;
+    --radius-sm: 4px;
+    --radius-md: 10px;
+    --radius-lg: 18px;
     --radius-pill: 999px;
   }
 * { box-sizing: border-box; }
@@ -272,9 +419,40 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+.crop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.crop-tile { margin: 0; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid var(--color-border); background: var(--color-surface); }
+.crop-tile__viewport { width: 100%; aspect-ratio: 4/3; overflow: hidden; position: relative; }
+.crop-tile__viewport img { position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover; transform-origin: var(--ox) var(--oy);
+  transform: scale(var(--zoom)); }
+.crop-tile figcaption { padding: 7px 12px; font-size: 11px; font-weight: 500;
+  color: var(--color-text-muted); background: var(--color-surface);
+  border-top: 1px solid var(--color-border); letter-spacing: 0.02em; text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -283,9 +461,9 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div class="header__body">
       <div class="kicker">saas</div>
       <h1>auto-saas-2026-05-16-4-scribe.png</h1>
-      <p class="muted">Modern SaaS landing page with a luminous blue-to-magenta gradient backdrop, oversized bold hero typography, and soft glassy panels. The interface blends enterprise polish with playful color accents and subtle depth through shadows, rings, and rounded cards.</p>
+      <p class="muted">A polished SaaS landing hero with a vibrant blue-to-magenta gradient background, oversized centered headline, and soft elevated UI cards. The design mixes friendly enterprise trust cues with subtle glow, rounded geometry, and clean modern typography.</p>
       <div class="tags">
-        <span class="tag">modern</span><span class="tag">vibrant</span><span class="tag">polished</span><span class="tag">friendly</span><span class="tag">premium</span><span class="tag">gradient-rich</span>
+        <span class="tag">modern</span><span class="tag">bright</span><span class="tag">friendly</span><span class="tag">polished</span><span class="tag">gradient-rich</span>
       </div>
     </div>
   </div>
@@ -294,101 +472,74 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <h2>Palette</h2>
     <div class="palette">
     <div class="swatch">
-      <div class="swatch__chip" style="background:#3e4df4"></div>
+      <div class="swatch__chip" style="background:#3a41e0"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Primary</div>
-        <div class="swatch__hex">#3e4df4</div>
-        <div class="swatch__name">electric indigo</div>
+        <div class="swatch__hex">#3a41e0</div>
+        <div class="swatch__name">brand blue</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#b04cb8"></div>
+      <div class="swatch__chip" style="background:#8d43bf"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Secondary</div>
-        <div class="swatch__hex">#b04cb8</div>
-        <div class="swatch__name">orchid purple</div>
+        <div class="swatch__hex">#8d43bf</div>
+        <div class="swatch__name">violet</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#e2a158"></div>
+      <div class="swatch__chip" style="background:#d89b4b"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Accent</div>
-        <div class="swatch__hex">#e2a158</div>
+        <div class="swatch__hex">#d89b4b</div>
         <div class="swatch__name">warm amber</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#3537c7"></div>
+      <div class="swatch__chip" style="background:#364bcf"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Background</div>
-        <div class="swatch__hex">#3537c7</div>
-        <div class="swatch__name">blue violet gradient</div>
+        <div class="swatch__hex">#364bcf</div>
+        <div class="swatch__name">gradient blue base</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#f4f3f7"></div>
+      <div class="swatch__chip" style="background:#ebebf0"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Surface</div>
-        <div class="swatch__hex">#f4f3f7</div>
+        <div class="swatch__hex">#ebebf0</div>
+        <div class="swatch__name">light card surface</div>
+      </div>
+    </div>
+
+    <div class="swatch">
+      <div class="swatch__chip" style="background:#f3f2f2"></div>
+      <div class="swatch__meta">
+        <div class="swatch__label">Text</div>
+        <div class="swatch__hex">#f3f2f2</div>
         <div class="swatch__name">soft white</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#ffffff"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Text</div>
-        <div class="swatch__hex">#ffffff</div>
-        <div class="swatch__name">white</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#ddd6ef"></div>
+      <div class="swatch__chip" style="background:#d4d1e7"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Text muted</div>
-        <div class="swatch__hex">#ddd6ef</div>
-        <div class="swatch__name">soft lavender white</div>
+        <div class="swatch__hex">#d4d1e7</div>
+        <div class="swatch__name">muted lavender white</div>
       </div>
     </div>
 
     <div class="swatch">
-      <div class="swatch__chip" style="background:#b79ad5"></div>
+      <div class="swatch__chip" style="background:#9b91d9"></div>
       <div class="swatch__meta">
         <div class="swatch__label">Border</div>
-        <div class="swatch__hex">#b79ad5</div>
-        <div class="swatch__name">frosted lavender border</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#88df9d"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Success</div>
-        <div class="swatch__hex">#88df9d</div>
-        <div class="swatch__name">mint green</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#f8bb43"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Warning</div>
-        <div class="swatch__hex">#f8bb43</div>
-        <div class="swatch__name">gold star</div>
-      </div>
-    </div>
-
-    <div class="swatch">
-      <div class="swatch__chip" style="background:#f19ac4"></div>
-      <div class="swatch__meta">
-        <div class="swatch__label">Danger</div>
-        <div class="swatch__hex">#f19ac4</div>
-        <div class="swatch__name">soft pink</div>
+        <div class="swatch__hex">#9b91d9</div>
+        <div class="swatch__name">soft lilac border</div>
       </div>
     </div></div>
   </div>
@@ -397,8 +548,8 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     <div>
       <h2>Typography</h2>
       <div class="type-stack">
-        <h3 style="font-size: 2rem;">Heading — Inter 800</h3>
-        <h3 style="font-size: 1.4rem;">Subhead — Inter 800</h3>
+        <h3 style="font-size: 2rem;">Heading — Inter 700</h3>
+        <h3 style="font-size: 1.4rem;">Subhead — Inter 700</h3>
         <p style="font-size: 1rem; margin: 0;">Body — Inter 400 at 16px</p>
         <p class="muted" style="font-size: 0.85rem; margin: 0;">Caption / muted text uses --color-text-muted.</p>
         
@@ -442,7 +593,152 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
     </div>
   </div>
 
-  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 2px 8px rgba(26,17,91,0.18)">0 2px 8px rgba(26,17,91,0.18)</div><div class="shadow-card" style="box-shadow:0 12px 32px rgba(33,22,122,0.28)">0 12px 32px rgba(33,22,122,0.28)</div><div class="shadow-card" style="box-shadow:0 10px 24px rgba(52,67,219,0.35)">0 10px 24px rgba(52,67,219,0.35)</div></div>
+  <div class="section"><h2>Shadows</h2><div class="shadow-card" style="box-shadow:0 2px 6px rgba(32,24,98,0.18)">0 2px 6px rgba(32,24,98,0.18)</div><div class="shadow-card" style="box-shadow:0 10px 24px rgba(49,58,188,0.28)">0 10px 24px rgba(49,58,188,0.28)</div></div>
+
+  <div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(25deg, #2b2fc2 0%, #3b63d7 22%, #7c35bb 72%, rgba(214, 155, 71, 0.95) 100%);"></div>
+        <div class="signal-title">hero-bg</div>
+        <div class="signal-meta">linear 25deg · main page background</div>
+        <div class="signal-code">0% #2b2fc2 @1  |  22% #3b63d7 @1  |  72% #7c35bb @1  |  100% #d69b47 @0.95</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-preview" style="background:linear-gradient(180deg, #4a5bf1 0%, #3940dc 100%);"></div>
+        <div class="signal-title">primary-button</div>
+        <div class="signal-meta">linear 180deg · primary CTA fill</div>
+        <div class="signal-code">0% #4a5bf1 @1  |  100% #3940dc @1</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">
+      <article class="signal-card">
+        <div class="signal-title">soft glow</div>
+        <div class="signal-meta">CTA buttons and hero elements use a subtle luminous edge and shadow over the gradient backdrop</div>
+        <div class="signal-code">box-shadow: 0 10px 24px rgba(49,58,188,0.28)<br/>border: 1px solid rgba(255,255,255,0.18)</div>
+      </article>
+      <article class="signal-card">
+        <div class="signal-title">frosted panel</div>
+        <div class="signal-meta">the segmented option tray appears as a translucent lilac panel behind solid cards</div>
+        <div class="signal-code">background: rgba(219,214,245,0.22)<br/>border: 1px solid rgba(255,255,255,0.18)<br/>backdrop-filter: blur(6px)</div>
+      </article></div>
+  </div>
+
+  <div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>solid blue gradient pill with white semi-bold text and soft outer shadow</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>slightly brighter blue-violet gradient with stronger glow and lift</td>
+      </tr>
+      <tr>
+        <td>button.primary</td>
+        <td><span class="state-pill state-focus">focus</span></td>
+        <td>thin light-lilac outer ring around pill boundary</td>
+      </tr>
+      <tr>
+        <td>navigation.link</td>
+        <td><span class="state-pill state-default">default</span></td>
+        <td>small white text with reduced opacity over transparent background</td>
+      </tr>
+      <tr>
+        <td>navigation.link</td>
+        <td><span class="state-pill state-hover">hover</span></td>
+        <td>full-opacity white text with subtle underline or brighter contrast</td>
+      </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>UI Element Details</h2>
+    <p class="muted" style="margin-top:-4px;font-size:13px;">CSS-zoomed crops of the reference screenshot — each tile zooms into an identified element region.</p>
+    <div class="crop-grid">
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="logo and nav"
+            style="--ox:0%;--oy:0%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>logo and nav</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="hero headline"
+            style="--ox:50%;--oy:0%;--zoom:2.2;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>hero headline</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="review badge"
+            style="--ox:50%;--oy:0%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>review badge</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="use-case cards"
+            style="--ox:50%;--oy:50%;--zoom:2.4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>use-case cards</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="primary cta"
+            style="--ox:50%;--oy:100%;--zoom:4;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>primary cta</figcaption>
+      </figure>
+      <figure class="crop-tile">
+        <div class="crop-tile__viewport">
+          <img
+            src="/knowledge-refs/auto-saas-2026-05-16-4-scribe.png"
+            alt="trust logos"
+            style="--ox:100%;--oy:100%;--zoom:2.8;"
+            draggable="false"
+          />
+        </div>
+        <figcaption>trust logos</figcaption>
+      </figure></div>
+  </div>
 
   <div class="section">
     <h2>Component Preview</h2>
@@ -455,7 +751,7 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
       <input class="input" type="text" placeholder="Search…">
       <div class="card">
         <h3>Card title</h3>
-        <p class="muted">Surface card on background, 24px radius, using primary as accent.</p>
+        <p class="muted">Surface card on background, 18px radius, using primary as accent.</p>
         <button class="btn btn-primary" style="margin-top:8px;">Action</button>
       </div>
     </div>
@@ -464,18 +760,18 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   <div class="section"><h2>Component Notes</h2>
       <div class="component">
         <div class="component__name">button</div>
-        <div class="component__desc">Large pill buttons with blue gradient fill for primary actions, white text, subtle outer glow/shadow, and rounded corners; secondary nav action uses a translucent frosted pink surface.</div>
+        <div class="component__desc">Rounded pill buttons with blue gradient fills for primary actions and muted translucent fills for secondary actions; white text, medium shadow, and generous horizontal padding.</div>
       </div>
       <div class="component">
         <div class="component__name">card</div>
-        <div class="component__desc">Horizontal selector cards in a segmented tray, each with white background, large rounded corners, thin lavender border, centered pastel icon, and dark text label.</div>
+        <div class="component__desc">Small rounded rectangular option cards with very light gray backgrounds, thin cool-gray borders, centered pastel icons, and dark label text, grouped inside a translucent rounded container.</div>
       </div>
       <div class="component">
         <div class="component__name">navigation</div>
-        <div class="component__desc">Centered top navigation with simple text links and small chevrons, logo on the left, and two CTA buttons on the right over the gradient background.</div>
+        <div class="component__desc">Minimal top navigation bar with centered text links, subtle dropdown chevrons, left-aligned logo, and right-aligned sign-in and primary CTA buttons.</div>
       </div></div>
 
-  <div class="section"><h2>Layout pattern</h2><p>top navigation + centered hero + social proof badge + segmented option card row + primary CTA + customer logo strip</p></div>
+  <div class="section"><h2>Layout pattern</h2><p>centered top navigation above a full-width hero with large centered headline, supporting copy, segmented use-case card row, primary CTA, and trust-logo strip at the bottom</p></div>
 </body>
 </html>
 ```

@@ -466,6 +466,10 @@ function DeleteProjectDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = {
+    WebkitAppRegion: "no-drag",
+  };
+
   // Lock body scroll while open, and listen for Escape to cancel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -480,6 +484,7 @@ function DeleteProjectDialog({
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+      style={noDragStyle}
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel();
       }}
