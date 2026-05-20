@@ -1,15 +1,116 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
+import mermaid from "mermaid";
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "default",
+});
+
+// ── Mermaid diagram renderer ──
+
+function MermaidBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const id = useRef(`mermaid-${Math.random().toString(36).slice(2, 8)}`).current;
+
+  useEffect(() => {
+    let cancelled = false;
+    mermaid
+      .render(id, code)
+      .then(({ svg }) => {
+        if (!cancelled) setSvg(svg);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message ?? String(err));
+      });
+    return () => { cancelled = true; };
+  }, [code, id]);
+
+  if (error) {
+    return (
+      <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-red-200 bg-red-50 p-4 text-[13px] leading-relaxed">
+        <code className="text-red-600">{error}</code>
+      </pre>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div className="mb-4 flex items-center justify-center rounded-md border border-[#d0d7de] bg-white p-8 text-[13px] text-[#94a3b8]">
+        Loading diagram…
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-4 flex justify-center overflow-x-auto rounded-md border border-[#d0d7de] bg-white p-4"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+// ── Helper to detect a MermaidBlock child ──
+function isMermaidBlock(node: React.ReactNode): boolean {
+  return React.isValidElement(node) && node.type === MermaidBlock;
+}
+
+// ── Components factory ──
 
 function createMarkdownComponents(variant: "default" | "prd"): Components {
   const isPrd = variant === "prd";
 
+  function codeComponent({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) {
+    const lang = className?.replace("language-", "") ?? "";
+
+    // ── Mermaid ──
+    if (lang === "mermaid") {
+      const diagramCode = String(children ?? "").replace(/\n$/, "");
+      return <MermaidBlock code={diagramCode} />;
+    }
+
+    const isBlock = !!className?.includes("language-");
+    if (isBlock) {
+      if (isPrd) {
+        return (
+          <code className="block font-mono text-[13px] leading-relaxed text-[#1f2328]">
+            {children}
+          </code>
+        );
+      }
+      return (
+        <code className="block text-xs leading-relaxed text-emerald-700">
+          {children}
+        </code>
+      );
+    }
+
+    if (isPrd) {
+      return (
+        <code className="rounded-md border border-[#afb8c133] bg-[#f6f8fa] px-[0.4em] py-[0.2em] font-mono text-[0.85em] text-[#1f2328]">
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-emerald-700">
+        {children}
+      </code>
+    );
+  }
+
   if (isPrd) {
-    // GitHub-flavored light theme
     return {
       h1: ({ children }) => (
         <h1 className="mb-4 mt-6 border-b border-[#d0d7de] pb-3 text-[2em] font-semibold leading-tight text-[#1f2328]">
@@ -71,26 +172,16 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
           {children}
         </a>
       ),
-      code: ({ children, className }) => {
-        const isBlock = className?.includes("language-");
-        if (isBlock) {
-          return (
-            <code className="block font-mono text-[13px] leading-relaxed text-[#1f2328]">
-              {children}
-            </code>
-          );
-        }
+      code: codeComponent,
+      pre: ({ children }) => {
+        const child = React.Children.count(children) === 1 ? React.Children.toArray(children)[0] : null;
+        if (child && isMermaidBlock(child)) return <>{children}</>;
         return (
-          <code className="rounded-md border border-[#afb8c133] bg-[#f6f8fa] px-[0.4em] py-[0.2em] font-mono text-[0.85em] text-[#1f2328]">
+          <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8c959f] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
             {children}
-          </code>
+          </pre>
         );
       },
-      pre: ({ children }) => (
-        <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8c959f] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
-          {children}
-        </pre>
-      ),
       blockquote: ({ children }) => (
         <blockquote className="mb-4 mt-0 border-l-4 border-[#d0d7de] pl-4 text-[16px] leading-[1.75] text-[#57606a] [&>p]:mb-0">
           {children}
@@ -175,26 +266,16 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
         {children}
       </a>
     ),
-    code: ({ children, className }) => {
-      const isBlock = className?.includes("language-");
-      if (isBlock) {
-        return (
-          <code className="block text-xs leading-relaxed text-emerald-700">
-            {children}
-          </code>
-        );
-      }
+    code: codeComponent,
+    pre: ({ children }) => {
+      const child = React.Children.count(children) === 1 ? React.Children.toArray(children)[0] : null;
+      if (child && isMermaidBlock(child)) return <>{children}</>;
       return (
-        <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-emerald-700">
+        <pre className="mb-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
           {children}
-        </code>
+        </pre>
       );
     },
-    pre: ({ children }) => (
-      <pre className="mb-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
-        {children}
-      </pre>
-    ),
     blockquote: ({ children }) => (
       <blockquote className="mb-3 border-l-2 border-indigo-400 pl-4 text-sm italic text-zinc-500">
         {children}
