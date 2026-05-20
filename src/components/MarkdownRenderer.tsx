@@ -17,8 +17,18 @@ function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const id = useRef(`mermaid-${Math.random().toString(36).slice(2, 8)}`).current;
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Skip rendering if the code looks like streaming garbage — must start
+    // with a known mermaid diagram type to avoid leaking DOM on every chunk.
+    const trimmed = code.trim();
+    const isLikelyMermaid = /^(graph\s|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s|journey|gitgraph|timeline|requirementDiagram|mindmap|block|packet)/i.test(trimmed);
+    if (!isLikelyMermaid) return;
+
+    // Clean up any leaked Mermaid temp elements from previous renders
+    document.querySelectorAll(`[id^="dmermaid-"]`).forEach((el) => el.remove());
+
     let cancelled = false;
     mermaid
       .render(id, code)
