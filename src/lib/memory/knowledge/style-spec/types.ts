@@ -82,6 +82,44 @@ export interface StyleSpecComponents {
   navigation?: StyleSpecComponent;
 }
 
+export interface StyleSpecGradientStop {
+  /** Lowercase 6-digit hex. */
+  color: string;
+  /** 0-100 position for this stop. */
+  positionPct: number;
+  /** Optional alpha value for translucent stops (0-1). */
+  opacity?: number;
+}
+
+export interface StyleSpecGradient {
+  /** Stable id for referencing the gradient in prompts/templates. */
+  id: string;
+  type: "linear" | "radial";
+  /** Optional direction for linear gradients. */
+  angleDeg?: number;
+  stops: StyleSpecGradientStop[];
+  /** Where this gradient is used in the UI. */
+  usage: string;
+}
+
+export interface StyleSpecSurfaceEffect {
+  /** Short tag like "glassmorphism" / "soft-glow". */
+  name: string;
+  /** What visual treatment is applied. */
+  description: string;
+  /** Optional CSS-like hints, e.g. backdrop-filter + border alpha. */
+  cssHints?: string[];
+}
+
+export interface StyleSpecStateToken {
+  /** Token id, e.g. "button.primary". */
+  component: string;
+  /** State key, e.g. default/hover/active/focus/disabled. */
+  state: "default" | "hover" | "active" | "focus" | "disabled";
+  /** Textual description of visual delta in this state. */
+  treatment: string;
+}
+
 /** Full structured style spec returned by the vision analyser. */
 export interface StyleSpec {
   /** Industry bucket — drives recall filtering. */
@@ -105,6 +143,12 @@ export interface StyleSpec {
   radius: StyleSpecRadius;
   /** Optional list of CSS box-shadow strings observed in the design. */
   shadows?: string[];
+  /** Optional gradient definitions extracted from key UI areas. */
+  gradients?: StyleSpecGradient[];
+  /** Optional material/effect definitions (glass blur, glow, noise, etc.). */
+  surfaceEffects?: StyleSpecSurfaceEffect[];
+  /** Optional state-level visual token definitions per component/state. */
+  stateTokens?: StyleSpecStateToken[];
   components: StyleSpecComponents;
   /** Layout pattern, e.g. "fixed left sidebar nav + hero + KPI grid + alert feed". */
   layout: string;

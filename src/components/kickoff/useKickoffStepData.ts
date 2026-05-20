@@ -213,7 +213,14 @@ export function useKickoffStepData(
       typeof result.metadata?.runId === "string"
         ? (result.metadata.runId as string)
         : "run-" + Date.now();
-    startCoding(runId, tasks, codeOutputDir, undefined, steps.prd?.content);
+    startCoding(
+      runId,
+      tasks,
+      codeOutputDir,
+      undefined,
+      undefined,
+      steps.prd?.content,
+    );
     opts.onStartCoding?.();
   }, [
     taskBreakdownConfirmed,
@@ -236,6 +243,7 @@ export function useKickoffStepData(
       tasks,
       matchingFailedIds,
       codeOutputDir,
+      undefined,
       undefined,
       steps.prd?.content,
     );

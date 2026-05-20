@@ -33,12 +33,17 @@ import {
   formatMigrationGapInstruction,
 } from "@/lib/pipeline/self-heal/migration-coverage";
 import { resolveModel } from "@/lib/openrouter";
-import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
+import { resolveModelChain } from "@/lib/model-config";
 import type {
   CodingAgentRole,
   CodingTask,
   TaskSubStep,
 } from "@/lib/pipeline/types";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
+import {
+  resolveCodingModelConfigValue,
+  shouldForceOpenRouterForCodingMode,
+} from "@/lib/pipeline/coding-model-selection";
 import type {
   OpenRouterResponse,
   OpenRouterToolDefinition,
@@ -1093,6 +1098,7 @@ async function runCodegenWorkerLoop(
   toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
   /** Worker role — used to select the codegen model variant. */
   role?: CodingAgentRole,
+  codingMode: CodingMode = "normal",
 ): Promise<{
   content: string;
   rawContent: string;
@@ -1162,6 +1168,7 @@ async function runCodegenWorkerLoop(
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
       openRouterVariant: codegenVariant,
+      codingMode,
       // When forcing write, omit tools entirely so the model cannot call them.
       tools: forceWrite ? undefined : WORKER_TOOLS,
       tool_choice: forceWrite ? "none" : "auto",
@@ -1362,6 +1369,7 @@ async function runCodegenAgentSession(
   recallCtx?: SecondaryRecallContext,
   toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
   role?: CodingAgentRole,
+  codingMode: CodingMode = "normal",
 ): Promise<CodegenAgentSessionResult> {
   // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity.
   const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
@@ -1395,6 +1403,7 @@ async function runCodegenAgentSession(
       temperature: 0.3,
       max_tokens: MAX_OUTPUT_TOKENS,
       openRouterVariant: codegenVariant,
+      codingMode,
       tools: WORKER_TOOLS,
       tool_choice: "auto",
     }).finally(() => {
@@ -2609,6 +2618,7 @@ async function generateCode(state: WorkerState) {
         secondaryRecallCtx,
         { fsWriteOptions: fsOpts, taskId: task.id },
         state.role,
+        state.codingMode,
       );
       const content = response.content;
       totalCostUsd += response.costUsd;
@@ -2679,6 +2689,7 @@ async function generateCode(state: WorkerState) {
           secondaryRecallCtx,
           { fsWriteOptions: fsOpts, taskId: task.id },
           state.role,
+          state.codingMode,
         );
         const content = response.content;
         validateCodegenFileOutput(content);
@@ -3433,7 +3444,10 @@ async function taskFix(state: WorkerState) {
   const codeFixChain =
     overrideModelChain.length > 0
       ? resolveModelChain(overrideModelChain, resolveModel)
-      : resolveModelChain(MODEL_CONFIG.codeFix ?? "gpt-4o", resolveModel);
+      : resolveModelChain(
+          resolveCodingModelConfigValue(state.codingMode, "codeFix"),
+          resolveModel,
+        );
   if (overrideModelChain.length > 0) {
     console.log(
       `[Worker:${state.workerLabel}] codeFix: using CODEFIX_MODEL_CHAIN override (${overrideModelChainRaw})`,
@@ -3526,6 +3540,7 @@ async function taskFix(state: WorkerState) {
     const response = await chatCompletionWithFallback(messages, codeFixChain, {
       temperature: 0.2,
       max_tokens: MAX_OUTPUT_TOKENS,
+      forceOpenRouter: shouldForceOpenRouterForCodingMode(state.codingMode),
     });
 
     const content = response.choices[0]?.message?.content ?? "";

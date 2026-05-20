@@ -75,6 +75,46 @@ export function renderStyleSpecMarkdown(spec: StyleSpec): string {
   }
   lines.push("");
 
+  // ── Gradients ──────────────────────────────────────────────────────────
+  if (spec.gradients?.length) {
+    lines.push("### Gradients");
+    for (const g of spec.gradients) {
+      const head =
+        g.type === "linear" && typeof g.angleDeg === "number"
+          ? `- **${g.id}** (${g.type}, ${g.angleDeg}deg) — ${g.usage}`
+          : `- **${g.id}** (${g.type}) — ${g.usage}`;
+      lines.push(head);
+      for (const stop of g.stops) {
+        const alpha = typeof stop.opacity === "number" ? `, alpha ${stop.opacity}` : "";
+        lines.push(
+          `  - stop ${stop.positionPct}%: \`${stop.color}\`${alpha}`,
+        );
+      }
+    }
+    lines.push("");
+  }
+
+  // ── Surface effects ────────────────────────────────────────────────────
+  if (spec.surfaceEffects?.length) {
+    lines.push("### Surface Effects");
+    for (const fx of spec.surfaceEffects) {
+      lines.push(`- **${fx.name}**: ${fx.description}`);
+      if (fx.cssHints?.length) {
+        for (const hint of fx.cssHints) lines.push(`  - \`${hint}\``);
+      }
+    }
+    lines.push("");
+  }
+
+  // ── State tokens ───────────────────────────────────────────────────────
+  if (spec.stateTokens?.length) {
+    lines.push("### Interaction State Tokens");
+    for (const st of spec.stateTokens) {
+      lines.push(`- **${st.component}.${st.state}**: ${st.treatment}`);
+    }
+    lines.push("");
+  }
+
   // ── Components ─────────────────────────────────────────────────────────
   const comps = spec.components;
   const compEntries = Object.entries(comps).filter(([, v]) => v?.description);
