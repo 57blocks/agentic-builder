@@ -81,6 +81,7 @@ Adapt nodes/edges to this product. Use \`flowchart\` or \`graph\`.
 - This is a SIMPLE project. Do NOT invent backend services, databases, authentication, microservices, or deployment infrastructure unless the user explicitly asks for them.
 - Do NOT add enterprise-only sections (personas, RACI, etc.).
 - **Never omit** layout regions, on-screen inventory, the interactive-components table, or the Mermaid diagram — even for a single-page app.
+- **Mermaid diagram MUST render correctly** with the latest Mermaid library. Use simple, well-tested syntax: prefer \`flowchart LR\` over \`graph\`; wrap node labels containing parentheses, brackets, or special characters in double quotes (e.g. \`A["Node label (text)"]\`); avoid complex styling directives or unsupported diagram types.
 - Acceptance Criteria must be specific, measurable, and testable.
 - Feature count: 3–8. PRD length: roughly 700–1600 words (longer is acceptable to complete the tables).
 - Write in English; professional tone.
@@ -187,6 +188,7 @@ Each row: one control; **User interaction** = trigger; **Effect** = UI feedback 
 - Every feature gets a unique ID (FR-XX##).
 - The Pages & Screens section is CRITICAL — list every distinct page with layout regions, on-screen inventory, interactions, and states.
 - Do not skip **5.3 Mermaid** or **5.4 Interactive components index**.
+- **Mermaid diagram MUST render correctly** — use \`flowchart LR\` or \`flowchart TD\`; wrap node labels with special characters in double quotes (e.g. \`A["Node label (text)"]\`); avoid complex styling or unsupported syntax.
 - Acceptance Criteria must be specific, measurable, and binary pass/fail.
 - PRD length: 1200–3000 words.
 - Write in English; professional tone.`;
@@ -373,6 +375,7 @@ Rules: **User interaction** = exact trigger; **Effect** = immediate feedback + d
 - Every acceptance criterion gets a unique ID (AC-## or NF-##).
 - The Pages & Screens section (Section 6) is CRITICAL — an engineer should be able to build the UI from it alone.
 - Do not skip **6.3 Mermaid** or **6.4 Interactive components master index**.
+- **Mermaid diagram MUST render correctly** — use \`flowchart LR\` or \`flowchart TD\`; wrap node labels with special characters in double quotes (e.g. \`A["Node label (text)"]\`); avoid complex styling or unsupported syntax.
 - Include ALL page states: loading, empty, error, populated.
 - Interactions must specify trigger, action, visual feedback, and result.
 - Acceptance criteria must be binary pass/fail — NEVER use vague terms like "works correctly" or "is user-friendly".

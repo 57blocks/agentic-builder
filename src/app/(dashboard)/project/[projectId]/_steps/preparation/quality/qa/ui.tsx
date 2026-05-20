@@ -145,7 +145,7 @@ export function QaUI(props: StepUIProps) {
         actions={
           <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => { if (nextStep) props.onNavigate(nextStep); }}
+              onClick={() => { const target = nextStep ?? getNextStep("qa", "M"); if (target) props.onNavigate(target); }}
               disabled={!isDone}
               className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none"
             >
