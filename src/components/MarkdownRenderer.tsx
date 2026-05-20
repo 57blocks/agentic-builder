@@ -1,87 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import mermaid from "mermaid";
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "default",
-});
-
-// ── Mermaid diagram renderer ──
-
-function MermaidBlock({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const id = useRef(`mermaid-${Math.random().toString(36).slice(2, 8)}`).current;
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Skip rendering if the code looks like streaming garbage — must start
-    // with a known mermaid diagram type to avoid leaking DOM on every chunk.
-    const trimmed = code.trim();
-    const isLikelyMermaid = /^(graph\s|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s|journey|gitgraph|timeline|requirementDiagram|mindmap|block|packet)/i.test(trimmed);
-    if (!isLikelyMermaid) return;
-
-    // Clean up any leaked Mermaid temp elements from previous renders
-    document.querySelectorAll(`[id^="dmermaid-"]`).forEach((el) => el.remove());
-
-    let cancelled = false;
-    mermaid
-      .render(id, code)
-      .then(({ svg }) => {
-        if (cancelled) return;
-        // mermaid.render can succeed (resolve) but return an SVG containing error text
-        // instead of a proper diagram — treat those as render failures.
-        if (/class="error[^"]*"|Syntax error|diagram error|aria-roledescription="error"/i.test(svg)) {
-          setError("Mermaid syntax error in diagram source");
-        } else {
-          setSvg(svg);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message ?? String(err));
-      });
-    return () => { cancelled = true; };
-  }, [code, id]);
-
-  if (error) {
-    return (
-      <div className="mb-4 overflow-hidden rounded-md border border-amber-200">
-        <div className="flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700 font-medium border-b border-amber-200">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          Diagram render error — showing source
-        </div>
-        <pre className="m-0 overflow-x-auto bg-[#f6f8fa] p-4 text-[13px] leading-relaxed">
-          <code className="text-[#1f2328]">{code}</code>
-        </pre>
-      </div>
-    );
-  }
-
-  if (!svg) {
-    return (
-      <div className="mb-4 flex items-center justify-center rounded-md border border-[#d0d7de] bg-white p-8 text-[13px] text-[#94a3b8]">
-        Loading diagram…
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="mb-4 flex justify-center overflow-x-auto rounded-md border border-[#d0d7de] bg-white p-4"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  );
-}
-
-// ── Helper to detect a MermaidBlock child ──
-function isMermaidBlock(node: React.ReactNode): boolean {
-  return React.isValidElement(node) && node.type === MermaidBlock;
-}
 
 // ── Components factory ──
 
@@ -96,12 +18,6 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
     className?: string;
   }) {
     const lang = className?.replace("language-", "") ?? "";
-
-    // ── Mermaid ──
-    if (lang === "mermaid") {
-      const diagramCode = String(children ?? "").replace(/\n$/, "");
-      return <MermaidBlock code={diagramCode} />;
-    }
 
     const isBlock = !!className?.includes("language-");
     if (isBlock) {
@@ -196,15 +112,11 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
         </a>
       ),
       code: codeComponent,
-      pre: ({ children }) => {
-        const child = React.Children.count(children) === 1 ? React.Children.toArray(children)[0] : null;
-        if (child && isMermaidBlock(child)) return <>{children}</>;
-        return (
-          <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8c959f] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
-            {children}
-          </pre>
-        );
-      },
+      pre: ({ children }) => (
+        <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8c959f] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
+          {children}
+        </pre>
+      ),
       blockquote: ({ children }) => (
         <blockquote className="mb-4 mt-0 border-l-4 border-[#d0d7de] pl-4 text-[16px] leading-[1.75] text-[#57606a] [&>p]:mb-0">
           {children}
@@ -290,15 +202,11 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
       </a>
     ),
     code: codeComponent,
-    pre: ({ children }) => {
-      const child = React.Children.count(children) === 1 ? React.Children.toArray(children)[0] : null;
-      if (child && isMermaidBlock(child)) return <>{children}</>;
-      return (
-        <pre className="mb-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
-          {children}
-        </pre>
-      );
-    },
+    pre: ({ children }) => (
+      <pre className="mb-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
+        {children}
+      </pre>
+    ),
     blockquote: ({ children }) => (
       <blockquote className="mb-3 border-l-2 border-indigo-400 pl-4 text-sm italic text-zinc-500">
         {children}
@@ -396,8 +304,6 @@ export default function MarkdownRenderer({
 
   return (
     <div className={`${proseClass} ${className}`}>
-      {/* Hide Mermaid error SVGs that may leak before React catches up */}
-      <style>{`svg[aria-roledescription="error"] { display: none !important; }`}</style>
       {chunks.map((chunk, idx) => {
         const md = (
           <ReactMarkdown
