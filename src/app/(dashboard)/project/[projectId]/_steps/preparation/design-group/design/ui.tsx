@@ -1549,7 +1549,7 @@ export function DesignUI(props: StepUIProps) {
       </div>
 
       {/* ── Bottom navigation bar ── */}
-      <div className="shrink-0 border-t border-[#e2e8f0] bg-white px-8 py-3 flex items-center gap-3">
+      <div className="shrink-0 border-t border-[#e2e8f0] bg-white flex items-center gap-3">
 
           {phase === "spec" && (
             <StageInputBar
