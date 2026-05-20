@@ -5,6 +5,10 @@ import type {
   KickoffWorkItem,
   TaskSubStep,
 } from "@/lib/pipeline/types";
+import {
+  DEFAULT_CODING_MODE,
+  type CodingMode,
+} from "@/lib/pipeline/coding-mode";
 import { type RalphConfig, DEFAULT_RALPH_CONFIG } from "@/lib/ralph";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
@@ -90,6 +94,10 @@ export const SupervisorStateAnnotation = Annotation.Root({
   projectContext: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
+  }),
+  codingMode: Annotation<CodingMode>({
+    reducer: (_prev, next) => next,
+    default: () => DEFAULT_CODING_MODE,
   }),
   frontendDesignContext: Annotation<string>({
     reducer: (_prev, next) => next,
@@ -236,6 +244,10 @@ export const WorkerStateAnnotation = Annotation.Root({
   projectContext: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
+  }),
+  codingMode: Annotation<CodingMode>({
+    reducer: (_prev, next) => next,
+    default: () => DEFAULT_CODING_MODE,
   }),
   fileRegistrySnapshot: Annotation<GeneratedFile[]>({
     reducer: (prev, next) => {

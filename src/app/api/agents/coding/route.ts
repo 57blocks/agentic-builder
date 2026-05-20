@@ -94,6 +94,7 @@ import {
 } from "@/lib/pipeline/session-checkpoint";
 import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
 import { activeCodingSessions } from "./session-registry";
+import { normalizeCodingMode, type CodingMode } from "@/lib/pipeline/coding-mode";
 
 const execFileAsync = promisify(execFile);
 
@@ -697,6 +698,7 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds,
     projectId,
     stitchMeta,
+    codingMode: codingModeRaw,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -722,7 +724,9 @@ export async function POST(request: NextRequest) {
       projectUrl: string;
       screenshotUrl?: string | null;
     } | null;
+    codingMode?: CodingMode | string;
   };
+  const codingMode = normalizeCodingMode(codingModeRaw);
 
   const ralphConfig: RalphConfig = {
     ...DEFAULT_RALPH_CONFIG,
@@ -1392,7 +1396,7 @@ export async function POST(request: NextRequest) {
       let fatalError = "";
 
       console.log(
-        `[CodingAPI] Session ${sessionId}: starting with ${codingTasks.length} tasks, output: ${outputRoot}`,
+        `[CodingAPI] Session ${sessionId}: starting with ${codingTasks.length} tasks, output: ${outputRoot}, mode=${codingMode}`,
       );
 
       send(
@@ -1447,6 +1451,7 @@ export async function POST(request: NextRequest) {
             tasks: codingTasks,
             outputDir: outputRoot,
             projectContext,
+            codingMode,
             frontendDesignContext,
             prebuiltScaffold,
             scaffoldProtectedPaths,

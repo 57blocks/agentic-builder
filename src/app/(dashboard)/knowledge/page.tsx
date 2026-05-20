@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
@@ -12,7 +13,9 @@ import type {
 import type { DesignIndustry } from "@/lib/memory/knowledge/57b-library";
 import type { StyleSpecIndustry } from "@/lib/memory/knowledge/style-spec/types";
 import { extractStyleSpecHtml } from "@/lib/memory/knowledge/style-spec/compose-body";
+import { resolveStyleSpecPreviewHtml } from "@/lib/memory/knowledge/style-spec/resolve-preview-html";
 import { extractTrendRefreshMarkdown } from "@/lib/memory/knowledge/trend-refresh";
+import { DeleteStyleSpecDialog } from "./DeleteStyleSpecDialog";
 
 // ---------------------------------------------------------------------------
 // Icons
@@ -88,6 +91,18 @@ function EyeIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Industry config
 // ---------------------------------------------------------------------------
@@ -120,7 +135,7 @@ const INDUSTRY_KW: Record<DesignIndustry, string> = {
 // ---------------------------------------------------------------------------
 function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onClose: () => void }) {
   const [tab, setTab] = useState<"html" | "markdown" | "raw">("html");
-  const html = extractStyleSpecHtml(record.body);
+  const html = resolveStyleSpecPreviewHtml(record.body);
 
   return (
     <motion.div
@@ -221,17 +236,64 @@ function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onCl
 // ---------------------------------------------------------------------------
 // Style Spec card — one per analysed image
 // ---------------------------------------------------------------------------
-function StyleSpecCard({ record, onOpen }: { record: KnowledgeRecordFull; onOpen: () => void }) {
+function StyleSpecCard({
+  record,
+  onOpen,
+  onDelete,
+  highlighted,
+  deleting,
+}: {
+  record: KnowledgeRecordFull;
+  onOpen: () => void;
+  onDelete: () => void;
+  highlighted?: boolean;
+  deleting?: boolean;
+}) {
   const isCapture = record.isTrendCapture;
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onOpen();
+    }
+  };
+
   return (
-    <motion.button
+    <motion.div
+      id={`kb-record-${record.id}`}
+      role="button"
+      tabIndex={0}
       whileHover={{ y: -3, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
+      animate={highlighted ? { scale: [1, 1.04, 1] } : {}}
+      transition={highlighted ? { duration: 0.5, repeat: 2 } : {}}
       onClick={onOpen}
+      onKeyDown={handleKeyDown}
       className={`group relative rounded-xl overflow-hidden border bg-white text-left shadow-sm transition-shadow hover:shadow-md ${
-        isCapture ? "border-amber-200" : "border-violet-200"
+        highlighted
+          ? isCapture
+            ? "border-amber-400 ring-2 ring-amber-300 ring-offset-1 shadow-amber-100 shadow-md"
+            : "border-violet-400 ring-2 ring-violet-300 ring-offset-1 shadow-violet-100 shadow-md"
+          : isCapture
+          ? "border-amber-200"
+          : "border-violet-200"
       }`}
     >
+      <button
+        type="button"
+        aria-label={`Delete ${record.imageName ?? record.title}`}
+        disabled={deleting}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/70 bg-slate-950/70 text-white opacity-0 shadow-sm backdrop-blur transition-all hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
+      >
+        {deleting ? (
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+        ) : (
+          <TrashIcon />
+        )}
+      </button>
       <div className="relative w-full bg-slate-100" style={{ aspectRatio: "16/10" }}>
         {record.imagePath ? (
           <Image src={record.imagePath} alt={record.imageName ?? ""} fill className="object-cover object-top" sizes="(max-width:768px) 50vw, 25vw" unoptimized />
@@ -257,7 +319,7 @@ function StyleSpecCard({ record, onOpen }: { record: KnowledgeRecordFull; onOpen
           <div className="text-[11px] text-slate-500 leading-snug mt-0.5 line-clamp-2">{record.title}</div>
         )}
       </div>
-    </motion.button>
+    </motion.div>
   );
 }
 
@@ -333,7 +395,29 @@ export default function KnowledgePage() {
   const [batchAnalysing, setBatchAnalysing] = useState(false);
   const [specModal, setSpecModal] = useState<KnowledgeRecordFull | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeRecordFull | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Read ?highlight=DK-xxx from URL and switch to the matching industry tab
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("highlight");
+    if (!id) return;
+    setHighlightId(id);
+    // Detect industry from the ID prefix and switch tab
+    if (id.startsWith("DK-57b-ai") || id.startsWith("DK-img-ai") || id.startsWith("DK-img-auto-ai")) {
+      setActiveIndustry("ai");
+    } else if (id.startsWith("DK-57b-fintech") || id.startsWith("DK-img-f") || id.startsWith("DK-img-auto-fintech")) {
+      setActiveIndustry("fintech-web3");
+    } else if (id.startsWith("DK-57b-saas") || id.startsWith("DK-img-s") || id.startsWith("DK-img-auto-saas")) {
+      setActiveIndustry("saas");
+    }
+    // Clear highlight after 4 s
+    const t = setTimeout(() => setHighlightId(null), 4000);
+    return () => clearTimeout(t);
+  }, [searchParams]);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -349,6 +433,15 @@ export default function KnowledgePage() {
   }, []);
 
   useEffect(() => { void fetchRecords(); }, [fetchRecords]);
+
+  // Scroll to and highlight the target record after records are loaded
+  useEffect(() => {
+    if (!highlightId || loading) return;
+    const el = document.getElementById(`kb-record-${highlightId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightId, loading, activeIndustry]);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -418,7 +511,7 @@ export default function KnowledgePage() {
       const res = await fetch("/api/memory/knowledge/analyze-existing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: false }),
+        body: JSON.stringify({ force: true }),
       });
       const data = await res.json() as {
         ok: boolean;
@@ -437,6 +530,38 @@ export default function KnowledgePage() {
     } finally {
       setBatchAnalysing(false);
     }
+  }
+
+  async function deleteStyleSpec(record: KnowledgeRecordFull) {
+    const label = record.imageName ?? record.title;
+    setDeletingIds((prev) => new Set(prev).add(record.id));
+    try {
+      const res = await fetch(`/api/memory/knowledge/records/${encodeURIComponent(record.id)}`, {
+        method: "DELETE",
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || data?.ok === false) {
+        showToast(`Delete failed: ${data?.error ?? res.statusText}`, false);
+        return;
+      }
+
+      setRecords((prev) => prev.filter((item) => item.id !== record.id));
+      setSpecModal((prev) => (prev?.id === record.id ? null : prev));
+      setDeleteTarget(null);
+      showToast(`Deleted ${label}`, true);
+    } catch (err) {
+      showToast(`Delete error: ${(err as Error).message}`, false);
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  }
+
+  function handleDeleteStyleSpec(record: KnowledgeRecordFull) {
+    setDeleteTarget(record);
   }
 
   const industryRecords = records.filter((r) => r.industry === activeIndustry);
@@ -469,6 +594,19 @@ export default function KnowledgePage() {
       {/* Style Spec modal */}
       <AnimatePresence>
         {specModal && <StyleSpecModal record={specModal} onClose={() => setSpecModal(null)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {deleteTarget && (
+          <DeleteStyleSpecDialog
+            record={deleteTarget}
+            deleting={deletingIds.has(deleteTarget.id)}
+            onCancel={() => {
+              if (!deletingIds.has(deleteTarget.id)) setDeleteTarget(null);
+            }}
+            onConfirm={() => void deleteStyleSpec(deleteTarget)}
+          />
+        )}
       </AnimatePresence>
 
       {/* Header */}
@@ -587,7 +725,14 @@ export default function KnowledgePage() {
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                     {styleSpecRecords.map((r) => (
-                      <StyleSpecCard key={r.id} record={r} onOpen={() => setSpecModal(r)} />
+                      <StyleSpecCard
+                        key={r.id}
+                        record={r}
+                        onOpen={() => setSpecModal(r)}
+                        onDelete={() => void handleDeleteStyleSpec(r)}
+                        highlighted={highlightId === r.id}
+                        deleting={deletingIds.has(r.id)}
+                      />
                     ))}
                   </div>
                 )}
@@ -600,7 +745,9 @@ export default function KnowledgePage() {
                   <span className="ml-2 text-slate-400 font-normal text-xs">— injected verbatim into DesignAgent prompt</span>
                 </h2>
                 {libraryRecord ? (
-                  <StyleGuideSection record={libraryRecord} />
+                  <div id={`kb-record-${libraryRecord.id}`} className={`transition-all duration-500 rounded-xl ${highlightId === libraryRecord.id ? "ring-2 ring-violet-400 ring-offset-2 shadow-lg shadow-violet-100" : ""}`}>
+                    <StyleGuideSection record={libraryRecord} />
+                  </div>
                 ) : (
                   <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-8 text-center">
                     <p className="text-sm text-slate-500 mb-3">No 57B library record found for this industry.</p>

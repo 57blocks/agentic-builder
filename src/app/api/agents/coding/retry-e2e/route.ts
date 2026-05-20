@@ -25,6 +25,7 @@ import {
   buildFrontendDesignContextForCodegen,
   readPencilDesignDoc,
 } from "@/lib/pipeline/frontend-design-context";
+import { normalizeCodingMode } from "@/lib/pipeline/coding-mode";
 
 export const maxDuration = 600;
 
@@ -76,13 +77,16 @@ export async function POST(request: NextRequest) {
     codeOutputDir,
     projectTier,
     ralph: ralphOverride,
+    codingMode: codingModeRaw,
   } = body as {
     runId?: string;
     tasks?: KickoffWorkItem[];
     codeOutputDir?: string;
     projectTier?: string;
     ralph?: Partial<RalphConfig>;
+    codingMode?: string;
   };
+  const codingMode = normalizeCodingMode(codingModeRaw);
 
   if (!codeOutputDir || !String(codeOutputDir).trim()) {
     return Response.json(
@@ -226,6 +230,7 @@ export async function POST(request: NextRequest) {
             tasks: codingTasks,
             outputDir: outputRoot,
             projectContext,
+            codingMode,
             frontendDesignContext,
             scaffoldProtectedPaths,
             ralphConfig,
