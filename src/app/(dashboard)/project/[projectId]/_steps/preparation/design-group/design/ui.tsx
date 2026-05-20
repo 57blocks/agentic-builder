@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Upload, X, FileImage, Code, Link, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
@@ -17,6 +17,51 @@ import {
   type DesignStyle,
   type StitchGenerateResult,
 } from "./agent";
+interface KbRecord {
+  id: string;
+  body: string;
+  isStyleSpec: boolean;
+  imageName?: string | null;
+  imagePath?: string | null;
+}
+interface KbStyleSpec {
+  summary: string;
+  vibe?: string[];
+  imageName: string;
+  palette: { primary: { hex: string }; accent?: { hex: string }; secondary?: { hex: string }; surface: { hex: string }; background: { hex: string } };
+  typography: { headingFont: string; bodyFont: string; monoFont?: string; baseSizePx: number };
+  spacing: { basePx: number };
+}
+function extractKbStyleSpec(body: string): KbStyleSpec | null {
+  const marker = "<!-- style-spec:json";
+  const openIdx = body.indexOf(marker);
+  if (openIdx < 0) return null;
+  const startIdx = openIdx + marker.length;
+  const closeIdx = body.indexOf("-->", startIdx);
+  if (closeIdx < 0) return null;
+  try { return JSON.parse(body.slice(startIdx, closeIdx).trim()) as KbStyleSpec; } catch { return null; }
+}
+function kbSpecToDesignStyle(spec: KbStyleSpec, recordId: string, imageName?: string | null): DesignStyle {
+  const name = (imageName ?? spec.imageName).replace(/\.\w+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return {
+    id: `kb-${recordId}`,
+    name,
+    description: spec.summary,
+    colors: {
+      primary: spec.palette.primary.hex,
+      secondary: spec.palette.accent?.hex ?? spec.palette.secondary?.hex ?? spec.palette.primary.hex,
+      tertiary: spec.palette.surface.hex,
+      neutral: spec.palette.background.hex,
+    },
+    typography: {
+      headlineFont: spec.typography.headingFont,
+      bodyFont: spec.typography.bodyFont,
+      labelFont: spec.typography.monoFont ?? spec.typography.bodyFont,
+    },
+    fontSizes: { h1: 36, h2: 28, h3: 22, body: spec.typography.baseSizePx, label: 12 },
+    spacing: { xs: spec.spacing.basePx, sm: spec.spacing.basePx * 2, md: spec.spacing.basePx * 4, lg: spec.spacing.basePx * 6, xl: spec.spacing.basePx * 8 },
+  };
+}
 
 // ─── Style Carousel ──────────────────────────────────────────────────────────
 
@@ -130,6 +175,12 @@ function StyleCarousel({
                     ))}
                   </div>
                   <div className="p-2 flex flex-col gap-1 flex-1 min-h-0">
+                    {style.id.startsWith("kb-") && (
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span className="text-[7px] font-bold uppercase tracking-wider text-amber-600">From 57 Knowledge Base</span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-1">
                       <h3 className="text-[11px] font-bold text-slate-900 truncate">
                         {style.name}
@@ -553,6 +604,16 @@ export function DesignUI(props: StepUIProps) {
   const [designStylesLoading, setDesignStylesLoading] = useState(false);
   const [designStylesError, setDesignStylesError] = useState<string | null>(null);
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(() => designMeta.selectedStyleId ?? null);
+  // Knowledge-base style specs — fetched from memory and merged into the carousel
+  const [kbStyles, setKbStyles] = useState<DesignStyle[]>([]);
+  const [kbStylesLoading, setKbStylesLoading] = useState(false);
+  // Combined carousel styles: AI-generated + KB
+  const carouselStyles = useMemo(() => {
+    if (!designStyles) return kbStyles.length > 0 ? kbStyles : null;
+    return [...designStyles, ...kbStyles];
+  }, [designStyles, kbStyles]);
+  // Track which styles came from KB for designDirectionPrompt
+  const kbStyleIds = useMemo(() => new Set(kbStyles.map((s) => s.id)), [kbStyles]);
 
   // Source mode — initialized from persisted metadata
   const [designSourceMode, setDesignSourceMode] = useState<"ai" | "custom">(() => designMeta.designSourceMode ?? "ai");
@@ -582,6 +643,26 @@ export function DesignUI(props: StepUIProps) {
   const [screenshotIdx, setScreenshotIdx] = useState(0);
   const [phaseMenuOpen, setPhaseMenuOpen] = useState(false);
   const phaseMenuRef = useRef<HTMLDivElement>(null);
+
+  // ── Fetch Knowledge Base style specs ────────────────────────────────────
+  useEffect(() => {
+    setKbStylesLoading(true);
+    fetch("/api/memory/knowledge/records", { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ records?: KbRecord[] }>)
+      .then((data) => {
+        const specs = (data.records ?? [])
+          .filter((r) => r.isStyleSpec)
+          .slice(0, 5)
+          .map((r) => {
+            const spec = extractKbStyleSpec(r.body);
+            return spec ? kbSpecToDesignStyle(spec, r.id, r.imageName) : null;
+          })
+          .filter((s): s is DesignStyle => s !== null);
+        setKbStyles(specs);
+      })
+      .catch(() => { /* silent — KB may not be available */ })
+      .finally(() => setKbStylesLoading(false));
+  }, []);
 
   // ── Derived step state ──────────────────────────────────────────────────
   const isDesignRunning = isRunning && currentStep === "design";
@@ -792,10 +873,27 @@ export function DesignUI(props: StepUIProps) {
   const handleGenerateDesignDoc = () => {
     // Set design context before executing the step
     if (designSourceMode === "ai") {
+      const selectedStyle = carouselStyles?.find((s) => s.id === selectedStyleId) ?? null;
+      let designDirectionPrompt: string | null = null;
+      if (selectedStyle) {
+        designDirectionPrompt = [
+          `## Selected visual style: ${selectedStyle.name}`,
+          `${selectedStyle.description}`,
+          `### Colors`,
+          `- Primary: ${selectedStyle.colors.primary}`,
+          `- Secondary: ${selectedStyle.colors.secondary}`,
+          `- Tertiary: ${selectedStyle.colors.tertiary}`,
+          `- Neutral/Background: ${selectedStyle.colors.neutral}`,
+          `### Typography`,
+          `- Headline font: ${selectedStyle.typography.headlineFont}`,
+          `- Body font: ${selectedStyle.typography.bodyFont}`,
+          `- Label font: ${selectedStyle.typography.labelFont}`,
+        ].join("\n");
+      }
       setDesignContext({
-        designStyleId: selectedStyleId,
+        designStyleId: kbStyleIds.has(selectedStyleId ?? "") ? undefined : selectedStyleId,
         styleReferenceImageBase64: null,
-        designDirectionPrompt: null,
+        designDirectionPrompt,
       });
     } else {
       // Custom mode: pass first image as base64 reference.
@@ -1096,19 +1194,19 @@ export function DesignUI(props: StepUIProps) {
               {/* ── Tab: Recommended ── */}
               {designSourceMode === "ai" && (
                 <div className="flex flex-col gap-4">
-                  {designStylesLoading && (
+                  {(designStylesLoading || kbStylesLoading) && (
                     <div className="flex items-center justify-center py-10">
                       <Loading size="md" text="Generating design styles…" />
                     </div>
                   )}
-                  {!designStylesLoading && designStyles && (
+                  {!designStylesLoading && carouselStyles && carouselStyles.length > 0 && (
                     <StyleCarousel
-                      styles={designStyles}
+                      styles={carouselStyles}
                       selectedId={selectedStyleId}
                       onSelect={setSelectedStyleId}
                     />
                   )}
-                  {!designStylesLoading && !designStyles && (
+                  {!designStylesLoading && !kbStylesLoading && !carouselStyles?.length && (
                     <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
                       {designStylesError ? (
                         <>

@@ -174,7 +174,12 @@ export function PrdUI(props: StepUIProps) {
   }, [isHydrated, featureBrief, step?.content]);
 
   const isThisRunning = isRunning && currentStep === "prd";
-  const content = isThisRunning ? streamingContent : (step?.content ?? "");
+  // Keep a stable content ref to bridge the gap between streamingContent cleared
+  // (step_complete SSE) and step.content updated (agent return).
+  const lastContentRef = useRef("");
+  if (streamingContent) lastContentRef.current = streamingContent;
+  if (step?.content) lastContentRef.current = step.content;
+  const content = streamingContent || step?.content || lastContentRef.current;
   const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
   const error = step?.status === "failed" ? step.error : null;
 
