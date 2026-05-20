@@ -1005,7 +1005,7 @@ export function DesignUI(props: StepUIProps) {
       </div>
 
       {/* ── Main Content ── */}
-      <div className="flex-1 overflow-y-auto px-16">
+      <div className="flex-1 overflow-y-auto">
         {/* ══ Phase 1: Style Selection ══ */}
         {phase === "style" && (
           <>
@@ -1358,8 +1358,8 @@ export function DesignUI(props: StepUIProps) {
                   );
                 }
                 return (
-                  <div className="p-6 max-w-4xl mx-auto">
-                    <MarkdownRenderer content={designContent} />
+                  <div className="p-6 w-full">
+                    <MarkdownRenderer content={designContent} className="w-full" />
                   </div>
                 );
               })()
