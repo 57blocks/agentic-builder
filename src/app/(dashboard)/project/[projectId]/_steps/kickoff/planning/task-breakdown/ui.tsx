@@ -233,9 +233,9 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
 
   const prdContent = steps.prd?.content ?? "";
   const trdContent = steps.trd?.content ?? "";
-  const allArtifacts: Array<{ name: string; type: "doc"; lines: number; download: () => void }> = [];
-  if (prdContent) allArtifacts.push({ name: "PRD.md", type: "doc", lines: prdContent.split("\n").length, download: () => handleDownloadMd(prdContent, "PRD.md") });
-  if (trdContent) allArtifacts.push({ name: "TRD.md", type: "doc", lines: trdContent.split("\n").length, download: () => handleDownloadMd(trdContent, "TRD.md") });
+  const allArtifacts: Array<{ name: string; lines: number; download: () => void }> = [];
+  if (prdContent) allArtifacts.push({ name: "PRD.md", lines: prdContent.split("\n").length, download: () => handleDownloadMd(prdContent, "PRD.md") });
+  if (trdContent) allArtifacts.push({ name: "TRD.md", lines: trdContent.split("\n").length, download: () => handleDownloadMd(trdContent, "TRD.md") });
   const artifacts = allArtifacts;
 
   return (
@@ -373,12 +373,12 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
               <div key={a.name} className="flex items-center justify-between p-3 rounded-lg border border-[#f1f5f9] bg-[#f8fafc]">
                 <div>
                   <p className="text-[13px] font-semibold text-[#334155]">{a.name}</p>
-                  <p className="text-[11px] text-[#94a3b8] mt-0.5">{a.lines} {a.type === "pdf" ? "pages" : "lines"}</p>
+                  <p className="text-[11px] text-[#94a3b8] mt-0.5">{a.lines} lines</p>
                 </div>
                 <button
                   onClick={a.download}
                   className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors text-[#94a3b8] hover:text-[#334155]"
-                  title={a.type === "pdf" ? "Open in browser to save as PDF" : "Download Markdown"}
+                  title="Download Markdown"
                 >
                   <Download size={14} />
                 </button>
