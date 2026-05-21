@@ -477,7 +477,7 @@ export function PrdUI(props: StepUIProps) {
               ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
-              : <MarkdownRenderer content={content} variant="prd" />}
+              : <MarkdownRenderer content={content} variant="prd" skipMermaid={isThisRunning} />}
             <div ref={bottomRef} />
             </div>
           </div>
