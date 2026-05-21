@@ -81,7 +81,7 @@ function CascadingMenu({
   const effectiveStageId = hoveredStageId ?? activeStageId;
   const hoveredStage = stages.find((s) => s.id === effectiveStageId);
 
-  const noSnapshot = (id: string) => stepStates[id] == null && id !== "intent" && id !== "initial";
+  const noSnapshot = (id: string) => stepStates[id] == null && id !== "intent" && id !== "initial" && id !== "deploy";
 
   const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";
   const l2Items: GroupItem[] = (hoveredStage?.children ?? [])
@@ -106,7 +106,11 @@ function CascadingMenu({
               .map((s) => {
                 const sid = s.id as StepId;
                 const result = stepStates[sid];
-                const depsMet = areDependenciesMet(sid, completedStepIds);
+                // getFlowNode walks all levels and returns the first match;
+                // "deploy" collides (stage and step share id "deploy"), so
+                // the stage's dependsOn:["preview"] leaks into the step check.
+                // Skip depsMet for deploy since the step itself has no dependsOn.
+                const depsMet = sid === "deploy" || areDependenciesMet(sid, completedStepIds);
                 return {
                   id: s.id,
                   label: STEP_LABELS[sid] ?? s.label,

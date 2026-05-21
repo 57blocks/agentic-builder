@@ -255,7 +255,14 @@ export async function streamChatCompletion(
   messages: ChatMessage[],
   options: Omit<OpenRouterOptions, "stream"> = {},
 ) {
-  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+  // Per-call override beats env-driven routing. Callers that need a specific
+  // model's tool-calling protocol (e.g. the in-IDE code-chat agent that
+  // depends on Claude-style tool_calls deltas) should set this so they
+  // don't get silently rerouted to DeepSeek V4 direct, which produces a
+  // different tool_calls schema and visibly hangs the chat UI.
+  const forceOpenRouter = options.forceOpenRouter || shouldForceOpenRouter();
+
+  if (isDeepSeekV4Provider() && !forceOpenRouter) {
     const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
@@ -273,7 +280,7 @@ export async function streamChatCompletion(
       thinking: options.thinking,
     });
   }
-  if (isGeminiProvider() && !shouldForceOpenRouter()) {
+  if (isGeminiProvider() && !forceOpenRouter) {
     return geminiStreamChatCompletion(messages, options);
   }
   if (options.model === GPT5_MODEL_ID) {

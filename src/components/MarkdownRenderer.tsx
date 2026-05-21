@@ -5,11 +5,51 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 
+// ── Components factory ──
+
 function createMarkdownComponents(variant: "default" | "prd"): Components {
   const isPrd = variant === "prd";
 
+  function codeComponent({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) {
+    const lang = className?.replace("language-", "") ?? "";
+
+    const isBlock = !!className?.includes("language-");
+    if (isBlock) {
+      if (isPrd) {
+        return (
+          <code className="block font-mono text-[13px] leading-relaxed text-[#1f2328]">
+            {children}
+          </code>
+        );
+      }
+      return (
+        <code className="block text-xs leading-relaxed text-emerald-700">
+          {children}
+        </code>
+      );
+    }
+
+    if (isPrd) {
+      return (
+        <code className="rounded-md border border-[#afb8c133] bg-[#f6f8fa] px-[0.4em] py-[0.2em] font-mono text-[0.85em] text-[#1f2328]">
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-emerald-700">
+        {children}
+      </code>
+    );
+  }
+
   if (isPrd) {
-    // GitHub-flavored light theme
     return {
       h1: ({ children }) => (
         <h1 className="mb-4 mt-6 border-b border-[#d0d7de] pb-3 text-[2em] font-semibold leading-tight text-[#1f2328]">
@@ -71,21 +111,7 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
           {children}
         </a>
       ),
-      code: ({ children, className }) => {
-        const isBlock = className?.includes("language-");
-        if (isBlock) {
-          return (
-            <code className="block font-mono text-[13px] leading-relaxed text-[#1f2328]">
-              {children}
-            </code>
-          );
-        }
-        return (
-          <code className="rounded-md border border-[#afb8c133] bg-[#f6f8fa] px-[0.4em] py-[0.2em] font-mono text-[0.85em] text-[#1f2328]">
-            {children}
-          </code>
-        );
-      },
+      code: codeComponent,
       pre: ({ children }) => (
         <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#8c959f] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
           {children}
@@ -175,21 +201,7 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
         {children}
       </a>
     ),
-    code: ({ children, className }) => {
-      const isBlock = className?.includes("language-");
-      if (isBlock) {
-        return (
-          <code className="block text-xs leading-relaxed text-emerald-700">
-            {children}
-          </code>
-        );
-      }
-      return (
-        <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-emerald-700">
-          {children}
-        </code>
-      );
-    },
+    code: codeComponent,
     pre: ({ children }) => (
       <pre className="mb-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
         {children}

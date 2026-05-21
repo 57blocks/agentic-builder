@@ -60,8 +60,13 @@ import {
   isDeepSeekV4Provider,
 } from "@/lib/providers/deepseek-v4";
 import type { OpenRouterOptions, OpenRouterResponse } from "@/lib/llm-types";
-import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
+import { resolveModelChain } from "@/lib/model-config";
 import type { CodingAgentRole, CodingTask } from "@/lib/pipeline/types";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
+import {
+  resolveCodingModelConfigValue,
+  shouldForceOpenRouterForCodingMode,
+} from "@/lib/pipeline/coding-model-selection";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { triagePrebuiltArchitectTasks } from "./architect-triage";
 import {
@@ -206,6 +211,20 @@ import {
 } from "./supervisor/nodes/tdd";
 
 // ─── Nodes ───
+
+function resolveCodingChain(
+  mode: CodingMode,
+  variant: "codeFix" | "phaseVerifyFix" | "e2eGen" | "taskBreakdown",
+  fallback: string,
+): string[] {
+  const configValue = resolveCodingModelConfigValue(mode, variant);
+  const safe = configValue ?? fallback;
+  return resolveModelChain(safe, resolveModel);
+}
+
+function forceOpenRouterForMode(mode: CodingMode): boolean {
+  return shouldForceOpenRouterForCodingMode(mode);
+}
 
 async function classifyTasks(state: SupervisorState) {
   const tasks = stripTestingPhaseTasks(state.tasks);
@@ -1054,10 +1073,7 @@ async function scaffoldFix(state: SupervisorState) {
     }
   }
 
-  const codeFixChain = resolveModelChain(
-    MODEL_CONFIG.codeFix ?? "gpt-4o",
-    resolveModel,
-  );
+  const codeFixChain = resolveCodingChain(state.codingMode, "codeFix", "gpt-4o");
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -1089,6 +1105,7 @@ Rules:
   const response = await chatCompletionWithFallback(messages, codeFixChain, {
     temperature: 0.2,
     max_tokens: 65536,
+    forceOpenRouter: forceOpenRouterForMode(state.codingMode),
   });
 
   const content = response.choices[0]?.message?.content ?? "";
@@ -1826,9 +1843,10 @@ async function e2eVerifyAndFix(
         );
       }
       try {
-        const genModelChain = resolveModelChain(
-          MODEL_CONFIG.e2eGen ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
-          resolveModel,
+        const genModelChain = resolveCodingChain(
+          state.codingMode,
+          "e2eGen",
+          "gpt-4o",
         );
         const genMessages: ChatMessage[] = [
           {
@@ -1893,6 +1911,7 @@ async function e2eVerifyAndFix(
           {
             temperature: 0.1,
             max_tokens: 16000,
+            forceOpenRouter: forceOpenRouterForMode(state.codingMode),
           },
         );
         const genContent = genResponse.choices[0]?.message?.content ?? "";
@@ -2094,10 +2113,7 @@ async function e2eVerifyAndFix(
     });
   }
 
-  const e2eModelChain = resolveModelChain(
-    MODEL_CONFIG.e2eGen ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
-    resolveModel,
-  );
+  const e2eModelChain = resolveCodingChain(state.codingMode, "e2eGen", "gpt-4o");
   const testTaskContext = summarizeE2eTaskContext(state.testTasks);
   const testFiles = (await listFiles("frontend", state.outputDir))
     .filter((f) => /\.(spec|test)\.(ts|tsx|js|jsx)$/.test(f))
@@ -2311,6 +2327,7 @@ async function e2eVerifyAndFix(
     const response = await chatCompletionWithFallback(messages, e2eModelChain, {
       temperature: 0.1,
       max_tokens: 12000,
+      forceOpenRouter: forceOpenRouterForMode(state.codingMode),
     });
     const content = response.choices[0]?.message?.content ?? "";
     recordSupervisorLlmUsage({
@@ -2504,9 +2521,10 @@ async function generateApiContracts(state: SupervisorState) {
     .join("\n");
   contextParts.push(`## Backend tasks to implement\n${taskList}`);
 
-  const contractModelChain = resolveModelChain(
-    MODEL_CONFIG.taskBreakdown ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
-    resolveModel,
+  const contractModelChain = resolveCodingChain(
+    state.codingMode,
+    "taskBreakdown",
+    "gpt-4o",
   );
   const messages: ChatMessage[] = [
     { role: "system", content: API_CONTRACT_SYSTEM_PROMPT },
@@ -2528,6 +2546,7 @@ async function generateApiContracts(state: SupervisorState) {
       {
         temperature: 0.1,
         max_tokens: 65536,
+        forceOpenRouter: forceOpenRouterForMode(state.codingMode),
       },
     );
 
@@ -3007,10 +3026,7 @@ async function bootstrapSharedContracts(
     .map((f) => `- ${f.path} (${f.summary})`)
     .join("\n");
 
-  const chain = resolveModelChain(
-    MODEL_CONFIG.codeFix ?? "gpt-4o",
-    resolveModel,
-  );
+  const chain = resolveCodingChain(state.codingMode, "codeFix", "gpt-4o");
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -3049,6 +3065,7 @@ Critical rules:
     const response = await chatCompletionWithFallback(messages, chain, {
       temperature: 0.1,
       max_tokens: 65536,
+      forceOpenRouter: forceOpenRouterForMode(state.codingMode),
     });
     const content = response.choices[0]?.message?.content ?? "";
     const costUsd = estimateCost(response.model, response.usage);
@@ -3159,6 +3176,7 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
         tasks,
         outputDir: state.outputDir,
         projectContext: state.projectContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -3178,6 +3196,7 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
         tasks: state.testTasks,
         outputDir: state.outputDir,
         projectContext: state.projectContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -3197,6 +3216,7 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
         tasks: [],
         outputDir: state.outputDir,
         projectContext: "",
+        codingMode: state.codingMode,
         fileRegistrySnapshot: [],
         apiContractsSnapshot: [],
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -3224,6 +3244,7 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
         tasks: [],
         outputDir: state.outputDir,
         projectContext: "",
+        codingMode: state.codingMode,
         fileRegistrySnapshot: [],
         apiContractsSnapshot: [],
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -3333,6 +3354,7 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
         tasks,
         outputDir: state.outputDir,
         projectContext: feContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: feContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -3562,9 +3584,10 @@ async function extractRealContracts(
 
   if (fileParts.length === 0) return {};
 
-  const extractModelChain = resolveModelChain(
-    MODEL_CONFIG.codeFix ?? "gpt-4o",
-    resolveModel,
+  const extractModelChain = resolveCodingChain(
+    state.codingMode,
+    "codeFix",
+    "gpt-4o",
   );
 
   const messages: ChatMessage[] = [
@@ -3607,6 +3630,7 @@ Rules:
       {
         temperature: 0.1,
         max_tokens: 4096,
+        forceOpenRouter: forceOpenRouterForMode(state.codingMode),
       },
     );
     const raw = (response.choices[0]?.message?.content ?? "").trim();
@@ -4401,9 +4425,10 @@ async function phaseVerifyAndFix(
     },
   ];
 
-  const modelChain = resolveModelChain(
-    MODEL_CONFIG.phaseVerifyFix ?? MODEL_CONFIG.codeFix ?? "claude-sonnet",
-    resolveModel,
+  const modelChain = resolveCodingChain(
+    state.codingMode,
+    "phaseVerifyFix",
+    "claude-sonnet",
   );
 
   let iterations = 0;
@@ -4455,6 +4480,7 @@ async function phaseVerifyAndFix(
         max_tokens: 36000,
         tools: SUPERVISOR_VERIFY_TOOLS,
         tool_choice: "auto",
+        forceOpenRouter: forceOpenRouterForMode(state.codingMode),
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -4600,6 +4626,7 @@ function dispatchParallelWorkers(state: SupervisorState): Send[] {
         tasks,
         outputDir: state.outputDir,
         projectContext: state.projectContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -4621,6 +4648,7 @@ function dispatchParallelWorkers(state: SupervisorState): Send[] {
         tasks,
         outputDir: state.outputDir,
         projectContext: feContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -4637,6 +4665,7 @@ function dispatchParallelWorkers(state: SupervisorState): Send[] {
         tasks: state.testTasks,
         outputDir: state.outputDir,
         projectContext: state.projectContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: state.fileRegistry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -4653,6 +4682,7 @@ function dispatchParallelWorkers(state: SupervisorState): Send[] {
         tasks: [],
         outputDir: state.outputDir,
         projectContext: "",
+        codingMode: state.codingMode,
         fileRegistrySnapshot: [],
         apiContractsSnapshot: [],
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -6047,9 +6077,10 @@ async function integrationVerifyAndFix(
     { role: "user", content: openingUserContent },
   ];
 
-  const modelChain = resolveModelChain(
-    MODEL_CONFIG.phaseVerifyFix ?? MODEL_CONFIG.codeFix ?? "claude-sonnet",
-    resolveModel,
+  const modelChain = resolveCodingChain(
+    state.codingMode,
+    "phaseVerifyFix",
+    "claude-sonnet",
   );
 
   let iterations = 0;
@@ -6467,6 +6498,7 @@ async function integrationVerifyAndFix(
         tools: SUPERVISOR_VERIFY_TOOLS,
         tool_choice: "auto",
         ...integrationReasoningOptions,
+        forceOpenRouter: forceOpenRouterForMode(state.codingMode),
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -7000,13 +7032,17 @@ async function integrationVerifyAndFix(
             iterationsConsumed: iterations - lastMeaningfulProgressIteration,
             chat: async (msgs) => {
               const replanChain = resolveModelChain(
-                MODEL_CONFIG.taskBreakdown ?? MODEL_CONFIG.codeFix ?? "gpt-4o",
+                resolveCodingModelConfigValue(state.codingMode, "taskBreakdown"),
                 resolveModel,
               );
               const resp = await chatCompletionWithFallback(
                 msgs as ChatMessage[],
                 replanChain,
-                { temperature: 0.1, max_tokens: 2048 },
+                {
+                  temperature: 0.1,
+                  max_tokens: 2048,
+                  forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+                },
               );
               return resp.choices[0]?.message?.content ?? "";
             },

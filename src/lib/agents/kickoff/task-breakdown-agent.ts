@@ -291,7 +291,7 @@ Each element has this shape:
     "inputTokens": 2000,
     "outputTokens": 3500,
     "totalTokens": 5500,
-    "estimatedCostUsd": 0.02
+    "estimatedCostUsd": 0.08
   },
   "acceptanceCriteria": [
     "npm install runs without errors",
@@ -323,12 +323,12 @@ Field rules:
 - **title**: short imperative sentence (< 80 chars)
 - **description**: 1-3 sentences explaining what to build, which files to touch, and
   any relevant FR-xxx / US-xx references from the PRD.
-- **estimatedHours**: number (0.5–6, one decimal allowed), **AI agent execution hours** ONLY (not human engineer time). AI works 5-10x faster than a human. Use these reference ranges:
-  - Simple single-file task (one component, one route): **0.5–1h**
-  - Moderate multi-file feature (page + service + types): **1–2h**
-  - Complex multi-file task (full CRUD module, several pages): **2–4h**
-  - Exceptionally broad task (rare): **4–6h**
-  Values over 6 are almost always wrong and should be split. This field is the AI coding time only.
+- **estimatedHours**: number (0.1–2, one decimal allowed), **AI agent execution hours** ONLY (not human engineer time). AI works very fast — these ranges reflect real execution time, not human-paced estimates. Use these reference ranges:
+  - Simple single-file task (one component, one route): **0.1–0.3h**
+  - Moderate multi-file feature (page + service + types): **0.3–0.5h**
+  - Complex multi-file task (full CRUD module, several pages): **0.5–1h**
+  - Exceptionally broad task (rare): **1–2h**
+  Values over 2 are almost always wrong and should be split. This field is the AI coding time only.
 - **humanReviewHours**: number, hours a **human developer** would take to write this same task from scratch. **REQUIRED for ALL tasks.** Human time is typically **5-10x AI time**, since humans read docs, debug, test, and iterate. Use these reference ranges:
   - Simple single-file task: **2–4h** for a human
   - Moderate multi-file feature: **4–8h** for a human
@@ -361,7 +361,7 @@ Field rules:
   - "inputTokens": tokens needed for context (project docs + task description + existing code), typically 1500-4000
   - "outputTokens": tokens the AI will generate (code output), estimate based on file count and complexity: config files ~500, components ~1500, services ~2000, complex pages ~3000
   - "totalTokens": inputTokens + outputTokens
-  - "estimatedCostUsd": totalTokens / 1000000 * 0 (Gemini is free) — set to 0 for now
+  - "estimatedCostUsd": (totalTokens / 1000000) * 15 — based on ~$15 per 1M tokens, which is the typical LLM API pricing. This represents the actual compute cost.
 - **acceptanceCriteria**: 2-4 concrete, testable conditions that verify the task is done correctly.
   - For **Frontend page tasks**: MUST include at least one criterion like "Page fetches [resource] from \`GET /api/[path]\` via the API client — no mock/hardcoded data". If the page has mutations, also include "Form submits to \`POST /api/[path]\` and reflects the server response".
 - **coversRequirementIds**: string array of PRD IDs this task fully or materially implements.
