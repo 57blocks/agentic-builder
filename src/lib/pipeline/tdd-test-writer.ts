@@ -142,10 +142,55 @@ async function existingTestFiles(
   return present;
 }
 
+function lacksRequirementCitation(
+  content: string,
+  requirementIds: string[] | undefined,
+): boolean {
+  const ids = requirementIds ?? [];
+  if (ids.length === 0) return false;
+  return !ids.some((id) => content.includes(id));
+}
+
+function lacksUnmockedDbGuard(file: string, content: string): boolean {
+  if (!file.startsWith("backend/")) return false;
+  const importsRealDb = /from\s+["'][^"']*\/db["']/.test(content);
+  if (!importsRealDb) return false;
+  // Allow if the test mocks the db module or uses an in-memory sqlite.
+  if (/vi\.mock\s*\(\s*["'][^"']*\/db["']/.test(content)) return false;
+  if (/sqlite::memory:/.test(content)) return false;
+  return true;
+}
+
+function lacksRealHttpMock(file: string, content: string): boolean {
+  if (!/services\/externalApis\//.test(file) && !/externalApis/.test(content))
+    return false;
+  if (/vi\.fn\s*\(|vi\.mock\s*\(|msw|nock|undici[^"']*MockAgent/.test(content))
+    return false;
+  if (/globalThis\.fetch\s*=\s*/.test(content)) return false;
+  return /\bfetch\s*\(|axios|got\(|undici/.test(content);
+}
+
+function lacksFrontendEnvStub(type: string, content: string): boolean {
+  if (type !== "frontend-service") return false;
+  const hasLiteralPathAssertion = /toHaveBeenCalledWith\s*\(\s*["']\/api\//.test(
+    content,
+  );
+  if (!hasLiteralPathAssertion) return false;
+  if (
+    /vi\.stubEnv\s*\(\s*["']VITE_API_BASE_URL["']/.test(content) ||
+    /expect\.(stringContaining|stringMatching)/.test(content)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 async function executeTool(input: {
   outputDir: string;
   allowedFiles: Set<string>;
   writtenFiles: Set<string>;
+  requirementIdsByFile: Map<string, string[]>;
+  typeByFile: Map<string, string>;
   name: string;
   args: Record<string, unknown>;
 }): Promise<string> {
@@ -165,6 +210,20 @@ async function executeTool(input: {
     const content = String(input.args.content ?? "");
     if (!/\b(expect|assert|should|toEqual|toBe)\b/.test(content)) {
       return "REJECTED: TDD test content must contain an assertion.";
+    }
+    const ids = input.requirementIdsByFile.get(file);
+    if (lacksRequirementCitation(content, ids)) {
+      return `REJECTED: ${file} must cite at least one coversRequirementIds value (one of: ${(ids ?? []).join(", ")}). Add a comment like \`/** coversRequirementIds: ${(ids ?? [])[0] ?? "FR-XXX"} */\` near the top of the file.`;
+    }
+    const type = input.typeByFile.get(file) ?? "";
+    if (lacksUnmockedDbGuard(file, content)) {
+      return `REJECTED: ${file} imports from "../db" without mocking it. Backend tests MUST \`vi.mock("../db")\` (or its relative equivalent) and substitute an in-memory SQLite Sequelize. See backend/src/models/index.test.ts for the canonical pattern.`;
+    }
+    if (lacksRealHttpMock(file, content)) {
+      return `REJECTED: ${file} calls fetch/axios without a network mock. External API client tests MUST mock \`globalThis.fetch\` (or use msw/nock). Live network access is not permitted.`;
+    }
+    if (lacksFrontendEnvStub(type, content)) {
+      return `REJECTED: ${file} asserts a literal "/api/..." URL but does not stub VITE_API_BASE_URL. Either \`vi.stubEnv("VITE_API_BASE_URL", "")\` in beforeAll, or use \`expect.stringContaining("/api/...")\`.`;
     }
     await fsWrite(file, content, input.outputDir);
     input.writtenFiles.add(file);
@@ -192,6 +251,16 @@ export async function runTddTestWriter(input: {
   }
 
   const allowedFiles = new Set(tests.map((test) => test.file));
+  const requirementIdsByFile = new Map<string, string[]>();
+  const typeByFile = new Map<string, string>();
+  for (const test of tests) {
+    const merged = requirementIdsByFile.get(test.file) ?? [];
+    for (const id of test.requirementIds ?? []) {
+      if (!merged.includes(id)) merged.push(id);
+    }
+    requirementIdsByFile.set(test.file, merged);
+    if (!typeByFile.has(test.file)) typeByFile.set(test.file, test.type);
+  }
   const present = await existingTestFiles(input.outputDir, [...allowedFiles]);
   const missingTests = tests.filter((test) => !present.has(test.file));
   if (missingTests.length === 0) {
@@ -211,7 +280,11 @@ export async function runTddTestWriter(input: {
         "You are a Test Writer in a RED/GREEN TDD pipeline.",
         "Write only test files listed in the manifest. Do not write production code.",
         "Tests must be real, assertion-bearing, executable by the declared command, and initially fail before implementation.",
-        "Each test file must cite at least one coversRequirementIds value in a short comment.",
+        // HARD requirements — `write_file` will REJECT content that violates these.
+        "HARD REQUIREMENT — every test file MUST cite at least one of its `coversRequirementIds` (e.g. FR-AU01, AC-09) verbatim as a string inside the file. Put it in a top-of-file JSDoc comment such as `/** coversRequirementIds: FR-AU01, AC-09 */`. Without this the file is rejected.",
+        "HARD REQUIREMENT — backend tests that import from `../db` MUST `vi.mock(\"<relative>/db\")` and substitute an in-memory SQLite Sequelize. Canonical example: `backend/src/models/index.test.ts`. Without this the file is rejected (real Postgres is not available in the test runner).",
+        "HARD REQUIREMENT — external-API client tests (paths under `services/externalApis/`) MUST mock `globalThis.fetch` (or use msw / nock). Live network access is not permitted; assume rate-limit / offline. Without a mock the file is rejected.",
+        "HARD REQUIREMENT — frontend `frontend-service` tests that assert on a literal `/api/...` URL MUST either `vi.stubEnv(\"VITE_API_BASE_URL\", \"\")` before the assertion, or use `expect.stringContaining(\"/api/...\")`. Otherwise the assertion drifts when the env injects a base URL.",
         "Each test must import or reference the declared target route/service/API client/task-owned file, or assert against the declared endpoint string.",
         "Do not use skipped tests, todo tests, placeholder assertions, or mock-only tests.",
         "Prefer the test framework already present in the generated project.",
@@ -295,6 +368,8 @@ export async function runTddTestWriter(input: {
         outputDir: input.outputDir,
         allowedFiles,
         writtenFiles,
+        requirementIdsByFile,
+        typeByFile,
         name: call.function.name,
         args,
       });

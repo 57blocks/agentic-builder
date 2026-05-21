@@ -123,6 +123,7 @@ async function runOneTest(
   outputDir: string,
   phase: TddPhase,
   test: TddManifestTest,
+  sessionId?: string,
 ): Promise<TddEvidenceEvent> {
   const command = test.command?.trim();
   if (!command) {
@@ -133,6 +134,7 @@ async function runOneTest(
       status: "skipped",
       failureExcerpt: "No command declared in TDD manifest.",
       timestamp: new Date().toISOString(),
+      sessionId,
     };
   }
   if (isUnsafeCommand(command)) {
@@ -144,6 +146,7 @@ async function runOneTest(
       status: "skipped",
       failureExcerpt: "TDD command rejected as unsafe.",
       timestamp: new Date().toISOString(),
+      sessionId,
     };
   }
 
@@ -168,6 +171,7 @@ async function runOneTest(
         ? output.slice(-MAX_OUTPUT_CHARS)
         : "RED test passed before implementation, so it is not a valid failing test.",
       timestamp: new Date().toISOString(),
+      sessionId,
     };
   } catch (err) {
     const e = err as {
@@ -197,6 +201,7 @@ async function runOneTest(
       expectedFailureReason: phase === "red" ? expectedRedMatch.reason : undefined,
       failureExcerpt: output.slice(-MAX_OUTPUT_CHARS),
       timestamp: new Date().toISOString(),
+      sessionId,
     };
   }
 }
@@ -205,6 +210,7 @@ export async function runTddRuntimePhase(input: {
   outputDir: string;
   phase: TddPhase;
   emitter?: RepairEmitter;
+  sessionId?: string;
 }): Promise<TddRuntimeExecutorResult> {
   const manifest = await readTddManifest(input.outputDir);
   if (!manifest || manifest.tests.length === 0) {
@@ -234,7 +240,12 @@ export async function runTddRuntimePhase(input: {
   const p0Failures: string[] = [];
 
   for (const test of manifest.tests) {
-    const event = await runOneTest(input.outputDir, input.phase, test);
+    const event = await runOneTest(
+      input.outputDir,
+      input.phase,
+      test,
+      input.sessionId,
+    );
     await appendEvidence(input.outputDir, event);
 
     if (event.status === "pass") passed += 1;

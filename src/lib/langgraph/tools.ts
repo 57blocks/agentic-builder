@@ -78,6 +78,39 @@ function isSafeCommand(cmd: string): boolean {
   );
 }
 
+type RelativizeResult =
+  | { kind: "relative"; path: string }
+  | { kind: "inside-absolute"; path: string }
+  | { kind: "outside-absolute" };
+
+/**
+ * Lets workers paste absolute paths they discovered via `find` / `ls -la`
+ * without downstream fs tools spuriously rejecting them as
+ * FILE_NOT_FOUND. Absolute paths inside `outputDir` are converted to
+ * relative ones; absolute paths *outside* `outputDir` are explicitly
+ * flagged so callers can refuse them (the legacy code silently relocated
+ * them under outputDir via path.join's POSIX absolute-arg behaviour,
+ * which was both surprising and a soft sandbox escape).
+ */
+function relativizeAbsolute(
+  inputPath: string,
+  outputDir: string,
+): RelativizeResult {
+  if (!path.isAbsolute(inputPath)) {
+    return { kind: "relative", path: inputPath };
+  }
+  const resolvedRoot = path.resolve(outputDir);
+  const resolvedAbs = path.resolve(inputPath);
+  if (
+    resolvedAbs === resolvedRoot ||
+    resolvedAbs.startsWith(resolvedRoot + path.sep)
+  ) {
+    const rel = path.relative(resolvedRoot, resolvedAbs);
+    return { kind: "inside-absolute", path: rel === "" ? "." : rel };
+  }
+  return { kind: "outside-absolute" };
+}
+
 export type FsWriteOptions = {
   /** Relative paths from tier scaffold; existing files merge or skip instead of overwrite. */
   scaffoldProtectedPaths?: Iterable<string>;
@@ -91,11 +124,17 @@ export async function fsWrite(
   outputDir: string,
   options?: FsWriteOptions,
 ): Promise<string> {
-  const normalized = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const relativized = relativizeAbsolute(filePath, outputDir);
+  if (relativized.kind === "outside-absolute") {
+    return `REJECTED: path "${filePath}" is outside the project root. Use a path relative to the project root.`;
+  }
+  const normalized = path
+    .normalize(relativized.path)
+    .replace(/^(\.\.(\/|\\|$))+/, "");
   const abs = path.resolve(path.join(outputDir, normalized));
   const resolvedRoot = path.resolve(outputDir);
   if (!abs.startsWith(resolvedRoot + path.sep) && abs !== resolvedRoot) {
-    return `REJECTED: path traversal detected for "${filePath}"`;
+    return `REJECTED: path "${filePath}" is outside the project root. Use a path relative to the project root.`;
   }
 
   const key = normalizeScaffoldRelPath(normalized);
@@ -144,11 +183,17 @@ export async function fsRead(
   filePath: string,
   outputDir: string,
 ): Promise<string> {
-  const normalized = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const relativized = relativizeAbsolute(filePath, outputDir);
+  if (relativized.kind === "outside-absolute") {
+    return `REJECTED: path "${filePath}" is outside the project root. Use a path relative to the project root.`;
+  }
+  const normalized = path
+    .normalize(relativized.path)
+    .replace(/^(\.\.(\/|\\|$))+/, "");
   const abs = path.resolve(path.join(outputDir, normalized));
   const resolvedRoot = path.resolve(outputDir);
   if (!abs.startsWith(resolvedRoot + path.sep) && abs !== resolvedRoot) {
-    return `REJECTED: path traversal detected for "${filePath}"`;
+    return `REJECTED: path "${filePath}" is outside the project root. Use a path relative to the project root.`;
   }
   try {
     return await fs.readFile(abs, "utf-8");
@@ -253,7 +298,9 @@ export async function listFiles(
   directory: string,
   outputDir: string,
 ): Promise<string[]> {
-  const abs = path.resolve(path.join(outputDir, directory));
+  const relativized = relativizeAbsolute(directory, outputDir);
+  if (relativized.kind === "outside-absolute") return [];
+  const abs = path.resolve(path.join(outputDir, relativized.path));
   const resolvedRoot = path.resolve(outputDir);
   if (!abs.startsWith(resolvedRoot) && abs !== resolvedRoot) {
     return [];
