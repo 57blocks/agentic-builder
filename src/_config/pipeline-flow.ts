@@ -44,10 +44,7 @@ export type GroupId =
   | "setup"
   | "planning"
   | "summary"
-  | "agents"
-  | "server"
-  | "testing"
-  | "deployment";
+  | "agents";
 
 export type StageId = "preparation" | "kickoff" | "coding" | "preview" | "deploy";
 
@@ -257,31 +254,17 @@ export const PIPELINE_FLOW: FlowNode[] = [
     dependsOn: ["coding"],
     children: [
       {
-        id: "server",
-        label: "Server",
+        id: "serve",
+        label: "Dev Server",
         level: 2,
-        children: [
-          {
-            id: "serve",
-            label: "Dev Server",
-            level: 3,
-            stepConfig: { uiKind: "custom" },
-          },
-        ],
+        stepConfig: { uiKind: "custom" },
       },
       {
-        id: "testing",
-        label: "Testing",
+        id: "e2e",
+        label: "E2E",
         level: 2,
-        dependsOn: ["server"],
-        children: [
-          {
-            id: "e2e",
-            label: "E2E",
-            level: 3,
-            stepConfig: { uiKind: "custom" },
-          },
-        ],
+        dependsOn: ["serve"],
+        stepConfig: { uiKind: "custom" },
       },
     ],
   },
@@ -296,17 +279,10 @@ export const PIPELINE_FLOW: FlowNode[] = [
     dependsOn: ["preview"],
     children: [
       {
-        id: "deployment",
-        label: "Deployment",
+        id: "deploy",
+        label: "Deploy",
         level: 2,
-        children: [
-          {
-            id: "deploy",
-            label: "Deploy",
-            level: 3,
-            stepConfig: { uiKind: "custom" },
-          },
-        ],
+        stepConfig: { uiKind: "custom" },
       },
     ],
   },
@@ -508,9 +484,6 @@ export const GROUP_LABELS: Record<GroupId, string> = {
   planning: "Planning",
   summary: "Overview",
   agents: "Agents",
-  server: "Server",
-  testing: "Testing",
-  deployment: "Deployment",
 };
 
 export const STAGE_LABELS: Record<StageId, { num: string; name: string }> = {
