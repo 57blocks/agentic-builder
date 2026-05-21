@@ -168,12 +168,15 @@ function buildFlowGraph(
 
 function calcProgress(tasks: CodingTask[]): number {
   if (tasks.length === 0) return 0;
-  const done = tasks.filter(
-    (t) =>
-      t.codingStatus === "completed" ||
-      t.codingStatus === "completed_with_warnings",
-  ).length;
-  return Math.round((done / tasks.length) * 100);
+  let score = 0;
+  for (const t of tasks) {
+    if (t.codingStatus === "completed" || t.codingStatus === "completed_with_warnings") {
+      score += 1;
+    } else if (t.codingStatus === "in_progress") {
+      score += 0.5;
+    }
+  }
+  return Math.round((score / tasks.length) * 100);
 }
 
 function useMergedTasks(
@@ -217,7 +220,14 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isIdle = codingState.status === "idle";
+  const [isRerunning, setIsRerunning] = useState(false);
+
+  // Clear rerunning state once the new session actually starts
+  useEffect(() => {
+    if (codingState.status === "running") setIsRerunning(false);
+  }, [codingState.status]);
+
+  const isIdle = codingState.status === "idle" && !isRerunning;
   const isRunning = codingState.status === "running";
   const isDone = codingState.status === "completed";
   const isFailed = codingState.status === "failed";
@@ -294,6 +304,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // ── Retry a single task ────────────────────────────────────────────────────
   const handleRetryTask = useCallback(
     (taskId: string) => {
+      if (kickoffTasks.length === 0) return;
       retryFailedTasks(runId, kickoffTasks, [taskId], codeOutputDir, projectTier, prdContent);
     },
     [retryFailedTasks, runId, kickoffTasks, codeOutputDir, projectTier, prdContent],
@@ -301,7 +312,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   // ── Retry all failed tasks ─────────────────────────────────────────────────
   const handleRetryAllFailed = useCallback(() => {
-    if (failedTaskIds.length === 0) return;
+    if (failedTaskIds.length === 0 || kickoffTasks.length === 0) return;
     retryFailedTasks(runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent);
   }, [retryFailedTasks, runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent]);
 
@@ -329,6 +340,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         `Already-saved kickoff artifacts (PRD / TRD / task breakdown / env / auth decision) are NOT touched.`,
     );
     if (!ok) return;
+    setIsRerunning(true);
     rerunCoding(
       runId,
       kickoffTasks,
@@ -369,8 +381,19 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     setEdges(e);
   }, [mergedTasks, selectedTaskId, setNodes, setEdges]);
 
-  // ── Timer ──────────────────────────────────────────────────────────────────
-  const { formatted: elapsed } = useElapsedTimer(isRunning);
+  // ── Timer (seed from earliest startedAt on return visits) ──────────────────
+  const initialElapsed = useMemo(() => {
+    if (!isReturnVisit) return 0;
+    const startedAt = codingState.tasks
+      .map((t) => t.startedAt)
+      .filter(Boolean)
+      .sort()
+      .at(0);
+    return startedAt
+      ? Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+      : 0;
+  }, []); // Run once on mount — depends on isReturnVisit which is stable
+  const { formatted: elapsed } = useElapsedTimer(isRunning, initialElapsed);
 
   // ── Progress ───────────────────────────────────────────────────────────────
   const progress = calcProgress(codingState.tasks);

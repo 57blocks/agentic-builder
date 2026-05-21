@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, StopCircle } from "lucide-react";
+import { StopCircle } from "lucide-react";
 import { motion } from "motion/react";
 
 interface StatusBarProps {
@@ -8,7 +8,6 @@ interface StatusBarProps {
   isCompleted: boolean;
   isFailed: boolean;
   isReturnVisit?: boolean;
-  onPause?: () => void;
   onAbort?: () => void;
 }
 
@@ -17,7 +16,6 @@ export function StatusBar({
   isCompleted,
   isFailed,
   isReturnVisit,
-  onPause,
   onAbort,
 }: StatusBarProps) {
   const systemStatus = isFailed
@@ -71,15 +69,6 @@ export function StatusBar({
       {/* Actions */}
       {isRunning && (
         <div className="flex items-center gap-2">
-          {onPause && (
-            <button
-              onClick={onPause}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
-            >
-              <Pause size={12} />
-              Pause Build
-            </button>
-          )}
           {onAbort && (
             <button
               onClick={onAbort}
