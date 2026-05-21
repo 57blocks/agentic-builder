@@ -31,6 +31,7 @@ import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
 import type { CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
 
 import { TaskNode, type TaskNodeData } from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
@@ -208,6 +209,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Track whether this mount is a "return visit" (component unmounted and remounted)
   // so we can show a "session still in progress" banner instead of a blank start state.
   const [isReturnVisit, setIsReturnVisit] = useState(false);
+  const [codingMode, setCodingMode] = useState<CodingMode>("normal");
   useEffect(() => {
     // On first mount: if there's already an active/completed session in the store,
     // this is a return visit (user navigated away and came back).
@@ -294,16 +296,49 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // ── Retry a single task ────────────────────────────────────────────────────
   const handleRetryTask = useCallback(
     (taskId: string) => {
-      retryFailedTasks(runId, kickoffTasks, [taskId], codeOutputDir, projectTier, prdContent);
+      retryFailedTasks(
+        runId,
+        kickoffTasks,
+        [taskId],
+        codeOutputDir,
+        projectTier,
+        codingMode,
+        prdContent,
+      );
     },
-    [retryFailedTasks, runId, kickoffTasks, codeOutputDir, projectTier, prdContent],
+    [
+      retryFailedTasks,
+      runId,
+      kickoffTasks,
+      codeOutputDir,
+      projectTier,
+      codingMode,
+      prdContent,
+    ],
   );
 
   // ── Retry all failed tasks ─────────────────────────────────────────────────
   const handleRetryAllFailed = useCallback(() => {
     if (failedTaskIds.length === 0) return;
-    retryFailedTasks(runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent);
-  }, [retryFailedTasks, runId, kickoffTasks, failedTaskIds, codeOutputDir, projectTier, prdContent]);
+    retryFailedTasks(
+      runId,
+      kickoffTasks,
+      failedTaskIds,
+      codeOutputDir,
+      projectTier,
+      codingMode,
+      prdContent,
+    );
+  }, [
+    retryFailedTasks,
+    runId,
+    kickoffTasks,
+    failedTaskIds,
+    codeOutputDir,
+    projectTier,
+    codingMode,
+    prdContent,
+  ]);
 
   // ── Rerun the entire coding session from scratch ──────────────────────────
   // Used when the user wants to discard the current results (regardless of
@@ -334,6 +369,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       kickoffTasks,
       codeOutputDir,
       projectTier,
+      codingMode,
       prdContent,
       stitchMeta ?? undefined,
     );
@@ -344,6 +380,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     runId,
     codeOutputDir,
     projectTier,
+    codingMode,
     prdContent,
     stitchMeta,
   ]);
@@ -415,8 +452,26 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   const handleStart = useCallback(() => {
     if (!isIdle || kickoffTasks.length === 0) return;
-    startCoding(runId, kickoffTasks, codeOutputDir, projectTier, prdContent, stitchMeta ?? undefined);
-  }, [isIdle, kickoffTasks, runId, codeOutputDir, projectTier, prdContent, stitchMeta, startCoding]);
+    startCoding(
+      runId,
+      kickoffTasks,
+      codeOutputDir,
+      projectTier,
+      codingMode,
+      prdContent,
+      stitchMeta ?? undefined,
+    );
+  }, [
+    isIdle,
+    kickoffTasks,
+    runId,
+    codeOutputDir,
+    projectTier,
+    codingMode,
+    prdContent,
+    stitchMeta,
+    startCoding,
+  ]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (isIdle && kickoffTasks.length === 0) {
@@ -498,13 +553,25 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
         {/* CTA buttons */}
         {isIdle && kickoffTasks.length > 0 && (
-          <button
-            onClick={handleStart}
-            className="flex items-center gap-2 px-5 py-2 bg-[#712ae2] hover:bg-[#5f24c2] text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
-          >
-            <Play size={13} />
-            Start Coding
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={codingMode}
+              onChange={(e) => setCodingMode(e.target.value as CodingMode)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 outline-none focus:border-violet-300"
+              title="Coding mode"
+            >
+              <option value="fast">Fast mode</option>
+              <option value="normal">Normal mode</option>
+              <option value="cost">Cost-saving mode</option>
+            </select>
+            <button
+              onClick={handleStart}
+              className="flex items-center gap-2 px-5 py-2 bg-[#712ae2] hover:bg-[#5f24c2] text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+            >
+              <Play size={13} />
+              Start Coding
+            </button>
+          </div>
         )}
 
         {/* Running: live indicator */}

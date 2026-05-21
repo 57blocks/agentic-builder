@@ -15,7 +15,12 @@ import type {
   OpenRouterToolCall,
   OpenRouterOptions,
 } from "@/lib/llm-types";
-import { MODEL_CONFIG, resolveModelChain } from "@/lib/model-config";
+import { resolveModelChain } from "@/lib/model-config";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
+import {
+  resolveCodingModelConfigValue,
+  shouldForceOpenRouterForCodingMode,
+} from "@/lib/pipeline/coding-model-selection";
 import {
   isDeepSeekV4Provider,
   chatCompletionsDeepSeekV4,
@@ -56,7 +61,7 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 
 function shouldForceOpenRouter(variant?: CodegenOpenRouterVariant): boolean {
   const codegenProvider = process.env.CODEGEN_PROVIDER?.trim().toLowerCase();
-  if (variant === "codeGen" && codegenProvider === "deepseek") {
+  if ((variant === "codeGen" || variant === "codeGenFrontend") && codegenProvider === "deepseek") {
     return false;
   }
 
@@ -258,7 +263,7 @@ async function chatCompletionsOpenAICompatible(
   };
 }
 
-export type CodegenOpenRouterVariant = "codeGen" | "codeFix";
+export type CodegenOpenRouterVariant = "codeGen" | "codeGenFrontend" | "codeFix";
 
 /**
  * Provider priority for codegen:
@@ -273,22 +278,29 @@ export async function invokeCodegenOrOpenRouter(
     temperature: number;
     max_tokens: number;
     openRouterVariant?: CodegenOpenRouterVariant;
+    codingMode?: CodingMode;
     tools?: OpenRouterToolDefinition[];
     tool_choice?: OpenRouterOptions["tool_choice"];
   },
 ): Promise<OpenRouterResponse> {
   const key = options.openRouterVariant ?? "codeGen";
+  const codingMode = options.codingMode ?? "cost";
   const reasoningOptions = buildCodegenReasoningOptions(key);
+  const modeForceOpenRouter = shouldForceOpenRouterForCodingMode(codingMode);
 
   // ── Priority 1: DeepSeek V4 Pro direct API ──────────────────────────────
   // Activated when DEEPSEEK_API_KEY is set (isDeepSeekV4Provider).
   // CODEGEN_PROVIDER=deepseek also signals intent to use DeepSeek direct;
   // emit a warning if the key is missing so the fallback isn't silent.
   const wantsDeepSeekDirect =
-    key === "codeGen" &&
+    (key === "codeGen" || key === "codeGenFrontend") &&
     process.env.CODEGEN_PROVIDER?.trim().toLowerCase() === "deepseek";
 
-  if (isDeepSeekV4Provider() && !shouldForceOpenRouter(key)) {
+  if (
+    isDeepSeekV4Provider() &&
+    !modeForceOpenRouter &&
+    !shouldForceOpenRouter(key)
+  ) {
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
     const dsBase =
@@ -328,15 +340,16 @@ export async function invokeCodegenOrOpenRouter(
   }
 
   // ── Priority 3: OpenRouter model chain ───────────────────────────────────
-  const configValue = MODEL_CONFIG[key] ?? "gpt-4o";
+  const configValue = resolveCodingModelConfigValue(codingMode, key);
   const chain = resolveModelChain(configValue, resolveModel);
   console.log(
-    `[LLM] invokeCodegenOrOpenRouter  variant=${key}  chain=[${chain.join(" → ")}]`,
+    `[LLM] invokeCodegenOrOpenRouter  mode=${codingMode}  variant=${key}  chain=[${chain.join(" → ")}]`,
   );
   return chatCompletionWithFallback(messages, chain, {
     temperature: options.temperature,
     max_tokens: options.max_tokens,
     timeoutMs: CODEGEN_PER_MODEL_TIMEOUT_MS,
+    forceOpenRouter: modeForceOpenRouter,
     ...reasoningOptions,
   });
 }

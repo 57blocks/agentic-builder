@@ -12,6 +12,11 @@
  */
 
 import type { StyleSpec, StyleSpecColor } from "./types";
+import {
+  renderGradientCards,
+  renderStateTokenRows,
+  renderSurfaceEffectCards,
+} from "./render-html-enhancements";
 
 function esc(s: string): string {
   return String(s)
@@ -114,6 +119,9 @@ export function renderStyleSpecHtml(spec: StyleSpec): string {
   const shadowList = (spec.shadows ?? [])
     .map((s) => `<div class="shadow-card" style="box-shadow:${esc(s)}">${esc(s)}</div>`)
     .join("");
+  const gradientCards = renderGradientCards(spec.gradients);
+  const surfaceEffectCards = renderSurfaceEffectCards(spec.surfaceEffects);
+  const stateTokenRows = renderStateTokenRows(spec.stateTokens);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -196,6 +204,27 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
 .shadow-card { padding: 16px; background: var(--color-surface);
   border-radius: var(--radius-md); margin-bottom: 12px; font-family: var(--font-mono);
   font-size: 12px; }
+.signal-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.signal-card { background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px; }
+.signal-preview { height: 72px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); margin-bottom: 8px; }
+.signal-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.signal-meta { margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.signal-code { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-text-muted); padding: 8px; border-radius: var(--radius-sm); background: var(--color-background);
+  border: 1px solid var(--color-border); }
+.state-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); }
+.state-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+.state-table th, .state-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.state-table th { color: var(--color-text-muted); font-weight: 600; }
+.state-pill { display:inline-flex; align-items:center; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--color-border); text-transform: uppercase; letter-spacing: 0.03em; }
+.state-default { background: #64748b22; }
+.state-hover { background: #2563eb22; }
+.state-active { background: #7c3aed22; }
+.state-focus { background: #06b6d422; }
+.state-disabled { background: #94a3b822; }
 .section { margin-top: 32px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -249,6 +278,44 @@ h3 { font-size: 1.1rem; margin-top: 24px; }
   ${
     shadowList
       ? `<div class="section"><h2>Shadows</h2>${shadowList}</div>`
+      : ""
+  }
+
+  ${
+    gradientCards
+      ? `<div class="section">
+    <h2>Gradients</h2>
+    <div class="signal-grid">${gradientCards}</div>
+  </div>`
+      : ""
+  }
+
+  ${
+    surfaceEffectCards
+      ? `<div class="section">
+    <h2>Surface Effects</h2>
+    <div class="signal-grid">${surfaceEffectCards}</div>
+  </div>`
+      : ""
+  }
+
+  ${
+    stateTokenRows
+      ? `<div class="section">
+    <h2>Interaction State Tokens</h2>
+    <div class="state-table-wrap">
+      <table class="state-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>State</th>
+            <th>Treatment</th>
+          </tr>
+        </thead>
+        <tbody>${stateTokenRows}</tbody>
+      </table>
+    </div>
+  </div>`
       : ""
   }
 

@@ -428,7 +428,7 @@ export default function AppNav() {
           </div>
           {!collapsed && (
             <div className="flex flex-col overflow-hidden">
-              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">Alex Chen</span>
+              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">57Blocks</span>
               <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
             </div>
           )}
@@ -466,6 +466,10 @@ function DeleteProjectDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = {
+    WebkitAppRegion: "no-drag",
+  };
+
   // Lock body scroll while open, and listen for Escape to cancel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -480,6 +484,7 @@ function DeleteProjectDialog({
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+      style={noDragStyle}
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel();
       }}

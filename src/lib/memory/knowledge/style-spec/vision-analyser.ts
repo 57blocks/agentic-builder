@@ -59,6 +59,47 @@ REQUIRED SHAPE (camelCase, all keys present unless marked optional):
   "spacing": { "basePx": 8, "scalePx": [4, 8, 12, 16, 24, 32, 48, 64] },
   "radius":  { "smPx": 4, "mdPx": 8, "lgPx": 16, "pillPx": 999 },
   "shadows": ["0 1px 2px rgba(0,0,0,0.05)", "0 8px 24px rgba(0,0,0,0.12)"],  // optional
+  "gradients": [ // optional but strongly preferred when visible
+    {
+      "id": "hero-bg",
+      "type": "linear",
+      "angleDeg": 135,
+      "stops": [
+        { "color": "#111827", "positionPct": 0, "opacity": 1 },
+        { "color": "#2563eb", "positionPct": 62, "opacity": 0.9 },
+        { "color": "#22d3ee", "positionPct": 100, "opacity": 0.7 }
+      ],
+      "usage": "main hero background"
+    }
+  ],
+  "surfaceEffects": [ // optional but strongly preferred when visible
+    {
+      "name": "glassmorphism",
+      "description": "cards use translucent dark fill with subtle frosted blur and thin bright border",
+      "cssHints": [
+        "background: rgba(15, 23, 42, 0.55)",
+        "backdrop-filter: blur(12px)",
+        "border: 1px solid rgba(255,255,255,0.14)"
+      ]
+    }
+  ],
+  "stateTokens": [ // optional but strongly preferred for interactive controls
+    {
+      "component": "button.primary",
+      "state": "default",
+      "treatment": "solid brand fill with high-contrast white text"
+    },
+    {
+      "component": "button.primary",
+      "state": "hover",
+      "treatment": "slightly brighter fill plus stronger outer glow"
+    },
+    {
+      "component": "button.primary",
+      "state": "focus",
+      "treatment": "2px cyan focus ring outside button bounds"
+    }
+  ],
   "components": {
     "button":     { "description": "..." },
     "card":       { "description": "..." },               // optional
@@ -81,6 +122,9 @@ GUIDELINES:
 - Always include "industry"; choose the closest bucket from the four allowed.
 - "vibe" must be 3-6 short adjectives.
 - Sample colours from large surfaces (backgrounds, panels) and from visible accents (buttons, charts).
+- If gradients are visible, extract 1-4 representative gradient recipes with accurate stop order and rough stop positions.
+- If material effects are visible (glass, glow, blur, grain, inner shadow), add 1-4 \`surfaceEffects\` entries with CSS-like hints.
+- Always infer state treatments for at least one key interactive control (e.g. primary button, nav item, input focus).
 - "visualElements": Identify 4-6 distinct UI elements you can see in the screenshot. For each, provide:
     - "name": short label (1-4 words), e.g. "hero headline", "primary CTA", "navigation bar",
       "metric card", "sidebar nav", "chart widget", "colour swatch", "input field".
@@ -138,7 +182,7 @@ export async function analyseImageToStyleSpec(
   const resp = await openRouterVisionChatCompletion(messages, {
     model,
     temperature: 0.3,
-    max_tokens: 2048,
+    max_tokens: 3072,
   });
 
   const raw = resp.choices[0]?.message?.content ?? "";

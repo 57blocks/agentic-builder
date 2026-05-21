@@ -7,12 +7,25 @@ import type {
   CodingTask,
   KickoffWorkItem,
 } from "@/lib/pipeline/types";
+import type { CodingMode } from "@/lib/pipeline/coding-mode";
 
 import type { HumanDecisionOption } from "@/lib/pipeline/human-decision";
 
 /** AbortController for the active coding SSE fetch. Module-level so reset()
  *  can abort the HTTP connection and signal the backend to stop processing. */
 let _codingAbortController: AbortController | null = null;
+
+/** Last known codeOutputDir — used by reset() to abort the backend session. */
+let _codingOutputDir: string | null = null;
+
+/** Fire-and-forget call to stop any in-flight backend coding session. */
+function abortBackendSession(codeOutputDir: string): void {
+  fetch("/api/agents/coding/abort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codeOutputDir }),
+  }).catch(() => {/* best-effort */});
+}
 
 import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
 
@@ -56,12 +69,14 @@ interface CodingState {
   supervisorLogs: AgentLogEntry[];
   /** Set when integration_verify_fix is waiting for a human to pick an action. */
   pendingHumanDecision: PendingHumanDecision | null;
+  codingMode: CodingMode;
 
   startCoding: (
     runId: string,
     tasks: KickoffWorkItem[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -75,6 +90,7 @@ interface CodingState {
     failedTaskIds: string[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -89,6 +105,7 @@ interface CodingState {
     tasks: KickoffWorkItem[],
     codeOutputDir: string,
     projectTier?: string,
+    codingMode?: CodingMode,
     prdContent?: string,
     stitchMeta?: { projectId: string; screenId: string; projectUrl: string },
   ) => void;
@@ -187,6 +204,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   gapAnalysis: null,
   supervisorLogs: [],
   pendingHumanDecision: null,
+  codingMode: "normal",
 
   setProjectId: (id) => {
     const current = get();
@@ -206,6 +224,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         e2eVerify: null,
         supervisorLogs: [],
         pendingHumanDecision: null,
+        codingMode: "normal",
       });
       return;
     }
@@ -229,7 +248,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     }
   },
 
-  startCoding: (runId, taskItems, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  startCoding: (
+    runId,
+    taskItems,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     set({
       status: "running",
       error: null,
@@ -242,14 +269,19 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     // Clear the last-session checkpoint so the "Retry Failed Tasks" button
     // doesn't show stale data while a fresh full run is in progress.
     fetch("/api/agents/coding/checkpoint", { method: "DELETE" }).catch(() => {});
 
-    // Abort any previous coding session before starting a new one.
+    // Abort any previous coding session (client-side SSE + backend process).
+    // The backend call is needed for the page-refresh case where the previous
+    // SSE connection was silently dropped and the backend is still running.
     _codingAbortController?.abort();
+    abortBackendSession(codeOutputDir);
+    _codingOutputDir = codeOutputDir;
 
     const controller = new AbortController();
     _codingAbortController = controller;
@@ -258,7 +290,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       signal: controller.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId, tasks: taskItems, codeOutputDir, projectTier, prd: prdContent, stitchMeta }),
+      body: JSON.stringify({
+        runId,
+        tasks: taskItems,
+        codeOutputDir,
+        projectTier,
+        codingMode,
+        prd: prdContent,
+        stitchMeta,
+      }),
     })
       .then(async (resp) => {
         if (!resp.ok) {
@@ -324,7 +364,15 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       });
   },
 
-  rerunCoding: (runId, tasks, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  rerunCoding: (
+    runId,
+    tasks,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     const { projectId } = get();
 
     // 1. Abort any active SSE connection. The backend coding pipeline reads
@@ -367,6 +415,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     get().startCoding(
@@ -374,12 +423,22 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       tasks,
       codeOutputDir,
       projectTier,
+      codingMode,
       prdContent,
       stitchMeta,
     );
   },
 
-  retryFailedTasks: (runId, tasks, failedTaskIds, codeOutputDir, projectTier, prdContent, stitchMeta) => {
+  retryFailedTasks: (
+    runId,
+    tasks,
+    failedTaskIds,
+    codeOutputDir,
+    projectTier,
+    codingMode = "normal",
+    prdContent,
+    stitchMeta,
+  ) => {
     const retrySet = new Set(failedTaskIds);
     const existingTasks = get().tasks;
 
@@ -423,10 +482,13 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       e2eVerify: null,
       supervisorLogs: [],
       pendingHumanDecision: null,
+      codingMode,
     });
 
     // Abort any previous coding session before starting retry.
     _codingAbortController?.abort();
+    abortBackendSession(codeOutputDir);
+    _codingOutputDir = codeOutputDir;
 
     const controller = new AbortController();
     _codingAbortController = controller;
@@ -440,6 +502,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks,
         codeOutputDir,
         projectTier,
+        codingMode,
         prd: prdContent,
         stitchMeta,
         retryFailedTaskIds: failedTaskIds,
@@ -531,6 +594,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks: current.tasks,
         codeOutputDir,
         projectTier,
+        codingMode: current.codingMode,
       }),
     })
       .then(async (resp) => {
@@ -614,6 +678,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tasks: current.tasks,
         codeOutputDir,
         projectTier,
+        codingMode: current.codingMode,
       }),
     })
       .then(async (resp) => {
@@ -769,8 +834,14 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
   reset: () => {
     // Abort the backend coding session so it stops processing tasks.
+    // Client-side abort propagates via request.signal → sessionAbortController.
+    // Also call the abort endpoint directly for immediate effect.
     _codingAbortController?.abort();
     _codingAbortController = null;
+    if (_codingOutputDir) {
+      abortBackendSession(_codingOutputDir);
+      _codingOutputDir = null;
+    }
     set({
       sessionId: null,
       status: "idle",

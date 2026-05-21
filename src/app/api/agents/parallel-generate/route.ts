@@ -59,6 +59,7 @@ function buildAgentMap(
   referenceImageBase64?: string,
   designKnowledgeContext?: string,
   authDecision?: AuthDecision | null,
+  instruction?: string,
 ): Record<string, DocAgentFn> {
   const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
     .filter((s) => s && s.trim().length > 0)
@@ -68,7 +69,7 @@ function buildAgentMap(
       new TRDAgent().generateTRD(
         `${tierConstraint}\n\n${prd}`,
         effectiveTier,
-        undefined,
+        instruction || undefined,
         sid,
         prdSpec ?? null,
         onChunk,
@@ -150,6 +151,7 @@ export async function POST(request: NextRequest) {
     designSpecContent,
     styleReferenceImageBase64,
     prdSpec,
+    instruction,
   } = body as {
     prdContent: string;
     selectedDocs: string[];
@@ -167,6 +169,8 @@ export async function POST(request: NextRequest) {
     /** Structured PRD spec from `steps.prd.metadata.prdSpec` — used by
      *  TRD to inject domain.rules as authoritative source. */
     prdSpec?: PrdSpec | null;
+    /** User edit instruction for re-generating a specific doc. */
+    instruction?: string;
   };
 
   const effectiveTier = (tier ?? "M").toUpperCase() as "S" | "M" | "L";
@@ -258,6 +262,7 @@ export async function POST(request: NextRequest) {
     styleReferenceImageBase64,
     designKnowledgeContext,
     authDecision,
+    instruction,
   );
 
   const encoder = new TextEncoder();

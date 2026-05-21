@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import Loading from "@/components/Loading";
+import type { ServerLogLine } from "@/components/preview/usePreviewServerLogs";
 
 type ServerStatus = "stopped" | "starting" | "running" | "error";
 
@@ -10,8 +11,13 @@ interface ServerInfo {
   status: ServerStatus;
   port: number | null;
   url: string | null;
-  logs: string[];
+  logs: ServerLogLine[];
   error?: string;
+}
+
+function formatTs(ts: number): string {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
 
 export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string }) {
@@ -68,7 +74,14 @@ export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string 
       });
       const data = await resp.json();
       if (data.error) {
-        setInfo((prev) => ({ ...prev, status: "error", logs: [...prev.logs, `Error: ${data.error}`] }));
+        setInfo((prev) => ({
+          ...prev,
+          status: "error",
+          logs: [
+            ...prev.logs,
+            { ts: Date.now(), stream: "system", text: `Error: ${data.error}` },
+          ],
+        }));
       } else {
         setInfo(data);
         if (action === "start" || action === "restart") {
@@ -256,11 +269,28 @@ export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string 
                 {info.logs.length === 0 ? (
                   <p className="text-zinc-600">No logs yet.</p>
                 ) : (
-                  info.logs.map((line, i) => (
-                    <p key={i} className={line.startsWith("[preview]") ? "text-emerald-400" : "text-zinc-400"}>
-                      {line}
-                    </p>
-                  ))
+                  info.logs.map((line, i) => {
+                    const isStderr = line.stream === "stderr";
+                    const isSystem = line.stream === "system";
+                    const isPreviewTag = line.text.startsWith("[preview]");
+                    return (
+                      <p
+                        key={i}
+                        className={`flex gap-2 whitespace-pre-wrap break-words ${
+                          isStderr
+                            ? "text-red-300"
+                            : isSystem || isPreviewTag
+                              ? "text-emerald-400"
+                              : "text-zinc-400"
+                        }`}
+                      >
+                        <span className="shrink-0 select-none text-[10px] text-zinc-600 tabular-nums">
+                          {formatTs(line.ts)}
+                        </span>
+                        <span className="min-w-0 flex-1">{line.text}</span>
+                      </p>
+                    );
+                  })
                 )}
                 <div ref={logsEndRef} />
               </div>

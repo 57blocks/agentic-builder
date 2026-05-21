@@ -96,6 +96,11 @@ import {
   writeTddManifestFromTasks,
   rotateTddEvidenceForNewSession,
 } from "@/lib/pipeline/tdd-manifest";
+import { activeCodingSessions } from "./session-registry";
+import {
+  normalizeCodingMode,
+  type CodingMode,
+} from "@/lib/pipeline/coding-mode";
 import { pruneDriftedTddTests } from "@/lib/pipeline/tdd-drift-cleanup";
 
 const execFileAsync = promisify(execFile);
@@ -700,6 +705,7 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds,
     projectId,
     stitchMeta,
+    codingMode: codingModeRaw,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -723,8 +729,11 @@ export async function POST(request: NextRequest) {
       projectId: string;
       screenId: string;
       projectUrl: string;
+      screenshotUrl?: string | null;
     } | null;
+    codingMode?: CodingMode | string;
   };
+  const codingMode = normalizeCodingMode(codingModeRaw);
 
   const ralphConfig: RalphConfig = {
     ...DEFAULT_RALPH_CONFIG,
@@ -1269,12 +1278,35 @@ export async function POST(request: NextRequest) {
   const mapper = new EventMapper(sessionId);
   const encoder = new TextEncoder();
 
+  // ── Session abort registry ──────────────────────────────────────────────
+  // Abort any previous coding session running against the same output directory
+  // (e.g. after a page refresh where the old SSE connection was silently dropped)
+  // then register this session's controller so the /abort endpoint and future
+  // sessions can stop it.
+  const sessionAbortController = new AbortController();
+  const _existingController = activeCodingSessions.get(outputRoot);
+  if (_existingController && !_existingController.signal.aborted) {
+    console.log(
+      `[CodingAPI] Aborting stale session for ${outputRoot} before starting new one`,
+    );
+    _existingController.abort();
+  }
+  activeCodingSessions.set(outputRoot, sessionAbortController);
+
   let clientAborted = false;
   request.signal.addEventListener("abort", () => {
     clientAborted = true;
+    // Propagate client-disconnect into the session controller so the stream
+    // loop exits even if checked via sessionAbortController.signal.
+    sessionAbortController.abort();
     console.warn(
       `[CodingAPI] Session ${sessionId}: client disconnected (signal aborted)`,
     );
+  });
+  // Wire external abort (e.g. /abort endpoint or new session auto-abort) back
+  // into clientAborted so all existing checks in the stream loop apply.
+  sessionAbortController.signal.addEventListener("abort", () => {
+    clientAborted = true;
   });
 
   const stream = new ReadableStream({
@@ -1373,7 +1405,7 @@ export async function POST(request: NextRequest) {
       let fatalError = "";
 
       console.log(
-        `[CodingAPI] Session ${sessionId}: starting with ${codingTasks.length} tasks, output: ${outputRoot}`,
+        `[CodingAPI] Session ${sessionId}: starting with ${codingTasks.length} tasks, output: ${outputRoot}, mode=${codingMode}`,
       );
 
       send(
@@ -1450,6 +1482,7 @@ export async function POST(request: NextRequest) {
             tasks: codingTasks,
             outputDir: outputRoot,
             projectContext,
+            codingMode,
             frontendDesignContext,
             prebuiltScaffold,
             scaffoldProtectedPaths,
@@ -1817,6 +1850,11 @@ export async function POST(request: NextRequest) {
 
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
+        // Remove from registry only if we are still the active session
+        // (a newer session may have already replaced us).
+        if (activeCodingSessions.get(outputRoot) === sessionAbortController) {
+          activeCodingSessions.delete(outputRoot);
+        }
         controller.close();
       }
     },

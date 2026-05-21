@@ -12,5 +12,6 @@ export const trdAgent: StepAgent = createParallelGenerateAgent({
     sessionId: ctx.sessionId,
     codeOutputDir: ctx.codeOutputDir,
     tier: ctx.tier,
+    instruction: ctx.editInstruction,
   }),
 });
