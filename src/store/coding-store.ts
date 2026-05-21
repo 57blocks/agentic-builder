@@ -924,6 +924,7 @@ function handleCodingEvent(
           assignedAgentId: payload.agentId ?? t.assignedAgentId,
           codingStatus: "in_progress" as const,
           progressStage: "generating" as const,
+          startedAt: t.startedAt ?? new Date().toISOString(),
           fixAttempts: 0,
           verifyErrors: undefined,
           errorPreview: undefined,
@@ -937,6 +938,8 @@ function handleCodingEvent(
                 ...t,
                 codingStatus: "completed_with_warnings" as const,
                 progressStage: undefined,
+                startedAt: undefined,
+                completedAt: new Date().toISOString(),
                 verifyErrors:
                   t.verifyErrors ??
                   "Task was auto-closed because the same worker started a new task before a completion event arrived.",
@@ -959,6 +962,7 @@ function handleCodingEvent(
           assignedAgentId: payload.agentId ?? null,
           codingStatus: "in_progress" as const,
           progressStage: "generating" as const,
+          startedAt: new Date().toISOString(),
           fixAttempts: 0,
         },
       ];
@@ -1060,6 +1064,7 @@ function handleCodingEvent(
           tokenUsage: tokenUsage ?? t.tokenUsage,
           taskCostUsd: (payload.data?.costUsd as number | undefined) ?? t.taskCostUsd,
           progressStage: undefined,
+          completedAt: new Date().toISOString(),
           fixAttempts:
             (payload.data?.fixCycles as number | undefined) ?? t.fixAttempts,
           verifyErrors:
@@ -1097,6 +1102,7 @@ function handleCodingEvent(
             0,
             200,
           ),
+          completedAt: new Date().toISOString(),
         },
       ];
     }
@@ -1132,6 +1138,7 @@ function handleCodingEvent(
         codingStatus: "failed" as const,
         error: payload.data?.error as string,
         progressStage: undefined,
+        completedAt: new Date().toISOString(),
       };
     });
     set({ agents, tasks });
@@ -1357,7 +1364,7 @@ function handleCodingEvent(
         set({
           tasks: get().tasks.map((t) =>
             t.id === repairTaskId
-              ? { ...t, codingStatus: "in_progress" as const, progressStage: "generating" as const }
+              ? { ...t, codingStatus: "in_progress" as const, progressStage: "generating" as const, startedAt: t.startedAt ?? new Date().toISOString() }
               : t,
           ),
         });
