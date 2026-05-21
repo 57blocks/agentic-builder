@@ -2,10 +2,20 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-export function useElapsedTimer(running: boolean) {
-  const [elapsed, setElapsed] = useState(0);
+export function useElapsedTimer(running: boolean, initialElapsed?: number) {
+  const [elapsed, setElapsed] = useState(initialElapsed ?? 0);
   const startRef = useRef<number | null>(null);
   const rafRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initialElapsedRef = useRef(initialElapsed);
+
+  // Seed the timer with an initial offset (e.g. from a previous session)
+  // so return-visits don't start from zero.
+  useEffect(() => {
+    if (initialElapsed !== undefined && initialElapsed > 0) {
+      initialElapsedRef.current = initialElapsed;
+      setElapsed(initialElapsed);
+    }
+  }, [initialElapsed]);
 
   useEffect(() => {
     if (running) {
