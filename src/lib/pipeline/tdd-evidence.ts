@@ -44,6 +44,10 @@ export interface TddEvidenceEvent {
   expectedFailureReason?: string;
   failureExcerpt?: string;
   timestamp?: string;
+  /** Session that produced the event. When set, readers may filter to the
+   *  currently active session so historical noise from prior sessions does
+   *  not poison the gate decision. */
+  sessionId?: string;
 }
 
 export interface TddEvidenceSummary {
@@ -177,6 +181,7 @@ async function readTddReviewSummary(outputDir: string): Promise<{
 
 export async function readTddEvidenceSummary(
   outputDir: string,
+  options?: { sessionId?: string },
 ): Promise<TddEvidenceSummary> {
   const ralphDir = path.join(outputDir, ".ralph");
   const manifestPath = path.join(ralphDir, "test-manifest.json");
@@ -184,7 +189,15 @@ export async function readTddEvidenceSummary(
 
   const manifestJson = await readJsonIfPresent(manifestPath);
   const manifestTests = manifestJson ? extractManifestTests(manifestJson) : [];
-  const evidenceEvents = await readJsonlEvidence(evidencePath);
+  const allEvidence = await readJsonlEvidence(evidencePath);
+  // If caller specified a session, filter to events tagged with that
+  // session id. Events without a sessionId predate the rotation feature
+  // and are treated as stale → excluded when filtering is requested. This
+  // is what prevents historical fails from one session from permanently
+  // blocking a future session's gate.
+  const evidenceEvents = options?.sessionId
+    ? allEvidence.filter((event) => event.sessionId === options.sessionId)
+    : allEvidence;
   const reviewSummary = await readTddReviewSummary(outputDir);
   const byPriority = clonePriorityCounts();
   const evidenceByTest = new Map<string, TddEvidenceEvent[]>();
@@ -209,20 +222,18 @@ export async function readTddEvidenceSummary(
     const events = evidenceByTest.get(test.id) ?? [];
     const latestRed = [...events].reverse().find((event) => event.phase === "red");
     const latestGreen = [...events].reverse().find((event) => event.phase === "green");
-    const hasValidRed = events.some(
-      (event) =>
-        event.phase === "red" &&
-        event.status === "expected_fail" &&
-        event.expectedFailureMatched !== false,
-    );
-    const hasGreenPass = events.some(
-      (event) => event.phase === "green" && event.status === "pass",
-    );
-    const hasGreenFail = events.some(
-      (event) =>
-        event.phase === "green" &&
-        (event.status === "fail" || event.status === "infra_fail"),
-    );
+
+    // Latest-event semantics: a test is "valid RED" only when its LATEST
+    // red event is `expected_fail`; "GREEN passed" only when its LATEST
+    // green event is `pass`. Historical fails no longer poison the gate
+    // — the loop can converge as soon as the latest run is healthy.
+    // See repo analysis 2026-05-19 (once-failed-forever-blocking bug).
+    const hasValidRed =
+      latestRed?.status === "expected_fail" &&
+      latestRed.expectedFailureMatched !== false;
+    const hasGreenPass = latestGreen?.status === "pass";
+    const hasGreenFail =
+      latestGreen?.status === "fail" || latestGreen?.status === "infra_fail";
 
     if (hasValidRed) redValid += 1;
     else missingRedEvidence.push(test.id);
@@ -235,7 +246,7 @@ export async function readTddEvidenceSummary(
     }
 
     if (hasGreenFail) greenFailed += 1;
-    if (priority === "P0" && (!hasValidRed || !hasGreenPass || hasGreenFail)) {
+    if (priority === "P0" && (!hasValidRed || !hasGreenPass)) {
       p0BlockingFailures.push(test.id);
     }
     if (priority === "P0") {
@@ -255,13 +266,22 @@ export async function readTddEvidenceSummary(
   }
 
   if (manifestTests.length === 0) {
+    // No manifest — fall back to a per-test latest scan over raw events
+    // so legacy callers still get sensible counts.
+    const latestByTest = new Map<
+      string,
+      { red?: TddEvidenceEvent; green?: TddEvidenceEvent }
+    >();
     for (const event of evidenceEvents) {
-      if (event.phase === "red" && event.status === "expected_fail") redValid += 1;
-      if (event.phase === "green" && event.status === "pass") greenPassed += 1;
-      if (
-        event.phase === "green" &&
-        (event.status === "fail" || event.status === "infra_fail")
-      ) {
+      const entry = latestByTest.get(event.testId) ?? {};
+      if (event.phase === "red") entry.red = event;
+      else if (event.phase === "green") entry.green = event;
+      latestByTest.set(event.testId, entry);
+    }
+    for (const { red, green } of latestByTest.values()) {
+      if (red?.status === "expected_fail") redValid += 1;
+      if (green?.status === "pass") greenPassed += 1;
+      if (green?.status === "fail" || green?.status === "infra_fail") {
         greenFailed += 1;
       }
     }
@@ -285,5 +305,58 @@ export async function readTddEvidenceSummary(
     reviewFindingCount: reviewSummary.findingCount,
     reviewP0ErrorCount: reviewSummary.p0ErrorCount,
     p0Details,
+  };
+}
+
+/**
+ * Lightweight gate check for IntegrationVerifyFix's `report_done(pass)`
+ * acceptance. Returns `{ pass: true }` when the latest TDD state is
+ * clean: no P0 review errors and every P0 test's latest GREEN event is
+ * `pass`. Otherwise returns a list of failing testIds the worker still
+ * needs to address.
+ */
+export async function evaluateTddHardGate(
+  outputDir: string,
+  options?: { sessionId?: string },
+): Promise<{
+  pass: boolean;
+  reasons: string[];
+  reviewP0Errors: number;
+  p0LatestGreenFailures: string[];
+  missingLatestGreen: string[];
+}> {
+  const summary = await readTddEvidenceSummary(outputDir, options);
+  const reasons: string[] = [];
+  const p0LatestGreenFailures: string[] = [];
+  const missingLatestGreen: string[] = [];
+  for (const detail of summary.p0Details) {
+    if (detail.greenStatus === undefined) {
+      missingLatestGreen.push(detail.id);
+    } else if (
+      detail.greenStatus !== "pass" &&
+      detail.greenStatus !== "skipped"
+    ) {
+      p0LatestGreenFailures.push(detail.id);
+    }
+  }
+  if (summary.reviewP0ErrorCount > 0) {
+    reasons.push(`tdd-review has ${summary.reviewP0ErrorCount} P0 error(s)`);
+  }
+  if (p0LatestGreenFailures.length > 0) {
+    reasons.push(
+      `latest GREEN failed for P0 test(s): ${p0LatestGreenFailures.slice(0, 10).join(", ")}${p0LatestGreenFailures.length > 10 ? " …" : ""}`,
+    );
+  }
+  if (missingLatestGreen.length > 0) {
+    reasons.push(
+      `no GREEN evidence yet for P0 test(s): ${missingLatestGreen.slice(0, 10).join(", ")}${missingLatestGreen.length > 10 ? " …" : ""}`,
+    );
+  }
+  return {
+    pass: reasons.length === 0,
+    reasons,
+    reviewP0Errors: summary.reviewP0ErrorCount,
+    p0LatestGreenFailures,
+    missingLatestGreen,
   };
 }

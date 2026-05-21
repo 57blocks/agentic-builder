@@ -36,6 +36,7 @@ export async function tddTestWriterAndRed(
     outputDir: state.outputDir,
     phase: "red",
     emitter,
+    sessionId: state.sessionId,
   });
   console.log(`[Supervisor] ${red.summary}`);
 
@@ -52,6 +53,7 @@ export async function tddGreenVerifyAndReview(
     outputDir: state.outputDir,
     phase: "green",
     emitter,
+    sessionId: state.sessionId,
   });
   const review = await reviewTddTests({
     outputDir: state.outputDir,

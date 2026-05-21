@@ -28,9 +28,41 @@
 
 import fs from "fs/promises";
 import path from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, execFile, type ChildProcess } from "child_process";
+import { promisify } from "util";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import type { RepairEmitter } from "./events";
+
+const execFileP = promisify(execFile);
+
+/**
+ * Find and SIGKILL any process bound to `port` so a previous, hung backend
+ * boot doesn't EADDRINUSE-poison the smoke gate. Best-effort; silently
+ * no-ops on platforms where `lsof` is absent.
+ */
+async function releaseBoundPort(port: number): Promise<string[]> {
+  const killedPids: string[] = [];
+  try {
+    const { stdout } = await execFileP("lsof", ["-ti", `:${port}`], {
+      timeout: 3_000,
+    });
+    const pids = stdout
+      .split(/\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), "SIGKILL");
+        killedPids.push(pid);
+      } catch {
+        /* process already gone */
+      }
+    }
+  } catch {
+    /* lsof missing or no process bound — fine */
+  }
+  return killedPids;
+}
 
 export type RuntimeSmokeFailureCode =
   | "backend_did_not_start"
@@ -228,11 +260,20 @@ interface BootResult {
   bootError?: string;
 }
 
-function bootBackend(
+async function bootBackend(
   cwd: string,
   bootTimeoutMs: number,
   port: number,
 ): Promise<BootResult> {
+  // Best-effort: kill anything still bound to the port from a previous
+  // (hung) boot. Otherwise `pnpm dev` hits EADDRINUSE immediately and the
+  // gate misclassifies it as "backend_did_not_start".
+  const killed = await releaseBoundPort(port);
+  if (killed.length > 0) {
+    console.warn(
+      `[runtime-smoke] released port ${port} from stale pid(s) ${killed.join(",")} before boot`,
+    );
+  }
   return new Promise((resolve) => {
     const child = spawn("pnpm", ["dev"], {
       cwd,

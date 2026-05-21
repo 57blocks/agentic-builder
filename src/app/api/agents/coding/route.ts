@@ -92,7 +92,11 @@ import {
   clearSessionCheckpoint,
   type TaskCheckpointEntry,
 } from "@/lib/pipeline/session-checkpoint";
-import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
+import {
+  writeTddManifestFromTasks,
+  rotateTddEvidenceForNewSession,
+} from "@/lib/pipeline/tdd-manifest";
+import { pruneDriftedTddTests } from "@/lib/pipeline/tdd-drift-cleanup";
 
 const execFileAsync = promisify(execFile);
 
@@ -1392,6 +1396,17 @@ export async function POST(request: NextRequest) {
         }
 
         try {
+          const rotated = await rotateTddEvidenceForNewSession(outputRoot);
+          if (rotated.rotated) {
+            console.log(
+              `[CodingAPI] TDD evidence rotated → ${rotated.archivedTo}`,
+            );
+          }
+        } catch (e) {
+          console.warn(`[CodingAPI] TDD evidence rotation failed: ${e}`);
+        }
+
+        try {
           const tddManifest = await writeTddManifestFromTasks(
             outputRoot,
             codingTasks,
@@ -1401,6 +1416,17 @@ export async function POST(request: NextRequest) {
           );
         } catch (e) {
           console.warn(`[CodingAPI] TDD manifest write failed: ${e}`);
+        }
+
+        try {
+          const drift = await pruneDriftedTddTests(outputRoot, codingTasks);
+          if (drift.removed.length > 0) {
+            console.log(
+              `[CodingAPI] Pruned ${drift.removed.length} drifted TDD test file(s): ${drift.removed.join(", ")}`,
+            );
+          }
+        } catch (e) {
+          console.warn(`[CodingAPI] TDD drift pruning failed: ${e}`);
         }
 
         // RALPH Phase 1+3: initialise progress tracker and write IMPLEMENTATION_PLAN.md
