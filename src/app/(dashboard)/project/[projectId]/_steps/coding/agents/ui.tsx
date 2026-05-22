@@ -627,7 +627,6 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                 <TaskDetailPanel
                   task={selectedTask}
                   allAgentLogs={allAgentLogs}
-                  supervisorLogs={codingState.supervisorLogs}
                   onClose={() => setSelectedTaskId(null)}
                   onRetry={!isRunning ? handleRetryTask : undefined}
                 />

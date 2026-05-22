@@ -9,7 +9,6 @@ import { FileActivityPanel } from "./FileActivityPanel";
 interface TaskDetailPanelProps {
   task: CodingTask | KickoffWorkItem | null;
   allAgentLogs: AgentLogEntry[];
-  supervisorLogs: AgentLogEntry[];
   onClose: () => void;
   onRetry?: (taskId: string) => void;
 }
@@ -107,7 +106,6 @@ function getDuration(task: CodingTask | KickoffWorkItem): string | null {
 export function TaskDetailPanel({
   task,
   allAgentLogs,
-  supervisorLogs: _supervisorLogs,
   onClose,
   onRetry,
 }: TaskDetailPanelProps) {
