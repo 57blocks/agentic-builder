@@ -267,13 +267,8 @@ export function PrdUI(props: StepUIProps) {
     if (!isDone || !step?.content) return;
     // Only save when this session actually ran the step (not on mount with old data)
     if (!wasRunningRef.current) {
-      console.log("[PrdUI] Skipping save-doc — step was already completed before mount (restored from previous session).");
       return;
     }
-    console.log("[PrdUI] PRD step completed. Saving PRD.md to generated-code...", {
-      contentLength: step.content.length,
-      codeOutputDir: useStepStore.getState().codeOutputDir,
-    });
     setIsSavingDoc(true);
     const codeOutputDir = useStepStore.getState().codeOutputDir;
     fetch("/api/agents/save-doc", {
@@ -288,10 +283,8 @@ export function PrdUI(props: StepUIProps) {
       }),
     })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-      .then((data) => { console.log("[PrdUI] PRD.md saved to generated-code", data); })
       .catch((err) => { console.error("[PrdUI] Failed to save PRD.md", err); })
       .finally(() => {
-        console.log("[PrdUI] PRD.md save complete, re-enabling Confirm PRD button");
         setIsSavingDoc(false);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
