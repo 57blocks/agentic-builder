@@ -718,7 +718,6 @@ export function DesignUI(props: StepUIProps) {
   });
 
   useEffect(() => {
-    console.log("[DesignUI] auto-start effect", { prdContent: !!prdContent.trim(), designStylesLoading, autoGen: autoGenRef.current, designStylesLen: designStyles?.length, storedStylesLen: storedDesignStyles?.length, designStatus: steps.design?.status });
     if (!prdContent.trim()) return;
     if (designStylesLoading) return;
     if (autoGenRef.current) return;
@@ -727,7 +726,6 @@ export function DesignUI(props: StepUIProps) {
     // store but may not have flowed into the local useState yet on first render.
     const hasStyles = Array.isArray(designStyles) && designStyles.length > 0;
     const hasStoredStyles = Array.isArray(storedDesignStyles) && storedDesignStyles.length > 0;
-    console.log("[DesignUI] auto-start guard check", { hasStyles, hasStoredStyles, designStyles, storedStyles: storedDesignStyles });
     if (hasStyles || hasStoredStyles) {
       autoGenRef.current = true;
       // Sync local state from store if it was restored but not yet in useState
@@ -858,12 +856,9 @@ export function DesignUI(props: StepUIProps) {
         designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
       });
     }
-    console.log("[DesignUI] handleGenerateDesignDoc: calling executeStep, isRunning:", isRunning, "currentStep:", currentStep);
     const p = executeStep("design");
-    console.log("[DesignUI] executeStep returned, setting phase to spec");
     setPhase("spec");
     p.then(() => {
-      console.log("[DesignUI] executeStep resolved");
       const s = useStepStore.getState();
       const stepData = s.steps.design;
       fetch(`/api/projects/${props.projectSlug}/project-step-snapshot`, {
@@ -918,7 +913,7 @@ export function DesignUI(props: StepUIProps) {
               designStyles,
               selectedStyleId,
               designSourceMode,
-              stitchResult: outcome.result ?? stitchError,
+              stitchResult: outcome.result,
               prdHash,
             },
             status: stepData?.status ?? "pending",
@@ -1059,7 +1054,7 @@ export function DesignUI(props: StepUIProps) {
         )}
         <div className="relative" ref={phaseMenuRef}>
           <button
-            onClick={() => { console.log("[DesignUI] phase label click, current phase:", phase, "menuOpen:", phaseMenuOpen); setPhaseMenuOpen((v) => !v); }}
+            onClick={() => { setPhaseMenuOpen((v) => !v); }}
             className="text-[13px] font-semibold text-slate-600 min-w-[100px] text-center select-none hover:text-[#712ae2] transition-colors"
           >
             {phase === "style" ? "Style" : phase === "spec" ? "Design Spec" : "Stitch Design"}
@@ -1076,7 +1071,7 @@ export function DesignUI(props: StepUIProps) {
                   <button
                     key={p}
                     disabled={!canJump}
-                    onClick={() => { console.log("[DesignUI] phase menu click", { p, canJump, phase, hasDesignSpec, hasStitchResult }); setPhase(p); setPhaseMenuOpen(false); }}
+                    onClick={() => { setPhase(p); setPhaseMenuOpen(false); }}
                     className={`w-full text-left px-4 py-2 text-[12px] font-medium transition-colors ${
                       isActive
                         ? "text-[#712ae2] bg-[rgba(113,42,226,0.06)]"
