@@ -1703,7 +1703,7 @@ export function DesignUI(props: StepUIProps) {
           )}
 
           {phase === "stitch" && (
-            <div className="flex items-center justify-end w-full">
+            <div className="flex items-center justify-end w-full px-8 py-3">
                 <button
                   onClick={() => {
                     // Fire-and-forget memory capture for design phase
