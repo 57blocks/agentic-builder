@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Loader2, ChevronLeft, ChevronRight, GitBranch, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
+import { ArrowRight, Loader2, GitBranch, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
@@ -9,8 +9,6 @@ import type { ResourceRequirement } from "@/lib/pipeline/resource-requirements";
 import type { SkillTraceRecord } from "@/lib/agents/skills";
 import type { StepUIProps } from "../../_shared/types";
 import { SkillsTracePanel } from "./SkillsTracePanel";
-
-const PAGE_SIZE = 8;
 
 const CATEGORY_LABEL: Record<string, string> = {
   auth: "Auth",
@@ -98,7 +96,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const nextStep = getNextStep("summary", tier);
 
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
   const [repoUrl, setRepoUrl] = useState<string | null>(null);
   const [repoLoading, setRepoLoading] = useState(true);
   // ── Abilities config state ──
@@ -321,8 +318,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const aiHours = aiTasks.reduce((s, t) => s + t.estimatedHours, 0);
   const efficiencyPct = tasks.length > 0 ? Math.round((aiTasks.length / tasks.length) * 100) : 0;
   const estimatedCost = tasks.reduce((s, t) => s + (t.tokenEstimate?.estimatedCostUsd ?? 0), 0);
-  const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
-  const pageTasks = tasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // ── Token computation ──
   const totalInputTokens = tasks.reduce((s, t) => s + (t.tokenEstimate?.inputTokens ?? 0), 0);
@@ -474,67 +469,6 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               {/* Skills trace (which auto-applied rules fired this run) */}
               <SkillsTracePanel trace={skillsTrace} />
 
-              {/* Task table — hidden for now */}
-              {false && (
-              <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-[#f1f5f9] flex items-center justify-between">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">Project Tasks</p>
-                  <span className="text-[11px] text-[#94a3b8]">Showing {Math.min((page + 1) * PAGE_SIZE, tasks.length)} of {tasks.length} tasks</span>
-                </div>
-                <div className="grid grid-cols-[2fr_1fr_72px_1fr_72px_96px] gap-4 px-5 py-2.5 bg-[#fafbfc] border-b border-[#f1f5f9]">
-                  {["TASK DESCRIPTION", "PHASE", "TOKENS", "AI EST.", "PRIORITY", "TYPE"].map((h) => (
-                    <span key={h} className="text-[10px] font-semibold uppercase tracking-wider text-[#94a3b8]">{h}</span>
-                  ))}
-                </div>
-                {pageTasks.map((task, i) => (
-                  <div key={task.id} className={`grid grid-cols-[2fr_1fr_72px_1fr_72px_96px] gap-4 items-center px-5 py-3.5 ${i < pageTasks.length - 1 ? "border-b border-[#f8fafc]" : ""} hover:bg-[#fafbff] transition-colors`}>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-[#1e293b] truncate">{task.title}</p>
-                      <p className="text-[11px] text-[#94a3b8] truncate mt-0.5">{task.description}</p>
-                    </div>
-                    <div>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${phaseColor(task.phase)}`}>{task.phase}</span>
-                    </div>
-                    <div className="text-[12px] font-medium text-[#334155]">
-                      {task.tokenEstimate?.totalTokens ? formatTokens(task.tokenEstimate.totalTokens) : <span className="text-slate-300">—</span>}
-                    </div>
-                    <div className="text-[13px] font-medium text-[#334155]">{task.estimatedHours}h</div>
-                    <div>
-                      {task.priority ? (
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          task.priority === "P0" ? "bg-red-100 text-red-700" :
-                          task.priority === "P1" ? "bg-orange-100 text-orange-700" :
-                          "bg-slate-100 text-slate-600"
-                        }`}>{task.priority}</span>
-                      ) : <span className="text-[11px] text-slate-300">—</span>}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {task.executionKind === "ai_autonomous" ? (
-                        <span className="flex items-center gap-1 text-[11px] font-medium text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full">
-                          <Zap size={10} className="shrink-0" /> Autonomous
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                          <User size={10} className="shrink-0" /> Manual Review
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#f1f5f9] bg-[#fafbfc]">
-                    <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}
-                      className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                      <ChevronLeft size={13} /> Previous
-                    </button>
-                    <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-                      className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                      Next <ChevronRight size={13} />
-                    </button>
-                  </div>
-                )}
-              </div>
-              )}
             </>
           )}
 

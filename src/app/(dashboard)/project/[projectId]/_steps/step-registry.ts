@@ -73,7 +73,6 @@ import { E2eUI } from "./preview/testing/e2e/ui";
 
 import { deployAgent } from "./preview/deployment/deploy/agent";
 import { DeployUI } from "./preview/deployment/deploy/ui";
-import { deploySnapshot } from "./preview/deployment/deploy/snapshot";
 
 // ── Registry Map ──────────────────────────────────────────────────────────────
 
