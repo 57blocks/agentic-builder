@@ -2831,7 +2831,9 @@ export async function writeCodingSessionReport(
   );
   const runtimeReadiness = await readRuntimeReadinessSummary(input.outputDir);
   const migrationCoverage = await readMigrationCoverageSummary(input.outputDir);
-  const tddEvidenceSummary = await readTddEvidenceSummary(input.outputDir);
+  const tddEvidenceSummary = await readTddEvidenceSummary(input.outputDir, {
+    sessionId: input.sessionId,
+  });
   const stageUsage = aggregateStageUsage({
     usage,
     repairSummary,

@@ -3,8 +3,8 @@ rules:
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: MC-1
-    name: "Market capitalization normalization"
-    description: "Maps current market capitalization to a score contribution."
+    name: "Current Market Capitalization"
+    description: "Normalizes current market cap contribution for the scoring model."
     type: piecewise-linear
     inputUnit: "usd"
     outputRange: [0, 100]
@@ -16,69 +16,60 @@ rules:
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: MC-5
-    name: "7-day market cap volatility normalization"
-    description: "Maps 7-day volatility to a contribution; lower volatility is better."
+    name: "Market cap volatility / 7-day window"
+    description: "Normalizes 7-day market cap volatility contribution."
     type: piecewise-linear
-    inputUnit: "percent"
+    inputUnit: "ratio"
     outputRange: [0, 100]
     segments:
-      - { from: 0, to: 5, outputFrom: 100, outputTo: 80 }
-      - { from: 5, to: 15, outputFrom: 80, outputTo: 40 }
-      - { from: 15, to: 100, outputFrom: 40, outputTo: 0 }
+      - { from: 0, to: 0.02, outputFrom: 100, outputTo: 80 }
+      - { from: 0.02, to: 0.05, outputFrom: 80, outputTo: 40 }
+      - { from: 0.05, to: 1, outputFrom: 40, outputTo: 0 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: MC-8
-    name: "30-day volume trend normalization"
-    description: "Maps 30-day volume trend to a contribution; rising trend is better."
-    type: decision-table
-    inputs:
-      - { name: trendDirection, type: string }
-      - { name: trendStrength, type: number }
-    output: { name: scoreContribution, type: number }
-    cases:
-      - when: { trendDirection: "strong_up" }
-        then: 100
-      - when: { trendDirection: "up" }
-        then: 75
-      - when: { trendDirection: "flat" }
-        then: 50
-      - when: { trendDirection: "down" }
-        then: 25
-      - when: { }
-        then: 0
+    name: "Volume trend / 30-day window"
+    description: "Maps 30-day volume trend into a contribution score."
+    type: piecewise-linear
+    inputUnit: "ratio"
+    outputRange: [0, 100]
+    segments:
+      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 25 }
+      - { from: 0.5, to: 1.0, outputFrom: 25, outputTo: 60 }
+      - { from: 1.0, to: 2.0, outputFrom: 60, outputTo: 100 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: OC-7
-    name: "On-chain holder concentration normalization"
-    description: "Maps concentration to a risk contribution."
+    name: "On-chain holder concentration"
+    description: "Converts holder concentration into a risk contribution."
     type: piecewise-linear
     inputUnit: "ratio"
     outputRange: [0, 100]
     segments:
       - { from: 0, to: 0.1, outputFrom: 0, outputTo: 20 }
-      - { from: 0.1, to: 0.3, outputFrom: 20, outputTo: 70 }
-      - { from: 0.3, to: 1, outputFrom: 70, outputTo: 100 }
+      - { from: 0.1, to: 0.3, outputFrom: 20, outputTo: 60 }
+      - { from: 0.3, to: 1, outputFrom: 60, outputTo: 100 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: SE-2
-    name: "Negative X/Twitter mention volume"
-    description: "Maps negative-sentiment mention count to a contribution."
+    name: "Negative sentiment volume on X"
+    description: "Maps negative social mention volume to a score contribution."
     type: piecewise-linear
     inputUnit: "count"
     outputRange: [0, 100]
     segments:
-      - { from: 0, to: 10, outputFrom: 100, outputTo: 80 }
-      - { from: 10, to: 100, outputFrom: 80, outputTo: 40 }
-      - { from: 100, to: 1000000, outputFrom: 40, outputTo: 0 }
+      - { from: 0, to: 100, outputFrom: 100, outputTo: 70 }
+      - { from: 100, to: 1000, outputFrom: 70, outputTo: 25 }
+      - { from: 1000, to: 1000000, outputFrom: 25, outputTo: 0 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: SE-4
     name: "News sentiment polarity"
-    description: "Maps LLM polarity classification to a contribution."
+    description: "Maps LLM polarity label to a numeric contribution."
     type: decision-table
     inputs:
       - { name: polarity, type: string }
@@ -94,36 +85,48 @@ rules:
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RQ-1
-    name: "Reserve composition extraction readiness"
-    description: "Normalizes completeness of extracted reserve composition into a review readiness contribution."
-    type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 40 }
-      - { from: 0.5, to: 0.9, outputFrom: 40, outputTo: 85 }
-      - { from: 0.9, to: 1, outputFrom: 85, outputTo: 100 }
+    name: "Reserve composition transparency"
+    description: "Extracts a normalized reserve composition signal from attestation text."
+    type: decision-table
+    inputs:
+      - { name: extractionState, type: string }
+    output: { name: scoreContribution, type: number }
+    cases:
+      - when: { extractionState: "verified" }
+        then: 100
+      - when: { extractionState: "needs_review" }
+        then: 50
+      - when: { extractionState: "missing" }
+        then: 0
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RQ-3
     name: "Independent attestor coverage"
-    description: "Maps attestor coverage completeness to a contribution."
+    description: "Maps attestor coverage quality to a contribution score."
     type: piecewise-linear
-    inputUnit: "ratio"
+    inputUnit: "count"
     outputRange: [0, 100]
     segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 50 }
-      - { from: 0.5, to: 1, outputFrom: 50, outputTo: 100 }
+      - { from: 0, to: 1, outputFrom: 0, outputTo: 25 }
+      - { from: 1, to: 2, outputFrom: 25, outputTo: 60 }
+      - { from: 2, to: 10, outputFrom: 60, outputTo: 100 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RQ-4
-    name: "Reserve liquidity tier completeness"
-    description: "Maps liquidity tier extraction completeness to a contribution."
-    type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 40 }
-      - { from: 0.5, to: 1, outputFrom: 40, outputTo: 100 }
+    name: "Reserve liquidity tier"
+    description: "Maps reserve liquidity classification to a contribution score."
+    type: decision-table
+    inputs:
+      - { name: tier, type: string }
+    output: { name: scoreContribution, type: number }
+    cases:
+      - when: { tier: "high" }
+        then: 100
+      - when: { tier: "medium" }
+        then: 60
+      - when: { tier: "low" }
+        then: 20
+      - when: { }
+        then: 0

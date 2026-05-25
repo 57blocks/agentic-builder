@@ -84,3 +84,33 @@ export async function readTddManifest(
     return null;
   }
 }
+
+/**
+ * Move `.ralph/tdd-evidence.jsonl` aside so a new session starts with a
+ * clean evidence ledger. Old events are kept (renamed with a sortable
+ * suffix) for forensic archaeology, but they no longer feed the gate.
+ *
+ * Without this rotation the evidence file is append-only across sessions
+ * and the gate's `hasGreenFail` aggregation eventually marks every test
+ * "once-failed-forever-blocking", structurally preventing the loop from
+ * ever turning green. See repo analysis 2026-05-19.
+ */
+export async function rotateTddEvidenceForNewSession(
+  outputDir: string,
+): Promise<{ rotated: boolean; archivedTo?: string }> {
+  const ralphDir = path.join(outputDir, ".ralph");
+  const currentPath = path.join(ralphDir, "tdd-evidence.jsonl");
+  try {
+    await fs.access(currentPath);
+  } catch {
+    return { rotated: false };
+  }
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const archivePath = path.join(ralphDir, `tdd-evidence.${ts}.jsonl`);
+  try {
+    await fs.rename(currentPath, archivePath);
+    return { rotated: true, archivedTo: archivePath };
+  } catch {
+    return { rotated: false };
+  }
+}

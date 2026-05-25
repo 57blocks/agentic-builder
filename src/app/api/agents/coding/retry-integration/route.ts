@@ -25,8 +25,12 @@ import {
   buildFrontendDesignContextForCodegen,
   readPencilDesignDoc,
 } from "@/lib/pipeline/frontend-design-context";
-import { writeTddManifestFromTasks } from "@/lib/pipeline/tdd-manifest";
+import {
+  writeTddManifestFromTasks,
+  rotateTddEvidenceForNewSession,
+} from "@/lib/pipeline/tdd-manifest";
 import { normalizeCodingMode } from "@/lib/pipeline/coding-mode";
+import { pruneDriftedTddTests } from "@/lib/pipeline/tdd-drift-cleanup";
 
 export const maxDuration = 600;
 
@@ -247,10 +251,36 @@ export async function POST(request: NextRequest) {
 
       try {
         try {
+          const rotated = await rotateTddEvidenceForNewSession(outputRoot);
+          if (rotated.rotated) {
+            console.log(
+              `[CodingAPI][retry-integration] TDD evidence rotated → ${rotated.archivedTo}`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `[CodingAPI][retry-integration] TDD evidence rotation failed: ${e}`,
+          );
+        }
+
+        try {
           await writeTddManifestFromTasks(outputRoot, codingTasks);
         } catch (e) {
           console.warn(
             `[CodingAPI][retry-integration] TDD manifest write failed: ${e}`,
+          );
+        }
+
+        try {
+          const drift = await pruneDriftedTddTests(outputRoot, codingTasks);
+          if (drift.removed.length > 0) {
+            console.log(
+              `[CodingAPI][retry-integration] Pruned ${drift.removed.length} drifted TDD test file(s): ${drift.removed.join(", ")}`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `[CodingAPI][retry-integration] TDD drift pruning failed: ${e}`,
           );
         }
         const streamIterator = await graph.stream(

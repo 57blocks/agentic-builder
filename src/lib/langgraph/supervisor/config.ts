@@ -58,3 +58,50 @@ export function workersForRole(role: CodingAgentRole, count: number): number {
 
 /** Max number of automated fix attempts inside the e2e_verify node. */
 export const MAX_E2E_VERIFY_FIX_ATTEMPTS = 10;
+
+/**
+ * Hard circuit-breaker: the TOTAL number of IntegrationVerifyFix iterations
+ * allowed across the *entire* session, summed over every re-entry of the
+ * `integration_verify` node. This is deliberately NOT per-loop — the
+ * `tdd_green_verify → integration_verify` edge can re-enter the node many
+ * times, and a per-loop counter (which resets to 0 on every entry) gave the
+ * loop an unbounded global budget. When the TDD hard gate stays red the graph
+ * looped forever (see runtime.log 2026-05-20: ~7 identical no-op cycles).
+ *
+ * Once cumulative `integrationFixAttempts` reaches this budget the node
+ * short-circuits and the routing predicates stop sending control back to
+ * `integration_verify`, so the session converges to summary instead of
+ * spinning. Override with INTEGRATION_VERIFY_FIX_TOTAL_BUDGET (clamped).
+ */
+export function readIntegrationVerifyFixTotalBudget(): number {
+  const raw = Number(process.env.INTEGRATION_VERIFY_FIX_TOTAL_BUDGET ?? "300");
+  if (!Number.isFinite(raw)) return 300;
+  return Math.max(20, Math.min(2000, Math.floor(raw)));
+}
+
+export const INTEGRATION_VERIFY_FIX_TOTAL_BUDGET =
+  readIntegrationVerifyFixTotalBudget();
+
+/**
+ * Remaining IntegrationVerifyFix iteration budget for the *next* node entry,
+ * given how many cumulative attempts have already been spent. Pure helper so
+ * the arithmetic is unit-testable in isolation. Never negative.
+ */
+export function remainingIntegrationVerifyBudget(
+  priorAttempts: number,
+  totalBudget: number = INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+): number {
+  const prior = Number.isFinite(priorAttempts) ? Math.max(0, priorAttempts) : 0;
+  return Math.max(0, totalBudget - prior);
+}
+
+/**
+ * Whether the cumulative IntegrationVerifyFix budget has been exhausted, used
+ * by routing predicates to refuse another `integration_verify` re-entry.
+ */
+export function integrationVerifyBudgetExhausted(
+  priorAttempts: number,
+  totalBudget: number = INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+): boolean {
+  return remainingIntegrationVerifyBudget(priorAttempts, totalBudget) <= 0;
+}
