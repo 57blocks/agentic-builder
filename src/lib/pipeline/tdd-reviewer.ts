@@ -90,6 +90,42 @@ function coversRequirementIds(content: string, requirementIds: string[] | undefi
   return ids.some((id) => content.includes(id));
 }
 
+function hasUnmockedDbImport(file: string, content: string): boolean {
+  if (!file.startsWith("backend/")) return false;
+  if (!/from\s+["'][^"']*\/db["']/.test(content)) return false;
+  if (/vi\.mock\s*\(\s*["'][^"']*\/db["']/.test(content)) return false;
+  if (/sqlite::memory:/.test(content)) return false;
+  return true;
+}
+
+function isExternalApiTest(file: string): boolean {
+  return /services\/externalApis\//.test(file);
+}
+
+function hasNetworkMock(content: string): boolean {
+  return (
+    /vi\.mock\s*\(/.test(content) ||
+    /vi\.fn\s*\(/.test(content) ||
+    /globalThis\.fetch\s*=\s*/.test(content) ||
+    /msw|nock|undici[^"']*MockAgent/.test(content)
+  );
+}
+
+function callsRealHttp(content: string): boolean {
+  return /\bfetch\s*\(|axios|got\(|undici/.test(content);
+}
+
+function assertsLiteralApiUrl(content: string): boolean {
+  return /toHaveBeenCalledWith\s*\(\s*["']\/api\//.test(content);
+}
+
+function hasFrontendEnvStub(content: string): boolean {
+  return (
+    /vi\.stubEnv\s*\(\s*["']VITE_API_BASE_URL["']/.test(content) ||
+    /expect\.(stringContaining|stringMatching)/.test(content)
+  );
+}
+
 async function reviewOne(
   outputDir: string,
   test: TddManifestTest,
@@ -186,6 +222,43 @@ async function reviewOne(
       file: relPath,
       message:
         "TDD test does not cite any covered requirement id from coversRequirementIds.",
+    });
+  }
+  if (hasUnmockedDbImport(relPath, content)) {
+    findings.push({
+      testId: test.id,
+      taskId: test.taskId,
+      priority,
+      severity: "error",
+      file: relPath,
+      message:
+        "TDD test imports from \"../db\" without `vi.mock(...)`-ing it. Backend tests must mock the real Sequelize/db module and use an in-memory SQLite (see backend/src/models/index.test.ts).",
+    });
+  }
+  if (isExternalApiTest(relPath) && callsRealHttp(content) && !hasNetworkMock(content)) {
+    findings.push({
+      testId: test.id,
+      taskId: test.taskId,
+      priority,
+      severity: "error",
+      file: relPath,
+      message:
+        "TDD test calls fetch/axios against an external API without a network mock (vi.fn / msw / nock). Live network access is not permitted.",
+    });
+  }
+  if (
+    test.type === "frontend-service" &&
+    assertsLiteralApiUrl(content) &&
+    !hasFrontendEnvStub(content)
+  ) {
+    findings.push({
+      testId: test.id,
+      taskId: test.taskId,
+      priority,
+      severity: "warn",
+      file: relPath,
+      message:
+        "TDD test asserts a literal \"/api/...\" URL but does not stub VITE_API_BASE_URL or use expect.stringContaining(...). The assertion drifts when the env injects a base URL.",
     });
   }
 

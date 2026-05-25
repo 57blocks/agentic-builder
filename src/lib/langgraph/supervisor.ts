@@ -103,6 +103,8 @@ import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
 import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
+import { formatRuntimeSmokeBlock } from "@/lib/pipeline/runtime-smoke-block";
+import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
   triageE2eFailures,
@@ -120,6 +122,8 @@ import {
   parsedWorkerLimit,
   workersForRole,
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
+  INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+  remainingIntegrationVerifyBudget,
 } from "./supervisor/config";
 import { recordSupervisorLlmUsage } from "./supervisor/usage-tracking";
 import {
@@ -5203,8 +5207,48 @@ async function integrationVerifyAndFix(
 ): Promise<Partial<SupervisorState>> {
   const label = "[Supervisor] IntegrationVerifyFix";
 
+  // Cumulative circuit-breaker. `integrationFixAttempts` carries the TOTAL
+  // iterations spent across every prior re-entry of this node (the reducer is
+  // replace-semantics, so we add to it ourselves and return the new total).
+  // Once the session-wide budget is gone we refuse to run another LLM loop —
+  // the routing predicates also stop sending us control, so the graph
+  // converges to summary instead of spinning. See runtime.log 2026-05-20.
+  const priorIntegrationAttempts = Math.max(
+    0,
+    state.integrationFixAttempts ?? 0,
+  );
+  const remainingBudget = remainingIntegrationVerifyBudget(
+    priorIntegrationAttempts,
+  );
+  if (remainingBudget <= 0) {
+    console.warn(
+      `${label}: cumulative budget exhausted (${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); skipping repair loop and reporting fail so the graph can converge.`,
+    );
+    getRepairEmitter(state.sessionId)({
+      stage: "integration-gate",
+      event: "integration_verify_budget_exhausted",
+      details: {
+        priorAttempts: priorIntegrationAttempts,
+        totalBudget: INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+      },
+    });
+    return {
+      integrationErrors: [
+        state.integrationErrors?.trim(),
+        `IntegrationVerifyFix circuit-breaker: reached the cumulative budget of ${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations across all repair passes without clearing the gate. Stopping to avoid an infinite loop. Inspect .ralph/runtime-smoke.json and .ralph/tdd-review.json for the unresolved blockers.`,
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 4000),
+      integrationFixAttempts: priorIntegrationAttempts,
+    };
+  }
+
   console.log(
-    `${label}: starting agentic loop (max ${readIntegrationVerifyFixMaxIterations()} iterations; one context compression on overflow)...`,
+    `${label}: starting agentic loop (max ${Math.min(
+      readIntegrationVerifyFixMaxIterations(),
+      remainingBudget,
+    )} iterations this pass; ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} cumulative budget used; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -5787,6 +5831,7 @@ async function integrationVerifyAndFix(
     "1. Resolve import/package mismatches so every runtime import is declared in the correct package.json.",
     "2. Remove or merge residual duplicate implementations when the same responsibility exists in old/new canonical paths.",
     "3. **Stagnation guard**: If you detect yourself rereading the same file or running the same command without making a `write_file` change for 3+ iterations, STOP. Either: (a) make the minimal targeted fix right now, or (b) if all remaining issues are WARN-only, call report_done(pass) with an explanation. Looping without mutations wastes budget and never converges.",
+    "5. **Working directory & probing**: every `bash`/`read_file` already runs from the project directory shown at the top of the user message. Do NOT `cd` to absolute paths like `/home/user`, and do NOT keep probing for files that returned FILE_NOT_FOUND (e.g. `.ralph/route-audit.json` may not exist) — the actionable audit findings are already inlined in this message as the route-audit / contract / runtime-smoke / TDD repair blocks. Act on those blocks instead of re-fetching files.",
     "4. Treat repeated frontend TypeScript templates as cluster problems, not isolated file problems: fix the shared abstraction or repeated pattern first, then return to leaf files.",
     "",
     "## Phase 2.3 — Cluster priority order (READ BEFORE EDITING ANY LEAF FILE)",
@@ -5922,7 +5967,61 @@ async function integrationVerifyAndFix(
       lines.push(
         "These tasks are PRE-CLASSIFIED. Execute them in one batch pass before re-running the route audit. Full data: `.ralph/contract-usage-coverage.json`.",
       );
+      lines.push(
+        "**MUST fix before report_done(pass)**: each frontend-wiring-missing entry above MUST be addressed by (a) editing the corresponding frontend client/hook to call the endpoint, OR (b) deleting the contract entry from API_CONTRACTS.json if the PRD does not actually require it. Calling report_done(pass) while wiring-missing entries remain leaves the gate red.",
+      );
       coverageBlock = lines.join("\n");
+    }
+  }
+
+  // Fallback: even if the in-memory coverageResult is empty (e.g. retry
+  // sub-graph that skipped preflight), surface the on-disk audit so the
+  // worker still sees the 14-wiring backlog instead of starting blind.
+  if (!coverageBlock) {
+    try {
+      const raw = await fsRead(
+        ".ralph/contract-usage-coverage.json",
+        state.outputDir,
+      );
+      if (!raw.startsWith("FILE_NOT_FOUND") && !raw.startsWith("REJECTED")) {
+        const parsed: unknown = JSON.parse(raw);
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          "classifications" in parsed &&
+          Array.isArray((parsed as { classifications: unknown[] }).classifications)
+        ) {
+          const classifications = (
+            parsed as {
+              classifications: Array<{
+                case?: string;
+                contract?: { method?: string; endpoint?: string };
+              }>;
+            }
+          ).classifications;
+          const wiring = classifications.filter(
+            (c) => c.case === "frontend-wiring-missing",
+          );
+          if (wiring.length > 0) {
+            const lines: string[] = [
+              "",
+              "## Contract usage coverage (from .ralph snapshot)",
+              `**Case (1) Frontend wiring missing (${wiring.length})** — these contracts have no frontend caller. Either wire them up or remove from API_CONTRACTS.json. MUST fix before report_done(pass).`,
+            ];
+            for (const c of wiring.slice(0, 10)) {
+              lines.push(
+                `  - ${c.contract?.method ?? "?"} ${c.contract?.endpoint ?? "?"}`,
+              );
+            }
+            if (wiring.length > 10) {
+              lines.push(`  - … (+${wiring.length - 10} more)`);
+            }
+            coverageBlock = lines.join("\n");
+          }
+        }
+      }
+    } catch {
+      /* ignore — no actionable snapshot available */
     }
   }
 
@@ -5946,6 +6045,9 @@ async function integrationVerifyAndFix(
     ? formatMigrationCoverageBlock(migrationCoverageResult)
     : "";
   const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
+  const runtimeSmokeBlock = await formatRuntimeSmokeBlock(state.outputDir, {
+    sessionId: state.sessionId,
+  });
 
   const openingUserContent = [
     `Project directory: ${state.outputDir}`,
@@ -5954,6 +6056,7 @@ async function integrationVerifyAndFix(
     coverageBlock,
     migrationCoverageBlock,
     runtimeAuditBlock,
+    runtimeSmokeBlock,
     tddRepairBlock,
     dependencyAuditBlock,
     residualConflictBlock,
@@ -5986,7 +6089,13 @@ async function integrationVerifyAndFix(
   let totalCostUsd = 0;
   let contextCompressionUsed = false;
   const integrationReasoningOptions = buildIntegrationReasoningOptions();
-  const maxIterations = readIntegrationVerifyFixMaxIterations();
+  // This pass may run at most the per-loop max, but never more than the
+  // remaining session-wide budget — so cumulative attempts across all
+  // re-entries can never exceed INTEGRATION_VERIFY_FIX_TOTAL_BUDGET.
+  const maxIterations = Math.min(
+    readIntegrationVerifyFixMaxIterations(),
+    remainingBudget,
+  );
   let validationStale = true;
   let lastMutationAt: string | null = null;
   let lastMutationReason = "initial integration review";
@@ -6363,13 +6472,17 @@ async function integrationVerifyAndFix(
     console.log(`${label}: iteration ${iterations}`);
 
     if (iterations > maxIterations) {
+      const cumulativeSoFar = priorIntegrationAttempts + iterations - 1;
+      const budgetCapped = cumulativeSoFar >= INTEGRATION_VERIFY_FIX_TOTAL_BUDGET;
       console.warn(
-        `${label}: reached max iterations (${maxIterations}); running final scoped validation before stopping.`,
+        `${label}: reached max iterations for this pass (${maxIterations}; cumulative ${cumulativeSoFar}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); running final scoped validation before stopping.`,
       );
       const maxIterationGate = await runFinalScopedValidationGates();
       finalStatus = maxIterationGate.pass ? "pass" : "fail";
       finalSummary = [
-        `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS=${maxIterations}.`,
+        budgetCapped
+          ? `Stopped after reaching the cumulative INTEGRATION_VERIFY_FIX_TOTAL_BUDGET=${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} across all repair passes.`
+          : `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS for this pass (${maxIterations}).`,
         maxIterationGate.summary,
       ].join("\n\n");
       break;
@@ -6439,9 +6552,42 @@ async function integrationVerifyAndFix(
       } catch {
         /* ignore */
       }
+      // Extra guidance appended to a tool result before it is pushed back to
+      // the model (e.g. "scoped suite passed but the TDD hard gate is red").
+      let toolResultSuffix = "";
 
       if (tc.function.name === "report_done") {
         const reportedStatus = (args.status as "pass" | "fail") ?? "fail";
+
+        if (reportedStatus === "pass") {
+          // Even when scoped validation suite is clean, the TDD hard gate
+          // (P0 review errors / latest GREEN failures) can still be red.
+          // Without this guard the worker reports done after only fixing
+          // tsc/build/smoke, leaving the TDD loop spinning forever.
+          const tddGate = await evaluateTddHardGate(state.outputDir, {
+            sessionId: state.sessionId,
+          });
+          if (!tddGate.pass) {
+            const rejectionMsg = [
+              "REJECTED: report_done(pass) is not allowed — the TDD hard gate is still red.",
+              ...tddGate.reasons.map((r) => `- ${r}`),
+              "Read `.ralph/tdd-review.json` and the GREEN failure excerpts in the TDD Repair Block above, then either:",
+              "  (a) Edit the failing test files to fix mocks / assertions / requirement-id citations, OR",
+              "  (b) Edit the implementation files the tests target so the assertions pass.",
+              "Re-run the failing test command via `bash` to confirm, then call report_done(pass) again.",
+            ].join("\n");
+            console.log(
+              `${label}: REJECTED report_done(pass) — TDD hard gate red: ${tddGate.reasons.join("; ")}`,
+            );
+            messages.push({
+              role: "tool",
+              content: rejectionMsg,
+              tool_call_id: tc.id,
+              name: "report_done",
+            });
+            continue;
+          }
+        }
 
         if (reportedStatus === "pass" && validationStale) {
           console.log(
@@ -6573,12 +6719,39 @@ async function integrationVerifyAndFix(
             }
             if (parsedSuite.pass) {
               markAllScopedValidationsFresh("run_validation_suite pass=true");
-              finalStatus = "pass";
-              finalSummary = [
-                "run_validation_suite passed; integration verification completed by system.",
-                parsedSuite.summary,
-              ].join("\n\n");
-              doneSignaled = true;
+              // The scoped suite (frontend/backend tsc + build + smoke) passing
+              // is NOT sufficient to finish: the TDD hard gate (P0 review
+              // errors / latest GREEN failures) can still be red, and a shallow
+              // `backend_smoke` does not prove the backend actually boots.
+              // Without this guard the worker terminates here on the very first
+              // validation pass and never touches the TDD Repair Block — the
+              // root cause of the no-op repair loop in runtime.log 2026-05-20.
+              const suiteTddGate = await evaluateTddHardGate(state.outputDir, {
+                sessionId: state.sessionId,
+              });
+              if (suiteTddGate.pass) {
+                finalStatus = "pass";
+                finalSummary = [
+                  "run_validation_suite passed; integration verification completed by system.",
+                  parsedSuite.summary,
+                ].join("\n\n");
+                doneSignaled = true;
+              } else {
+                toolResultSuffix = [
+                  "",
+                  "",
+                  "⚠️ Scoped validation passed, but the TDD hard gate is still RED — NOT done yet:",
+                  ...suiteTddGate.reasons.map((r) => `- ${r}`),
+                  "Open the **TDD Repair Block** in the first user message and apply each concrete patch:",
+                  "  • For a *missing* P0 test file: read `.ralph/test-manifest.json`, find the test by id, and write the `.test.ts` file yourself (real assertions, db mocked with sqlite::memory:).",
+                  "  • For an *unmocked ../db* import: add `vi.mock(\"../../../db\", …)` mirroring backend/src/models/index.test.ts.",
+                  "  • For a GREEN failure: run the test command via `bash`, read the failing assertion, and fix the test or the implementation it targets.",
+                  "Then re-run `run_validation_suite` and call `report_done(pass)` only after the TDD gate is green.",
+                ].join("\n");
+                console.log(
+                  `${label}: run_validation_suite passed but TDD hard gate red (${suiteTddGate.reasons.join("; ")}) — continuing repair loop.`,
+                );
+              }
             } else if (parsedSuite.failedSuites.length > 0) {
               finalSummary = parsedSuite.failedSuites.join("\n");
             }
@@ -6637,7 +6810,7 @@ async function integrationVerifyAndFix(
         );
         messages.push({
           role: "tool",
-          content: result,
+          content: toolResultSuffix ? `${result}${toolResultSuffix}` : result,
           tool_call_id: tc.id,
           name: tc.function.name,
         });
@@ -7361,14 +7534,17 @@ async function integrationVerifyAndFix(
     });
   }
 
+  const cumulativeIntegrationAttempts = priorIntegrationAttempts + iterations;
   console.log(
-    `${label}: done — status=${finalStatus} iterations=${iterations} cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
+    `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
   );
 
   return {
     integrationErrors:
       finalStatus === "pass" ? "" : finalSummary.slice(0, 4000),
-    integrationFixAttempts: iterations,
+    // Accumulate across re-entries so the session-wide circuit-breaker can
+    // fire. The state reducer is replace-semantics, hence the explicit add.
+    integrationFixAttempts: cumulativeIntegrationAttempts,
     totalCostUsd,
   };
 }
