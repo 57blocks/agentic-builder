@@ -34,7 +34,18 @@ const AppServiceSchema = z.object({
   build: z.string().optional(),
   start: z.string(),
   port: z.number().int().min(1).max(65535).optional(),
+  /**
+   * Secret / dynamic env keys. Rendered as `${KEY}` in compose so they read
+   * from Dokploy-stored environment (or a project-root `.env`). Each entry
+   * also appears in `.env.example` for the local-dev path.
+   */
   envs: z.array(z.string()).default([]),
+  /**
+   * Non-secret config that's safe to bake into the compose file as literal
+   * values (NODE_ENV=production, PORT=3001, USE_REDIS_QUEUE=1, ...). These
+   * are NOT written to `.env.example` and don't depend on any external env.
+   */
+  staticEnvs: z.record(z.string(), z.string()).default({}),
   depends: z.array(z.string()).default([]),
   servesStatic: z.boolean().default(false),
 });
