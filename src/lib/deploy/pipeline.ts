@@ -1,5 +1,4 @@
 import { readKickoffRepoMetadata, pushGeneratedCodeToKickoffRepo } from "@/lib/pipeline/push-kickoff-repo";
-import { readKickoffDatabaseMetadata } from "@/lib/pipeline/kickoff-database";
 import {
   readKickoffInfraMetadata,
   internalDatabaseUrlFrom,
@@ -74,28 +73,21 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
   }
   const verifiedRepo = repoMeta;
 
-  // Step 3: Load infra URLs. Prefer the unified kickoff-infra.json (Dokploy
-  // managed Postgres + Redis on a per-app project). Fall back to the legacy
-  // shared-PG kickoff-database.json so existing projects keep working.
+  // Step 3: Load infra URLs from kickoff-infra.json (Dokploy-managed
+  // per-app Postgres + Redis).
   emit(jobId, "create-database", "running", "Loading infra metadata...");
   const infraMeta = await readKickoffInfraMetadata(projectRoot);
-  let databaseUrl: string | null = internalDatabaseUrlFrom(infraMeta);
+  const databaseUrl: string | null = internalDatabaseUrlFrom(infraMeta);
   const redisInternalUrl = internalRedisUrlFrom(infraMeta);
-  let reusedDokployProjectId: string | null = infraMeta?.dokployProjectId ?? null;
-  let reusedDokployEnvId: string | null = infraMeta?.dokployEnvironmentId ?? null;
+  const reusedDokployProjectId: string | null = infraMeta?.dokployProjectId ?? null;
+  const reusedDokployEnvId: string | null = infraMeta?.dokployEnvironmentId ?? null;
   if (!databaseUrl) {
-    const dbMeta = await readKickoffDatabaseMetadata(projectRoot);
-    if (!dbMeta?.databaseUrl) {
-      emit(jobId, "create-database", "error", "No infra metadata found. Re-run kickoff with DOKPLOY_BASE_URL+DOKPLOY_API_KEY (preferred) or SHARED_PG_CONNECTION_STRING.");
-      failJob(jobId);
-      return;
-    }
-    databaseUrl = dbMeta.databaseUrl;
-    emit(jobId, "create-database", "done", `Database ready (legacy shared PG: ${dbMeta.appName})`);
-  } else {
-    const services = (infraMeta?.services ?? []).map((s) => s.kind).join("+");
-    emit(jobId, "create-database", "done", `Infra ready (${services || "none"})`);
+    emit(jobId, "create-database", "error", "No kickoff-infra.json found. Re-run kickoff with DOKPLOY_URL + DOKPLOY_TOKEN set so per-app Postgres/Redis get provisioned.");
+    failJob(jobId);
+    return;
   }
+  const services = (infraMeta?.services ?? []).map((s) => s.kind).join("+");
+  emit(jobId, "create-database", "done", `Infra ready (${services || "none"})`);
 
   // Step 4: Create the compose stack inside the same Dokploy project as the
   // managed services (when kickoff-infra.json is present). Otherwise create a

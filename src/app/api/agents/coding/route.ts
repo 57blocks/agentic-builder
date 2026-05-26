@@ -1107,9 +1107,9 @@ export async function POST(request: NextRequest) {
     const existingBackendEnv = await fs
       .readFile(backendEnvPath, "utf-8")
       .catch(() => "");
-    // Prefer the unified kickoff-infra.json (Dokploy-managed per-app PG+Redis).
-    // Falls back to: explicit override env, then per-request body, then legacy
-    // kickoff-database.json that the existing resolver already handles.
+    // Read kickoff-infra.json (Dokploy-managed per-app PG+Redis) for the
+    // backend's DATABASE_URL. Falls back to explicit override env / per-request
+    // body when infra metadata is missing.
     const kickoffInfra = await readKickoffInfraMetadata(process.cwd()).catch(
       () => null,
     );
