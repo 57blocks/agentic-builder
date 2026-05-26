@@ -1,2 +1,11 @@
 node_modules
 dist
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs / coverage
+*.log
+coverage
