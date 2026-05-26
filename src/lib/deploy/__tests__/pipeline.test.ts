@@ -4,8 +4,10 @@ vi.mock("@/lib/pipeline/push-kickoff-repo", () => ({
   readKickoffRepoMetadata: vi.fn(),
   pushGeneratedCodeToKickoffRepo: vi.fn(),
 }));
-vi.mock("@/lib/pipeline/kickoff-database", () => ({
-  readKickoffDatabaseMetadata: vi.fn(),
+vi.mock("@/lib/pipeline/kickoff-infra", () => ({
+  readKickoffInfraMetadata: vi.fn(),
+  internalDatabaseUrlFrom: vi.fn(),
+  internalRedisUrlFrom: vi.fn(),
 }));
 vi.mock("../dokploy", () => ({
   createDokployProject: vi.fn(),
@@ -22,7 +24,11 @@ vi.mock("../job-manager", () => ({
 }));
 
 import { readKickoffRepoMetadata, pushGeneratedCodeToKickoffRepo } from "@/lib/pipeline/push-kickoff-repo";
-import { readKickoffDatabaseMetadata } from "@/lib/pipeline/kickoff-database";
+import {
+  readKickoffInfraMetadata,
+  internalDatabaseUrlFrom,
+  internalRedisUrlFrom,
+} from "@/lib/pipeline/kickoff-infra";
 import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "../dokploy";
 import { emitStep, completeJob, failJob } from "../job-manager";
 import { runDeployPipeline } from "../pipeline";
@@ -43,11 +49,26 @@ beforeEach(() => {
     savedAt: new Date().toISOString(),
   });
   vi.mocked(pushGeneratedCodeToKickoffRepo).mockResolvedValue({ ok: true, message: "Pushed" });
-  vi.mocked(readKickoffDatabaseMetadata).mockResolvedValue({
-    databaseUrl: "postgresql://user:pass@host:5432/my_app",
+  vi.mocked(readKickoffInfraMetadata).mockResolvedValue({
+    dokployProjectId: "kickoff-proj",
+    dokployEnvironmentId: "kickoff-env",
     appName: "my-app",
     savedAt: new Date().toISOString(),
+    services: [
+      {
+        kind: "postgres",
+        id: "pg-1",
+        appName: "my-app-pg",
+        publicUrl: "postgresql://app:pw@public:5432/my_app",
+        internalUrl: "postgresql://app:pw@my-app-pg:5432/my_app",
+        externalPort: 5432,
+      },
+    ],
   });
+  vi.mocked(internalDatabaseUrlFrom).mockReturnValue(
+    "postgresql://app:pw@my-app-pg:5432/my_app",
+  );
+  vi.mocked(internalRedisUrlFrom).mockReturnValue(null);
   vi.mocked(createDokployProject).mockResolvedValue({ projectId: "proj-1", environmentId: "env-1" });
   vi.mocked(createDokployCompose).mockResolvedValue({ composeId: "comp-1", appName: "my-app-abc" });
   vi.mocked(createDokployDomain).mockResolvedValue(undefined);
@@ -90,8 +111,10 @@ describe("runDeployPipeline", () => {
     expect(pushGeneratedCodeToKickoffRepo).not.toHaveBeenCalled();
   });
 
-  it("calls failJob when database metadata is missing", async () => {
-    vi.mocked(readKickoffDatabaseMetadata).mockResolvedValue(null);
+  it("calls failJob when infra metadata is missing", async () => {
+    vi.mocked(readKickoffInfraMetadata).mockResolvedValue(null);
+    vi.mocked(internalDatabaseUrlFrom).mockReturnValue(null);
+    vi.mocked(internalRedisUrlFrom).mockReturnValue(null);
 
     await runDeployPipeline({
       jobId: "job-1",
