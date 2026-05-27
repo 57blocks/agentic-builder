@@ -22,6 +22,7 @@ import { intentSnapshot } from "./preparation/input/intent/snapshot";
 // ── Preparation > Core Docs ──
 import { prdAgent } from "./preparation/core-docs/prd/agent";
 import { PrdUI } from "./preparation/core-docs/prd/ui";
+import { prdSnapshot } from "./preparation/core-docs/prd/snapshot";
 
 // ── Preparation > Tech Docs ──
 import { trdAgent } from "./preparation/tech-docs/trd/agent";
@@ -86,7 +87,7 @@ export const STEP_REGISTRY: Record<StepId, StepEntry> = {
   // Preparation
   initial:      { component: InitialUI,      agent: initialAgent,      snapshot: initialSnapshot },
   intent:       { component: IntentUI,       agent: intentAgent,       snapshot: intentSnapshot },
-  prd:          { component: PrdUI,          agent: prdAgent,          snapshot: createStepDataSnapshot("prd") },
+  prd:          { component: PrdUI,          agent: prdAgent,          snapshot: prdSnapshot },
   trd:          { component: TrdUI,          agent: trdAgent,          snapshot: createStepDataSnapshot("trd") },
   sysdesign:    { component: SysDesignUI,    agent: sysdesignAgent,    snapshot: createStepDataSnapshot("sysdesign") },
   implguide:    { component: ImplGuideUI,    agent: implguideAgent,    snapshot: createStepDataSnapshot("implguide") },
