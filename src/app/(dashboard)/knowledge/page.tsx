@@ -150,14 +150,14 @@ function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onCl
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.96, opacity: 0, y: 8 }}
         transition={{ type: "spring", stiffness: 360, damping: 28 }}
-        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"
+        className="relative bg-white rounded-[4px] shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e2e8f0]">
           <div className="flex items-center gap-3 min-w-0">
             {record.imagePath && (
-              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-100">
+              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-[#e2e8f0] shrink-0 bg-slate-100">
                 <Image src={record.imagePath} alt={record.imageName ?? ""} fill className="object-cover" unoptimized />
               </div>
             )}
@@ -174,7 +174,7 @@ function StyleSpecModal({ record, onClose }: { record: KnowledgeRecordFull; onCl
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 px-6 py-2 border-b border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-1 px-6 py-2 border-b border-[#f1f5f9] bg-slate-50">
           {(["html", "markdown", "raw"] as const).map((id) => (
             <button
               key={id}
@@ -329,7 +329,7 @@ function StyleSpecCard({
 function StyleGuideSection({ record }: { record: KnowledgeRecordFull }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-[4px] border border-[#e2e8f0] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] overflow-hidden">
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 transition-colors"
@@ -338,10 +338,10 @@ function StyleGuideSection({ record }: { record: KnowledgeRecordFull }) {
           <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
             57B Library
           </span>
-          <span className="text-sm font-semibold text-slate-800">{record.title}</span>
+          <span className="text-sm font-semibold text-[#0f172a]">{record.title}</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-[#64748b]">
             {record.metrics.hits ?? 0} hits · score {(record.metrics.score ?? 0).toFixed(2)}
           </span>
           <motion.svg
@@ -575,7 +575,7 @@ export default function KnowledgePage() {
   const activeInfo = INDUSTRIES.find((i) => i.id === activeIndustry)!;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#f8f9ff]">
       {/* Toast */}
       <AnimatePresence>
         {toast && (
@@ -610,15 +610,15 @@ export default function KnowledgePage() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="border-b border-slate-200 bg-white px-8 py-5 sticky top-0 z-40">
+      <div className="border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-8 py-5 sticky top-0 z-40">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
               <SparkleIcon />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900 leading-tight">Design Knowledge Base</h1>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h1 className="text-lg font-bold text-[#0f172a] leading-tight">Design Knowledge Base</h1>
+              <p className="text-xs text-[#64748b] mt-0.5">
                 57B company style library · {records.length} knowledge records · auto-injected into DesignAgent
               </p>
             </div>
@@ -638,21 +638,21 @@ export default function KnowledgePage() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-300 bg-violet-50 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-xs font-medium text-[#64748b] hover:bg-slate-50 disabled:opacity-50 transition-all"
             >
               <UploadIcon />{uploading ? "Analysing…" : `Upload to ${activeInfo.label}`}
             </button>
             <button
               onClick={() => void handleBatchAnalyse()}
               disabled={batchAnalysing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-xs font-medium text-[#64748b] hover:bg-slate-50 disabled:opacity-50 transition-all"
             >
               <MagicWandIcon />{batchAnalysing ? "Analysing…" : "Analyse All Images"}
             </button>
-            <button onClick={() => void handleReseed()} disabled={seeding} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all">
+            <button onClick={() => void handleReseed()} disabled={seeding} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-xs font-medium text-[#64748b] hover:bg-slate-50 disabled:opacity-50 transition-all">
               <SeedIcon />{seeding ? "Seeding…" : "Re-seed Library"}
             </button>
-            <button onClick={() => void handleRefresh()} disabled={refreshing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 disabled:opacity-50 transition-all">
+            <button onClick={() => void handleRefresh()} disabled={refreshing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#712ae2] text-white text-xs font-medium hover:bg-[#6b24da] disabled:opacity-50 transition-all">
               <RefreshIcon spinning={refreshing} />{refreshing ? "Capturing…" : `Capture ${activeInfo.label} Trends`}
             </button>
           </div>
@@ -664,7 +664,7 @@ export default function KnowledgePage() {
             const count = records.filter((r) => r.industry === ind.id).length;
             const isActive = ind.id === activeIndustry;
             return (
-              <button key={ind.id} onClick={() => setActiveIndustry(ind.id)} className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium transition-all ${isActive ? INDUSTRY_TAB_ACTIVE[ind.id] : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"}`}>
+              <button key={ind.id} onClick={() => setActiveIndustry(ind.id)} className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium transition-all ${isActive ? INDUSTRY_TAB_ACTIVE[ind.id] : "bg-white text-[#64748b] border border-[#e2e8f0] hover:bg-slate-50"}`}>
                 <span>{ind.emoji}</span>
                 <span>{ind.label}</span>
                 <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isActive ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{count}</span>
@@ -688,7 +688,7 @@ export default function KnowledgePage() {
             <motion.div key={activeIndustry} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.18 }} className="space-y-8">
 
               {/* Trigger keywords banner */}
-              <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${INDUSTRY_ACCENT[activeIndustry]}`}>
+              <div className={`flex items-start gap-3 rounded-[4px] border px-4 py-3 text-sm ${INDUSTRY_ACCENT[activeIndustry]}`}>
                 <SparkleIcon />
                 <div>
                   <span className="font-semibold">Auto-inject trigger keywords: </span>
@@ -701,20 +701,20 @@ export default function KnowledgePage() {
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-sm font-bold text-slate-800">
+                    <h2 className="text-sm font-bold text-[#0f172a]">
                       ✨ Generated Style Specs
-                      <span className="ml-2 text-slate-400 font-normal text-xs">
+                      <span className="ml-2 text-[#94a3b8] font-normal text-xs">
                         ({styleSpecRecords.length} spec{styleSpecRecords.length === 1 ? "" : "s"})
                       </span>
                     </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="text-xs text-[#64748b] mt-0.5">
                       Each uploaded image OR captured trend site is analysed by a vision LLM → produces a Markdown summary + a full HTML visualisation document.
                       Both are recalled into DesignAgent when the project matches this industry.
                     </p>
                   </div>
                 </div>
                 {styleSpecRecords.length === 0 ? (
-                  <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-8 text-center">
+                  <div className="rounded-[4px] border-2 border-dashed border-[#e2e8f0] bg-white p-8 text-center">
                     <p className="text-sm text-slate-500 mb-1">No Style Specs yet for this bucket.</p>
                     <p className="text-xs text-slate-400 mb-3">
                       Click <strong>Capture {activeInfo.label} Trends</strong> above to auto-discover and screenshot trending sites,{" "}
@@ -749,9 +749,9 @@ export default function KnowledgePage() {
                     <StyleGuideSection record={libraryRecord} />
                   </div>
                 ) : (
-                  <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-8 text-center">
+                  <div className="rounded-[4px] border-2 border-dashed border-[#e2e8f0] bg-white p-8 text-center">
                     <p className="text-sm text-slate-500 mb-3">No 57B library record found for this industry.</p>
-                    <button onClick={() => void handleReseed()} disabled={seeding} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-all">
+                    <button onClick={() => void handleReseed()} disabled={seeding} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#712ae2] text-white text-sm font-medium hover:bg-[#6b24da] disabled:opacity-50 transition-all">
                       <SeedIcon />{seeding ? "Seeding…" : "Seed 57B Library"}
                     </button>
                   </div>
@@ -778,7 +778,7 @@ export default function KnowledgePage() {
                       const markdown = extractTrendRefreshMarkdown(r.body) ?? r.body;
                       const hasHtml = Boolean(extractStyleSpecHtml(r.body));
                       return (
-                        <div key={r.id} className="bg-white rounded-xl border border-dashed border-slate-300 p-4">
+                        <div key={r.id} className="bg-white rounded-[4px] border border-dashed border-[#e2e8f0] p-4">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Trend Refresh</span>
                             {date && <span className="text-[11px] text-slate-400">{date}</span>}

@@ -2,14 +2,13 @@
 
 import { useRef, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { X, ExternalLink, RefreshCw, CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
+import { X, RefreshCw, CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
 import type { CodingTask, KickoffWorkItem, AgentLogEntry, TaskSubStep } from "@/lib/pipeline/types";
 import { FileActivityPanel } from "./FileActivityPanel";
 
 interface TaskDetailPanelProps {
   task: CodingTask | KickoffWorkItem | null;
   allAgentLogs: AgentLogEntry[];
-  supervisorLogs: AgentLogEntry[];
   onClose: () => void;
   onRetry?: (taskId: string) => void;
 }
@@ -107,7 +106,6 @@ function getDuration(task: CodingTask | KickoffWorkItem): string | null {
 export function TaskDetailPanel({
   task,
   allAgentLogs,
-  supervisorLogs: _supervisorLogs,
   onClose,
   onRetry,
 }: TaskDetailPanelProps) {
@@ -175,12 +173,6 @@ export function TaskDetailPanel({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0 ml-2">
-          <button
-            className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-slate-600 transition-colors"
-            title="Open in new tab"
-          >
-            <ExternalLink size={14} />
-          </button>
           <button
             onClick={onClose}
             className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-slate-600 transition-colors"

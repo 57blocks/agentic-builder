@@ -23,9 +23,6 @@ interface CodingAgentLogOptions {
 export function createCodingAgentLogAgent(options: CodingAgentLogOptions): StepAgent {
   const { stepId, role } = options;
 
-  // The coding-store module path — lazy-imported to avoid circular deps
-  const CODING_STORE_PATH = "@/store/coding-store";
-
   return {
     async execute(ctx: StepAgentContext): Promise<StepResultData> {
       // Coding agents are started centrally via startCoding() in the coding-store,

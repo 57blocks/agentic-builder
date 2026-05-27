@@ -18,6 +18,16 @@ export interface PrdIntentSubmission {
 // ── DB Sync ───────────────────────────────────────────────────────────────────
 let _stepProjectSlug = "";
 
+// ── AbortController for in-flight step execution ──────────────────────────────
+/** AbortController for the active step SSE fetch. Aborted on reset() so
+ *  switching projects cancels in-flight requests and prevents stale data
+ *  from overwriting the new project's state. */
+let _stepAbortController: AbortController | null = null;
+
+/** Set to true after abort so executeStep's continuation (emitState, result
+ *  processing) becomes a no-op instead of writing stale data to the store. */
+let _isStepAborted = false;
+
 // ── New Session ID ────────────────────────────────────────────────────────────
 function newSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -245,6 +255,7 @@ export const useStepStore = create<StepStoreState>()(
               stepId,
               status: "running",
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
         }));
@@ -260,6 +271,7 @@ export const useStepStore = create<StepStoreState>()(
               status: "running",
               content: (s.steps[stepId]?.content ?? "") + contentChunk,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
         }));
@@ -276,6 +288,7 @@ export const useStepStore = create<StepStoreState>()(
               costUsd,
               durationMs,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
           totalCostUsd: s.totalCostUsd + costUsd,
@@ -297,6 +310,7 @@ export const useStepStore = create<StepStoreState>()(
               status: "failed",
               error,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
           isRunning: false,
@@ -430,6 +444,11 @@ export const useStepStore = create<StepStoreState>()(
         console.log("[step-store] calling setStepRunning for", stepId);
         get().setStepRunning(stepId);
 
+        // ── Abort controller for this execution ──
+        _isStepAborted = false;
+        const controller = new AbortController();
+        _stepAbortController = controller;
+
         try {
           // Tier resolution priority:
           //   1. PRD's `**Project Tier: X**` badge (authoritative)
@@ -461,7 +480,10 @@ export const useStepStore = create<StepStoreState>()(
             sessionId,
             editInstruction,
             prdIntent: s.prdIntent,
+            abortSignal: controller.signal,
             emitState: (update: Partial<import("@/app/(dashboard)/project/[projectId]/_steps/_shared/types").StepAgentState>) => {
+              // No-op after abort — don't write stale streaming data to the new project's store
+              if (_isStepAborted) return;
               if (update.streamingContent !== undefined) {
                 const current = get().streamingContent;
                 if (update.streamingContent.length <= current.length) {
@@ -491,6 +513,9 @@ export const useStepStore = create<StepStoreState>()(
           const result = await entry.agent.execute(ctx);
           console.log("[step-store] agent.execute completed for", stepId, { status: result.status, contentLen: result.content?.length });
 
+          // Don't process results after abort — store has been reset for the new project
+          if (_isStepAborted) return;
+
           if (result.status === "completed") {
             get().setStepCompleted(stepId, result.content ?? "", result.costUsd ?? 0, result.durationMs ?? 0);
             if (result.metadata && Object.keys(result.metadata).length > 0) {
@@ -500,6 +525,7 @@ export const useStepStore = create<StepStoreState>()(
             get().setStepFailed(stepId, result.error ?? "Step failed");
           }
         } catch (err) {
+          if (_isStepAborted) return;
           get().setStepFailed(stepId, err instanceof Error ? err.message : "Unknown error");
         }
       },
@@ -537,13 +563,21 @@ export const useStepStore = create<StepStoreState>()(
       },
 
       reset: () => {
+        // Preserve user input that should survive project switches
+        const currentFeatureBrief = get().featureBrief;
+
+        // Abort any in-flight SSE request so stale data doesn't overwrite new project state
+        _isStepAborted = true;
+        _stepAbortController?.abort();
+        _stepAbortController = null;
+
         set({
           steps: emptySteps(),
           currentStep: null,
           totalCostUsd: 0,
           isRunning: false,
           error: null,
-          featureBrief: "",
+          featureBrief: currentFeatureBrief,
           streamingContent: "",
           streamingThinking: "",
           kickoffSessionId: null,

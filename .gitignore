@@ -41,6 +41,8 @@ example
 # pipeline snapshot (debug-only, may contain large doc content)
 .blueprint/pipeline-snapshot.json
 .blueprint/design-references/
+.blueprint/kickoff-repo.json
+.blueprint/kickoff-database.json
 
 # shared-schema is generated per-project and should not be tracked
 .blueprint/shared-schema.ts
