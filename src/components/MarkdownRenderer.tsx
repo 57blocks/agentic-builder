@@ -1,13 +1,65 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
+import mermaid from "mermaid";
+
+mermaid.initialize({ startOnLoad: false, theme: "default" });
+
+// ── Mermaid diagram renderer ──
+
+function MermaidBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const id = useRef(`mermaid-${Math.random().toString(36).slice(2, 8)}`).current;
+
+  useEffect(() => {
+    const trimmed = code.trim();
+    if (!/^(graph\s|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s|journey|gitgraph|timeline|requirementDiagram|mindmap|block|packet)/i.test(trimmed)) return;
+
+    // Clean up any leaked Mermaid temp elements from previous renders
+    document.querySelectorAll(`[id^="dmermaid-"]`).forEach((el) => el.remove());
+
+    let cancelled = false;
+    mermaid.render(id, code)
+      .then(({ svg }) => {
+        if (cancelled) return;
+        if (/class="error[^"]*"|Syntax error|diagram error|aria-roledescription="error"/i.test(svg)) {
+          setError("Mermaid syntax error in diagram source");
+        } else {
+          setSvg(svg);
+        }
+      })
+      .catch((err) => { if (!cancelled) setError(err.message ?? String(err)); });
+    return () => { cancelled = true; };
+  }, [code, id]);
+
+  if (error) {
+    return (
+      <div className="mb-4 overflow-hidden rounded-md border border-amber-200">
+        <div className="flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700 font-medium border-b border-amber-200">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Diagram render error — showing source
+        </div>
+        <pre className="m-0 overflow-x-auto bg-[#f6f8fa] p-4 text-[13px] leading-relaxed"><code className="text-[#1f2328]">{code}</code></pre>
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <pre className="mb-4 mt-0 overflow-x-auto rounded-md border border-[#d0d7de] bg-[#f6f8fa] p-4 text-[13px] leading-relaxed"><code className="text-[#1f2328]">{code}</code></pre>
+    );
+  }
+
+  return <div className="mb-4 flex justify-center overflow-x-auto rounded-md border border-[#d0d7de] bg-white p-4" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
 
 // ── Components factory ──
 
-function createMarkdownComponents(variant: "default" | "prd"): Components {
+function createMarkdownComponents(variant: "default" | "prd", skipMermaid?: boolean): Components {
   const isPrd = variant === "prd";
 
   function codeComponent({
@@ -18,6 +70,11 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
     className?: string;
   }) {
     const lang = className?.replace("language-", "") ?? "";
+
+    // Mermaid: skip during streaming (show raw code), render after completion
+    if (lang === "mermaid" && !skipMermaid) {
+      return <MermaidBlock code={String(children ?? "").replace(/\n$/, "")} />;
+    }
 
     const isBlock = !!className?.includes("language-");
     if (isBlock) {
@@ -236,13 +293,14 @@ function createMarkdownComponents(variant: "default" | "prd"): Components {
   };
 }
 
-const defaultComponents = createMarkdownComponents("default");
-
 interface MarkdownRendererProps {
   content: string;
   className?: string;
   /** Richer typography for PRD review (dark, deliverable-style). */
   variant?: "default" | "prd";
+  /** When true, skip Mermaid diagram rendering and show raw code blocks instead
+   *  (used during SSE streaming to avoid incomplete diagram syntax errors). */
+  skipMermaid?: boolean;
 }
 
 /**
@@ -291,10 +349,11 @@ export default function MarkdownRenderer({
   content,
   className = "",
   variant = "default",
+  skipMermaid = false,
 }: MarkdownRendererProps) {
   if (!content) return null;
   const components =
-    variant === "prd" ? createMarkdownComponents("prd") : defaultComponents;
+    variant === "prd" ? createMarkdownComponents("prd", skipMermaid) : createMarkdownComponents("default", skipMermaid);
   const proseClass =
     variant === "prd"
       ? "prose prose-slate max-w-none prose-headings:font-semibold prose-headings:text-[#1f2328] prose-p:text-[#1f2328] prose-li:text-[#1f2328]"

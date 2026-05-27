@@ -7,10 +7,10 @@
  * Ported from _DocViewerSubStage.tsx — uses new step-navigation store.
  */
 
-import { useState } from "react";
+import React from "react";
 import {
-  Share2, MoreVertical, Download, ArrowRight, Sparkles,
-  Loader2, Send, CheckCircle2,
+  Download, ArrowRight,
+  Loader2, CheckCircle2,
 } from "lucide-react";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,6 @@ export function DocViewerUi({
   markdownVariant = "default",
   onNavigate,
 }: DocViewerUiProps) {
-  const [editInput, setEditInput] = useState("");
   const goToStep = onNavigate ?? useStepNavigationStore((s) => s.goToStep);
 
   const statusLabel = isRunning ? generatingLabel : isDone ? "DRAFT V1.0" : "PENDING";
@@ -147,12 +146,6 @@ export function DocViewerUi({
                   )}
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-[#94a3b8]">
-                    <Share2 className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-[#94a3b8]">
-                    <MoreVertical className="size-4" />
-                  </Button>
                 </div>
               </div>
 
@@ -182,24 +175,6 @@ export function DocViewerUi({
       {/* ── Footer ── */}
       <Separator />
       <div className="shrink-0 bg-white/90 backdrop-blur-sm flex items-center justify-between px-8 py-3 gap-6">
-        {/* AI Edit Input */}
-        <div className="flex-1 min-w-0 relative">
-          <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-[#94a3b8] pointer-events-none" />
-          <input
-            value={editInput}
-            onChange={(e) => setEditInput(e.target.value)}
-            placeholder={editPlaceholder}
-            className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-md pl-9 pr-10 py-2.5 text-sm text-[#0f172a] placeholder:text-[#6b7280] focus:outline-none focus:ring-1 focus:ring-[#712ae2] focus:border-[#712ae2] transition-colors"
-          />
-          {editInput && (
-            <button
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#712ae2] hover:opacity-70 transition-opacity"
-              title="Send"
-            >
-              <Send className="size-3.5" />
-            </button>
-          )}
-        </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5 shrink-0">

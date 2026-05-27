@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Monitor, Bell, HelpCircle } from "lucide-react";
 import PipelineBreadcrumb from "@/components/PipelineBreadcrumb";
-import { Button } from "@/components/ui/button";
+
 import { STEP_REGISTRY } from "./_steps/step-registry";
 import { getStepConfig } from "@/_config/pipeline-flow";
 import { useStepStore } from "@/store/step-store";
@@ -204,17 +203,6 @@ export default function ProjectPage() {
             stepStates={stepStates}
           />
         </div>
-        {/* <div className="flex items-center gap-1 pt-3 pr-2 shrink-0" style={noDragStyle}>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
-            <Monitor className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
-            <Bell className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-[#64748b]">
-            <HelpCircle className="size-4" />
-          </Button>
-        </div> */}
       </header>
 
       {/* ── Active Step View ── */}

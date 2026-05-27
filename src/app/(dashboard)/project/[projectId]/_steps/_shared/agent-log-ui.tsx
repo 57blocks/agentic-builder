@@ -39,7 +39,6 @@ function statusBadge(status: string) {
 
 export function AgentLogUi({ role, title, description, nextStep, onNavigate }: AgentLogUiProps) {
   const agents       = useCodingStore((s) => s.agents);
-  const tasks        = useCodingStore((s) => s.tasks);
   const goToStep     = onNavigate ?? useStepNavigationStore((s) => s.goToStep);
 
   const agent       = agents.find((a) => a.role === role);
