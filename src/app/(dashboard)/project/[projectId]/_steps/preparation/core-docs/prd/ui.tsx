@@ -10,10 +10,11 @@ import StageInputBar from "@/components/StageInputBar";
 import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
+import { savePrdVersion, loadPrdVersions } from "./snapshot";
+import type { PrdVersion } from "./snapshot";
 
-// ─── In-memory PRD history ────────────────────────────────────────────────
+// ─── PRD history (populated from persisted versions) ──────────────────────
 export interface PrdSnapshot { content: string; savedAt: Date; label: string; }
-const _prdHistoryStore: PrdSnapshot[] = [];
 
 // ─── Word-level inline diff ────────────────────────────────────────────────
 type WordDiff = { type: "equal" | "added" | "removed"; text: string };
@@ -157,7 +158,7 @@ export function PrdUI(props: StepUIProps) {
   const [manualError, setManualError] = useState<string | null>(null);
   const manualTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const prdHistoryRef = useRef<PrdSnapshot[]>(_prdHistoryStore);
+  const prdHistoryRef = useRef<PrdSnapshot[]>([]);
   const prevIsDoneRef = useRef(false);
   const autoStartedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -177,13 +178,28 @@ export function PrdUI(props: StepUIProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHydrated, featureBrief, step?.content]);
 
+  // ── Load persisted version history on hydration ─────────────────────
+  useEffect(() => {
+    if (!isHydrated || !props.projectSlug) return;
+    loadPrdVersions(props.projectSlug).then((versions) => {
+      prdHistoryRef.current = versions.map((v: PrdVersion) => ({
+        content: v.content,
+        savedAt: new Date(v.timestamp),
+        label: v.label,
+      }));
+    }).catch(() => {/* ignore */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]);
+
   const isThisRunning = isRunning && currentStep === "prd";
   // Keep a stable content ref to bridge the gap between streamingContent cleared
   // (step_complete SSE) and step.content updated (agent return).
   const lastContentRef = useRef("");
   if (streamingContent) lastContentRef.current = streamingContent;
-  if (step?.content) lastContentRef.current = step.content;
-  const content = streamingContent || step?.content || lastContentRef.current;
+  if (step?.content && !isThisRunning) lastContentRef.current = step.content;
+  // Clear ref when re-gen starts so we don't show stale content
+  if (isThisRunning && !streamingContent) lastContentRef.current = "";
+  const content = streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current;
   const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
   const error = step?.status === "failed" ? step.error : null;
 
@@ -235,7 +251,12 @@ export function PrdUI(props: StepUIProps) {
       const finalContent = stripChangeMarkers(step?.content ?? "");
       if (finalContent) {
         const versionNum = prdHistoryRef.current.length + 1;
-        prdHistoryRef.current = [...prdHistoryRef.current, { content: finalContent, savedAt: new Date(), label: versionNum === 1 ? `v${versionNum} · Initial` : `v${versionNum} · Edited` }];
+        const label = versionNum === 1 ? "Initial" : "Edited";
+        prdHistoryRef.current = [...prdHistoryRef.current, { content: finalContent, savedAt: new Date(), label: `v${versionNum} · ${label}` }];
+        // Persist version to DB
+        if (props.projectSlug) {
+          savePrdVersion(props.projectSlug, finalContent, label).catch(() => {});
+        }
 
         // Parse Project Tier badge from PRD content and sync to navigation store + DB.
         // The PRD may contain "**Project Tier: S**" or "**Project Tier: M**" etc.
@@ -363,6 +384,9 @@ export function PrdUI(props: StepUIProps) {
         ...prdHistoryRef.current,
         { content: draft, savedAt: new Date(), label: `v${versionNum} · Manual edit` },
       ];
+      if (props.projectSlug) {
+        savePrdVersion(props.projectSlug, draft, "Manual edit").catch(() => {});
+      }
 
       // 4. Sync tier badge if the user added/changed it.
       const tierMatch = draft.match(/\*\*Project Tier:\s*([SML])\*\*/i);
@@ -553,7 +577,7 @@ export function PrdUI(props: StepUIProps) {
               ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
-              : <MarkdownRenderer content={content} variant="prd" skipMermaid={isThisRunning} />}
+              : <MarkdownRenderer content={content} variant="prd" skipMermaid={true} />}
             <div ref={bottomRef} />
             </div>
           </div>
@@ -587,8 +611,8 @@ export function PrdUI(props: StepUIProps) {
       ) : (
       <StageInputBar
         value={editInput} onChange={setEditInput}
-        onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
-        placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
+        onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning || confirmCooldown) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
+        placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning || confirmCooldown}
         actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={() => {
           // Fire-and-forget memory capture before navigating
           const finalContent = stripChangeMarkers(step?.content ?? "");

@@ -255,6 +255,7 @@ export const useStepStore = create<StepStoreState>()(
               stepId,
               status: "running",
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
         }));
@@ -270,6 +271,7 @@ export const useStepStore = create<StepStoreState>()(
               status: "running",
               content: (s.steps[stepId]?.content ?? "") + contentChunk,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
         }));
@@ -286,6 +288,7 @@ export const useStepStore = create<StepStoreState>()(
               costUsd,
               durationMs,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
           totalCostUsd: s.totalCostUsd + costUsd,
@@ -307,6 +310,7 @@ export const useStepStore = create<StepStoreState>()(
               status: "failed",
               error,
               timestamp: new Date().toISOString(),
+              metadata: s.steps[stepId]?.metadata ?? null,
             },
           },
           isRunning: false,
