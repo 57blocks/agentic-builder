@@ -161,6 +161,10 @@ export function PrdUI(props: StepUIProps) {
   const prevIsDoneRef = useRef(false);
   const autoStartedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // ── 8s confirm cooldown after SSE completes ──────────────────────────
+  const [confirmCooldown, setConfirmCooldown] = useState(false);
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -259,6 +263,22 @@ export function PrdUI(props: StepUIProps) {
       }
     }
     prevIsDoneRef.current = isDone;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDone]);
+
+  // ── 8-second confirm cooldown after fresh SSE completion ─────────────
+  useEffect(() => {
+    const justCompleted = isDone && !prevIsDoneRef.current;
+    if (justCompleted && wasRunningRef.current) {
+      setConfirmCooldown(true);
+      cooldownTimerRef.current = setTimeout(() => setConfirmCooldown(false), 8000);
+    }
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearTimeout(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone]);
 
@@ -387,16 +407,79 @@ export function PrdUI(props: StepUIProps) {
   }, [isManualEditing, manualDraft, step?.content]);
 
   const handleDownloadPdf = () => {
-    if (!content || isPrinting) return;
+    if (!content || isPrinting || !contentRef.current) return;
     setIsPrinting(true);
-    import("marked").then(({ marked }) => {
-      const htmlBody = marked.parse(content) as string;
-      const printWindow = window.open("", "_blank");
-      if (!printWindow) { setIsPrinting(false); return; }
-      printWindow.document.write(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><title>Product Requirements Document</title><style>*,*::before,*::after{box-sizing:border-box}html{font-size:16px}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:16px;line-height:1.75;color:#1f2328;background:#fff;max-width:860px;margin:0 auto;padding:48px 56px}h1{font-size:2em;font-weight:600;border-bottom:1px solid #d0d7de;padding-bottom:.3em;margin:1.5em 0 .75em}h2{font-size:1.5em;font-weight:600;border-bottom:1px solid #d0d7de;padding-bottom:.3em;margin:1.5em 0 .75em}h3{font-size:1.25em;font-weight:600;margin:1.5em 0 .5em}h4{font-size:1em;font-weight:600;margin:1.25em 0 .4em}h5{font-size:.875em;font-weight:600;margin:1em 0 .3em}h6{font-size:.85em;font-weight:600;color:#57606a;margin:1em 0 .3em}p{margin:0 0 1em}ul,ol{padding-left:1.5em;margin:0 0 1em}li+li{margin-top:.25em}a{color:#0969da;text-decoration:underline}strong{font-weight:600}em{font-style:italic}code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.85em;background:#f6f8fa;border:1px solid rgba(175,184,193,.2);border-radius:6px;padding:.2em .4em}pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:16px;overflow-x:auto;margin:0 0 1em}pre code{background:none;border:none;padding:0;font-size:13px}blockquote{border-left:4px solid #d0d7de;color:#57606a;margin:0 0 1em;padding:0 1em}table{border-collapse:collapse;width:100%;margin:0 0 1em;font-size:14px}th,td{border:1px solid #d0d7de;padding:8px 16px;text-align:left}thead{background:#f6f8fa;font-weight:600}tbody tr:nth-child(even){background:#f6f8fa}hr{border:none;border-top:1px solid #d0d7de;margin:1.5em 0}@media print{body{padding:0}@page{margin:20mm 18mm}}</style></head><body><h1 style="margin-top:0">Product Requirements Document</h1>${htmlBody}</body></html>`);
-      printWindow.document.close();
-      printWindow.onload = () => { printWindow.focus(); printWindow.print(); printWindow.onafterprint = () => { printWindow.close(); setIsPrinting(false); }; setTimeout(() => setIsPrinting(false), 5000); };
-    }).catch(() => setIsPrinting(false));
+    Promise.all([
+      import("html2canvas"),
+      import("jspdf"),
+    ]).then(async ([html2canvasMod, { jsPDF }]) => {
+      const html2canvas = html2canvasMod.default;
+      // Extract the rendered HTML content and re-render in a clean iframe
+      // to avoid html2canvas choking on lab() colors in the page's stylesheets.
+      const sourceHtml = contentRef.current!.innerHTML;
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;left:0;top:0;z-index:-1;pointer-events:none;width:800px;height:1200px;border:none";
+      document.body.appendChild(iframe);
+      const doc = iframe.contentDocument!;
+      doc.open();
+      doc.write(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#1f2328;background:#fff;padding:40px}
+        h1{font-size:1.8em;font-weight:600;border-bottom:1px solid #d0d7de;padding-bottom:.3em;margin:1em 0 .5em}
+        h2{font-size:1.5em;font-weight:600;border-bottom:1px solid #d0d7de;padding-bottom:.3em;margin:1em 0 .5em}
+        h3{font-size:1.25em;font-weight:600;margin:1em 0 .5em}
+        h4{font-size:1em;font-weight:600;margin:1em 0 .4em}
+        p{margin:0 0 .8em}
+        ul,ol{padding-left:1.8em;margin:0 0 .8em}
+        li+li{margin-top:.2em}
+        code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.85em;background:#f6f8fa;border:1px solid rgba(175,184,193,.2);border-radius:6px;padding:.2em .4em}
+        pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:16px;overflow-x:auto;margin:0 0 .8em}
+        pre code{background:none;border:none;padding:0;font-size:13px}
+        table{border-collapse:collapse;width:100%;margin:0 0 .8em}
+        th,td{border:1px solid #d0d7de;padding:8px 12px;text-align:left}
+        th{background:#f6f8fa}
+        blockquote{border-left:4px solid #d0d7de;color:#57606a;margin:0 0 .8em;padding:0 1em}
+        img{max-width:100%}
+        hr{border:none;border-top:1px solid #d0d7de;margin:1.5em 0}
+      </style></head><body>${sourceHtml}</body></html>`);
+      doc.close();
+      // Wait for iframe content to render
+      await new Promise((r) => setTimeout(r, 150));
+      const canvas = await html2canvas(doc.body, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+      });
+      document.body.removeChild(iframe);
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const usableW = pdfW - margin * 2;
+      const usableH = pdfH - margin * 2;
+      const ratio = usableW / canvas.width;
+      const imgH = canvas.height * ratio;
+      let remainingH = imgH;
+      let srcY = 0;
+      let page = 0;
+      while (remainingH > 0) {
+        if (page > 0) pdf.addPage();
+        const pageH = Math.min(remainingH, usableH);
+        const canvasPageH = pageH / ratio;
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = canvasPageH;
+        const ctx = pageCanvas.getContext("2d")!;
+        ctx.drawImage(canvas, 0, srcY, canvas.width, canvasPageH, 0, 0, canvas.width, canvasPageH);
+        pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", margin, margin, usableW, pageH);
+        srcY += canvasPageH;
+        remainingH -= pageH;
+        page++;
+      }
+      pdf.save(`PRD-${new Date().toISOString().slice(0, 10)}.pdf`);
+    }).catch((err) => { console.error("[PrdUI] PDF failed", err); })
+      .finally(() => setIsPrinting(false));
   };
 
   const handleTabChange = (tab: DocTab) => { if (tab !== "prd") props.onNavigate(tab); };
@@ -443,7 +526,7 @@ export function PrdUI(props: StepUIProps) {
                 <button onClick={handleDownloadPdf} disabled={!isDone || isPrinting || isManualEditing} className="flex items-center justify-center p-1.5 rounded-md text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Download PDF">{isPrinting ? <SpinnerIcon /> : <DownloadIcon />}</button>
               </div>
             </div>
-            <div className="p-8">
+            <div className="p-8" ref={contentRef}>
               {isManualEditing ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between text-[12px] text-slate-500">
@@ -506,7 +589,7 @@ export function PrdUI(props: StepUIProps) {
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning}
-        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc} onClick={() => {
+        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={() => {
           // Fire-and-forget memory capture before navigating
           const finalContent = stripChangeMarkers(step?.content ?? "");
           if (finalContent && kickoffSessionId) {
@@ -524,7 +607,7 @@ export function PrdUI(props: StepUIProps) {
             }).catch(() => {/* ignore */});
           }
           if (nextStep) props.onNavigate(nextStep);
-        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : "Confirm PRD"}{!isSavingDoc && <ArrowRight size={16} color="white" />}</button></div>}
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : "Confirm PRD"}{!isSavingDoc && !confirmCooldown && <ArrowRight size={16} color="white" />}</button></div>}
       />
       )}
     </div>
