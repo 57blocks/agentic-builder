@@ -202,6 +202,9 @@ export function PrdUI(props: StepUIProps) {
   const content = streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current;
   const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
   const error = step?.status === "failed" ? step.error : null;
+  // Derive version count from step metadata (reactive via zustand)
+  const prdVersions = (step?.metadata as { prdVersions?: PrdVersion[] } | undefined)?.prdVersions ?? [];
+  const versionCount = prdVersions.length;
 
   // On hydration, if PRD already exists, sync tier to nav store in case it was
   // never persisted (e.g. projects created before this fix was deployed).
@@ -536,7 +539,7 @@ export function PrdUI(props: StepUIProps) {
                 {isDone && <div className="flex items-center gap-4 mt-1">{step?.costUsd != null && <span className="text-[11px] text-[#94a3b8]">Cost: <span className="font-medium text-[#64748b]">${step.costUsd.toFixed(4)}</span></span>}</div>}
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {prdHistoryRef.current.length > 1 && <button onClick={() => setShowDiff(true)} disabled={isManualEditing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1 disabled:opacity-40" title="View version history & diff"><History size={13} />{prdHistoryRef.current.length} versions</button>}
+                {versionCount > 1 && <button onClick={() => setShowDiff(true)} disabled={isManualEditing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1 disabled:opacity-40" title="View version history & diff"><History size={13} />{versionCount} versions</button>}
                 {!isManualEditing && (
                   <button
                     onClick={startManualEdit}
