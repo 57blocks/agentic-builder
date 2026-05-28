@@ -1,6 +1,7 @@
 import { chatCompletion, resolveModel, type ChatMessage } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import type { PrdKnowledgeRecord } from "./types";
+import type { ProjectTier } from "@/lib/agents/shared/project-classifier";
 
 const MAX_PRD_CHARS = 8000;
 
@@ -34,9 +35,7 @@ Rules:
 export interface ExtractInput {
   finalPrd: string;
   projectType: string;
-  // Accept string broadly so callers using non-canonical tier labels (e.g. "standard", "lite")
-  // are not blocked by TypeScript at the call-site; the value is stored as-is.
-  tier: string;
+  tier: ProjectTier;
 }
 
 export async function extractPrdKnowledge(
@@ -73,8 +72,7 @@ export async function extractPrdKnowledge(
         typeof parsed.productType === "string" && parsed.productType.length > 0
           ? parsed.productType
           : input.projectType,
-      // Store tier as-is from input (may be canonical "S"|"M"|"L" or descriptive "standard"|"lite")
-      tier: input.tier as PrdKnowledgeRecord["tier"],
+      tier: input.tier,
       title:
         typeof parsed.title === "string" && parsed.title.length > 0
           ? parsed.title.slice(0, 120)
