@@ -142,6 +142,28 @@ export type {
   MigrationQualityRepairResult,
 } from "./migration-quality-repair";
 export {
+  checkSchemaDrift,
+  extractModelFields,
+  extractFieldRemaps,
+} from "./schema-drift";
+export type {
+  SchemaDriftRuleId,
+  SchemaDriftFinding,
+  SchemaDriftInput,
+  SchemaDriftResult,
+  ModelFile,
+  MigrationTextFile,
+} from "./schema-drift";
+export {
+  runSchemaDriftRepair,
+  formatSchemaDriftBlock,
+} from "./schema-drift-repair";
+export type {
+  SchemaDriftRepairTask,
+  SchemaDriftRepairInput,
+  SchemaDriftRepairResult,
+} from "./schema-drift-repair";
+export {
   computeStagnationReplan,
   buildReplanContext,
 } from "./stagnation-replan";
