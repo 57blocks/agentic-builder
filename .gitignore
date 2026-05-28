@@ -64,3 +64,8 @@ worklog-automation
 .memory/metrics.json
 .memory/trace.jsonl
 docs/superpowers
+CLAUDE.md
+
+# infra provisioning artifacts (contain real DB / Redis credentials)
+.blueprint/kickoff-infra.json
+.blueprint/kickoff-database.json
