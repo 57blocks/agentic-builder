@@ -2,8 +2,7 @@ import type { MemoryRecord } from "@/lib/memory/types";
 import type { PrdKnowledgeRecord } from "./types";
 
 export * from "./types";
-// TODO(T2): re-enable when extract.ts lands
-// export { extractPrdKnowledge } from "./extract";
+export { extractPrdKnowledge } from "./extract";
 
 export function parsePrdKnowledgeBody(record: MemoryRecord): PrdKnowledgeRecord | null {
   try {
