@@ -80,7 +80,7 @@ const MODE_OPTIONS: readonly ModeOption[] = [
   },
 ] as const;
 
-const PRIMARY_PURPLE = "#712ae2";
+const PRIMARY_PURPLE = "#4f46e5";
 
 export function AuthModeCard({
   decision,
@@ -321,16 +321,16 @@ function ModeRow({
       disabled={disabled}
       className={`flex items-start gap-3 text-left px-4 py-3 rounded-lg border transition-colors ${
         active
-          ? "border-[#712ae2] bg-[rgba(113,42,226,0.05)]"
+          ? "border-indigo-600 bg-indigo-50"
           : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
       } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
     >
       <span
         className={`mt-1 size-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-          active ? "border-[#712ae2]" : "border-slate-300"
+          active ? "border-indigo-600" : "border-slate-300"
         }`}
       >
-        {active && <span className="size-2 rounded-full bg-[#712ae2]" />}
+        {active && <span className="size-2 rounded-full bg-indigo-600" />}
       </span>
       <span className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">

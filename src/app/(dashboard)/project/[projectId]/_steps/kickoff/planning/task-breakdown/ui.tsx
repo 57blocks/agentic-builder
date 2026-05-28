@@ -260,7 +260,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
               <button
                 onClick={handleRegenerate}
                 disabled={regenerating}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold text-[#712ae2] bg-[rgba(113,42,226,0.08)] hover:bg-[rgba(113,42,226,0.16)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Re-run the kickoff agent against the latest PRD/TRD and replace the current task breakdown"
               >
                 {regenerating ? (
@@ -415,7 +415,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
                 ))
               )}
               <button onClick={() => onNavigate("summary")}
-                className="w-full mt-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#712ae2] bg-violet-50 px-3 py-2 rounded-lg hover:bg-violet-100 transition-colors">
+                className="w-full mt-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg hover:bg-indigo-100 transition-colors">
                 <Settings size={12} /> Manage in Summary
               </button>
             </div>
@@ -430,7 +430,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
                 <p className="text-[12px] text-[#94a3b8]">Loading…</p>
               ) : repoUrl ? (
                 <a href={repoUrl} target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-[#712ae2] transition-colors">
+                  className="flex items-center gap-2.5 text-[13px] font-medium text-[#334155] hover:text-indigo-600 transition-colors">
                   <GitBranch size={15} className="shrink-0 text-[#334155]" /> GitHub Repository
                 </a>
               ) : (
@@ -455,7 +455,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
         <button
           onClick={() => nextStep && onNavigate(nextStep)}
           disabled={!isCompleted || regenerating}
-          className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[13px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Confirm &amp; Start Coding <ArrowRight size={14} />
         </button>
@@ -484,7 +484,7 @@ function TaskDetailBody({ task }: { task: KickoffWorkItem }) {
             {covers.map((req) => (
               <span
                 key={req}
-                className="text-[10px] font-mono font-semibold text-[#712ae2] bg-[rgba(113,42,226,0.08)] px-1.5 py-0.5 rounded"
+                className="text-[10px] font-mono font-semibold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded"
               >
                 {req}
               </span>

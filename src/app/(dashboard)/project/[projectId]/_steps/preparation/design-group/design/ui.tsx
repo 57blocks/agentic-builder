@@ -119,7 +119,7 @@ function StyleCarousel({
       >
         <button
           onClick={prev}
-          className="absolute left-2 z-20 flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:bg-slate-50 hover:border-[#712ae2] transition-all"
+          className="absolute left-2 z-20 flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:bg-slate-50 hover:border-indigo-600 transition-all"
         >
           <svg
             width="14"
@@ -186,7 +186,7 @@ function StyleCarousel({
                         {style.name}
                       </h3>
                       {isCenter && (
-                        <span className="text-[8px] font-bold text-[#712ae2] bg-[rgba(113,42,226,0.08)] px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full shrink-0">
                           Selected
                         </span>
                       )}
@@ -238,7 +238,7 @@ function StyleCarousel({
         </div>
         <button
           onClick={next}
-          className="absolute right-2 z-20 flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:bg-slate-50 hover:border-[#712ae2] transition-all"
+          className="absolute right-2 z-20 flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:bg-slate-50 hover:border-indigo-600 transition-all"
         >
           <svg
             width="14"
@@ -261,7 +261,7 @@ function StyleCarousel({
             onClick={() => goTo(i)}
             className={`rounded-full transition-all duration-300 ${
               i === active
-                ? "w-5 h-2 bg-[#712ae2]"
+                ? "w-5 h-2 bg-indigo-600"
                 : "w-2 h-2 bg-slate-300 hover:bg-slate-400"
             }`}
             aria-label={s.name}
@@ -1047,7 +1047,7 @@ export function DesignUI(props: StepUIProps) {
         {showLeftArrow && (
           <button
             onClick={goToPrevPhase}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-[#712ae2] transition-all"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-600 transition-all"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
@@ -1055,7 +1055,7 @@ export function DesignUI(props: StepUIProps) {
         <div className="relative" ref={phaseMenuRef}>
           <button
             onClick={() => { setPhaseMenuOpen((v) => !v); }}
-            className="text-[13px] font-semibold text-slate-600 min-w-[100px] text-center select-none hover:text-[#712ae2] transition-colors"
+            className="text-[13px] font-semibold text-slate-600 min-w-[100px] text-center select-none hover:text-indigo-600 transition-colors"
           >
             {phase === "style" ? "Style" : phase === "spec" ? "Design Spec" : "Stitch Design"}
           </button>
@@ -1074,7 +1074,7 @@ export function DesignUI(props: StepUIProps) {
                     onClick={() => { setPhase(p); setPhaseMenuOpen(false); }}
                     className={`w-full text-left px-4 py-2 text-[12px] font-medium transition-colors ${
                       isActive
-                        ? "text-[#712ae2] bg-[rgba(113,42,226,0.06)]"
+                        ? "text-indigo-600 bg-indigo-50"
                         : canJump
                           ? "text-slate-700 hover:bg-slate-50"
                           : "text-slate-300 cursor-not-allowed"
@@ -1090,7 +1090,7 @@ export function DesignUI(props: StepUIProps) {
         {showRightArrow && (
           <button
             onClick={goToNextPhase}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-[#712ae2] transition-all"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-600 transition-all"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
           </button>
@@ -1102,14 +1102,14 @@ export function DesignUI(props: StepUIProps) {
         {/* ══ Phase 1: Style Selection ══ */}
         {phase === "style" && (
           <>
-            <div className="py-8 flex flex-col gap-6">
+            <div className="py-8 px-6 flex flex-col gap-6">
               {/* ── Tab bar ── */}
               <div className="flex border-b border-slate-200">
                 <button
                   onClick={() => setDesignSourceMode("ai")}
                   className={`px-5 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${
                     designSourceMode === "ai"
-                      ? "border-[#712ae2] text-[#712ae2]"
+                      ? "border-indigo-600 text-indigo-600"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
@@ -1119,7 +1119,7 @@ export function DesignUI(props: StepUIProps) {
                   onClick={() => setDesignSourceMode("custom")}
                   className={`px-5 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${
                     designSourceMode === "custom"
-                      ? "border-[#712ae2] text-[#712ae2]"
+                      ? "border-indigo-600 text-indigo-600"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
@@ -1179,7 +1179,7 @@ export function DesignUI(props: StepUIProps) {
                                 }
                               });
                             }}
-                            className="px-4 py-2 text-[13px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors"
+                            className="px-4 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors"
                           >
                             Retry
                           </button>
@@ -1189,7 +1189,7 @@ export function DesignUI(props: StepUIProps) {
                           <p className="text-sm">PRD generation was interrupted. Go back to PRD to complete it.</p>
                           <button
                             onClick={() => props.onNavigate("prd" as StepId)}
-                            className="px-4 py-2 text-[13px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors"
+                            className="px-4 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors"
                           >
                             Go to PRD
                           </button>
@@ -1213,15 +1213,15 @@ export function DesignUI(props: StepUIProps) {
                     onDrop={handleDrop}
                     className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors ${
                       dragActive
-                        ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
+                        ? "border-indigo-600 bg-indigo-50"
                         : "border-slate-300 bg-slate-50"
                     }`}
                   >
-                    <Upload size={24} className={dragActive ? "text-[#712ae2]" : "text-slate-400"} />
+                    <Upload size={24} className={dragActive ? "text-indigo-600" : "text-slate-400"} />
                     <div className="text-center">
                       <p className="text-[12px] text-slate-600 font-medium">
                         Drop files here or{" "}
-                        <label className="text-[#712ae2] cursor-pointer hover:underline">
+                        <label className="text-indigo-600 cursor-pointer hover:underline">
                           browse
                           <input
                             type="file"
@@ -1320,7 +1320,7 @@ export function DesignUI(props: StepUIProps) {
                       <button
                         type="submit"
                         disabled={!urlInput.trim() || urlFetching}
-                        className="px-3 py-2 text-[12px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                        className="px-3 py-2 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                       >
                         {urlFetching ? <Loader2 size={13} className="animate-spin" /> : "Fetch"}
                       </button>
@@ -1354,7 +1354,7 @@ export function DesignUI(props: StepUIProps) {
                     urlFetching ||
                     isDesignRunning
                   }
-                  className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[14px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
                 >
                   {designSourceMode === "ai" ? "Generate based on this style" : "Generate based on reference"}
                   <ArrowRight size={16} />
@@ -1501,7 +1501,7 @@ export function DesignUI(props: StepUIProps) {
                 </div>
                 <button
                   onClick={() => handleGenerateWithStitch()}
-                  className="mt-2 px-4 py-2 text-[12px] font-medium text-white bg-[#712ae2] rounded-lg hover:bg-[#6b24da] transition-colors"
+                  className="mt-2 px-4 py-2 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors"
                 >
                   Retry
                 </button>
@@ -1538,7 +1538,7 @@ export function DesignUI(props: StepUIProps) {
                             setTimeout(() => setPromptCopied(false), 2000);
                           });
                       }}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-violet-700 bg-white border border-violet-200 rounded-md hover:bg-violet-50 transition-colors"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-indigo-700 bg-white border border-indigo-200 rounded-md hover:bg-indigo-50 transition-colors"
                     >
                       {promptCopied ? "Copied!" : "Copy URL"}
                     </button>
@@ -1546,7 +1546,7 @@ export function DesignUI(props: StepUIProps) {
                       href={stitchResult.projectUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700 transition-colors"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-500 transition-colors"
                     >
                       Open in Stitch
                     </a>
@@ -1616,7 +1616,7 @@ export function DesignUI(props: StepUIProps) {
                           href={stitchResult.projectUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[13px] font-medium transition-colors"
+                          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[13px] font-medium transition-colors"
                         >
                           Open in Stitch
                         </a>
@@ -1631,7 +1631,7 @@ export function DesignUI(props: StepUIProps) {
                 <button
                   onClick={() => handleGenerateWithStitch()}
                   disabled={!steps.design?.content || isRunning}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[13px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Generate with Stitch
                 </button>
@@ -1693,7 +1693,7 @@ export function DesignUI(props: StepUIProps) {
                       );
                     }}
                     disabled={!steps.design?.content || isRunning}
-                    className="flex items-center gap-2 shrink-0 px-4 py-2 bg-[#712ae2] text-white text-[13px] font-semibold rounded-full hover:bg-[#6b24da] transition-colors disabled:opacity-40"
+                    className="flex items-center gap-2 shrink-0 px-4 py-2 bg-indigo-600 text-white text-[13px] font-semibold rounded-full hover:bg-indigo-500 transition-colors disabled:opacity-40"
                   >
                     Generate with Stitch
                   </button>
@@ -1726,7 +1726,7 @@ export function DesignUI(props: StepUIProps) {
                     if (next) props.onNavigate(next);
                   }}
                   disabled={isRunning}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 shadow-md hover:shadow-lg"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[14px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 shadow-md hover:shadow-lg"
                 >
                   Next Step <ArrowRight size={16} />
                 </button>

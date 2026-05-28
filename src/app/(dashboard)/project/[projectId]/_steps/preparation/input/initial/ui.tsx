@@ -50,7 +50,7 @@ export function InitialUI(props: StepUIProps) {
           </Card>
           <Card className="max-w-180 w-full shadow-sm bg-white/70">
             <CardContent className="flex items-center gap-3 px-5 py-3">
-              <Info className="size-4 text-[#712ae2] shrink-0" />
+              <Info className="size-4 text-indigo-600 shrink-0" />
               <p className="text-sm text-[#7c839b] leading-5">Upload existing project docs to accelerate the <strong className="font-semibold text-[#475569]">Preparation</strong> phase.</p>
             </CardContent>
           </Card>
