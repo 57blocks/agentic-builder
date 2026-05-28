@@ -10,16 +10,18 @@ async function start(): Promise<void> {
   await initDb();
   await syncModels();
 
-  // Seed default accounts on first startup (idempotent upsert — safe to re-run).
-  // The seed script only exists when an auth overlay (auth-password-rbac /
-  // auth-magic-link / auth-privy) was applied. The dynamic import + catch
-  // handles the "no auth" case gracefully. Set AUTO_SEED=0 to skip.
+  // Seed on first startup (idempotent upsert — safe to re-run).
+  // Each seed script exists only when the corresponding overlay / task created it;
+  // the dynamic import + catch handles the "file not present" case gracefully.
+  // Set AUTO_SEED=0 to skip all seeding.
   if (process.env.AUTO_SEED !== "0") {
-    try {
-      const { run: seedRun } = await import("./scripts/seed-auth-users");
-      await seedRun();
-    } catch {
-      // Script not present (no auth overlay) — skip silently.
+    for (const script of ["./scripts/seed-auth-users", "./scripts/seed-demo-data"]) {
+      try {
+        const { run: seedRun } = await import(/* @vite-ignore */ script);
+        await seedRun();
+      } catch {
+        // Script not present — skip silently.
+      }
     }
   }
 
