@@ -22,6 +22,8 @@ export type MemoryKind =
   | "design-pattern"
   // L1 (design knowledge base — company style library + daily trends)
   | "design-knowledge"
+  // L1 (PRD knowledge base — full-PRD case library)
+  | "prd-knowledge"
   // L2
   | "project-card"
   | "task-history"
