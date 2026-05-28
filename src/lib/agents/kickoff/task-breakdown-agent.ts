@@ -106,12 +106,12 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
   - **MANDATORY PAGE INVENTORY (do this before writing any frontend task)**: Write out every page/view mentioned in the PRD as a numbered list. Count them. Then produce exactly that many page-level frontend tasks — one task per page, no more, no less. If a page has no task, add one. Never skip a page silently.
   - **SELF-CHECK (run this before finalising the JSON array)**: For every frontend task you have written, verify ALL of the following are true:
     1. The task title contains exactly **one** page name (no "and", no comma-separated list, no plural like "pages").
-    2. `files.creates` contains exactly **one** file under `frontend/src/views/` (the one page component).
+    2. \`files.creates\` contains exactly **one** file under \`frontend/src/views/\` (the one page component).
     3. The first frontend task in the list is the **app shell / layout** task (sidebar, topbar, navigation skeleton — no data fetching).
     If any check fails, split the offending task before outputting.
   - **HARD RULE — title**: A frontend task title that contains "and" between two page names (e.g. "Implement Dashboard **and** Settings pages") is **forbidden** — that is two tasks.
   - **HARD RULE — plural**: A frontend task title that uses a **plural noun for pages** (e.g. "Implement enrollment **pages**", "Implement authentication **pages** and flows") is **forbidden** when it covers more than one view file — split until each task title refers to exactly one page.
-  - **HARD RULE — files**: A frontend task whose `files.creates` lists **two or more** `frontend/src/views/*.tsx` files is **forbidden** — split it so each task creates exactly one view file. Example violation: creating `PrivateEnrollmentPage.tsx`, `GroupEnrollmentPage.tsx`, and `LectureCampEnrollmentPage.tsx` in one task → must become 3 separate tasks.
+  - **HARD RULE — files**: A frontend task whose \`files.creates\` lists **two or more** \`frontend/src/views/*.tsx\` files is **forbidden** — split it so each task creates exactly one view file. Example violation: creating \`PrivateEnrollmentPage.tsx\`, \`GroupEnrollmentPage.tsx\`, and \`LectureCampEnrollmentPage.tsx\` in one task → must become 3 separate tasks.
   - **SPLIT SIGNAL**: If a frontend task's \`estimatedHours\` would exceed **0.5h**, it covers too much — split it.
   - Coding tasks should build the shell, navigation UI, and pages, but **must not** do the final route registration in \`frontend/src/router.tsx\`; that closure is handled by \`integrationVerifyAndFix\`.
   - **MANDATORY for every page-level frontend task**: the task \`description\` and at least one \`subStep\` MUST explicitly list every backend API endpoint the page reads from or writes to (e.g. \`GET /api/projects\`, \`POST /api/projects\`, \`DELETE /api/projects/:id\`). Derive these from the PRD and the Backend Services task's file list. If no endpoint applies (e.g. a static layout task), state "no API calls required" explicitly.
@@ -120,12 +120,12 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
 - **Testing** — **Do not** add separate tasks with phase "Testing". Instead, every P0/P1 implementation task MUST include an embedded \`tddPlan.tests[]\` array so Test Writer / Runtime Executor can create RED/GREEN evidence for that task.
 
 **Bad for M / L — frontend (these are ALL violations):**
-- "Implement course enrollment **pages**" that creates `PrivateEnrollmentPage.tsx` + `GroupEnrollmentPage.tsx` + `LectureCampEnrollmentPage.tsx` → must be 3 tasks
-- "Implement authentication **pages** and flows" that creates `AuthPage.tsx` + `AgreementSigningPage.tsx` → must be 2 tasks
+- "Implement course enrollment **pages**" that creates \`PrivateEnrollmentPage.tsx\` + \`GroupEnrollmentPage.tsx\` + \`LectureCampEnrollmentPage.tsx\` → must be 3 tasks
+- "Implement authentication **pages** and flows" that creates \`AuthPage.tsx\` + \`AgreementSigningPage.tsx\` → must be 2 tasks
 - "Implement course catalog **and** teacher directory pages" → must be 2 tasks
 - "Implement payment **and** billing pages" → must be 2 tasks
 - "Implement Dashboard, Settings, and Profile pages" → must be 3 tasks
-- Any frontend task where `files.creates` has 2+ entries under `frontend/src/views/`
+- Any frontend task where \`files.creates\` has 2+ entries under \`frontend/src/views/\`
 - Starting frontend tasks with a page task — the **first** frontend task must always be the app shell/layout
 
 **Bad for M / L — backend / other:**
