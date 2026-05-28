@@ -34,14 +34,14 @@ describe("extractPrdKnowledge", () => {
     const result = await extractPrdKnowledge({
       finalPrd: "# PRD\n\n## User Stories\n- ...\n",
       projectType: "dashboard",
-      tier: "standard",
+      tier: "M",
     });
 
     expect(result).not.toBeNull();
     expect(result!.industry).toBe("saas");
     expect(result!.productType).toBe("dashboard");
     expect(result!.sections.userStories).toHaveLength(2);
-    expect(result!.tier).toBe("standard");
+    expect(result!.tier).toBe("M");
   });
 
   it("falls back to input projectType when LLM omits it", async () => {
@@ -52,7 +52,7 @@ describe("extractPrdKnowledge", () => {
     const result = await extractPrdKnowledge({
       finalPrd: "# PRD body".repeat(100),
       projectType: "marketplace",
-      tier: "lite",
+      tier: "S",
     });
 
     expect(result!.productType).toBe("marketplace");
@@ -64,7 +64,7 @@ describe("extractPrdKnowledge", () => {
     const result = await extractPrdKnowledge({
       finalPrd: "x".repeat(300),
       projectType: "dashboard",
-      tier: "standard",
+      tier: "M",
     });
     expect(result).toBeNull();
   });
