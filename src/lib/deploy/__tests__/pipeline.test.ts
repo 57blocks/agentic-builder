@@ -8,6 +8,7 @@ vi.mock("@/lib/pipeline/kickoff-infra", () => ({
   readKickoffInfraMetadata: vi.fn(),
   internalDatabaseUrlFrom: vi.fn(),
   internalRedisUrlFrom: vi.fn(),
+  persistComposeOnInfra: vi.fn(),
 }));
 vi.mock("../dokploy", () => ({
   createDokployProject: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("../dokploy", () => ({
   updateDokployCompose: vi.fn(),
   deployDokployCompose: vi.fn(),
   pollDeployStatus: vi.fn(),
+  getDokployCompose: vi.fn(),
 }));
 vi.mock("../job-manager", () => ({
   emitStep: vi.fn(),
@@ -28,8 +30,9 @@ import {
   readKickoffInfraMetadata,
   internalDatabaseUrlFrom,
   internalRedisUrlFrom,
+  persistComposeOnInfra,
 } from "@/lib/pipeline/kickoff-infra";
-import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus } from "../dokploy";
+import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus, getDokployCompose } from "../dokploy";
 import { emitStep, completeJob, failJob } from "../job-manager";
 import { runDeployPipeline } from "../pipeline";
 
@@ -75,6 +78,21 @@ beforeEach(() => {
   vi.mocked(updateDokployCompose).mockResolvedValue(undefined);
   vi.mocked(deployDokployCompose).mockResolvedValue(undefined);
   vi.mocked(pollDeployStatus).mockResolvedValue("https://app.example.com");
+  // Default: kickoff-infra has no compose yet → first-time path (create + save).
+  vi.mocked(persistComposeOnInfra).mockResolvedValue({
+    dokployProjectId: "kickoff-proj",
+    dokployEnvironmentId: "kickoff-env",
+    appName: "my-app",
+    savedAt: new Date().toISOString(),
+    services: [],
+    compose: {
+      composeId: "comp-1",
+      appName: "my-app-abc",
+      appHost: "my-app-abc.apps.example.com",
+      savedAt: new Date().toISOString(),
+    },
+  });
+  vi.mocked(getDokployCompose).mockResolvedValue(null);
 });
 
 describe("runDeployPipeline", () => {
@@ -127,6 +145,110 @@ describe("runDeployPipeline", () => {
     expect(emitStep).toHaveBeenCalledWith("job-1", expect.objectContaining({ step: "create-database", status: "error" }));
     expect(failJob).toHaveBeenCalledWith("job-1");
     expect(createDokployProject).not.toHaveBeenCalled();
+  });
+
+  it("first deploy: creates compose, attaches domain, persists onto infra", async () => {
+    await runDeployPipeline({
+      jobId: "job-1",
+      appName: "my-app",
+      generatedCodePath: "generated-code",
+      projectRoot: "/project",
+      env: ENV,
+    });
+    expect(createDokployCompose).toHaveBeenCalledTimes(1);
+    expect(createDokployDomain).toHaveBeenCalledTimes(1);
+    expect(persistComposeOnInfra).toHaveBeenCalledWith("/project", {
+      composeId: "comp-1",
+      appName: "my-app-abc",
+      appHost: "my-app-abc.apps.example.com",
+    });
+  });
+
+  it("subsequent deploy: reuses compose from infraMeta, skips create+domain", async () => {
+    vi.mocked(readKickoffInfraMetadata).mockResolvedValue({
+      dokployProjectId: "kickoff-proj",
+      dokployEnvironmentId: "kickoff-env",
+      appName: "my-app",
+      savedAt: new Date().toISOString(),
+      services: [
+        {
+          kind: "postgres",
+          id: "pg-1",
+          appName: "my-app-pg",
+          publicUrl: "postgresql://app:pw@public:5432/my_app",
+          internalUrl: "postgresql://app:pw@my-app-pg:5432/my_app",
+          externalPort: 5432,
+        },
+      ],
+      compose: {
+        composeId: "comp-existing",
+        appName: "my-app-existing",
+        appHost: "my-app-existing.apps.example.com",
+        savedAt: new Date().toISOString(),
+      },
+    });
+    vi.mocked(getDokployCompose).mockResolvedValue({
+      composeId: "comp-existing",
+      appName: "my-app-existing",
+    });
+
+    await runDeployPipeline({
+      jobId: "job-1",
+      appName: "my-app",
+      generatedCodePath: "generated-code",
+      projectRoot: "/project",
+      env: ENV,
+    });
+
+    expect(createDokployProject).not.toHaveBeenCalled();
+    expect(createDokployCompose).not.toHaveBeenCalled();
+    expect(createDokployDomain).not.toHaveBeenCalled();
+    expect(persistComposeOnInfra).not.toHaveBeenCalled();
+    expect(updateDokployCompose).toHaveBeenCalledWith(
+      expect.objectContaining({ composeId: "comp-existing" }),
+    );
+    expect(deployDokployCompose).toHaveBeenCalledWith(
+      expect.objectContaining({ composeId: "comp-existing" }),
+    );
+  });
+
+  it("stale infraMeta.compose: composeId gone from Dokploy → recreate + repersist", async () => {
+    vi.mocked(readKickoffInfraMetadata).mockResolvedValue({
+      dokployProjectId: "kickoff-proj",
+      dokployEnvironmentId: "kickoff-env",
+      appName: "my-app",
+      savedAt: new Date().toISOString(),
+      services: [
+        {
+          kind: "postgres",
+          id: "pg-1",
+          appName: "my-app-pg",
+          publicUrl: "postgresql://app:pw@public:5432/my_app",
+          internalUrl: "postgresql://app:pw@my-app-pg:5432/my_app",
+          externalPort: 5432,
+        },
+      ],
+      compose: {
+        composeId: "comp-deleted",
+        appName: "my-app-old",
+        savedAt: new Date().toISOString(),
+      },
+    });
+    vi.mocked(getDokployCompose).mockResolvedValue(null); // Dokploy 404
+
+    await runDeployPipeline({
+      jobId: "job-1",
+      appName: "my-app",
+      generatedCodePath: "generated-code",
+      projectRoot: "/project",
+      env: ENV,
+    });
+
+    expect(createDokployCompose).toHaveBeenCalledTimes(1);
+    expect(persistComposeOnInfra).toHaveBeenCalledWith(
+      "/project",
+      expect.objectContaining({ composeId: "comp-1" }),
+    );
   });
 
   it("calls failJob when git push fails", async () => {

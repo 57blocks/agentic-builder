@@ -116,6 +116,21 @@ export async function pushGeneratedCodeToKickoffRepo(params: {
       { maxBuffer: 1024 * 1024 },
     );
 
+    // Force HTTP/1.1 + a generous post buffer for the push. git defaults to
+    // HTTP/2 over https, which intermittently fails the smart-HTTP push RPC
+    // with "RPC failed; HTTP 400 ... send-pack: unexpected disconnect" behind
+    // some proxies / GitHub edges. HTTP/1.1 is the documented workaround.
+    await execFileAsync(
+      "git",
+      ["-C", cloneDir, "config", "http.version", "HTTP/1.1"],
+      { maxBuffer: 1024 * 1024 },
+    );
+    await execFileAsync(
+      "git",
+      ["-C", cloneDir, "config", "http.postBuffer", "524288000"],
+      { maxBuffer: 1024 * 1024 },
+    );
+
     await execFileAsync("git", ["-C", cloneDir, "add", "-A"], {
       maxBuffer: 50 * 1024 * 1024,
     });
@@ -157,10 +172,17 @@ export async function pushGeneratedCodeToKickoffRepo(params: {
     const msg = e instanceof Error ? e.message : String(e);
     const err = e as { stderr?: Buffer };
     const stderr = err.stderr?.toString?.() ?? "";
+    // Redact the embedded credential before surfacing — git echoes the
+    // authenticated remote URL (`x-access-token:<token>@github.com/...`) in
+    // both the failed-command message and stderr.
+    const redact = (s: string) =>
+      s
+        .replaceAll(token, "***")
+        .replace(/x-access-token:[^@]*@/g, "x-access-token:***@");
     return {
       ok: false,
       message: "Git clone/commit/push failed",
-      detail: `${msg}${stderr ? `\n${stderr}` : ""}`,
+      detail: redact(`${msg}${stderr ? `\n${stderr}` : ""}`),
     };
   } finally {
     await fs.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
