@@ -26,6 +26,12 @@ interface SeedAccount {
   password?: string;
   role: Role;
   displayName?: string;
+  /**
+   * Business persona ("family" / "teacher" / "student" / "coach", etc.).
+   * Written to the `domain_role` column and consumed by frontend route
+   * shells. Optional; null when the decision file doesn't specify one.
+   */
+  domainRole?: string;
 }
 
 const HARDCODED_DEFAULTS: readonly SeedAccount[] = [
@@ -43,7 +49,12 @@ async function loadSeedAccounts(): Promise<SeedAccount[]> {
     try {
       const raw = await fs.readFile(file, "utf-8");
       const parsed = JSON.parse(raw) as {
-        seedAccounts?: Array<{ email?: unknown; password?: unknown; role?: unknown }>;
+        seedAccounts?: Array<{
+          email?: unknown;
+          password?: unknown;
+          role?: unknown;
+          domainRole?: unknown;
+        }>;
       };
       const list = Array.isArray(parsed.seedAccounts) ? parsed.seedAccounts : [];
       const accounts: SeedAccount[] = [];
@@ -54,7 +65,11 @@ async function loadSeedAccounts(): Promise<SeedAccount[]> {
           : null;
         if (!email || !role) continue;
         const password = typeof item.password === "string" ? item.password : undefined;
-        accounts.push({ email, role, password, displayName: role });
+        const domainRole =
+          typeof item.domainRole === "string" && item.domainRole.trim().length > 0
+            ? item.domainRole.trim()
+            : undefined;
+        accounts.push({ email, role, password, displayName: role, domainRole });
       }
       if (accounts.length > 0) return accounts;
     } catch {
@@ -77,6 +92,9 @@ async function upsert(account: SeedAccount): Promise<void> {
     passwordHash,
     role: account.role,
     displayName: account.displayName ?? account.role,
+    // null is significant here — Sequelize's upsert will clear an
+    // existing domain_role when the decision file removes it.
+    domainRole: account.domainRole ?? null,
   });
 }
 
@@ -88,10 +106,11 @@ export async function run(): Promise<void> {
   }
   console.log("Seeded auth users:");
   for (const acc of accounts) {
+    const persona = acc.domainRole ? ` [${acc.domainRole}]` : "";
     if ("password" in acc && acc.password) {
-      console.log(`  - ${acc.role.padEnd(8)} ${acc.email}  /  ${acc.password}`);
+      console.log(`  - ${acc.role.padEnd(8)}${persona} ${acc.email}  /  ${acc.password}`);
     } else {
-      console.log(`  - ${acc.role.padEnd(8)} ${acc.email}`);
+      console.log(`  - ${acc.role.padEnd(8)}${persona} ${acc.email}`);
     }
   }
 }

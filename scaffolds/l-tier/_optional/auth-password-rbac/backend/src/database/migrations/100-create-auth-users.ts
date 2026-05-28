@@ -33,9 +33,25 @@ export async function up(
       password_hash VARCHAR(255),
       role          VARCHAR(32)  NOT NULL DEFAULT 'viewer',
       display_name  VARCHAR(255),
+      domain_role   VARCHAR(64),
       created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
       updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     )
+  `);
+
+  // Backfill path for databases created BEFORE `domain_role` was part of
+  // the CREATE TABLE. Idempotent guard so re-runs on fresh databases
+  // (column already present) are a no-op.
+  await q.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'domain_role'
+      ) THEN
+        ALTER TABLE users ADD COLUMN domain_role VARCHAR(64);
+      END IF;
+    END $$
   `);
 
   await q.query(`
@@ -45,6 +61,10 @@ export async function up(
   await q.query(`
     CREATE INDEX IF NOT EXISTS users_role_idx
       ON users (role)
+  `);
+  await q.query(`
+    CREATE INDEX IF NOT EXISTS users_domain_role_idx
+      ON users (domain_role)
   `);
 
   await q.query(`

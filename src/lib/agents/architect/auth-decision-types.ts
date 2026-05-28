@@ -45,6 +45,19 @@ export interface SeedAccount {
    *  insert. Empty/omitted for non-password modes (magic-link / privy)
    *  where seed accounts only exist to pre-assign roles to incoming users. */
   password?: string;
+  /**
+   * Optional domain persona (e.g. "family" / "teacher" / "student" / "coach"
+   * — anything the PRD calls for). Stored on the User row in the
+   * `domain_role` column so frontend shells can route by business persona
+   * INDEPENDENTLY of the RBAC `role` (admin/operator/viewer).
+   *
+   * Why this exists: in past projects we kept stuffing business personas
+   * into the 3-value RBAC `role` enum, which (a) overflowed the type and
+   * (b) forced every nav guard to know about both. Splitting them keeps
+   * `role` as a tight authZ primitive and `domainRole` as a flexible
+   * routing/UI hint.
+   */
+  domainRole?: string;
 }
 
 /** Default fixed seed accounts (per user choice). Production README warns to
