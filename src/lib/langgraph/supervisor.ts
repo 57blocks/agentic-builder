@@ -83,6 +83,8 @@ import {
   formatMigrationCoverageBlock,
   runMigrationQualityRepair,
   formatMigrationQualityBlock,
+  runSchemaDriftRepair,
+  formatSchemaDriftBlock,
   repairContractCoverage,
   repairPageCoverage,
   getUnresolvedMigrationGaps,
@@ -5569,6 +5571,42 @@ async function integrationVerifyAndFix(
     );
   }
 
+  // ── Schema DRIFT repair (model column vs migration DDL) ────────────────
+  // Sibling of migration-coverage / migration-quality. Coverage answers
+  // "did the task write a migration when it touched a model?", quality
+  // answers "is every migration safe to re-run?", drift answers the
+  // narrower question: "for every `declare <field>:` on every model, does
+  // the migrations corpus mention the corresponding snake_case column?".
+  //
+  // This catches the F-04 class of bugs (login → 500 because
+  // `column "google_id" does not exist`) which slip past the per-task
+  // coverage check whenever a worker edits an EXISTING model and adds a
+  // new field without authoring an ALTER TABLE migration.
+  let schemaDriftResult: Awaited<
+    ReturnType<typeof runSchemaDriftRepair>
+  > | null = null;
+  try {
+    schemaDriftResult = await runSchemaDriftRepair({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+    });
+    if (schemaDriftResult.pendingRepairTasks.length > 0) {
+      console.log(
+        `${label}: schema-drift queued ${schemaDriftResult.pendingRepairTasks.length} repair task(s) across ${schemaDriftResult.modelsScanned} model file(s).`,
+      );
+    }
+    if (schemaDriftResult.scanFailed) {
+      console.warn(
+        `${label}: schema-drift scan partial — ${schemaDriftResult.scanFailed}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: schema-drift repair skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   // ── Runtime integration audit (CODEGEN_HARDENING_PLAN.md §4.2 / §4.3 /
   //    §4.4 / §4.5 / §4.7) ────────────────────────────────────────────────
   // Static grep-based audit catching the runtime pitfalls Phase 4 prompts
@@ -6225,6 +6263,9 @@ async function integrationVerifyAndFix(
   const migrationQualityBlock = migrationQualityResult
     ? formatMigrationQualityBlock(migrationQualityResult)
     : "";
+  const schemaDriftBlock = schemaDriftResult
+    ? formatSchemaDriftBlock(schemaDriftResult)
+    : "";
   const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
 
   const openingUserContent = [
@@ -6234,6 +6275,7 @@ async function integrationVerifyAndFix(
     coverageBlock,
     migrationCoverageBlock,
     migrationQualityBlock,
+    schemaDriftBlock,
     runtimeAuditBlock,
     tddRepairBlock,
     dependencyAuditBlock,
