@@ -164,6 +164,26 @@ export type {
   SchemaDriftRepairResult,
 } from "./schema-drift-repair";
 export {
+  checkAdminRouteCoverage,
+  normaliseAdminPath,
+} from "./admin-route-coverage";
+export type {
+  AdminRouteCoverageRuleId,
+  AdminRouteCoverageFinding,
+  AdminRouteCoverageInput,
+  AdminRouteCoverageResult,
+  AdminRouteCoverageFile,
+} from "./admin-route-coverage";
+export {
+  runAdminRouteCoverageRepair,
+  formatAdminRouteCoverageBlock,
+} from "./admin-route-coverage-repair";
+export type {
+  AdminRouteCoverageRepairTask,
+  AdminRouteCoverageRepairInput,
+  AdminRouteCoverageRepairResult,
+} from "./admin-route-coverage-repair";
+export {
   computeStagnationReplan,
   buildReplanContext,
 } from "./stagnation-replan";
