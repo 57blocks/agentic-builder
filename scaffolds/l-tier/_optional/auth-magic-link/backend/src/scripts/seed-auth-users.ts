@@ -23,6 +23,12 @@ interface SeedAccount {
   email: string;
   role: Role;
   displayName?: string;
+  /**
+   * Business persona ("family" / "teacher" / "student" / "coach", etc.).
+   * Written to the `domain_role` column and consumed by frontend route
+   * shells. Optional; null when the decision file doesn't specify one.
+   */
+  domainRole?: string;
 }
 
 const HARDCODED_DEFAULTS: readonly SeedAccount[] = [
@@ -40,7 +46,11 @@ async function loadSeedAccounts(): Promise<SeedAccount[]> {
     try {
       const raw = await fs.readFile(file, "utf-8");
       const parsed = JSON.parse(raw) as {
-        seedAccounts?: Array<{ email?: unknown; role?: unknown }>;
+        seedAccounts?: Array<{
+          email?: unknown;
+          role?: unknown;
+          domainRole?: unknown;
+        }>;
       };
       const list = Array.isArray(parsed.seedAccounts) ? parsed.seedAccounts : [];
       const accounts: SeedAccount[] = [];
@@ -51,7 +61,11 @@ async function loadSeedAccounts(): Promise<SeedAccount[]> {
             ? (item.role as Role)
             : null;
         if (!email || !role) continue;
-        accounts.push({ email, role, displayName: role });
+        const domainRole =
+          typeof item.domainRole === "string" && item.domainRole.trim().length > 0
+            ? item.domainRole.trim()
+            : undefined;
+        accounts.push({ email, role, displayName: role, domainRole });
       }
       if (accounts.length > 0) return accounts;
     } catch {
@@ -67,6 +81,9 @@ async function upsert(account: SeedAccount): Promise<void> {
     role: account.role,
     displayName: account.displayName ?? account.role,
     passwordHash: null,
+    // null is significant — clears an existing domain_role when the
+    // decision file removes the persona.
+    domainRole: account.domainRole ?? null,
   });
 }
 
@@ -78,7 +95,8 @@ export async function run(): Promise<void> {
   }
   console.log("Seeded auth users:");
   for (const acc of accounts) {
-    console.log(`  - ${acc.role.padEnd(8)} ${acc.email}`);
+    const persona = acc.domainRole ? ` [${acc.domainRole}]` : "";
+    console.log(`  - ${acc.role.padEnd(8)}${persona} ${acc.email}`);
   }
 }
 

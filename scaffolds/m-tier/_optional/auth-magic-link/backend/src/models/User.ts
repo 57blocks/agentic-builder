@@ -25,6 +25,12 @@ export class User extends Model<
   declare passwordHash: CreationOptional<string | null>;
   declare role: "admin" | "operator" | "viewer";
   declare displayName: string | null;
+  /**
+   * Free-form business persona ("family" / "teacher" / "student" /
+   * "coach" — whatever the PRD specifies). Separate from the 3-value
+   * RBAC `role` enum. See password-rbac User.ts for full rationale.
+   */
+  declare domainRole: CreationOptional<string | null>;
   declare lastLoginAt: CreationOptional<Date | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -58,6 +64,11 @@ User.init(
       type: DataTypes.STRING(255),
       allowNull: true,
       field: "display_name",
+    },
+    domainRole: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+      field: "domain_role",
     },
     lastLoginAt: {
       type: DataTypes.DATE,
