@@ -181,6 +181,12 @@ export async function recallPrdContext(
       }
       cases = cases.slice(0, 2);
       recalledKnowledgeIds = cases.map((r) => r.id);
+      console.log(
+        `[memory:prd-recall] inject=${memoryInjectEnabledForPrd()} industry=${industry ?? "none"} active-cases=${cases.length} ids=[${recalledKnowledgeIds.join(",")}]`,
+      );
+      for (const rec of cases) {
+        await getSystemMemory().bumpHit(rec.id);
+      }
 
       const xmlCases: string[] = [];
       for (const rec of cases) {
@@ -194,6 +200,8 @@ export async function recallPrdContext(
     } catch (err) {
       console.warn("[memory] recallPrdContext: prd-knowledge fetch failed (skipping):", (err as Error).message);
     }
+  } else {
+    console.log("[memory:prd-recall] inject=false (MEMORY_PRD_INJECT / MEMORY_INJECT off)");
   }
 
   const contextChunk = [knowledgeBlock, wrapPatternBlock("PRD", patternResult.block)]
