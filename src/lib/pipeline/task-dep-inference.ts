@@ -211,6 +211,62 @@ export function inferTaskDependencies(
     }
   }
 
+  // ── 5. Fix serial same-phase chains ────────────────────────────────────
+  // When the LLM emits T-005 → ["T-004"] where both share the same phase
+  // (e.g. Backend Services), it creates a fully serial chain.  Replace the
+  // same-phase dep with the appropriate foundation dep so same-phase tasks
+  // fan out in parallel.
+  //
+  // Only the same-phase portion of the dep list is replaced; cross-phase
+  // deps (e.g. a frontend task that legitimately depends on a backend task)
+  // are kept unchanged.  A cycle-safety check prevents regressions.
+  const phaseOf = new Map(tasks.map((t) => [t.id, t.phase]));
+
+  for (const t of tasks) {
+    const deps = Array.isArray(t.dependencies) ? [...t.dependencies] : [];
+    if (deps.length === 0) continue;
+
+    const kept: string[] = [];
+    let needsFoundation = false;
+
+    for (const depId of deps) {
+      if (phaseOf.get(depId) === t.phase) {
+        // Same-phase dep → mark for replacement with foundation dep.
+        needsFoundation = true;
+      } else {
+        kept.push(depId);
+      }
+    }
+
+    if (!needsFoundation) continue;
+
+    // Determine the foundation dep for this task's phase.
+    let foundation: string | undefined;
+    if (t.phase === "Backend Services" || t.phase === "Auth & Gateway") {
+      foundation = modelTask?.id ?? apiClientTask?.id;
+    } else if (t.phase === "Frontend") {
+      foundation = appShellTask?.id ?? apiClientTask?.id;
+    }
+
+    if (foundation && foundation !== t.id && !kept.includes(foundation)) {
+      if (!wouldCreateCycle(tasks, foundation, t.id)) {
+        kept.push(foundation);
+        trace.added.push({
+          taskId: t.id,
+          depId: foundation,
+          reason: `replaced serial same-phase dep with foundation ${foundation}`,
+        });
+      }
+    }
+
+    // Deduplicate and write back only if something actually changed.
+    const next = [...new Set(kept)].sort();
+    const prev = [...deps].sort();
+    if (next.join(",") !== prev.join(",")) {
+      t.dependencies = next;
+    }
+  }
+
   return { tasks, trace };
 }
 
