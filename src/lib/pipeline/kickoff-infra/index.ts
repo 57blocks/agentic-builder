@@ -226,4 +226,33 @@ export function internalRedisUrlFrom(
   return urlForKind(meta.services, "redis")?.internalUrl ?? null;
 }
 
+/**
+ * Read-modify-write the `compose` field on `kickoff-infra.json`. Used by the
+ * deploy pipeline after a fresh compose stack is created so subsequent
+ * deploys can find it and reuse instead of leaking new composes per click.
+ * Throws if the file is missing — first deploy must run with a real infra
+ * provision in place, otherwise nothing to attach the compose to.
+ */
+export async function persistComposeOnInfra(
+  projectRoot: string,
+  compose: Omit<import("./types").ComposeInfo, "savedAt">,
+): Promise<KickoffInfraFile> {
+  const current = await readKickoffInfraMetadata(projectRoot);
+  if (!current) {
+    throw new Error(
+      "kickoff-infra.json not found — cannot persist compose info. Run kickoff first.",
+    );
+  }
+  const next: KickoffInfraFile = {
+    ...current,
+    compose: { ...compose, savedAt: new Date().toISOString() },
+  };
+  await fs.writeFile(
+    kickoffInfraJsonPath(projectRoot),
+    JSON.stringify(next, null, 2),
+    "utf-8",
+  );
+  return next;
+}
+
 export * from "./types";
