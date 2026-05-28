@@ -19,6 +19,7 @@ import { buildTaskBreakdownScaffoldBlock } from "@/lib/pipeline/scaffold-spec";
 import type { KickoffWorkItem } from "./types";
 import { stripTestingPhaseTasks } from "./strip-testing-tasks";
 import { inferTaskDependencies } from "./task-dep-inference";
+import { splitMultiPageFrontendTasks } from "./split-multipage-tasks";
 
 function isKickoffWorkItem(x: unknown): x is KickoffWorkItem {
   if (!x || typeof x !== "object") return false;
@@ -350,12 +351,13 @@ async function maybeRunExpansion(opts: {
   );
   const merged = [...keptTasks, ...expansionNormalized];
   const { tasks: withNewDeps } = inferTaskDependencies(merged);
+  const withSplit = splitMultiPageFrontendTasks(withNewDeps);
 
   console.info(
-    `[task-breakdown] ${opts.tierLabel} expansion complete: ${opts.tasks.length} → ${withNewDeps.length} tasks`,
+    `[task-breakdown] ${opts.tierLabel} expansion complete: ${opts.tasks.length} → ${withSplit.length} tasks`,
   );
 
-  return withNewDeps;
+  return withSplit;
 }
 
 function extractPrdRequirementIds(prd: string): Set<string> {
@@ -467,6 +469,17 @@ export async function buildTaskBreakdownFromDocuments(params: {
    *  Persisted on the kickoff step metadata so the UI + audit script can
    *  show "which rules fired this run" without re-running the loader. */
   skillsTrace: SkillTraceRecord;
+  /** Pre-formatted scaffold contract block injected into the primary
+   *  task-breakdown system prompt. Surfaced so coverage-gate / phase-gate
+   *  self-heal can reuse the exact same context when they spawn their
+   *  own TaskBreakdownAgent instances. */
+  scaffoldBlock: string;
+  /** Pre-formatted applied-skills block injected into the primary
+   *  task-breakdown system prompt. Surfaced for the same reason as
+   *  `scaffoldBlock` above — without it, self-heal LLM calls would
+   *  bypass hard rules like `scaffold-owned-files` and freely re-create
+   *  canonical paths (User.ts, Session.ts, modules/admin/*). */
+  skillsBlock: string;
 }> {
   const tier = normalizeProjectTier(params.tier ?? "M");
   const scaffoldTier = tier as ScaffoldTier;
@@ -541,10 +554,15 @@ export async function buildTaskBreakdownFromDocuments(params: {
     );
   }
 
+  // Deterministically split any frontend task that creates 2+ view files.
+  // This catches pages the LLM merged despite prompt rules (e.g. "lecture and
+  // camp enrollment pages" → two separate page tasks).
+  const splitTasks = splitMultiPageFrontendTasks(withDeps);
+
   // L-tier self-heal: when too few tasks for the PRD size, expand overbroad ones.
   const expandedTasks = await maybeExpandLTierTasks({
     tier,
-    tasks: withDeps,
+    tasks: splitTasks,
     prd: params.prd,
     agent,
     trd: params.trd,
@@ -565,5 +583,14 @@ export async function buildTaskBreakdownFromDocuments(params: {
     droppedFromTruncation: parsed.droppedCount,
     truncationOffset: parsed.truncationOffset,
     skillsTrace: toSkillTraceRecord(skillsLoaded),
+    // Surface scaffold + skills system-prompt blocks so coverage-gate /
+    // phase-gate self-heal can reuse them when spawning their own
+    // TaskBreakdownAgent instances. Without these, self-heal LLM calls
+    // get a stripped-down prompt and happily re-create scaffold-owned
+    // files (e.g. backend/src/models/User.ts) or invent parallel module
+    // trees (e.g. backend/src/api/modules/admin/*.ts) instead of
+    // honouring the canonical scaffold-owned-files contract.
+    scaffoldBlock,
+    skillsBlock,
   };
 }
