@@ -407,6 +407,17 @@ export default function AppNav() {
             </>
           )}
         </Link>
+        <Link
+          href="/prd-knowledge"
+          className={`flex items-center text-sm font-medium transition-colors ${
+            pathname === "/prd-knowledge"
+              ? "text-slate-900"
+              : "text-slate-500 hover:text-slate-900"
+          } ${collapsed ? "w-8 h-8 justify-center rounded-lg hover:bg-slate-100" : ""}`}
+          title={collapsed ? "PRD Knowledge" : undefined}
+        >
+          {collapsed ? <span className="text-[13px] font-bold">P</span> : "PRD Knowledge"}
+        </Link>
       </div>
 
       {/* Bottom: New Project + User Profile */}
