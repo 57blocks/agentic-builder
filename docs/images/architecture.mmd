@@ -1,0 +1,62 @@
+%%{init: {'theme': 'neutral', 'themeVariables': {'fontSize': '18px', 'primaryBorderColor': '#469bff'}}}%%
+flowchart TB
+    classDef ui fill:#ffffff,stroke:#469bff,stroke-width:3px,color:#202631,font-size:15px
+    classDef orchestration fill:#ffffff,stroke:#8370f2,stroke-width:3px,color:#202631,font-size:15px
+    classDef agents fill:#ffffff,stroke:#3fc484,stroke-width:3px,color:#202631,font-size:15px
+    classDef execution fill:#ffffff,stroke:#ffb700,stroke-width:3px,color:#202631,font-size:15px
+    classDef infra fill:#ffffff,stroke:#ff4343,stroke-width:3px,color:#202631,font-size:15px
+
+    subgraph UI["LAYER 1 - PIPELINE DASHBOARD"]
+        Nav["Pipeline Navigation and Status Bar"]
+        StepView["Active Step Workspace"]
+    end
+
+    subgraph Orchestration["LAYER 2 - ORCHESTRATION"]
+        Registry["Step Registry and Flow Engine"]
+        Snapshot["Progress Persistence Layer"]
+        Stores["Global State Management"]
+    end
+
+    subgraph Agents["LAYER 3 - AI AGENTS"]
+        Chat["Conversational Agents - Idea Capture and Intent Clarification"]
+        Doc["Document Agents - PRD, TRD, QA Plan Generation"]
+        DesignAgent["Design Agents - Specifications and Visual Mockups"]
+        CodeAgents["Coding Agents - Architect, Backend, Frontend, Test"]
+    end
+
+    subgraph Execution["LAYER 4 - EXECUTION ENGINES"]
+        PipelineSSE["Real-Time Streaming Engine - Pipeline SSE Protocol"]
+        ParallelSSE["Parallel Generation Engine - Multi-Document Concurrent Output"]
+        CodingGraph["Coding Orchestration Engine - Multi-Agent Task Graph"]
+    end
+
+    subgraph Infrastructure["LAYER 5 - INFRASTRUCTURE"]
+        LLM["Large Language Models - Claude, GPT, and Others"]
+        DB["Project Database - Snapshots, State, Artifacts"]
+        FS["File System - Generated Code and Assets"]
+    end
+
+    Nav --> StepView
+    StepView --> Registry
+    Registry --> Snapshot
+    Snapshot --> Stores
+    Stores --> Chat
+    Stores --> Doc
+    Stores --> DesignAgent
+    Stores --> CodeAgents
+    Chat --> PipelineSSE
+    Doc --> ParallelSSE
+    DesignAgent --> ParallelSSE
+    CodeAgents --> CodingGraph
+    PipelineSSE --> LLM
+    ParallelSSE --> LLM
+    CodingGraph --> LLM
+    PipelineSSE --> DB
+    ParallelSSE --> DB
+    CodingGraph --> FS
+
+    UI:::ui
+    Orchestration:::orchestration
+    Agents:::agents
+    Execution:::execution
+    Infrastructure:::infra
