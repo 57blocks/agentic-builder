@@ -72,7 +72,7 @@ function DiffPanel({ history, currentContent, onClose }: { history: PrdSnapshot[
   return (
     <div className="flex flex-col w-full h-full bg-white border border-[#e2e8f0] rounded-[4px] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-        <div className="flex items-center gap-3"><History size={16} className="text-[#712ae2]" /><span className="font-semibold text-slate-900 text-sm">PRD Version Diff</span><span className="text-xs text-slate-500">{allVersions.length} versions</span></div>
+        <div className="flex items-center gap-3"><History size={16} className="text-indigo-600" /><span className="font-semibold text-slate-900 text-sm">PRD Version Diff</span><span className="text-xs text-slate-500">{allVersions.length} versions</span></div>
         <button onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100 transition-colors"><X size={16} className="text-slate-500" /></button>
       </div>
       <div className="flex items-center gap-6 px-6 py-3 border-b border-slate-100 bg-slate-50 shrink-0 text-xs">
@@ -522,7 +522,7 @@ export function PrdUI(props: StepUIProps) {
             <div className="bg-[rgba(248,250,252,0.5)] border-b border-[#f1f5f9] px-8 pt-8 pb-[33px] flex items-start justify-between">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-[rgba(113,42,226,0.1)] text-[#712ae2] text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">{isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}</span>
+                  <span className="bg-indigo-50 text-indigo-600 text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">{isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}</span>
                   {isDone && tier && (
                     <span className={`text-[11px] font-semibold px-2 py-[2px] rounded-[2px] ${
                       tier === "S" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
@@ -539,7 +539,7 @@ export function PrdUI(props: StepUIProps) {
                 {isDone && <div className="flex items-center gap-4 mt-1">{step?.costUsd != null && <span className="text-[11px] text-[#94a3b8]">Cost: <span className="font-medium text-[#64748b]">${step.costUsd.toFixed(4)}</span></span>}</div>}
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {versionCount > 1 && <button onClick={() => setShowDiff(true)} disabled={isManualEditing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors mr-1 disabled:opacity-40" title="View version history & diff"><History size={13} />{versionCount} versions</button>}
+                {versionCount > 1 && <button onClick={() => setShowDiff(true)} disabled={isManualEditing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors mr-1 disabled:opacity-40" title="View version history & diff"><History size={13} />{versionCount} versions</button>}
                 {!isManualEditing && (
                   <button
                     onClick={startManualEdit}
@@ -558,7 +558,7 @@ export function PrdUI(props: StepUIProps) {
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between text-[12px] text-slate-500">
                     <span className="flex items-center gap-1.5">
-                      <Pencil size={12} className="text-[#712ae2]" />
+                      <Pencil size={12} className="text-indigo-600" />
                       Editing raw markdown — changes are saved to <code className="px-1 py-[1px] rounded bg-slate-100 text-slate-700">PRD.md</code> on Save.
                     </span>
                     <span className="text-[11px] text-slate-400">{manualDraft.length.toLocaleString()} chars</span>
@@ -569,7 +569,7 @@ export function PrdUI(props: StepUIProps) {
                     onChange={(e) => setManualDraft(e.target.value)}
                     spellCheck={false}
                     disabled={manualSaving}
-                    className="w-full min-h-[60vh] resize-y font-mono text-[13px] leading-[1.6] text-[#1f2328] bg-white border border-slate-200 rounded-md p-4 focus:outline-none focus:border-[#712ae2] focus:ring-1 focus:ring-[#712ae2] disabled:bg-slate-50"
+                    className="w-full min-h-[60vh] resize-y font-mono text-[13px] leading-[1.6] text-[#1f2328] bg-white border border-slate-200 rounded-md p-4 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 disabled:bg-slate-50"
                   />
                   {manualError && (
                     <div className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
@@ -579,7 +579,7 @@ export function PrdUI(props: StepUIProps) {
                 </div>
               ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
-              : isThisRunning && !content ? <div className="flex items-center gap-2 text-[#712ae2] text-[13px]"><SpinnerIcon /> Generating PRD…</div>
+              : isThisRunning && !content ? <div className="flex items-center gap-2 text-indigo-600 text-[13px]"><SpinnerIcon /> Generating PRD…</div>
               : <MarkdownRenderer content={content} variant="prd" skipMermaid={true} />}
             <div ref={bottomRef} />
             </div>
@@ -634,7 +634,7 @@ export function PrdUI(props: StepUIProps) {
             }).catch(() => {/* ignore */});
           }
           if (nextStep) props.onNavigate(nextStep);
-        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : "Confirm PRD"}{!isSavingDoc && !confirmCooldown && <ArrowRight size={16} color="white" />}</button></div>}
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : "Next Step"}{!isSavingDoc && !confirmCooldown && <ArrowRight size={16} color="white" />}</button></div>}
       />
       )}
     </div>
