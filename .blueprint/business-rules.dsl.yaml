@@ -2,128 +2,119 @@ version: 1
 rules:
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: MC-1
-    name: "Market capitalization normalization"
-    description: "Maps current market capitalization to a score contribution."
-    type: piecewise-linear
-    inputUnit: "usd"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 1000000, outputFrom: 0, outputTo: 20 }
-      - { from: 1000000, to: 1000000000, outputFrom: 20, outputTo: 80 }
-      - { from: 1000000000, to: 1000000000000, outputFrom: 80, outputTo: 100 }
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: MC-5
-    name: "7-day market cap volatility normalization"
-    description: "Maps 7-day volatility to a contribution; lower volatility is better."
-    type: piecewise-linear
-    inputUnit: "percent"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 5, outputFrom: 100, outputTo: 80 }
-      - { from: 5, to: 15, outputFrom: 80, outputTo: 40 }
-      - { from: 15, to: 100, outputFrom: 40, outputTo: 0 }
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: MC-8
-    name: "30-day volume trend normalization"
-    description: "Maps 30-day volume trend to a contribution; rising trend is better."
+  - id: RULE-1
+    name: "Enrollment deadline enforcement"
+    description: "Blocks enrollment actions after the course deadline."
     type: decision-table
     inputs:
-      - { name: trendDirection, type: string }
-      - { name: trendStrength, type: number }
-    output: { name: scoreContribution, type: number }
+      - { name: enrollmentDeadlinePassed, type: string }
+    output: { name: action, type: string }
     cases:
-      - when: { trendDirection: "strong_up" }
-        then: 100
-      - when: { trendDirection: "up" }
-        then: 75
-      - when: { trendDirection: "flat" }
-        then: 50
-      - when: { trendDirection: "down" }
-        then: 25
+      - when: { enrollmentDeadlinePassed: "true" }
+        then: "disable-enroll"
       - when: { }
-        then: 0
+        then: "allow-enroll"
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: OC-7
-    name: "On-chain holder concentration normalization"
-    description: "Maps concentration to a risk contribution."
-    type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 0.1, outputFrom: 0, outputTo: 20 }
-      - { from: 0.1, to: 0.3, outputFrom: 20, outputTo: 70 }
-      - { from: 0.3, to: 1, outputFrom: 70, outputTo: 100 }
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: SE-2
-    name: "Negative X/Twitter mention volume"
-    description: "Maps negative-sentiment mention count to a contribution."
-    type: piecewise-linear
-    inputUnit: "count"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 10, outputFrom: 100, outputTo: 80 }
-      - { from: 10, to: 100, outputFrom: 80, outputTo: 40 }
-      - { from: 100, to: 1000000, outputFrom: 40, outputTo: 0 }
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: SE-4
-    name: "News sentiment polarity"
-    description: "Maps LLM polarity classification to a contribution."
+  - id: RULE-2
+    name: "Class capacity enforcement"
+    description: "Determines whether a group class is full and should move to waitlist."
     type: decision-table
     inputs:
-      - { name: polarity, type: string }
-    output: { name: scoreContribution, type: number }
+      - { name: enrolled, type: number }
+      - { name: capacity, type: number }
+    output: { name: enrollmentState, type: string }
     cases:
-      - when: { polarity: "negative" }
-        then: 100
-      - when: { polarity: "neutral" }
-        then: 50
-      - when: { polarity: "positive" }
-        then: 0
+      - when: { enrolled: ">=capacity" }
+        then: "waitlist"
+      - when: { }
+        then: "enroll"
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RQ-1
-    name: "Reserve composition extraction readiness"
-    description: "Normalizes completeness of extracted reserve composition into a review readiness contribution."
-    type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 40 }
-      - { from: 0.5, to: 0.9, outputFrom: 40, outputTo: 85 }
-      - { from: 0.9, to: 1, outputFrom: 85, outputTo: 100 }
+  - id: RULE-3
+    name: "Policy re-sign enforcement"
+    description: "Forces re-sign when the active policy version changes."
+    type: decision-table
+    inputs:
+      - { name: signedVersion, type: string }
+      - { name: activeVersion, type: string }
+    output: { name: allowed, type: string }
+    cases:
+      - when: { signedVersion: "!=activeVersion" }
+        then: "block-and-redirect"
+      - when: { }
+        then: "allow"
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RQ-3
-    name: "Independent attestor coverage"
-    description: "Maps attestor coverage completeness to a contribution."
+  - id: RULE-4
+    name: "Refund window"
+    description: "Allows refunds only within the configured refund window."
     type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
+    inputUnit: "days"
+    outputRange: [0, 1]
     segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 50 }
-      - { from: 0.5, to: 1, outputFrom: 50, outputTo: 100 }
+      - { from: 0, to: 14, outputFrom: 1, outputTo: 1 }
+      - { from: 14, to: 3650, outputFrom: 0, outputTo: 0 }
 
   # PLACEHOLDER: thresholds inferred without authoritative source;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RQ-4
-    name: "Reserve liquidity tier completeness"
-    description: "Maps liquidity tier extraction completeness to a contribution."
+  - id: RULE-5
+    name: "Teacher work-hour submission gating"
+    description: "Requires all records confirmed before submission."
+    type: decision-table
+    inputs:
+      - { name: allConfirmed, type: string }
+      - { name: singleMonthSelected, type: string }
+    output: { name: allowed, type: string }
+    cases:
+      - when: { allConfirmed: "false" }
+        then: "block"
+      - when: { singleMonthSelected: "false" }
+        then: "block"
+      - when: { }
+        then: "allow"
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RULE-6
+    name: "Teacher availability overlap"
+    description: "Blocks overlapping availability slots for the same teacher."
+    type: decision-table
+    inputs:
+      - { name: slotOverlaps, type: string }
+    output: { name: allowed, type: string }
+    cases:
+      - when: { slotOverlaps: "true" }
+        then: "block"
+      - when: { }
+        then: "allow"
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RULE-7
+    name: "Room conflict"
+    description: "Blocks course configuration when a classroom is already occupied."
+    type: decision-table
+    inputs:
+      - { name: roomConflict, type: string }
+    output: { name: allowed, type: string }
+    cases:
+      - when: { roomConflict: "true" }
+        then: "block"
+      - when: { }
+        then: "allow"
+
+  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RULE-8
+    name: "Password strength"
+    description: "Requires passwords to be at least 6 characters."
     type: piecewise-linear
-    inputUnit: "ratio"
-    outputRange: [0, 100]
+    inputUnit: "chars"
+    outputRange: [0, 1]
     segments:
-      - { from: 0, to: 0.5, outputFrom: 0, outputTo: 40 }
-      - { from: 0.5, to: 1, outputFrom: 40, outputTo: 100 }
+      - { from: 0, to: 6, outputFrom: 0, outputTo: 0 }
+      - { from: 6, to: 128, outputFrom: 1, outputTo: 1 }

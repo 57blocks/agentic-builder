@@ -8,24 +8,6 @@ export interface AppError extends Error {
   details?: any;
 }
 
-/**
- * Canonical error handler. Two responsibilities:
- *
- *   1. Convert every thrown `AppError` (or unknown) into the project-wide
- *      response envelope `{ ok: false, error: { code, message, details? } }`.
- *      Frontends rely on this shape — if a handler returns a bare `{ error }`
- *      object the client unwrapper falls through and renders "undefined".
- *
- *   2. Log the failure through `pino` (NOT `console.error`). Reasons:
- *        - `console.error` bypasses pino's redaction config, so any
- *          `password`/`refresh_token` smuggled in `requestBody` leaks to stdout
- *          in plain text (audit + GDPR risk).
- *        - pino's structured output is what log aggregators index; plain
- *          `console.error` strings break dashboards.
- *
- * MUST be registered FIRST in `app.use(...)` chain so errors thrown by later
- * middleware (auth, body parser, validation) are caught.
- */
 export const errorHandlerMiddleware: Koa.Middleware = async (
   ctx: AppContext,
   next,
@@ -35,28 +17,32 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
   try {
     await next();
 
+    // Handle 404
     if (ctx.status === 404 && !ctx.body) {
       ctx.status = 404;
       ctx.body = {
-        ok: false,
-        error: {
-          code: "NOT_FOUND",
-          message: `Route ${ctx.method} ${ctx.url} not found`,
-        },
+        error: "Not Found",
+        message: `Route ${ctx.method} ${ctx.url} not found`,
       };
     }
   } catch (err: any) {
     const error = err as AppError;
-    const status = error.status || 500;
-    const code = error.code || (status >= 500 ? "INTERNAL_SERVER_ERROR" : "BAD_REQUEST");
 
+    // Log error via the structured logger so the `redact` paths configured
+    // on `config/logger.ts` (`password`, `*.password`, `passwordHash`,
+    // `authorization`, `cookie`, …) actually take effect. Using
+    // `console.error` bypasses redaction → /auth/login validation
+    // failures used to leak plaintext credentials to stdout / CloudWatch.
     logger.error(
       {
         method: ctx.method,
         url: ctx.url,
-        status,
-        code,
+        status: error.status,
+        code: error.code,
         details: error.details,
+        // `body` is the parsed request body. pino's redact path matches
+        // `body.password` (and any nested *.password) because we expose
+        // the body under `body` — see logger.ts#redact.paths.
         body: requestBody,
         userId: ctx.state.user?.id,
         err: error,
@@ -64,22 +50,27 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
       `request failed: ${error.message}`,
     );
 
-    ctx.status = status;
+    // Set response status
+    ctx.status = error.status || 500;
+
+    // Format error response. NOTE: even in development we never echo the
+    // raw request body back — `details` is for backend-emitted structured
+    // error context only (see `Errors.ValidationError` callers).
     ctx.body = {
-      ok: false,
-      error: {
-        code,
-        message: error.message || "An unexpected error occurred",
-        ...(error.details !== undefined ? { details: error.details } : {}),
-        ...(process.env.NODE_ENV === "development" && error.stack
-          ? { stack: error.stack }
-          : {}),
-      },
+      error: error.name || "InternalServerError",
+      message: error.message || "An unexpected error occurred",
+      ...(process.env.NODE_ENV === "development" && {
+        stack: error.stack,
+        details: error.details,
+      }),
     };
+
+    // Ensure JSON content type
     ctx.type = "application/json";
   }
 };
 
+// Helper function to create structured errors
 export function createError(
   message: string,
   status: number = 500,
@@ -93,6 +84,7 @@ export function createError(
   return error;
 }
 
+// Common error types
 export const Errors = {
   BadRequest: (message: string = "Bad Request", details?: any) =>
     createError(message, 400, "BAD_REQUEST", details),

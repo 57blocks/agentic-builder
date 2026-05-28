@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { openRouterVisionChatCompletion } from "@/lib/openrouter";
 
 /**
  * Design references — user-supplied screenshots that guide the coding phase.
@@ -479,4 +480,322 @@ export function formatDesignReferencesPromptBlock(
   }
 
   return sections.join("\n");
+}
+
+// ─── Vision descriptions ──────────────────────────────────────────────────────
+
+const VISION_CACHE_FILE = "design-reference-vision-cache.json";
+
+interface VisionCacheEntry {
+  storedFileName: string;
+  bytes: number;
+  description: string;
+  generatedAt: string;
+}
+
+async function readVisionCache(
+  projectRoot: string,
+): Promise<Map<string, VisionCacheEntry>> {
+  try {
+    const raw = await fs.readFile(
+      path.join(designReferenceDirAbs(projectRoot), VISION_CACHE_FILE),
+      "utf-8",
+    );
+    const arr = JSON.parse(raw) as VisionCacheEntry[];
+    return new Map(arr.map((e) => [e.storedFileName, e]));
+  } catch {
+    return new Map();
+  }
+}
+
+async function writeVisionCache(
+  projectRoot: string,
+  cache: Map<string, VisionCacheEntry>,
+): Promise<void> {
+  await ensureDir(projectRoot);
+  await fs.writeFile(
+    path.join(designReferenceDirAbs(projectRoot), VISION_CACHE_FILE),
+    JSON.stringify([...cache.values()], null, 2),
+    "utf-8",
+  );
+}
+
+// ─── Auto-match ───────────────────────────────────────────────────────────────
+
+export interface PageCandidate {
+  id: string;   // e.g. "PAGE-001"
+  name: string; // e.g. "Dashboard"
+}
+
+export interface AutoMatchResult {
+  referenceId: string;
+  storedFileName: string;
+  assignedPageId: string | null;  // null if no confident match
+  assignedPageName: string | null;
+  confidence: "high" | "medium" | "low";
+}
+
+/**
+ * Uses a vision LLM to determine which PRD page a screenshot most likely
+ * corresponds to. The model is shown the image and the list of candidate
+ * pages and must return the best-fit PAGE-xxx id.
+ *
+ * Returns null when no confident match can be determined.
+ */
+async function matchImageToPage(
+  imageBase64DataUrl: string,
+  candidates: PageCandidate[],
+): Promise<{ pageId: string | null; confidence: "high" | "medium" | "low" }> {
+  const pageList = candidates
+    .map((p, i) => `${i + 1}. ${p.name} (${p.id})`)
+    .join("\n");
+
+  try {
+    const resp = await openRouterVisionChatCompletion(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Look at this UI screenshot and determine which of the following pages it most likely shows.",
+                "",
+                "Pages:",
+                pageList,
+                "",
+                "Instructions:",
+                "- Respond with a JSON object: { \"pageId\": \"PAGE-xxx\", \"confidence\": \"high\" | \"medium\" | \"low\" }",
+                "- Use \"high\" if the page content is clearly identifiable (e.g. login form → Login page)",
+                "- Use \"medium\" if likely but some ambiguity",
+                "- Use \"low\" if you cannot confidently tell",
+                "- If none of the pages match, respond: { \"pageId\": null, \"confidence\": \"low\" }",
+                "- Respond ONLY with the JSON — no markdown fences, no prose.",
+              ].join("\n"),
+            },
+            {
+              type: "image_url",
+              image_url: { url: imageBase64DataUrl, detail: "low" },
+            },
+          ],
+        },
+      ],
+      { model: "openai/gpt-4o", max_tokens: 80 },
+    );
+
+    const raw = resp.choices[0]?.message?.content;
+    const text = typeof raw === "string" ? raw.trim() : "";
+    // Strip markdown fences if model ignored the instruction
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned) as { pageId?: string | null; confidence?: string };
+    const pageId = typeof parsed.pageId === "string" ? parsed.pageId : null;
+    const confidence =
+      parsed.confidence === "high" ? "high"
+      : parsed.confidence === "medium" ? "medium"
+      : "low";
+    return { pageId, confidence };
+  } catch {
+    return { pageId: null, confidence: "low" };
+  }
+}
+
+/**
+ * Automatically matches image design references (those without a pageHint, or
+ * all of them when `force` is true) to PRD pages using a vision LLM.
+ *
+ * Returns the list of match results. Callers should call `updateDesignReference`
+ * to persist the assignments they want to keep.
+ */
+export async function autoMatchReferencesToPages(
+  projectRoot: string,
+  candidates: PageCandidate[],
+  options?: { force?: boolean; minConfidence?: "high" | "medium" | "low" },
+): Promise<AutoMatchResult[]> {
+  if (candidates.length === 0) return [];
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
+
+  const entries = await readManifest(projectRoot);
+  const imageEntries = entries.filter(
+    (e) =>
+      e.kind === "image" &&
+      (options?.force || !e.pageHint.trim()),
+  );
+  if (imageEntries.length === 0) return [];
+
+  const minConf = options?.minConfidence ?? "medium";
+  const confRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+  const results: AutoMatchResult[] = [];
+
+  for (const entry of imageEntries) {
+    let imageData: Buffer;
+    try {
+      imageData = await fs.readFile(
+        path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
+      );
+    } catch {
+      results.push({
+        referenceId: entry.id,
+        storedFileName: entry.storedFileName,
+        assignedPageId: null,
+        assignedPageName: null,
+        confidence: "low",
+      });
+      continue;
+    }
+
+    const dataUrl = `data:${entry.mime};base64,${imageData.toString("base64")}`;
+    const { pageId, confidence } = await matchImageToPage(dataUrl, candidates);
+
+    const meetsMinConf = confRank[confidence] >= confRank[minConf];
+    const matched = meetsMinConf ? candidates.find((c) => c.id === pageId) ?? null : null;
+
+    results.push({
+      referenceId: entry.id,
+      storedFileName: entry.storedFileName,
+      assignedPageId: matched?.id ?? null,
+      assignedPageName: matched?.name ?? null,
+      confidence,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * For each image design reference, call a vision LLM to generate a detailed
+ * layout description that coding agents can use to replicate the UI.
+ *
+ * Results are cached in `.blueprint/design-references/design-reference-vision-cache.json`
+ * so we only re-call when an image changes.
+ *
+ * Returns a map from `storedFileName` → description text.
+ */
+export async function buildVisionDescriptionsForReferences(
+  projectRoot: string,
+  entries: DesignReferenceEntry[],
+): Promise<Map<string, string>> {
+  const imageEntries = entries.filter((e) => e.kind === "image");
+  if (imageEntries.length === 0) return new Map();
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    console.warn("[DesignReferences] OPENROUTER_API_KEY not set — skipping vision descriptions");
+    return new Map();
+  }
+
+  const cache = await readVisionCache(projectRoot);
+  const result = new Map<string, string>();
+  let cacheUpdated = false;
+
+  for (const entry of imageEntries) {
+    // Use cached description if the file hasn't changed (same bytes count = same file)
+    const cached = cache.get(entry.storedFileName);
+    if (cached && cached.bytes === entry.bytes) {
+      result.set(entry.storedFileName, cached.description);
+      continue;
+    }
+
+    // Read image file and encode as base64
+    let imageData: Buffer;
+    try {
+      imageData = await fs.readFile(
+        path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
+      );
+    } catch {
+      console.warn(`[DesignReferences] Could not read ${entry.storedFileName} for vision`);
+      continue;
+    }
+
+    const base64 = `data:${entry.mime};base64,${imageData.toString("base64")}`;
+    const pageHint = entry.pageHint || entry.label || entry.fileName;
+
+    try {
+      const resp = await openRouterVisionChatCompletion(
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: [
+                  `You are analyzing a UI screenshot for the page: "${pageHint}".`,
+                  "Provide a detailed, structured description of this UI screenshot that a frontend developer can use to replicate it accurately.",
+                  "Describe:",
+                  "1. Overall layout (columns, panels, sidebars, header/footer structure)",
+                  "2. Color scheme (background colors, primary/accent colors, text colors)",
+                  "3. Typography (font weights, sizes, heading hierarchy)",
+                  "4. Key UI components visible (tables, cards, forms, buttons, charts, navigation)",
+                  "5. Spacing and visual density",
+                  "6. Any notable design patterns or interactions visible",
+                  "Be precise and specific — the developer will use this description to write matching code.",
+                ].join("\n"),
+              },
+              {
+                type: "image_url",
+                image_url: { url: base64, detail: "high" },
+              },
+            ],
+          },
+        ],
+        { model: "openai/gpt-4o", max_tokens: 1500 },
+      );
+
+      const description = resp.choices[0]?.message?.content;
+      if (typeof description === "string" && description.trim()) {
+        result.set(entry.storedFileName, description.trim());
+        cache.set(entry.storedFileName, {
+          storedFileName: entry.storedFileName,
+          bytes: entry.bytes,
+          description: description.trim(),
+          generatedAt: new Date().toISOString(),
+        });
+        cacheUpdated = true;
+      }
+    } catch (err) {
+      console.warn(
+        `[DesignReferences] Vision description failed for ${entry.storedFileName}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  if (cacheUpdated) {
+    await writeVisionCache(projectRoot, cache).catch((e) =>
+      console.warn("[DesignReferences] Failed to persist vision cache:", e),
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Formats vision descriptions for image references into a context block
+ * that coding agents can use as per-page visual specifications.
+ */
+export function formatVisionDescriptionsBlock(
+  entries: DesignReferenceEntry[],
+  descriptions: Map<string, string>,
+): string {
+  const sections: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.kind !== "image") continue;
+    const desc = descriptions.get(entry.storedFileName);
+    if (!desc) continue;
+    const label = entry.pageHint || entry.label || entry.fileName;
+    sections.push(`### ${label}\n\n${desc}`);
+  }
+
+  if (sections.length === 0) return "";
+
+  return [
+    "## Per-page UI screenshot descriptions",
+    "",
+    "The following are AI-generated descriptions of the user-uploaded screenshots. Use these as visual specifications when generating the frontend — implement the described layout, colors, and components exactly.",
+    "",
+    ...sections,
+  ].join("\n");
 }

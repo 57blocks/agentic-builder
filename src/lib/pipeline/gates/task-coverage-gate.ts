@@ -14,13 +14,15 @@ export function runTaskCoverageGate(
   const targetIds = [
     ...prdIndex.acceptanceCriteriaIds,
     ...prdIndex.featureIds,
+    ...(prdIndex.pageIds ?? []),
+    ...(prdIndex.cmpIds ?? []),
   ];
   if (targetIds.length === 0) {
     return {
       gateId: "task-prd-coverage",
       passed: true,
       warnings: [
-        "No PRD AC/FR ids extracted — skipped strict task coverage check.",
+        "No PRD AC/FR/PAGE/CMP ids extracted — skipped strict task coverage check.",
       ],
       missingIds: [],
     };

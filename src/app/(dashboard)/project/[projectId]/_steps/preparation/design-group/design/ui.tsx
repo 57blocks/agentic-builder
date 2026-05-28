@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Upload, X, FileImage, Code, Link, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowRight, Upload, X, Link, Loader2, CheckCircle2, AlertCircle, ImageIcon, Layers } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
+import { usePipelineStore } from "@/store/pipeline-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import type { StepId } from "@/_config/pipeline-flow";
 import { getNextStep } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
+import PageScreenshotsPanel from "@/components/PageScreenshotsPanel";
 import type { StepUIProps } from "../../../_shared/types";
 import {
   setDesignContext,
@@ -475,37 +477,14 @@ function ScreenshotCarousel({
   );
 }
 
-// ─── Custom Upload — file types ──────────────────────────────────────────────
+// ─── Style reference image (local, not persisted) ────────────────────────────
 
-const ACCEPTED_IMAGE_MIMES = [
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-];
-const ACCEPTED_HTML_MIMES = ["text/html", "application/xhtml+xml"];
-const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-const HTML_EXTS = [".html", ".htm", ".xhtml"];
-
-interface CustomFile {
+interface StyleRefImage {
   key: string;
   file: File;
-  kind: "image" | "html";
   previewUrl: string;
-  base64: string | null; // resolved async for images
-  textContent: string | null; // resolved async for HTML
+  dataUrl: string | null; // base64 data URL, resolved async
   loading: boolean;
-}
-
-function classifyFile(file: File): "image" | "html" | null {
-  const mime = file.type.toLowerCase();
-  if (ACCEPTED_IMAGE_MIMES.includes(mime)) return "image";
-  if (ACCEPTED_HTML_MIMES.includes(mime)) return "html";
-  const lower = file.name.toLowerCase();
-  if (HTML_EXTS.some((ext) => lower.endsWith(ext))) return "html";
-  if (IMAGE_EXTS.some((ext) => lower.endsWith(ext))) return "image";
-  return null;
 }
 
 // ─── Phase type ───────────────────────────────────────────────────────────────
@@ -557,8 +536,15 @@ export function DesignUI(props: StepUIProps) {
   // Source mode — initialized from persisted metadata
   const [designSourceMode, setDesignSourceMode] = useState<"ai" | "custom">(() => designMeta.designSourceMode ?? "ai");
 
-  // Custom upload files
-  const [customFiles, setCustomFiles] = useState<CustomFile[]>([]);
+  // Reference sub-mode: style-only (local, not persisted) vs page restoration (persisted, used in coding)
+  const [referenceMode, setReferenceMode] = useState<"style" | "restoration">("style");
+
+  // Style-reference images (local React state — not stored to .blueprint/)
+  const [styleRefImages, setStyleRefImages] = useState<StyleRefImage[]>([]);
+  const [styleRefDragActive, setStyleRefDragActive] = useState(false);
+
+  // Design references from pipeline store (uploaded screenshots for page restoration)
+  const designReferences = usePipelineStore((s) => s.designReferences);
 
   // Custom URL reference
   const [urlInput, setUrlInput] = useState("");
@@ -787,6 +773,40 @@ export function DesignUI(props: StepUIProps) {
       .finally(() => setStitchScreensLoading(false));
   }, [stitchResult?.projectId]);
 
+  // ── Style-reference image handlers (local, not persisted) ──────────────────
+
+  const addStyleRefImages = useCallback((files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    const entries: StyleRefImage[] = imageFiles.map((file) => ({
+      key: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      dataUrl: null,
+      loading: true,
+    }));
+    for (const entry of entries) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setStyleRefImages((prev) =>
+          prev.map((f) =>
+            f.key === entry.key ? { ...f, dataUrl: reader.result as string, loading: false } : f,
+          ),
+        );
+      };
+      reader.readAsDataURL(entry.file);
+    }
+    setStyleRefImages((prev) => [...prev, ...entries]);
+  }, []);
+
+  const removeStyleRefImage = useCallback((key: string) => {
+    setStyleRefImages((prev) => {
+      const target = prev.find((f) => f.key === key);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((f) => f.key !== key);
+    });
+  }, []);
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const handleGenerateDesignDoc = () => {
@@ -796,23 +816,35 @@ export function DesignUI(props: StepUIProps) {
         designStyleId: selectedStyleId,
         styleReferenceImageBase64: null,
         designDirectionPrompt: null,
+        useUploadedDesignReferences: false,
       });
-    } else {
-      // Custom mode: pass first image as base64 reference.
-      // For text context: merge uploaded HTML file content + fetched URL HTML (if any).
-      const imageFile = customFiles.find((f) => f.kind === "image");
-      const htmlFile = customFiles.find((f) => f.kind === "html");
+    } else if (referenceMode === "style") {
+      // Style reference mode: pass local images inline (not persisted to disk).
       const htmlParts: string[] = [];
-      if (htmlFile?.textContent) htmlParts.push(htmlFile.textContent);
       if (urlFetchedHtml) {
-        htmlParts.push(
-          `<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`,
-        );
+        htmlParts.push(`<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`);
       }
       setDesignContext({
         designStyleId: null,
-        styleReferenceImageBase64: imageFile?.base64 ?? null,
+        styleReferenceImageBase64: null,
+        styleReferenceImages: styleRefImages
+          .filter((img) => img.dataUrl)
+          .map((img) => img.dataUrl!),
         designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
+        useUploadedDesignReferences: false,
+      });
+    } else {
+      // Page restoration mode: use screenshots stored in .blueprint/design-references/.
+      const htmlParts: string[] = [];
+      if (urlFetchedHtml) {
+        htmlParts.push(`<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`);
+      }
+      setDesignContext({
+        designStyleId: null,
+        styleReferenceImageBase64: null,
+        styleReferenceImages: undefined,
+        designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
+        useUploadedDesignReferences: true,
       });
     }
     console.log("[DesignUI] handleGenerateDesignDoc: calling executeStep, isRunning:", isRunning, "currentStep:", currentStep);
@@ -886,82 +918,6 @@ export function DesignUI(props: StepUIProps) {
     setPhase("stitch");
   };
 
-  // ── Custom file handling ────────────────────────────────────────────────
-
-  const addCustomFiles = useCallback((files: File[]) => {
-    const entries: CustomFile[] = [];
-    for (const file of files) {
-      const kind = classifyFile(file);
-      if (!kind) continue;
-      const entry: CustomFile = {
-        key: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        file,
-        kind,
-        previewUrl: kind === "image" ? URL.createObjectURL(file) : "",
-        base64: null,
-        textContent: null,
-        loading: true,
-      };
-      // Read file content async
-      if (kind === "image") {
-        const reader = new FileReader();
-        reader.onload = () => {
-          setCustomFiles((prev) =>
-            prev.map((f) =>
-              f.key === entry.key
-                ? { ...f, base64: reader.result as string, loading: false }
-                : f,
-            ),
-          );
-        };
-        reader.readAsDataURL(file);
-      } else {
-        const reader = new FileReader();
-        reader.onload = () => {
-          setCustomFiles((prev) =>
-            prev.map((f) =>
-              f.key === entry.key
-                ? { ...f, textContent: reader.result as string, loading: false }
-                : f,
-            ),
-          );
-        };
-        reader.readAsText(file);
-      }
-      entries.push(entry);
-    }
-    if (entries.length > 0) {
-      setCustomFiles((prev) => [...prev, ...entries]);
-    }
-  }, []);
-
-  const removeCustomFile = useCallback((key: string) => {
-    setCustomFiles((prev) => {
-      const target = prev.find((f) => f.key === key);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((f) => f.key !== key);
-    });
-  }, []);
-
-  const handleFileInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      e.target.value = "";
-      if (files.length > 0) addCustomFiles(files);
-    },
-    [addCustomFiles],
-  );
-
-  const [dragActive, setDragActive] = useState(false);
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragActive(false);
-      const files = Array.from(e.dataTransfer.files ?? []);
-      if (files.length > 0) addCustomFiles(files);
-    },
-    [addCustomFiles],
-  );
 
   // Detect interrupted PRD
   const prdInterrupted =
@@ -1089,7 +1045,7 @@ export function DesignUI(props: StepUIProps) {
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  Custom Upload
+                  Reference Screenshots
                 </button>
               </div>
 
@@ -1168,74 +1124,126 @@ export function DesignUI(props: StepUIProps) {
                 </div>
               )}
 
-              {/* ── Tab: Custom Upload ── */}
+              {/* ── Tab: Reference Screenshots ── */}
               {designSourceMode === "custom" && (
-                <div className="flex flex-col gap-4">
-                  {/* Drop zone */}
-                  <div
-                    onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
-                    onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                    onDragLeave={() => setDragActive(false)}
-                    onDrop={handleDrop}
-                    className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors ${
-                      dragActive
-                        ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
-                        : "border-slate-300 bg-slate-50"
-                    }`}
-                  >
-                    <Upload size={24} className={dragActive ? "text-[#712ae2]" : "text-slate-400"} />
-                    <div className="text-center">
-                      <p className="text-[12px] text-slate-600 font-medium">
-                        Drop files here or{" "}
-                        <label className="text-[#712ae2] cursor-pointer hover:underline">
-                          browse
-                          <input
-                            type="file"
-                            accept={[...ACCEPTED_IMAGE_MIMES, ...ACCEPTED_HTML_MIMES, ...IMAGE_EXTS, ...HTML_EXTS].join(",")}
-                            multiple
-                            onChange={handleFileInput}
-                            className="hidden"
-                          />
-                        </label>
+                <div className="flex flex-col gap-5">
+                  {/* Sub-mode toggle */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setReferenceMode("style")}
+                      className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
+                        referenceMode === "style"
+                          ? "border-[#712ae2] bg-violet-50"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <ImageIcon size={15} className={referenceMode === "style" ? "text-[#712ae2]" : "text-slate-400"} />
+                        <span className={`text-[12.5px] font-semibold ${referenceMode === "style" ? "text-[#712ae2]" : "text-slate-700"}`}>
+                          Style Reference
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Upload images as visual inspiration. The AI extracts colors, typography, and layout patterns to generate a matching design spec.
                       </p>
-                      <p className="text-[10px] text-slate-400 mt-1">Supports .png, .jpg, .webp, .gif, .html</p>
-                    </div>
+                    </button>
+                    <button
+                      onClick={() => setReferenceMode("restoration")}
+                      className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
+                        referenceMode === "restoration"
+                          ? "border-[#712ae2] bg-violet-50"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Layers size={15} className={referenceMode === "restoration" ? "text-[#712ae2]" : "text-slate-400"} />
+                        <span className={`text-[12.5px] font-semibold ${referenceMode === "restoration" ? "text-[#712ae2]" : "text-slate-700"}`}>
+                          Page Restoration
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Upload one screenshot per page for pixel-perfect replication. Images are matched to PRD pages and used by coding agents.
+                      </p>
+                    </button>
                   </div>
 
-                  {/* File list */}
-                  {customFiles.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                        Uploaded files ({customFiles.length})
-                      </div>
-                      {customFiles.map((f) => (
-                        <div key={f.key} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
-                          {f.kind === "image" && f.previewUrl ? (
-                            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={f.previewUrl} alt={f.file.name} className="h-full w-full object-cover" />
-                            </div>
-                          ) : (
-                            <div className="h-14 w-14 shrink-0 flex items-center justify-center rounded-lg border border-amber-200 bg-linear-to-br from-amber-50 to-orange-50">
-                              {f.kind === "html" ? <Code size={20} className="text-amber-600" /> : <FileImage size={20} className="text-sky-600" />}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[12.5px] font-medium text-slate-800 truncate">{f.file.name}</span>
-                              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${f.kind === "html" ? "bg-amber-100 text-amber-700" : "bg-sky-100 text-sky-700"}`}>{f.kind}</span>
-                            </div>
-                            <div className="text-[10.5px] text-slate-500">{(f.file.size / 1024).toFixed(1)} KB{f.loading ? " · Reading file…" : " · Ready"}</div>
-                          </div>
-                          <button onClick={() => removeCustomFile(f.key)} className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"><X size={16} /></button>
+                  {/* ── Style Reference mode ── */}
+                  {referenceMode === "style" && (
+                    <div className="flex flex-col gap-4">
+                      {/* Drop zone */}
+                      <div
+                        onDragEnter={(e) => { e.preventDefault(); setStyleRefDragActive(true); }}
+                        onDragOver={(e) => { e.preventDefault(); setStyleRefDragActive(true); }}
+                        onDragLeave={() => setStyleRefDragActive(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setStyleRefDragActive(false);
+                          addStyleRefImages(Array.from(e.dataTransfer.files ?? []));
+                        }}
+                        className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors cursor-pointer ${
+                          styleRefDragActive
+                            ? "border-[#712ae2] bg-violet-50"
+                            : "border-slate-300 bg-slate-50 hover:border-slate-400"
+                        }`}
+                      >
+                        <Upload size={22} className={styleRefDragActive ? "text-[#712ae2]" : "text-slate-400"} />
+                        <div className="text-center">
+                          <p className="text-[12px] text-slate-600 font-medium">
+                            Drop screenshots here or{" "}
+                            <label className="text-[#712ae2] cursor-pointer hover:underline">
+                              browse
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                                multiple
+                                onChange={(e) => {
+                                  addStyleRefImages(Array.from(e.target.files ?? []));
+                                  e.target.value = "";
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-1">PNG, JPG, WebP, GIF</p>
                         </div>
-                      ))}
+                      </div>
+
+                      {/* Preview thumbnails */}
+                      {styleRefImages.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {styleRefImages.map((img) => (
+                            <div key={img.key} className="relative group rounded-lg overflow-hidden border border-slate-200 bg-slate-100 aspect-video">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={img.previewUrl} alt={img.file.name} className="w-full h-full object-cover" />
+                              {img.loading && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-white/60">
+                                  <Loader2 size={14} className="animate-spin text-[#712ae2]" />
+                                </div>
+                              )}
+                              <button
+                                onClick={() => removeStyleRefImage(img.key)}
+                                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
+                              >
+                                <X size={11} />
+                              </button>
+                              <p className="absolute bottom-0 left-0 right-0 px-1.5 py-1 text-[9px] text-white bg-gradient-to-t from-black/60 to-transparent truncate">
+                                {img.file.name}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* URL reference input */}
+                  {/* ── Page Restoration mode ── */}
+                  {referenceMode === "restoration" && prdContent.trim() && (
+                    <PageScreenshotsPanel prdContent={prdContent} />
+                  )}
+
+                  {/* Optional URL reference */}
                   <div className="flex flex-col gap-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Or paste a reference URL</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Or paste a reference URL (optional)</div>
                     <form
                       onSubmit={async (e) => {
                         e.preventDefault();
@@ -1316,13 +1324,14 @@ export function DesignUI(props: StepUIProps) {
                   onClick={handleGenerateDesignDoc}
                   disabled={
                     (designSourceMode === "ai" && !selectedStyleId) ||
-                    (designSourceMode === "custom" && customFiles.length === 0 && !urlFetchedHtml) ||
+                    (designSourceMode === "custom" && referenceMode === "style" && styleRefImages.filter((r) => r.dataUrl).length === 0 && !urlFetchedHtml) ||
+                    (designSourceMode === "custom" && referenceMode === "restoration" && designReferences.filter((r) => r.kind === "image").length === 0 && !urlFetchedHtml) ||
                     urlFetching ||
                     isDesignRunning
                   }
                   className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[14px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
                 >
-                  {designSourceMode === "ai" ? "Generate based on this style" : "Generate based on reference"}
+                  {designSourceMode === "ai" ? "Generate based on this style" : "Generate based on screenshots"}
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -1637,20 +1646,18 @@ export function DesignUI(props: StepUIProps) {
                 if (!i || isDesignRunning) return;
                 setSpecInput("");
                 setDesignContext({
-                  designStyleId:
-                    designSourceMode === "ai"
-                      ? selectedStyleId
+                  designStyleId: designSourceMode === "ai" ? selectedStyleId : undefined,
+                  styleReferenceImageBase64: null,
+                  styleReferenceImages:
+                    designSourceMode === "custom" && referenceMode === "style"
+                      ? styleRefImages.filter((img) => img.dataUrl).map((img) => img.dataUrl!)
                       : undefined,
-                  styleReferenceImageBase64:
-                    designSourceMode === "custom"
-                      ? (customFiles.find((f) => f.kind === "image")
-                          ?.base64 ?? null)
-                      : null,
                   designDirectionPrompt:
-                    designSourceMode === "custom"
-                      ? (customFiles.find((f) => f.kind === "html")
-                          ?.textContent ?? null)
+                    designSourceMode === "custom" && urlFetchedHtml
+                      ? `<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`
                       : null,
+                  useUploadedDesignReferences:
+                    designSourceMode === "custom" && referenceMode === "restoration",
                 });
                 void executeStep("design", i);
               }}

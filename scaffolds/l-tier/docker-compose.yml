@@ -58,34 +58,35 @@ services:
       NODE_ENV: production
       PORT: "4000"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
-      # CORS allowlist for the SPA served via nginx (see frontend service
-      # below). When you front the API with a custom domain, replace this
-      # with the public origin(s). `assertRequiredEnv()` fatal-exits in
-      # production if this is empty.
-      CORS_ORIGINS: http://localhost:8080
-      # AUTH_JWT_SECRET MUST be supplied via an actual secret store (CI
-      # var, k8s secret, Vault). The compose file is checked into git.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET must be set in shell env or .env}
       REDIS_URL: redis://redis:6379
-      # Default OFF — flip to "1" only when you actually deploy multiple
-      # backend replicas. With a single replica the in-process queue is
-      # faster and one fewer moving part to monitor.
-      USE_REDIS_QUEUE: "0"
+      # NOTE: `USE_REDIS_QUEUE=1` is a no-op until `src/queue/redisQueue.ts`
+      # ships. Keep it commented out so multi-replica deploys aren't
+      # misled into thinking jobs are shared across pods.
+      # USE_REDIS_QUEUE: "1"
+      # Frontend container talks to backend via nginx on port 80, so this
+      # is the only origin that needs to be allowlisted in compose. Add
+      # extra origins (preview URLs, staging) as comma-separated entries.
+      CORS_ORIGINS: "http://localhost:8080"
+      # AUTH_JWT_SECRET MUST be supplied via an external .env / secrets
+      # manager — DO NOT bake a value in here. `assertRequiredEnv` will
+      # process.exit(1) on boot if it's missing in production.
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      # If you proxy the SPA via the same backend host (no separate nginx),
-      # the health path may be `/v1/health` instead of `/api/v1/health`. The
-      # default scaffold path is `/api/v1/health`, exposed by `src/api/modules`.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/v1/health || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
     ports:
       - "4000:4000"
+    healthcheck:
+      # `/api/v1/health` is the path when the `auth-password-rbac` (or any
+      # other scaffold that mounts apiRouter at `/api/v1`) overlay is
+      # applied. For a bare base-only deployment the path is `/api/health`
+      # — edit this line during codegen if your generated project doesn't
+      # use a versioned API prefix.
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   frontend:

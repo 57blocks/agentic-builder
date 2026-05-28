@@ -76,12 +76,16 @@ import {
   formatRuntimeAuditBlock,
   dispatchRuntimeAudit,
   formatRuntimeAuditTasksBlock,
+  type RuntimeAuditFinding,
   runRuntimeSmokeGate,
   runTscDiagnosticsAsTasks,
   runMigrationCoverageRepair,
   formatMigrationCoverageBlock,
   repairContractCoverage,
   getUnresolvedMigrationGaps,
+  generateMissingRouteStubs,
+  formatMissingRouteStubBlock,
+  type GenerateMissingRouteStubsResult,
 } from "@/lib/pipeline/self-heal";
 import {
   runContractCoverageGate,
@@ -457,6 +461,7 @@ async function runArchitectPhase(state: SupervisorState) {
         tasks: mustRunTasks.map((t) => t.task),
         outputDir: state.outputDir,
         projectContext: state.projectContext,
+        codingMode: state.codingMode,
         fileRegistrySnapshot: registry,
         apiContractsSnapshot: state.apiContracts,
         scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -492,6 +497,7 @@ async function runArchitectPhase(state: SupervisorState) {
       tasks: state.architectTasks,
       outputDir: state.outputDir,
       projectContext: state.projectContext,
+      codingMode: state.codingMode,
       fileRegistrySnapshot: state.fileRegistry,
       apiContractsSnapshot: state.apiContracts,
       scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
@@ -5234,6 +5240,68 @@ async function integrationVerifyAndFix(
   const initialDependencyAudit = await auditImportDependencyConsistency(
     state.outputDir,
   );
+
+  // Fix 2: Auto-install missing packages detected by the dependency audit.
+  // `remainingIssues` format: `"Root package imports are missing dependencies: pkg1, pkg2"`
+  //                        or `"\"backend\" imports are missing dependencies: pkg1, pkg2"`
+  // We parse this deterministically, run one `pnpm/npm add` per workspace scope,
+  // then re-run the audit so `dependencyAuditBlock` reflects the post-fix state.
+  if (initialDependencyAudit.remainingIssues.length > 0) {
+    const pm = await detectPackageManager(state.outputDir);
+    const missingRe =
+      /^(?:Root|"([^"]+)")\s+(?:package\s+)?imports are missing dependencies:\s+(.+)$/i;
+    let anyInstalled = false;
+    for (const issue of initialDependencyAudit.remainingIssues) {
+      const m = missingRe.exec(issue);
+      if (!m) continue;
+      const scopeDir = m[1] ?? null; // null = root
+      const pkgs = m[2]
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0 && isAutoInstallableNpmPackageName(p));
+      if (pkgs.length === 0) continue;
+      const addCmd = buildAddCommand(pm, pkgs, {
+        filter: scopeDir ? scopeDir : undefined,
+      });
+      try {
+        const r = await shellExec(addCmd, state.outputDir, {
+          timeout: 90_000,
+        });
+        if (r.exitCode === 0) {
+          console.log(
+            `${label}: auto-installed missing dep(s) [${pkgs.join(", ")}]${scopeDir ? ` in "${scopeDir}"` : ""}: ${r.stdout.slice(0, 120)}`,
+          );
+          anyInstalled = true;
+        } else {
+          console.warn(
+            `${label}: auto-install failed for [${pkgs.join(", ")}]: ${r.stderr.slice(0, 200)}`,
+          );
+        }
+      } catch (e) {
+        console.warn(
+          `${label}: auto-install threw for [${pkgs.join(", ")}]: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+    if (anyInstalled) {
+      // Re-run audit so the opening-context block and downstream checks
+      // reflect the post-install state instead of the stale snapshot.
+      try {
+        const reAudit = await auditImportDependencyConsistency(state.outputDir);
+        if (reAudit.remainingIssues.length < initialDependencyAudit.remainingIssues.length) {
+          console.log(
+            `${label}: dependency auto-install resolved ${initialDependencyAudit.remainingIssues.length - reAudit.remainingIssues.length} issue(s); ${reAudit.remainingIssues.length} remaining.`,
+          );
+          // Patch in-place so downstream code sees the updated audit result.
+          initialDependencyAudit.remainingIssues = reAudit.remainingIssues;
+          initialDependencyAudit.summary = reAudit.summary;
+        }
+      } catch {
+        // Non-fatal; continue with original audit.
+      }
+    }
+  }
+
   const initialResidualConflicts = await detectResidualImplementationConflicts(
     state.outputDir,
   );
@@ -5373,9 +5441,12 @@ async function integrationVerifyAndFix(
   let runtimeAuditDispatch: Awaited<
     ReturnType<typeof dispatchRuntimeAudit>
   > | null = null;
+  // Preserved for mid-loop re-runs (report_done gate, stagnation replan).
+  let runtimeAuditDeclaredEnvKeys: string[] = [];
   try {
     const declaredResources = await readResourceRequirements(process.cwd());
     const declaredEnvKeys = declaredResources.map((r) => r.envKey);
+    runtimeAuditDeclaredEnvKeys = declaredEnvKeys;
     runtimeAuditDispatch = await dispatchRuntimeAudit({
       outputDir: state.outputDir,
       declaredEnvKeys,
@@ -5496,6 +5567,13 @@ async function integrationVerifyAndFix(
     }
     if (appendResult.added.length > 0) {
       contractCompleteness = await auditContractCompleteness(state.outputDir);
+      // Fix 1 (contract completeness stubs): re-run routeAudit so
+      // the newly-appended scoped endpoints appear in
+      // `missingContractEndpoints` and our stub generation (below)
+      // will create 501 handlers + register them in index.ts.
+      // Without this re-run, autoAppendMissingScopedEndpoints adds
+      // the contract entries but no handler is ever generated.
+      routeAudit = await auditApiRouteRegistration(state.outputDir);
     }
   }
   if (initialDependencyAudit.remainingIssues.length > 0) {
@@ -5546,6 +5624,44 @@ async function integrationVerifyAndFix(
       missingScopedEndpoints: contractCompleteness.missingScopedEndpoints,
     },
   });
+
+  // Fix 1: Auto-generate 501 stub files for missing contract endpoints at preflight.
+  // This breaks the "no file to implement → no mutation → stagnation" cycle by giving
+  // the verify-fix agent concrete stub files to fill in rather than starting from scratch.
+  let preflightStubResult: GenerateMissingRouteStubsResult = {
+    groups: [],
+    indexPatched: false,
+  };
+  if (routeAudit.missingContractEndpoints.length > 0) {
+    try {
+      preflightStubResult = await generateMissingRouteStubs(
+        state.outputDir,
+        routeAudit.missingContractEndpoints,
+      );
+      const createdCount = preflightStubResult.groups.filter(
+        (g) => g.created,
+      ).length;
+      if (createdCount > 0) {
+        console.log(
+          `${label}: preflight stub generation — created ${createdCount} stub file(s) for ${routeAudit.missingContractEndpoints.length} missing contract endpoint(s); index.ts patched=${preflightStubResult.indexPatched}.`,
+        );
+      }
+      getRepairEmitter(state.sessionId)({
+        stage: "preflight-stub-generation",
+        event: "stub_generation_complete",
+        details: {
+          createdCount,
+          totalGroups: preflightStubResult.groups.length,
+          indexPatched: preflightStubResult.indexPatched,
+          missingEndpointCount: routeAudit.missingContractEndpoints.length,
+        },
+      });
+    } catch (e) {
+      console.warn(
+        `${label}: preflight stub generation failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 
   const dbInfo = await detectDbDependencies(state.outputDir);
   const hasAnyOrmWithExternalDb =
@@ -5660,10 +5776,19 @@ async function integrationVerifyAndFix(
           )
           .join("\n")}`
       : "";
-  const routeAuditBlock =
-    routeAudit.findings.length > 0
-      ? `\n## Backend route registration audit (MUST fix before report_done(pass))\n${routeAudit.findings.join("\n")}`
-      : "";
+  const routeAuditBlock = (() => {
+    const parts: string[] = [];
+    if (routeAudit.findings.length > 0) {
+      parts.push(
+        `\n## Backend route registration audit (MUST fix before report_done(pass))\n${routeAudit.findings.join("\n")}`,
+      );
+    }
+    // Fix 2: Append structured stub creation instructions so the agent knows exactly
+    // which files to implement (501 stubs were created at preflight; agent fills them in).
+    const stubBlock = formatMissingRouteStubBlock(preflightStubResult);
+    if (stubBlock) parts.push(stubBlock);
+    return parts.join("\n");
+  })();
   const contractCompletenessBlock = (() => {
     if (contractCompleteness.findings.length === 0) return "";
     // Split HARD vs WARN sections from findings (WARN items contain "(advisory)").
@@ -6443,45 +6568,143 @@ async function integrationVerifyAndFix(
       if (tc.function.name === "report_done") {
         const reportedStatus = (args.status as "pass" | "fail") ?? "fail";
 
+        // ── Scoped validation gate ──────────────────────────────────────────
+        // When the model wrote files since last validation, force-run the
+        // full 4-command suite before accepting pass.
+        let validationGatePassed = !validationStale;
+        let validationSummaryLine = "";
+
         if (reportedStatus === "pass" && validationStale) {
           console.log(
             `${label}: report_done(pass) requested while stale — running system final validation instead of rejecting.`,
           );
           const autoGate = await runFinalScopedValidationGates();
-          if (autoGate.pass) {
-            finalStatus = "pass";
-            finalSummary = [
-              String(args.summary ?? "").trim(),
-              "Accepted after system final scoped validation:",
+          if (!autoGate.pass) {
+            // Priority 2: include migration gaps in the rejection so the
+            // model knows ALL the blockers, not just the tsc/build output.
+            const migGapsForRej = await getUnresolvedMigrationGaps(
+              state.outputDir,
+            ).catch(() => []);
+            const rejParts = [
+              "REJECTED: report_done(pass) is not allowed — system final validation still fails.",
+              `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
               autoGate.summary,
-            ]
-              .filter(Boolean)
-              .join("\n\n");
-            doneSignaled = true;
+            ];
+            if (migGapsForRej.length > 0) {
+              rejParts.push(
+                `\n## Also: ${migGapsForRej.length} migration gap(s) still open`,
+                ...migGapsForRej
+                  .slice(0, 5)
+                  .map((g) => `- ${g.modelPath}`),
+                "Create the missing migration file(s) before re-running validation.",
+              );
+            }
+            rejParts.push(
+              "Fix all failing gate(s), then run run_validation_suite once. Do not create verification helper files.",
+            );
+            console.log(
+              `${label}: REJECTED report_done(pass) — scoped validation failed.`,
+            );
             messages.push({
               role: "tool",
-              content: "acknowledged after system final validation",
+              content: rejParts.join("\n\n"),
               tool_call_id: tc.id,
               name: "report_done",
             });
-            break;
+            continue;
           }
-          const rejectionMsg = [
-            "REJECTED: report_done(pass) is not allowed — system final validation still fails.",
-            `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
-            autoGate.summary,
-            "Fix only the failing gate(s), then run run_validation_suite once. Do not create verification helper files.",
-          ].join("\n\n");
+          validationGatePassed = true;
+          validationSummaryLine = `Accepted after system final scoped validation:\n${autoGate.summary}`;
+        }
+
+        // ── Priority 1/2: Runtime audit + migration gate ──────────────────
+        // Re-run the audit with fresh file state so that (a) the model gets
+        // actionable per-file directives when errors remain, and (b) the
+        // final post-loop gate sees an up-to-date result instead of the
+        // stale preflight snapshot.
+        if (reportedStatus === "pass" && validationGatePassed) {
+          let freshRuntimeErrors: RuntimeAuditFinding[] = [];
+          try {
+            const freshAudit = await runRuntimeIntegrationAudit({
+              outputDir: state.outputDir,
+              declaredEnvKeys: runtimeAuditDeclaredEnvKeys,
+              emitter: getRepairEmitter(state.sessionId),
+              sessionId: state.sessionId,
+            });
+            runtimeAuditResult = freshAudit; // keep final gate in sync
+            freshRuntimeErrors = freshAudit.findings.filter(
+              (f) => f.severity === "error",
+            );
+          } catch (e) {
+            console.warn(
+              `${label}: runtime audit re-run failed in report_done handler (continuing): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          const freshMigGaps = await getUnresolvedMigrationGaps(
+            state.outputDir,
+          ).catch(() => []);
+
+          if (freshRuntimeErrors.length > 0 || freshMigGaps.length > 0) {
+            const parts: string[] = [
+              "REJECTED: report_done(pass) blocked — the following issues must be resolved first.",
+            ];
+            if (freshRuntimeErrors.length > 0) {
+              parts.push(
+                `\n## Runtime integration audit: ${freshRuntimeErrors.length} ERROR finding(s) still open`,
+              );
+              freshRuntimeErrors.slice(0, 6).forEach((f, i) => {
+                parts.push(
+                  `### ${i + 1}. [ERROR] \`${f.ruleId}\` — \`${f.file}:${f.line}\``,
+                  `- Why: ${f.reason}`,
+                  `- Action: ${f.directive}`,
+                );
+              });
+              if (freshRuntimeErrors.length > 6) {
+                parts.push(
+                  `…and ${freshRuntimeErrors.length - 6} more (see .ralph/runtime-audit-tasks.json).`,
+                );
+              }
+            }
+            if (freshMigGaps.length > 0) {
+              parts.push(
+                `\n## Migration coverage: ${freshMigGaps.length} model(s) still missing a migration`,
+                ...freshMigGaps.slice(0, 5).map((g) => `- ${g.modelPath}`),
+                "Write the missing migration file(s) in backend/src/database/migrations/, then re-run validation.",
+              );
+            }
+            parts.push(
+              "\nFix the above, re-run run_validation_suite, then call report_done(pass) again.",
+            );
+            console.log(
+              `${label}: REJECTED report_done(pass) — ${freshRuntimeErrors.length} runtime error(s), ${freshMigGaps.length} migration gap(s).`,
+            );
+            messages.push({
+              role: "tool",
+              content: parts.join("\n"),
+              tool_call_id: tc.id,
+              name: "report_done",
+            });
+            continue;
+          }
+
+          // All gates pass — accept.
+          finalStatus = "pass";
+          finalSummary = [String(args.summary ?? "").trim(), validationSummaryLine]
+            .filter(Boolean)
+            .join("\n\n");
+          doneSignaled = true;
           console.log(
-            `${label}: REJECTED report_done(pass) — system final validation failed.`,
+            `${label}: report_done(pass) accepted — runtime audit clean, no migration gaps.`,
           );
           messages.push({
             role: "tool",
-            content: rejectionMsg,
+            content: validationSummaryLine
+              ? "acknowledged after system final validation"
+              : "acknowledged",
             tool_call_id: tc.id,
             name: "report_done",
           });
-          continue;
+          break;
         }
 
         finalStatus = reportedStatus;
@@ -6755,17 +6978,47 @@ async function integrationVerifyAndFix(
           stagnationWarningsWithoutProgress = 0;
           repeatedReadOnlyActionCounts.clear();
 
+          // Fix 3: Deterministically create stubs for any still-missing contract endpoints
+          // before handing the agent its fallback budget, so the "no file to write" blocker
+          // is removed even if the preflight pass was skipped or produced no-ops.
+          let stagnationStubBlock = "";
+          if (routeAudit.missingContractEndpoints.length > 0) {
+            try {
+              const stagnationStubResult = await generateMissingRouteStubs(
+                state.outputDir,
+                routeAudit.missingContractEndpoints,
+              );
+              const createdNow = stagnationStubResult.groups.filter(
+                (g) => g.created,
+              ).length;
+              stagnationStubBlock = formatMissingRouteStubBlock(stagnationStubResult);
+              if (createdNow > 0) {
+                console.log(
+                  `${label}: stagnation-escape stub generation — created ${createdNow} stub file(s) for ${routeAudit.missingContractEndpoints.length} missing contract endpoint(s).`,
+                );
+              }
+            } catch (e) {
+              console.warn(
+                `${label}: stagnation-escape stub generation failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+
           messages.push({
             role: "user",
             content: [
               "SYSTEM CORRECTION — STAGNATION ABORT WAS ABOUT TO FIRE. You get ONE last batched-mode chance to make progress.",
               `Reason: no filesystem mutation for ${abortAt} iteration(s); progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}; last meaningful progress at iteration ${lastMeaningfulProgressIteration || 0} (${lastMeaningfulProgressReason}).`,
               repeatedAction ? `Most repeated action: ${repeatedAction}.` : "",
+              stagnationStubBlock || "",
               "",
               "## Switch to single-batch classification mode",
               "Do EXACTLY this on your next 2 turns. Do NOT free-form explore.",
               "",
               "Turn N (this turn):",
+              stagnationStubBlock
+                ? "  0. The stub files listed above were just created/confirmed. Open each one and replace the 501 body with real business logic — DO NOT skip this, these are the primary blockers."
+                : "",
               "  1. read_file(`API_CONTRACTS.json`)            — ONCE.",
               "  2. read_file(`.ralph/contract-usage-coverage.json`) if it exists — that file already classifies every contract entry vs frontend call vs PRD.",
               "  3. grep(`apiClient\\.|api\\.(get|post|put|patch|delete)\\(`, `frontend/src`) — collect all call sites in ONE pass.",
@@ -7186,11 +7439,23 @@ async function integrationVerifyAndFix(
   });
 
   // ─── Pre-gate: runtime-integration-audit ERROR findings block smoke ───
-  // Some audit rules (e.g. `bg-job-worker-startup`) catch silent failure
-  // modes that the HTTP smoke probe cannot observe — workers exported but
-  // never started in `server.ts` leave the API surface looking fine while
-  // every enqueued background run hangs forever. We treat any ERROR-level
-  // finding as a hard gate so the project is not silently shipped broken.
+  // Use the latest runtime audit result — if the model called report_done(pass)
+  // at least once, the handler above already refreshed `runtimeAuditResult`.
+  // If the model called report_done(fail) directly (or never reached report_done),
+  // do a final re-run here so we don't fail a project the model actually fixed.
+  if (runtimeAuditResult !== null) {
+    try {
+      const finalFreshAudit = await runRuntimeIntegrationAudit({
+        outputDir: state.outputDir,
+        declaredEnvKeys: runtimeAuditDeclaredEnvKeys,
+        emitter: getRepairEmitter(state.sessionId),
+        sessionId: state.sessionId,
+      });
+      runtimeAuditResult = finalFreshAudit;
+    } catch {
+      // Keep the most-recent cached result if re-run fails.
+    }
+  }
   const runtimeAuditErrorFindings =
     runtimeAuditResult?.findings.filter((f) => f.severity === "error") ?? [];
   if (runtimeAuditErrorFindings.length > 0) {
@@ -7383,12 +7648,14 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   contractCoverageGaps?: string[];
   routeAudit?: string[];
   migrationGaps?: string[];
+  runtimeAuditErrors?: string[];
 }> {
   const out: {
     tscErrors?: string[];
     contractCoverageGaps?: string[];
     routeAudit?: string[];
     migrationGaps?: string[];
+    runtimeAuditErrors?: string[];
   } = {};
 
   const tryReadJson = async (relPath: string): Promise<unknown> => {
@@ -7403,6 +7670,8 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     }
   };
 
+  // TSC diagnostics — read from artifact (no re-run; diagnostics are written
+  // after each validation suite and are close-enough for replan context).
   const tsc = (await tryReadJson(".ralph/tsc-diagnostics.json")) as {
     tasks?: Array<{ instruction?: string }>;
   } | null;
@@ -7413,6 +7682,7 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
       .slice(0, 10);
   }
 
+  // Contract coverage — read from artifact (pre-classified; stable).
   const coverage = (await tryReadJson(
     ".ralph/contract-usage-coverage.json",
   )) as {
@@ -7433,43 +7703,89 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
       );
   }
 
-  const routeAudit = (await tryReadJson(".ralph/route-audit.json")) as {
-        unregisteredModules?: string[];
-        unresolvedRegistrations?: string[];
-  } | null;
-  if (routeAudit) {
+  // Priority 3: Route audit — run LIVE instead of reading the stale
+  // preflight `.ralph/route-audit.json` snapshot (which may predate any
+  // modules the agent added during the current run).
+  try {
+    const liveRouteAudit = await auditApiRouteRegistration(outputDir);
     const lines: string[] = [];
-    for (const m of routeAudit.unregisteredModules ?? []) {
+    for (const m of liveRouteAudit.unregisteredModules) {
       lines.push(`unregistered: ${m}`);
     }
-    for (const r of routeAudit.unresolvedRegistrations ?? []) {
+    for (const r of liveRouteAudit.unresolvedRegistrations) {
       lines.push(`unresolved registration: ${r}`);
     }
+    for (const ep of liveRouteAudit.missingContractEndpoints.slice(0, 5)) {
+      lines.push(`missing contract endpoint: ${ep.method} ${ep.endpoint}`);
+    }
     if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
+  } catch {
+    // Fallback to stale snapshot on error.
+    const routeAuditSnap = (await tryReadJson(".ralph/route-audit.json")) as {
+      unregisteredModules?: string[];
+      unresolvedRegistrations?: string[];
+    } | null;
+    if (routeAuditSnap) {
+      const lines: string[] = [];
+      for (const m of routeAuditSnap.unregisteredModules ?? []) lines.push(`unregistered: ${m}`);
+      for (const r of routeAuditSnap.unresolvedRegistrations ?? []) lines.push(`unresolved registration: ${r}`);
+      if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
+    }
   }
 
-  const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
-        tasks?: Record<
-          string,
-          {
-            ok?: boolean;
-            gaps?: Array<{ modelPath?: string; modelName?: string }>;
-          }
-        >;
-  } | null;
-  if (migration?.tasks) {
-    const lines: string[] = [];
-    for (const entry of Object.values(migration.tasks)) {
-      if (!entry || entry.ok || !Array.isArray(entry.gaps)) continue;
-      for (const g of entry.gaps) {
-        lines.push(
-          `model ${g.modelPath ?? "?"} needs migration ${g.modelName ?? "?"}`,
-        );
+  // Priority 3: Migration gaps — use `getUnresolvedMigrationGaps` which
+  // cross-references the artifact against actual disk state, so gaps for
+  // models that were deleted during replan don't appear as blockers.
+  try {
+    const liveMigGaps = await getUnresolvedMigrationGaps(outputDir);
+    if (liveMigGaps.length > 0) {
+      out.migrationGaps = liveMigGaps
+        .slice(0, 10)
+        .map((g) => `model ${g.modelPath} needs migration`);
+    }
+  } catch {
+    // Fallback to stale snapshot on error.
+    const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
+      tasks?: Record<string, { ok?: boolean; gaps?: Array<{ modelPath?: string; modelName?: string }> }>;
+    } | null;
+    if (migration?.tasks) {
+      const lines: string[] = [];
+      for (const entry of Object.values(migration.tasks)) {
+        if (!entry || entry.ok || !Array.isArray(entry.gaps)) continue;
+        for (const g of entry.gaps) {
+          lines.push(`model ${g.modelPath ?? "?"} needs migration ${g.modelName ?? "?"}`);
+          if (lines.length >= 10) break;
+        }
         if (lines.length >= 10) break;
       }
-      if (lines.length >= 10) break;
+      if (lines.length > 0) out.migrationGaps = lines;
     }
-    if (lines.length > 0) out.migrationGaps = lines;
+  }
+
+  // Priority 3: Runtime audit tasks — read from the persisted artifact
+  // (`.ralph/runtime-audit-tasks.json`) which is written at preflight and
+  // contains per-finding directives. We do NOT re-run the full audit here
+  // (too expensive) — the replan context just needs the file+directive pairs
+  // so the triage LLM can reference them in the 3-step plan.
+  const runtimeTasks = (await tryReadJson(
+    ".ralph/runtime-audit-tasks.json",
+  )) as Array<{
+    ruleId?: string;
+    severity?: string;
+    file?: string;
+    line?: number;
+    directive?: string;
+  }> | null;
+  if (Array.isArray(runtimeTasks)) {
+    const errorTasks = runtimeTasks.filter(
+      (t) => t?.severity === "error",
+    );
+    if (errorTasks.length > 0) {
+      out.runtimeAuditErrors = errorTasks.slice(0, 8).map(
+        (t) =>
+          `[${t.ruleId ?? "?"}] ${t.file ?? "?"}:${t.line ?? 0} — ${t.directive ?? ""}`,
+      );
+    }
   }
 
   return out;

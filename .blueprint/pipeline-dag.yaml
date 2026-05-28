@@ -1,53 +1,28 @@
 version: 1
 pipelines:
-  - id: market-data-ingestion
-    description: "Intraday market data ingestion for MC-1, MC-5, MC-8"
+  - id: eventbrite-sync
+    description: "Scheduled Eventbrite feed refresh"
     schedule: { cron: "2,32 * * * *" }
     failure: { strategy: retry-3, retries: 3, compensation: mark-stale }
     nodes:
-      - { id: fetch, service: Ingestion Service, function: fetchCoinGeckoMarketData }
-      - { id: normalize, service: Scoring Service, function: normalizeMarketVariables, dependsOn: [fetch] }
-      - { id: persist, service: Ingestion Service, function: persistMarketVariableValues, dependsOn: [normalize] }
-      - { id: update-health, service: Health / Job Status Service, function: updateDataSourceFeedHealth, dependsOn: [persist] }
+      - { id: fetch, service: Sync Service, function: fetchEventbriteFeeds }
+      - { id: persist, service: Sync Service, function: persistEventbriteSnapshot, dependsOn: [fetch] }
+      - { id: health, service: Sync Service, function: updateEventbriteFeedHealth, dependsOn: [persist] }
 
-  - id: onchain-ingestion
-    description: "Intraday on-chain analytics ingestion for OC-7"
-    schedule: { cron: "3,18,33,48 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: mark-stale }
-    nodes:
-      - { id: fetch, service: Ingestion Service, function: fetchQuotientHolderConcentration }
-      - { id: persist, service: Ingestion Service, function: persistOnchainVariableValue, dependsOn: [fetch] }
-      - { id: update-health, service: Health / Job Status Service, function: updateDataSourceFeedHealth, dependsOn: [persist] }
-
-  - id: sentiment-ingestion
-    description: "Intraday sentiment ingestion for SE-2 and SE-4"
-    schedule: { cron: "5,20,35,50 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: mark-stale }
-    nodes:
-      - { id: fetch-x, service: Ingestion Service, function: fetchXTwitterCounts }
-      - { id: fetch-jina, service: Ingestion Service, function: fetchNewsArticlesViaJina, dependsOn: [fetch-x] }
-      - { id: classify-llm, service: Ingestion Service, function: classifySentimentWithLLM, dependsOn: [fetch-jina] }
-      - { id: persist, service: Ingestion Service, function: persistSentimentVariableValues, dependsOn: [classify-llm] }
-      - { id: update-health, service: Health / Job Status Service, function: updateDataSourceFeedHealth, dependsOn: [persist] }
-
-  - id: reserve-attestation-ingestion
-    description: "Weekly and on-demand reserve attestation pipeline"
+  - id: marketing-sync
+    description: "Scheduled Mailchimp / Constant Contact refresh"
     schedule: { cron: "7,37 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: preserve-run-state }
+    failure: { strategy: retry-3, retries: 3, compensation: mark-stale }
     nodes:
-      - { id: fetch-document, service: Ingestion Service, function: fetchReserveAttestationDocument }
-      - { id: extract-text, service: Ingestion Service, function: extractReserveTextWithJina, dependsOn: [fetch-document] }
-      - { id: llm-extract, service: Ingestion Service, function: extractReserveStructureWithLLM, dependsOn: [extract-text] }
-      - { id: human-review, service: Reserve Review Service, function: createOrUpdateReserveReviewQueueItem, dependsOn: [llm-extract] }
-      - { id: persist-run, service: Ingestion Service, function: persistReserveIngestionRun, dependsOn: [human-review] }
+      - { id: fetch, service: Sync Service, function: fetchMarketingProviders }
+      - { id: persist, service: Sync Service, function: persistMarketingSnapshot, dependsOn: [fetch] }
+      - { id: health, service: Sync Service, function: updateMarketingSyncHealth, dependsOn: [persist] }
 
-  - id: scoring-cycle
-    description: "Scheduled composite score recomputation"
-    schedule: { cron: "0,15,30,45 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
+  - id: teacher-work-hours-monthly-closeout
+    description: "Teacher submission closeout and summary rebuild"
+    schedule: { cron: "0 0 1 * *" }
+    failure: { strategy: abort, retries: 0, compensation: reopen-submission }
     nodes:
-      - { id: load-inputs, service: Scoring Service, function: loadLatestVariableValues }
-      - { id: apply-staleness, service: Scoring Service, function: excludeStaleVariables, dependsOn: [load-inputs] }
-      - { id: compute-score, service: Scoring Service, function: calculateCompositeScores, dependsOn: [apply-staleness] }
-      - { id: persist-history, service: Scoring Service, function: persistScoreHistory, dependsOn: [compute-score] }
-      - { id: notify, service: Notification Service, function: notifyScoringCycleComplete, dependsOn: [persist-history] }
+      - { id: lock, service: Approval Workflow Service, function: lockSubmittedWorkHours }
+      - { id: summarize, service: Approval Workflow Service, function: rebuildTeacherWorkHourSummaries, dependsOn: [lock] }
+      - { id: notify, service: Notification Service, function: notifyPendingReviewQueue, dependsOn: [summarize] }

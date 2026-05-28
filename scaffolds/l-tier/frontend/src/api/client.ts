@@ -2,8 +2,19 @@ export interface ApiConfig {
   baseURL: string;
 }
 
-// Default to relative `/api` so Vite dev server proxies to the backend.
-// Override with `VITE_API_BASE_URL` in production builds.
+/**
+ * Path contract (read this before adding api modules):
+ *
+ *  - `API_BASE` is the URL prefix this client prepends to EVERY path.
+ *    Default: `/api` — Vite dev server proxies `/api` → backend.
+ *    Override in production builds via `VITE_API_BASE_URL`.
+ *
+ *  - Callers MUST pass paths STARTING AT `/v1/...` (no leading `/api`).
+ *    e.g. `apiClient.get("/v1/users/me")` → final URL `/api/v1/users/me`.
+ *    Passing `/api/v1/...` produces `/api/api/v1/...` and a 404.
+ *
+ * Update this comment if `API_BASE` ever changes shape.
+ */
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export type ApiQueryValue = string | number | boolean | null | undefined;

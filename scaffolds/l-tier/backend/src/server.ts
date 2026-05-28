@@ -1,24 +1,32 @@
 import "dotenv/config";
-import { assertRequiredEnv, PORT } from "./config/env";
-
-// Boot-time validation MUST run before any DB / queue / HTTP import touches
-// `process.env.*`. A misconfigured prod deploy fails fast here instead of
-// silently serving with a dev fallback secret.
-assertRequiredEnv();
-
-import type { Server } from "node:http";
 import { createApp } from "./app";
+import { PORT, assertRequiredEnv } from "./config/env";
 import { initDb, sequelize } from "./db";
 import { syncModels } from "./models";
 import { startAllWorkers } from "./workers";
-import { drainInFlight } from "./queue";
+import { drainInFlight } from "./queue/inProcessQueue";
 import { logger } from "./config/logger";
+
+assertRequiredEnv();
 
 const app = createApp();
 
 async function start(): Promise<void> {
   await initDb();
   await syncModels();
+
+  // Seed default accounts on first startup (idempotent upsert — safe to re-run).
+  // The seed script only exists when an auth overlay (auth-password-rbac /
+  // auth-magic-link / auth-privy) was applied. The dynamic import + catch
+  // handles the "no auth" case gracefully. Set AUTO_SEED=0 to skip.
+  if (process.env.AUTO_SEED !== "0") {
+    try {
+      const { run: seedRun } = await import("./scripts/seed-auth-users");
+      await seedRun();
+    } catch {
+      // Script not present (no auth overlay) — skip silently.
+    }
+  }
 
   // Workers MUST be registered before `listen()` — otherwise any HTTP handler
   // that calls `enqueueJob(...)` during the brief window between server-ready
@@ -33,69 +41,66 @@ async function start(): Promise<void> {
   registerGracefulShutdown(httpServer);
 }
 
+/**
+ * Graceful shutdown.
+ *
+ * On SIGTERM / SIGINT:
+ *   1. Stop accepting new connections (httpServer.close).
+ *   2. Wait for in-flight queue jobs to settle (up to JOB_DRAIN_TIMEOUT_MS).
+ *   3. Close the Sequelize pool so the next deploy starts clean.
+ *   4. exit(0). A hard SHUTDOWN_HARD_TIMEOUT_MS watchdog forces exit(1) if
+ *      anything hangs — K8s expects pods to die within terminationGracePeriod.
+ *
+ * Without this, rolling deploys (K8s, ECS, fly.io) send SIGTERM and then
+ * SIGKILL after the grace period; in-flight jobs and DB transactions get
+ * cut mid-write.
+ */
+function registerGracefulShutdown(httpServer: ReturnType<typeof app.listen>): void {
+  let shuttingDown = false;
+  const JOB_DRAIN_TIMEOUT_MS = Number(process.env.JOB_DRAIN_TIMEOUT_MS ?? 10_000);
+  const SHUTDOWN_HARD_TIMEOUT_MS = Number(
+    process.env.SHUTDOWN_HARD_TIMEOUT_MS ?? 30_000,
+  );
+
+  async function shutdown(signal: NodeJS.Signals): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, "shutdown initiated");
+
+    // Watchdog — if any step hangs, exit non-zero so the orchestrator
+    // knows the shutdown failed instead of hanging until SIGKILL.
+    const watchdog = setTimeout(() => {
+      logger.fatal(
+        { timeoutMs: SHUTDOWN_HARD_TIMEOUT_MS },
+        "shutdown watchdog tripped; forcing exit",
+      );
+      process.exit(1);
+    }, SHUTDOWN_HARD_TIMEOUT_MS);
+    watchdog.unref();
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
+      logger.info("HTTP server closed");
+
+      await drainInFlight(JOB_DRAIN_TIMEOUT_MS);
+
+      await sequelize.close();
+      logger.info("DB connection closed");
+
+      process.exit(0);
+    } catch (err) {
+      logger.error({ err }, "error during shutdown");
+      process.exit(1);
+    }
+  }
+
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+}
+
 void start().catch((err) => {
   logger.fatal({ err }, "fatal startup error");
   process.exit(1);
 });
-
-/**
- * Graceful shutdown: SIGTERM/SIGINT → stop accepting new connections →
- * drain in-flight jobs → close DB → exit. The watchdog timer guarantees
- * we exit even if a handler hangs (PID 1 in a container would otherwise
- * be `kill -9`'d after the orchestrator's grace period — much worse).
- *
- * Why every step has its own timeout:
- *   - `httpServer.close()` waits for keep-alive connections to drain,
- *     which can sit at 5s forever if a client holds an idle SSE stream.
- *   - `drainInFlight()` blocks on user code that may have a leaky
- *     `await fetch(...)` somewhere.
- *   - `sequelize.close()` rarely hangs, but a stuck pgbouncer can.
- *
- * Each phase logs its outcome so a crashlooping container's tail explains
- * exactly which step timed out.
- */
-function registerGracefulShutdown(httpServer: Server): void {
-  let shuttingDown = false;
-  const SHUTDOWN_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
-
-  const handle = (signal: NodeJS.Signals) => async (): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info({ signal }, "graceful shutdown started");
-
-    // Watchdog — if any step hangs past 35s, exit non-zero so the
-    // orchestrator restarts us instead of waiting for SIGKILL.
-    const watchdog = setTimeout(() => {
-      logger.error("graceful shutdown watchdog fired — exiting forcefully");
-      process.exit(1);
-    }, 35_000);
-    watchdog.unref();
-
-    try {
-      await new Promise<void>((resolve) => {
-        httpServer.close((err) => {
-          if (err) logger.warn({ err }, "httpServer.close emitted error");
-          resolve();
-        });
-      });
-      logger.info("http server closed");
-
-      const drained = await drainInFlight(20_000);
-      logger.info({ drained }, "queue drain complete");
-
-      try {
-        await sequelize.close();
-        logger.info("sequelize connection closed");
-      } catch (err) {
-        logger.warn({ err }, "sequelize.close emitted error");
-      }
-    } finally {
-      clearTimeout(watchdog);
-      process.exit(0);
-    }
-  };
-
-  for (const signal of SHUTDOWN_SIGNALS) {
-    process.once(signal, handle(signal));
-  }
-}

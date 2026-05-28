@@ -36,6 +36,8 @@ export interface StagnationReplanInput {
     routeAudit?: string[];
     /** Migration coverage gaps from .ralph/migration-coverage.json. */
     migrationGaps?: string[];
+    /** Runtime integration audit ERROR-level tasks (file:line — directive). */
+    runtimeAuditErrors?: string[];
   };
   /** The actions the worker has been repeating without progress. */
   repeatedActions: string[];
@@ -202,6 +204,13 @@ export function buildReplanContext(input: StagnationReplanInput): string {
     parts.push(
       `## Migration coverage gaps`,
       ...d.migrationGaps.slice(0, 10).map((e) => `- ${e}`),
+      "",
+    );
+  }
+  if (d.runtimeAuditErrors && d.runtimeAuditErrors.length > 0) {
+    parts.push(
+      `## Runtime integration audit: ERROR-level tasks still open (HARD GATE — must fix)`,
+      ...d.runtimeAuditErrors.slice(0, 8).map((e) => `- ${e}`),
       "",
     );
   }

@@ -209,7 +209,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Track whether this mount is a "return visit" (component unmounted and remounted)
   // so we can show a "session still in progress" banner instead of a blank start state.
   const [isReturnVisit, setIsReturnVisit] = useState(false);
-  const [codingMode, setCodingMode] = useState<CodingMode>("normal");
+  const [codingMode, setCodingMode] = useState<CodingMode>(codingState.codingMode);
   useEffect(() => {
     // On first mount: if there's already an active/completed session in the store,
     // this is a return visit (user navigated away and came back).
@@ -572,6 +572,13 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
               Start Coding
             </button>
           </div>
+        )}
+
+        {/* Mode label when session is active/done */}
+        {hasStarted && (
+          <span className="px-2 py-1 text-[11px] font-medium text-slate-500 bg-slate-100 rounded">
+            {codingMode === "fast" ? "Fast" : codingMode === "cost" ? "Cost" : "Normal"} mode
+          </span>
         )}
 
         {/* Running: live indicator */}
