@@ -6,7 +6,7 @@
  * Modes:
  *   - "password-rbac"  (default fallback; multi-role, internal tools, ambiguous PRDs)
  *   - "magic-link"     (single-role consumer apps, "email-only sign-in", passwordless)
- *   - "privy"          (multi social providers, Web3 / wallet, PRD names Privy)
+ *   - "privy"          (any social OAuth provider, Web3 / wallet, PRD names Privy)
  *
  * Output is JSON (model is asked to emit a strict shape); parser is
  * defensive — any failure falls back to the keyword heuristic, which in
@@ -47,6 +47,8 @@ Read the product description (PRD, optionally TRD) and pick exactly ONE of three
    - PRD emphasises "frictionless onboarding" without mentioning OAuth providers
 
 3. **privy** — Privy OAuth (Google / Email OTP / Twitter / Wallet). Use this when:
+   - The PRD mentions ANY third-party OAuth provider, even just one (e.g. "Sign in with Google", "GitHub login", "Twitter OAuth", "Apple sign-in")
+   - The PRD says "social login", "OAuth", "SSO", or names any specific provider (Google, GitHub, Twitter, Facebook, LinkedIn, Apple, Discord, etc.)
    - The PRD names multiple social providers ("Sign in with Google AND GitHub AND ...")
    - The PRD mentions Web3 / wallet login / crypto / blockchain authentication
    - The PRD explicitly names Privy
@@ -243,16 +245,23 @@ function heuristicMode(prd: string, trd?: string): ParsedDeciderJson {
     /\b(wallet|web3|metamask|wagmi|rainbow ?kit|crypto sign[- ]?in)\b/.test(
       corpus,
     );
-  const mentionsMultipleSocial =
-    /\bgoogle\b.*\bgithub\b|\bgithub\b.*\bgoogle\b|\bsign in with .* and .*/.test(
+  // Any single OAuth provider is enough to warrant Privy — worker cannot
+  // implement a real OAuth flow without the SDK, and partial UI with a dead
+  // "Sign in with Google" button is worse than no button at all.
+  const mentionsSocialProvider =
+    /\b(google|github|twitter|facebook|linkedin|apple|discord|microsoft|slack)\b/.test(
+      corpus,
+    );
+  const mentionsSocialIntent =
+    /\b(social login|social sign[- ]?in|oauth|sso|sign[- ]?in with|login with|continue with)\b/.test(
       corpus,
     );
 
-  if (mentionsPrivy || mentionsWallet || mentionsMultipleSocial) {
+  if (mentionsPrivy || mentionsWallet || mentionsSocialProvider || mentionsSocialIntent) {
     return {
       mode: "privy",
       rationale:
-        "Heuristic match: PRD mentions Privy / wallet / multiple social providers.",
+        "Heuristic match: PRD mentions Privy / wallet / social OAuth provider.",
       confidence: "medium",
     };
   }
