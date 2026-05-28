@@ -88,6 +88,35 @@ export async function createDokployCompose(
   return { composeId: data.composeId, appName: data.appName };
 }
 
+/**
+ * Look up an existing compose by id. Returns `null` when Dokploy says it
+ * doesn't exist (404 / NOT_FOUND), which is the legitimate "saved compose
+ * is stale, recreate it" branch in the deploy pipeline. Other errors
+ * (5xx, network) still throw so we don't silently lose a real Dokploy
+ * outage.
+ */
+export async function getDokployCompose(
+  params: DokployBase & { composeId: string },
+): Promise<{ composeId: string; appName: string } | null> {
+  const url = `${params.baseUrl}/api/compose.one?composeId=${encodeURIComponent(params.composeId)}`;
+  const res = await fetch(url, { headers: { "x-api-key": params.token } });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    // Dokploy returns 200 with a NOT_FOUND code in body for some endpoints —
+    // treat that as missing too.
+    if (/NOT_FOUND/i.test(text)) return null;
+    throw new Error(`Dokploy compose.one error ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as {
+    composeId?: string;
+    appName?: string;
+    code?: string;
+  };
+  if (data.code === "NOT_FOUND" || !data.composeId) return null;
+  return { composeId: data.composeId, appName: data.appName ?? "" };
+}
+
 export async function createDokployDomain(
   params: DokployBase & { composeId: string; host: string; serviceName: string }
 ): Promise<void> {
@@ -110,9 +139,11 @@ export async function updateDokployCompose(
     repository: string;
     branch: string;
     env: string;
+    /** When set, Dokploy clones via SSH using this stored key (private repos). */
+    sshKeyId?: string;
   }
 ): Promise<void> {
-  const body = {
+  const body: Record<string, unknown> = {
     composeId: params.composeId,
     sourceType: "git",
     customGitUrl: params.repository,
@@ -120,7 +151,12 @@ export async function updateDokployCompose(
     composeType: "docker-compose",
     env: params.env,
   };
-  console.log("[dokploy] compose.update request:", JSON.stringify(body));
+  if (params.sshKeyId) body.customGitSSHKeyId = params.sshKeyId;
+  // Redact any embedded credential before logging the request.
+  console.log(
+    "[dokploy] compose.update request:",
+    JSON.stringify({ ...body, env: "<redacted>" }),
+  );
   const res = await dokployPost<unknown>(`${params.baseUrl}/api/compose.update`, params.token, body);
   console.log("[dokploy] compose.update response:", JSON.stringify(res));
 }

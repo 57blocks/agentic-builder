@@ -81,7 +81,12 @@ function CascadingMenu({
   const effectiveStageId = hoveredStageId ?? activeStageId;
   const hoveredStage = stages.find((s) => s.id === effectiveStageId);
 
-  const noSnapshot = (id: string) => stepStates[id] == null && id !== "intent" && id !== "initial" && id !== "deploy";
+  // Steps that drive user-facing runtime actions (start/stop dev server,
+  // trigger a deploy) never produce a snapshot of their own — they always
+  // start from an idle state. Treat them as navigable even when their
+  // snapshot is empty so the user can always click in.
+  const SNAPSHOTLESS_STEPS = new Set(["intent", "initial", "deploy", "serve"]);
+  const noSnapshot = (id: string) => stepStates[id] == null && !SNAPSHOTLESS_STEPS.has(id);
 
   const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";
   const l2Items: GroupItem[] = (hoveredStage?.children ?? [])

@@ -38,6 +38,7 @@ import { normalizeProjectTier } from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
 import { InfraAgent } from "@/lib/agents/infra/infra-agent";
 import { applyInfra } from "@/lib/pipeline/infra/apply";
+import { buildInfraSpecFromKickoff } from "@/lib/pipeline/infra/from-kickoff";
 import {
   readKickoffInfraMetadata,
   databaseUrlFrom,
@@ -929,16 +930,58 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Infra step ──────────────────────────────────────────────────────────
-  // Generate a per-project Dockerfile / docker-compose.yml from TRD + SysDesign,
-  // overwriting the static scaffold copies. Each project gets its own Redis
-  // (when needed), Postgres, etc. — never shared across projects.
+  // ── Infra step (deployment-ready Dockerfile + docker-compose) ───────────
+  // Preferred path: when `.blueprint/kickoff-infra.json` exists (Dokploy
+  // already provisioned per-app Postgres/Redis), derive an InfraSpec from
+  // the scaffold layout + provisioned URLs and render compose that *connects*
+  // to those services on `dokploy-network` instead of self-starting them.
+  // The scaffold's local-dev compose is preserved as `docker-compose.local.yml`.
   //
-  // Failure is non-fatal: we keep the scaffold defaults.
-  // Gate behind INFRA_AGENT_ENABLED=true for staged rollout.
+  // Failure is non-fatal: we fall back to the scaffold defaults.
+  let appliedKickoffInfra = false;
+  try {
+    const kickoffInfraMeta = await readKickoffInfraMetadata(process.cwd());
+    if (kickoffInfraMeta && kickoffInfraMeta.services.length > 0) {
+      const { spec, provisioned } = await buildInfraSpecFromKickoff(
+        outputRoot,
+        tier as "S" | "M" | "L",
+        kickoffInfraMeta,
+      );
+      const applied = await applyInfra(
+        outputRoot,
+        spec,
+        path.join(outputRoot, ".blueprint"),
+        { provisioned, preserveLocalCompose: true },
+      );
+      appliedKickoffInfra = true;
+      console.log(
+        `[CodingAPI] Kickoff-infra rendered: tier=${tier} provisioned=${[
+          provisioned.postgres && "postgres",
+          provisioned.redis && "redis",
+        ]
+          .filter(Boolean)
+          .join("+") || "none"} → wrote ${applied.writtenFiles.join(", ")}${
+          applied.preservedComposePath
+            ? `; preserved ${path.basename(applied.preservedComposePath)}`
+            : ""
+        }`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[CodingAPI] Kickoff-infra render failed (non-fatal, keeping scaffold defaults): ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+
+  // ── Legacy LLM-driven infra path ───────────────────────────────────────
+  // Only runs when no kickoff-infra metadata existed (e.g. Dokploy not
+  // configured). Gated behind INFRA_AGENT_ENABLED for staged rollout.
   if (
-    process.env.INFRA_AGENT_ENABLED === "true" ||
-    process.env.INFRA_AGENT_ENABLED === "1"
+    !appliedKickoffInfra &&
+    (process.env.INFRA_AGENT_ENABLED === "true" ||
+      process.env.INFRA_AGENT_ENABLED === "1")
   ) {
     try {
       const trdForInfra = await fs
@@ -1064,9 +1107,9 @@ export async function POST(request: NextRequest) {
     const existingBackendEnv = await fs
       .readFile(backendEnvPath, "utf-8")
       .catch(() => "");
-    // Prefer the unified kickoff-infra.json (Dokploy-managed per-app PG+Redis).
-    // Falls back to: explicit override env, then per-request body, then legacy
-    // kickoff-database.json that the existing resolver already handles.
+    // Read kickoff-infra.json (Dokploy-managed per-app PG+Redis) for the
+    // backend's DATABASE_URL. Falls back to explicit override env / per-request
+    // body when infra metadata is missing.
     const kickoffInfra = await readKickoffInfraMetadata(process.cwd()).catch(
       () => null,
     );
