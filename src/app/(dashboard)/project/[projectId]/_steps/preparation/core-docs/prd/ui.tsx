@@ -619,13 +619,14 @@ export function PrdUI(props: StepUIProps) {
         actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={() => {
           // Fire-and-forget memory capture before navigating
           const finalContent = stripChangeMarkers(step?.content ?? "");
-          if (finalContent && kickoffSessionId) {
+          const sessionId = kickoffSessionId ?? props.projectSlug ?? null;
+          if (finalContent && sessionId) {
             const originalContent = prdHistoryRef.current[0]?.content ?? finalContent;
             fetch("/api/memory/prd/capture", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                sessionId: kickoffSessionId,
+                sessionId,
                 originalPrd: originalContent,
                 finalPrd: finalContent,
                 tier,
