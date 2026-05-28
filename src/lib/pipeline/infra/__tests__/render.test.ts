@@ -278,6 +278,128 @@ describe("renderInfra", () => {
     });
   });
 
+  describe("nginx.conf", () => {
+    it("M-tier: frontend nginx.conf proxies /api/ to backend service:port", () => {
+      const spec: InfraSpec = {
+        tier: "M",
+        services: [
+          {
+            name: "frontend",
+            kind: "app",
+            role: "frontend",
+            runtime: "node20-alpine",
+            context: "frontend",
+            workdir: "/app",
+            install: "pnpm install --frozen-lockfile",
+            build: "pnpm run build",
+            start: "node dist/server.js",
+            servesStatic: true,
+            envs: [],
+            staticEnvs: {},
+            depends: ["backend"],
+          },
+          {
+            name: "backend",
+            kind: "app",
+            role: "backend",
+            runtime: "node20-alpine",
+            context: "backend",
+            workdir: "/app",
+            install: "pnpm install --frozen-lockfile",
+            build: "pnpm run build",
+            start: "node dist/server.js",
+            port: 4000,
+            envs: [],
+            staticEnvs: {},
+            depends: [],
+            servesStatic: false,
+          },
+        ],
+        domains: [],
+      };
+      const { files } = renderInfra(spec);
+      const nginx = files["frontend/nginx.conf"];
+      expect(nginx).toBeDefined();
+      expect(nginx).toMatch(/location \/api\//);
+      expect(nginx).toMatch(/proxy_pass http:\/\/backend:4000/);
+      expect(nginx).toMatch(/try_files \$uri \$uri\/ \/index\.html/);
+    });
+
+    it("S-tier static app: no backend → nginx.conf only has SPA fallback (no /api/)", () => {
+      const spec: InfraSpec = {
+        tier: "S",
+        services: [
+          {
+            name: "app",
+            kind: "app",
+            role: "frontend",
+            runtime: "node20-alpine",
+            context: ".",
+            workdir: "/app",
+            install: "pnpm install --frozen-lockfile",
+            build: "pnpm run build",
+            start: "node dist/server.js",
+            servesStatic: true,
+            envs: [],
+            staticEnvs: {},
+            depends: [],
+          },
+        ],
+        domains: [],
+      };
+      const { files } = renderInfra(spec);
+      const nginx = files["nginx.conf"];
+      expect(nginx).toBeDefined();
+      expect(nginx).toMatch(/try_files/);
+      expect(nginx).not.toMatch(/location \/api\//);
+      expect(nginx).not.toMatch(/proxy_pass/);
+    });
+
+    it("uses the discovered backend port (3001) when EXPOSE differs from 4000", () => {
+      const spec: InfraSpec = {
+        tier: "L",
+        services: [
+          {
+            name: "frontend",
+            kind: "app",
+            role: "frontend",
+            runtime: "node20-alpine",
+            context: "frontend",
+            workdir: "/app",
+            install: "pnpm install --frozen-lockfile",
+            build: "pnpm run build",
+            start: "node dist/server.js",
+            servesStatic: true,
+            envs: [],
+            staticEnvs: {},
+            depends: ["backend"],
+          },
+          {
+            name: "backend",
+            kind: "app",
+            role: "backend",
+            runtime: "node20-alpine",
+            context: "backend",
+            workdir: "/app",
+            install: "pnpm install --frozen-lockfile",
+            build: "pnpm run build",
+            start: "node dist/server.js",
+            port: 3001,
+            envs: [],
+            staticEnvs: {},
+            depends: [],
+            servesStatic: false,
+          },
+        ],
+        domains: [],
+      };
+      const { files } = renderInfra(spec);
+      expect(files["frontend/nginx.conf"]).toMatch(
+        /proxy_pass http:\/\/backend:3001/,
+      );
+    });
+  });
+
   it("throws when S-tier has !=1 app service", () => {
     const spec: InfraSpec = {
       tier: "S",
