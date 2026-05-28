@@ -49,7 +49,18 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
   const [repoUrl, setRepoUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"app" | "repo" | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+
+  async function copyToClipboard(text: string, which: "app" | "repo") {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied((c) => (c === which ? null : c)), 1500);
+    } catch {
+      /* clipboard blocked — silent */
+    }
+  }
 
   const appName = featureBrief
     .toLowerCase()
@@ -188,21 +199,69 @@ export default function DeploySection({ codeOutputDir }: { codeOutputDir: string
       )}
 
       {finalStatus === "done" && (
-        <div className="mt-3 flex flex-wrap gap-3 text-[12px]">
+        <div className="mt-4 space-y-3">
           {deployUrl && (
-            <a href={deployUrl} className="text-indigo-600 underline">
-              Open app ↗
-            </a>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                Deployed app
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <a
+                  href={deployUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 truncate rounded-md bg-white px-2.5 py-1.5 font-mono text-[12px] text-zinc-800 ring-1 ring-zinc-200 hover:bg-zinc-50"
+                  title={deployUrl}
+                >
+                  {deployUrl}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(deployUrl, "app")}
+                  className="shrink-0 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50"
+                  aria-label="Copy app URL"
+                >
+                  {copied === "app" ? "Copied ✓" : "Copy"}
+                </button>
+                <a
+                  href={deployUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  Open ↗
+                </a>
+              </div>
+            </div>
           )}
+
           {repoUrl && (
-            <a href={repoUrl} target="_blank" rel="noreferrer" className="text-zinc-500 underline">
-              GitHub repo ↗
-            </a>
+            <div className="flex items-center gap-2 text-[12px]">
+              <span className="text-zinc-500">GitHub repo:</span>
+              <a
+                href={repoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 truncate font-mono text-zinc-700 hover:underline"
+                title={repoUrl}
+              >
+                {repoUrl}
+              </a>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(repoUrl, "repo")}
+                className="shrink-0 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
+                aria-label="Copy repo URL"
+              >
+                {copied === "repo" ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
           )}
+
           <button
             type="button"
             onClick={() => { setFinalStatus("idle"); setJobId(null); setSteps([]); }}
-            className="text-zinc-400 hover:text-zinc-600"
+            className="text-[12px] text-zinc-400 hover:text-zinc-600"
           >
             Deploy again
           </button>
