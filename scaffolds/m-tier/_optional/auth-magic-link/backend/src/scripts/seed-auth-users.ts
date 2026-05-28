@@ -12,6 +12,7 @@
 import "dotenv/config";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { sequelize } from "../db";
 import { User } from "../models/User";
@@ -89,11 +90,13 @@ async function main(): Promise<void> {
   console.log("\n⚠️  Passwords above are demo defaults — change them in production.\n");
 }
 
-main()
-  .catch((err) => {
-    console.error("[seed-auth-users] failed:", err);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await sequelize.close().catch(() => undefined);
-  });
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main()
+    .catch((err) => {
+      console.error("[seed-auth-users] failed:", err);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await sequelize.close().catch(() => undefined);
+    });
+}
