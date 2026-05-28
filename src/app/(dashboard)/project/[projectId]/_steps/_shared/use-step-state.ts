@@ -3,7 +3,6 @@
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import type { StepId } from "@/_config/pipeline-flow";
-import type { StepResultData } from "@/app/(dashboard)/project/[projectId]/_steps/_shared/types";
 
 /**
  * Hook that derives the current state for a given step from the centralized stores.

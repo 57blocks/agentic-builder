@@ -8,14 +8,12 @@ export const prdAgent: StepAgent = createPipelineSseAgent({
   stepId: "prd",
   apiEndpoint: "/api/agents/pipeline",
   buildPayload: (ctx) => ({
-    featureBrief: ctx.featureBrief,
+    featureBrief: ctx.editInstruction
+      ? `Original brief:\n${ctx.featureBrief}\n\nCurrent PRD:\n${ctx.previousSteps.prd?.content ?? ""}\n\nEdit request: ${ctx.editInstruction}\n\nPlease generate an updated PRD incorporating the edit request above.`
+      : ctx.featureBrief,
     codeOutputDir: ctx.codeOutputDir,
     sessionId: ctx.sessionId,
     pauseAfterPrd: true,
-    ...(ctx.editInstruction ? {
-      prdEditInstruction: ctx.editInstruction,
-      existingPrd: ctx.previousSteps.prd?.content ?? "",
-    } : {}),
     // Forward user-confirmed clarifications when present and we are not
     // in edit-only mode (edits bypass the intent gate).
     ...(!ctx.editInstruction && ctx.prdIntent

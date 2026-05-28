@@ -389,6 +389,11 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
               <>
                 <RefreshCw size={9} className="text-red-400" />
                 <span className="text-red-500 font-medium">Failed</span>
+                {"verifyErrors" in task && task.verifyErrors && (
+                  <span className="text-[9px] font-bold text-red-400 bg-red-50 rounded-full px-1.5 py-0.5 ml-0.5">
+                    {task.verifyErrors.split("\n").length}
+                  </span>
+                )}
               </>
             ) : duration ? (
               <>

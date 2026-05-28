@@ -77,10 +77,18 @@ export async function loadAllStepSnapshots(projectSlug: string): Promise<void> {
   // does not populate them — we must extract them explicitly here).
   const intentMeta = (all["intent"]?.metadata as Record<string, unknown> | undefined);
   if (intentMeta?.intentMessages && Array.isArray(intentMeta.intentMessages) && intentMeta.intentMessages.length > 0) {
+    const intentEnrichedBrief = (intentMeta.intentEnrichedBrief as string) ?? "";
     useStepStore.setState({
       intentMessages: intentMeta.intentMessages,
-      intentEnrichedBrief: (intentMeta.intentEnrichedBrief as string) ?? "",
+      intentEnrichedBrief,
     });
+    // Restore featureBrief from the project's intent data so downstream
+    // steps (e.g. PRD auto-trigger) have access to the brief even when
+    // the zustand-persisted value is empty (e.g. after a project switch
+    // or fresh browser session).
+    if (intentEnrichedBrief) {
+      useStepStore.setState({ featureBrief: intentEnrichedBrief });
+    }
   }
 }
 
