@@ -124,6 +124,23 @@ export type {
   MigrationCoverageRepairInput,
   MigrationCoverageRepairResult,
 } from "./migration-coverage-repair";
+export { checkMigrationQuality } from "./migration-quality";
+export type {
+  MigrationQualityRuleId,
+  MigrationQualityFinding,
+  MigrationQualityCheckInput,
+  MigrationQualityCheckResult,
+  MigrationFile,
+} from "./migration-quality";
+export {
+  runMigrationQualityRepair,
+  formatMigrationQualityBlock,
+} from "./migration-quality-repair";
+export type {
+  MigrationQualityRepairTask,
+  MigrationQualityRepairInput,
+  MigrationQualityRepairResult,
+} from "./migration-quality-repair";
 export {
   computeStagnationReplan,
   buildReplanContext,
