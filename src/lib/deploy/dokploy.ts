@@ -3,6 +3,8 @@ interface DokployBase {
   token: string;
 }
 
+export type { DokployBase };
+
 async function dokployPost<T>(url: string, token: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -47,6 +49,32 @@ export async function createDokployProject(
     projectId: data.project.projectId,
     environmentId: data.environment.environmentId,
   };
+}
+
+interface ProjectSummary {
+  projectId: string;
+  name: string;
+  environments?: Array<{ environmentId: string; name?: string }>;
+}
+
+/** List all projects visible to the API token. */
+export async function listDokployProjects(
+  params: DokployBase,
+): Promise<ProjectSummary[]> {
+  return dokployGet<ProjectSummary[]>(
+    `${params.baseUrl}/api/project.all`,
+    params.token,
+  );
+}
+
+/** Look up one project (includes environments) by id. */
+export async function getDokployProject(
+  params: DokployBase & { projectId: string },
+): Promise<ProjectSummary> {
+  return dokployGet<ProjectSummary>(
+    `${params.baseUrl}/api/project.one?projectId=${encodeURIComponent(params.projectId)}`,
+    params.token,
+  );
 }
 
 export async function createDokployCompose(
@@ -105,6 +133,201 @@ export async function deployDokployCompose(
     params.token,
     { composeId: params.composeId }
   );
+}
+
+// ── Redis service API ───────────────────────────────────────────────────────
+// Dokploy treats Redis as a first-class managed Service. One container per call;
+// Dokploy puts it on `dokploy-network` and (when externalPort is set) publishes
+// the host port so it's reachable from outside the Docker network.
+
+export interface CreateRedisResponse {
+  redisId: string;
+  appName: string;
+}
+
+/**
+ * Create a managed Redis service inside an existing Dokploy project/environment.
+ * Pass `externalPort` to publish the host port (required for local dev access
+ * without docker). Random by default; caller can pick a deterministic port if
+ * they want per-project stable addresses.
+ */
+export async function createDokployRedis(
+  params: DokployBase & {
+    name: string;
+    appName: string;
+    projectId: string;
+    environmentId: string;
+    password: string;
+    memoryLimit?: string;
+    command?: string;
+    dockerImage?: string;
+  },
+): Promise<CreateRedisResponse> {
+  // NOTE: externalPort is NOT settable here — Dokploy ignores it on create.
+  // Use `saveDokployRedisExternalPort` between create and deploy.
+  const body = {
+    name: params.name,
+    appName: params.appName,
+    projectId: params.projectId,
+    environmentId: params.environmentId,
+    dockerImage: params.dockerImage ?? "redis:7-alpine",
+    // Dokploy's redis.create uses `databasePassword` (verified empirically
+    // against API 400 response, despite Redis having no concept of database).
+    databasePassword: params.password,
+    memoryLimit: params.memoryLimit ?? "160m",
+    command:
+      params.command ??
+      'redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""',
+    description: "Provisioned by Agentic Builder kickoff",
+  };
+  return dokployPost<CreateRedisResponse>(
+    `${params.baseUrl}/api/redis.create`,
+    params.token,
+    body,
+  );
+}
+
+export async function deployDokployRedis(
+  params: DokployBase & { redisId: string },
+): Promise<void> {
+  await dokployPost(`${params.baseUrl}/api/redis.deploy`, params.token, {
+    redisId: params.redisId,
+  });
+}
+
+/**
+ * Set the host port for a Redis service. Must be called between `create` and
+ * `deploy` (Dokploy ignores `externalPort` in the create body).
+ */
+export async function saveDokployRedisExternalPort(
+  params: DokployBase & { redisId: string; externalPort: number },
+): Promise<void> {
+  await dokployPost(`${params.baseUrl}/api/redis.saveExternalPort`, params.token, {
+    redisId: params.redisId,
+    externalPort: params.externalPort,
+  });
+}
+
+export interface DokployRedisDetail {
+  redisId: string;
+  appName: string;
+  name: string;
+  externalPort: number | null;
+  password: string;
+  applicationStatus: string;
+  serverIp?: string | null;
+}
+
+export async function getDokployRedis(
+  params: DokployBase & { redisId: string },
+): Promise<DokployRedisDetail> {
+  return dokployGet<DokployRedisDetail>(
+    `${params.baseUrl}/api/redis.one?redisId=${encodeURIComponent(params.redisId)}`,
+    params.token,
+  );
+}
+
+export async function removeDokployRedis(
+  params: DokployBase & { redisId: string },
+): Promise<void> {
+  await dokployPost(`${params.baseUrl}/api/redis.remove`, params.token, {
+    redisId: params.redisId,
+  });
+}
+
+// ── Postgres service API ────────────────────────────────────────────────────
+
+export interface CreatePostgresResponse {
+  postgresId: string;
+  appName: string;
+}
+
+export async function createDokployPostgres(
+  params: DokployBase & {
+    name: string;
+    appName: string;
+    projectId: string;
+    environmentId: string;
+    databaseName: string;
+    databaseUser: string;
+    databasePassword: string;
+    memoryLimit?: string;
+    dockerImage?: string;
+  },
+): Promise<CreatePostgresResponse> {
+  // NOTE: externalPort is NOT settable here — Dokploy ignores it on create.
+  // Use `saveDokployPostgresExternalPort` between create and deploy.
+  const body = {
+    name: params.name,
+    appName: params.appName,
+    projectId: params.projectId,
+    environmentId: params.environmentId,
+    dockerImage: params.dockerImage ?? "postgres:16-alpine",
+    databaseName: params.databaseName,
+    databaseUser: params.databaseUser,
+    databasePassword: params.databasePassword,
+    memoryLimit: params.memoryLimit ?? "512m",
+    description: "Provisioned by Agentic Builder kickoff",
+  };
+  return dokployPost<CreatePostgresResponse>(
+    `${params.baseUrl}/api/postgres.create`,
+    params.token,
+    body,
+  );
+}
+
+export async function deployDokployPostgres(
+  params: DokployBase & { postgresId: string },
+): Promise<void> {
+  await dokployPost(`${params.baseUrl}/api/postgres.deploy`, params.token, {
+    postgresId: params.postgresId,
+  });
+}
+
+/**
+ * Set the host port for a Postgres service. Must be called between `create`
+ * and `deploy` (Dokploy ignores `externalPort` in the create body).
+ */
+export async function saveDokployPostgresExternalPort(
+  params: DokployBase & { postgresId: string; externalPort: number },
+): Promise<void> {
+  await dokployPost(
+    `${params.baseUrl}/api/postgres.saveExternalPort`,
+    params.token,
+    {
+      postgresId: params.postgresId,
+      externalPort: params.externalPort,
+    },
+  );
+}
+
+export interface DokployPostgresDetail {
+  postgresId: string;
+  appName: string;
+  name: string;
+  externalPort: number | null;
+  databaseName: string;
+  databaseUser: string;
+  databasePassword: string;
+  applicationStatus: string;
+  serverIp?: string | null;
+}
+
+export async function getDokployPostgres(
+  params: DokployBase & { postgresId: string },
+): Promise<DokployPostgresDetail> {
+  return dokployGet<DokployPostgresDetail>(
+    `${params.baseUrl}/api/postgres.one?postgresId=${encodeURIComponent(params.postgresId)}`,
+    params.token,
+  );
+}
+
+export async function removeDokployPostgres(
+  params: DokployBase & { postgresId: string },
+): Promise<void> {
+  await dokployPost(`${params.baseUrl}/api/postgres.remove`, params.token, {
+    postgresId: params.postgresId,
+  });
 }
 
 interface DeploymentSummary {

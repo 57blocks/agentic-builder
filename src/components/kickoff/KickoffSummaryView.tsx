@@ -7,6 +7,7 @@ import type { StepResult } from "@/lib/pipeline/types";
 
 import PushGeneratedCodeSection from "./PushGeneratedCodeSection";
 import DeploySection from "./DeploySection";
+import InfraSection, { type InfraMeta } from "./InfraSection";
 import type { KickoffStepData } from "./types";
 
 interface Props {
