@@ -68,13 +68,13 @@ function RestoreIcon() {
 // Page
 // ---------------------------------------------------------------------------
 const TAB_META: Record<Tab, { label: string; accent: string }> = {
-  pending: { label: "Pending", accent: "from-amber-500 to-orange-500" },
   active: { label: "Active", accent: "from-emerald-500 to-teal-500" },
+  pending: { label: "Pending", accent: "from-amber-500 to-orange-500" },
   deprecated: { label: "Deprecated", accent: "from-slate-400 to-slate-500" },
 };
 
 export default function PrdKnowledgePage() {
-  const [tab, setTab] = useState<Tab>("pending");
+  const [tab, setTab] = useState<Tab>("active");
   const [records, setRecords] = useState<PrdKnowledgeListItem[]>([]);
   const [allCounts, setAllCounts] = useState<Record<Tab, number>>({ pending: 0, active: 0, deprecated: 0 });
   const [loading, setLoading] = useState(false);
