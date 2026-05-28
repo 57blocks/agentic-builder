@@ -85,6 +85,8 @@ import {
   formatMigrationQualityBlock,
   runSchemaDriftRepair,
   formatSchemaDriftBlock,
+  runAdminRouteCoverageRepair,
+  formatAdminRouteCoverageBlock,
   repairContractCoverage,
   repairPageCoverage,
   getUnresolvedMigrationGaps,
@@ -5607,6 +5609,39 @@ async function integrationVerifyAndFix(
     );
   }
 
+  // ── Admin-route alias coverage (A-09) ────────────────────────────────────
+  // Catches the F-09 outage class: `frontend/src/api/admin.ts` calls
+  // `/admin/<resource>` that 404 because no backend module mounts a
+  // matching route. The L-tier `_optional/auth-password-rbac` scaffold
+  // ships the empty `admin-aliases.routes.ts` shell — this lint flags
+  // every frontend call that lacks an alias in that file so the worker
+  // fills them in deterministically (chained with `requireAuth,
+  // requireRole("admin")`).
+  let adminRouteCoverageResult: Awaited<
+    ReturnType<typeof runAdminRouteCoverageRepair>
+  > | null = null;
+  try {
+    adminRouteCoverageResult = await runAdminRouteCoverageRepair({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+    });
+    if (adminRouteCoverageResult.pendingRepairTasks.length > 0) {
+      console.log(
+        `${label}: admin-route-coverage queued ${adminRouteCoverageResult.pendingRepairTasks.length} repair task(s) (${adminRouteCoverageResult.totalAdminCalls} admin call(s) vs ${adminRouteCoverageResult.totalAdminRoutes} backend admin route(s)).`,
+      );
+    }
+    if (adminRouteCoverageResult.scanFailed) {
+      console.warn(
+        `${label}: admin-route-coverage scan partial — ${adminRouteCoverageResult.scanFailed}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: admin-route-coverage repair skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   // ── Runtime integration audit (CODEGEN_HARDENING_PLAN.md §4.2 / §4.3 /
   //    §4.4 / §4.5 / §4.7) ────────────────────────────────────────────────
   // Static grep-based audit catching the runtime pitfalls Phase 4 prompts
@@ -6266,6 +6301,9 @@ async function integrationVerifyAndFix(
   const schemaDriftBlock = schemaDriftResult
     ? formatSchemaDriftBlock(schemaDriftResult)
     : "";
+  const adminRouteCoverageBlock = adminRouteCoverageResult
+    ? formatAdminRouteCoverageBlock(adminRouteCoverageResult)
+    : "";
   const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
 
   const openingUserContent = [
@@ -6276,6 +6314,7 @@ async function integrationVerifyAndFix(
     migrationCoverageBlock,
     migrationQualityBlock,
     schemaDriftBlock,
+    adminRouteCoverageBlock,
     runtimeAuditBlock,
     tddRepairBlock,
     dependencyAuditBlock,
