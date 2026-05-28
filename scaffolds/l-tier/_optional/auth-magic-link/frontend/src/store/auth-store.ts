@@ -4,10 +4,18 @@
  * Workers should NOT call `verifyMagicLink` directly — the callback
  * page (`MagicLinkCallbackPage`) calls `consumeToken()` which wraps it
  * and updates the store atomically.
+ *
+ * Token storage contract (must match frontend/src/api/client.ts):
+ *   - The bearer token lives at `localStorage[TOKEN_STORAGE_KEY]` and is
+ *     the SINGLE source of truth.
+ *   - `user` is persisted via zustand-persist (under the `auth-store`
+ *     localStorage key); `token` is intentionally excluded from
+ *     `partialize` so the two storage locations never drift.
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { TOKEN_STORAGE_KEY } from "../api/client";
 import {
   requestMagicLink as apiRequest,
   verifyMagicLink as apiVerify,
@@ -53,7 +61,7 @@ export const useAuthStore = create<AuthStoreState>()(
         set({ loading: true, error: null });
         try {
           const res = await apiVerify(token);
-          localStorage.setItem("token", res.accessToken);
+          localStorage.setItem(TOKEN_STORAGE_KEY, res.accessToken);
           set({ token: res.accessToken, user: res.user, loading: false });
           return res.user;
         } catch (err) {
@@ -70,12 +78,14 @@ export const useAuthStore = create<AuthStoreState>()(
         } catch {
           /* swallow */
         }
-        localStorage.removeItem("token");
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
         set({ token: null, user: null });
       },
 
       async refresh() {
-        const token = get().token ?? localStorage.getItem("token");
+        // Cold-start path: zustand-persist only restores `user`, so we
+        // read the token back from the canonical storage key.
+        const token = get().token ?? localStorage.getItem(TOKEN_STORAGE_KEY);
         if (!token) {
           set({ user: null });
           return null;
@@ -85,7 +95,7 @@ export const useAuthStore = create<AuthStoreState>()(
           set({ user: res.user, token });
           return res.user;
         } catch {
-          localStorage.removeItem("token");
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
           set({ token: null, user: null });
           return null;
         }
@@ -97,7 +107,8 @@ export const useAuthStore = create<AuthStoreState>()(
     }),
     {
       name: "auth-store",
-      partialize: (state) => ({ token: state.token, user: state.user }),
+      // `token` is excluded on purpose — see file header.
+      partialize: (state) => ({ user: state.user }),
     },
   ),
 );
