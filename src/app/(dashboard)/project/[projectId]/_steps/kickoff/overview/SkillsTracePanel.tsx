@@ -25,7 +25,7 @@ export function SkillsTracePanel({ trace }: Props) {
     <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-[#f1f5f9] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-[#712ae2]" />
+          <Sparkles size={14} className="text-indigo-600" />
           <p className="text-[11px] font-semibold uppercase tracking-widest text-[#94a3b8]">
             Skills Applied
           </p>

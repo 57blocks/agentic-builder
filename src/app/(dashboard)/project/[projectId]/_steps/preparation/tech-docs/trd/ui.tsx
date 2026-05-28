@@ -199,7 +199,7 @@ export function TrdUI(props: StepUIProps) {
             <div className="bg-[rgba(248,250,252,0.5)] border-b border-[#f1f5f9] px-8 pt-8 pb-[33px] flex items-start justify-between">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-[rgba(113,42,226,0.1)] text-[#712ae2] text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
+                  <span className="bg-indigo-50 text-indigo-600 text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
                     {isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}
                   </span>
                   {isDone && (
@@ -240,7 +240,7 @@ export function TrdUI(props: StepUIProps) {
                 <button
                   onClick={handleRegenerate}
                   disabled={isThisRunning || !isDone}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Regenerate TRD from scratch against the latest PRD"
                 >
                   <RefreshCw size={12} className={isThisRunning ? "animate-spin" : ""} />
@@ -265,7 +265,7 @@ export function TrdUI(props: StepUIProps) {
                   </span>
                 </div>
               ) : isThisRunning && !content ? (
-                <div className="flex items-center gap-2 text-[#712ae2] text-[13px]">
+                <div className="flex items-center gap-2 text-indigo-600 text-[13px]">
                   <SpinnerIcon /> Generating TRD…
                 </div>
               ) : (
@@ -312,7 +312,7 @@ export function TrdUI(props: StepUIProps) {
               }}
               className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95"
             >
-              Confirm TRD
+              Next Step
               <ArrowRight size={16} color="white" />
             </button>
           </div>

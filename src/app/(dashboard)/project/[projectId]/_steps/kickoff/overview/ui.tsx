@@ -353,7 +353,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 <button
                   onClick={runKickoff}
                   disabled={isRunning}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-50 text-[#712ae2] text-[11px] font-semibold hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-semibold hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Regenerate summary"
                 >
                   <RefreshCw size={11} className={isRunning ? "animate-spin" : ""} />
@@ -373,8 +373,8 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           {!hasRunKickoff && (
             <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-sm overflow-hidden">
               <div className="px-6 py-8 flex flex-col items-center justify-center gap-4 text-center">
-                <div className="w-14 h-14 rounded-full bg-[#712ae2]/10 flex items-center justify-center">
-                  <Rocket size={28} className="text-[#712ae2]" />
+                <div className="w-14 h-14 rounded-full bg-indigo-600/10 flex items-center justify-center">
+                  <Rocket size={28} className="text-indigo-600" />
                 </div>
                 <div>
                   <p className="text-[15px] font-bold text-[#0b1c30]">Ready to generate the task plan</p>
@@ -385,7 +385,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 <button
                   onClick={runKickoff}
                   disabled={isRunning}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#712ae2] px-8 py-3.5 text-[14px] font-semibold text-white shadow-sm transition-all hover:bg-[#6b24da] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-8 py-3.5 text-[14px] font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isRunning ? (
                     <><Loader2 size={16} className="animate-spin" /> Generating…</>
@@ -403,7 +403,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           {/* ── Generating banner ── */}
           {isThisRunning && (
             <div className="rounded-xl border border-violet-200 bg-white px-5 py-4 flex items-center gap-3 shadow-sm">
-              <Loader2 size={15} className="text-[#712ae2] animate-spin shrink-0" />
+              <Loader2 size={15} className="text-indigo-600 animate-spin shrink-0" />
               <div>
                 <p className="text-[13px] font-semibold text-violet-900">Generating Kick-off Plan…</p>
                 {streamingContent && <p className="text-[11px] text-violet-500 mt-0.5 line-clamp-1">{streamingContent.slice(-120)}</p>}
@@ -440,7 +440,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                     { label: "EST. COST", value: `$${estimatedCost.toFixed(2)}` },
                   ].map(({ label, value, highlight }) => (
                     <div key={label} className="px-4 py-3 text-center">
-                      <p className={`text-[17px] font-bold ${highlight ? "text-[#712ae2]" : "text-[#0b1c30]"}`}>{value}</p>
+                      <p className={`text-[17px] font-bold ${highlight ? "text-indigo-600" : "text-[#0b1c30]"}`}>{value}</p>
                       <p className="text-[10px] text-[#94a3b8] mt-0.5 font-medium">{label}</p>
                     </div>
                   ))}
@@ -448,7 +448,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 {hasTokenData && (
                   <div className="border-t border-[#f1f5f9] bg-[#fafbff]">
                     <div className="px-5 py-2 border-b border-[#f1f5f9]">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-[#712ae2]">Token Usage</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-indigo-600">Token Usage</p>
                     </div>
                     <div className="grid grid-cols-3 divide-x divide-[#f1f5f9]">
                       {[
@@ -457,7 +457,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                         { label: "TOTAL TOKENS", value: formatTokens(totalTokens), highlight: true },
                       ].map(({ label, value, highlight }) => (
                         <div key={label} className="px-4 py-3 text-center">
-                          <p className={`text-[15px] font-bold ${highlight ? "text-[#712ae2]" : "text-[#0b1c30]"}`}>{value}</p>
+                          <p className={`text-[15px] font-bold ${highlight ? "text-indigo-600" : "text-[#0b1c30]"}`}>{value}</p>
                           <p className="text-[9px] text-[#94a3b8] mt-0.5 font-medium">{label}</p>
                         </div>
                       ))}
@@ -487,7 +487,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               <button
                 onClick={handleDetectAbilities}
                 disabled={detecting || abilitiesLoading}
-                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#712ae2] bg-violet-50 px-2.5 py-1 rounded-full hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {detecting
                   ? <><Loader2 size={11} className="animate-spin" /> Analyzing…</>
@@ -507,7 +507,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                 <div className="rounded-lg border border-dashed border-[#e2e8f0] bg-[#fafbff] p-4 text-center">
                   <p className="text-[13px] font-medium text-[#334155]">No integrations detected yet</p>
                   <p className="text-[12px] text-[#94a3b8] mt-1">
-                    Click <span className="font-semibold text-[#712ae2]">Detect from PRD</span> to auto-detect third-party dependencies from your PRD, or skip if your app has no external services.
+                    Click <span className="font-semibold text-indigo-600">Detect from PRD</span> to auto-detect third-party dependencies from your PRD, or skip if your app has no external services.
                   </p>
                 </div>
               ) : (
@@ -534,7 +534,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                           title={enabled ? "Disable" : "Enable"}
                         >
                           {enabled
-                            ? <CheckSquare size={20} className="text-[#712ae2]" />
+                            ? <CheckSquare size={20} className="text-indigo-600" />
                             : <Square size={20} className="text-[#cbd5e1]" />
                           }
                         </button>
@@ -552,7 +552,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                               onChange={(e) => handleAbilityValueChange(item.envKey, e.target.value)}
                               placeholder={item.example ?? "Paste value here…"}
                               autoComplete="off" spellCheck={false}
-                              className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                              className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-indigo-600 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                             />
                             <button
                               type="button"
@@ -567,7 +567,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                           )}
                           {item.docsUrl && (
                             <a href={item.docsUrl} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline mt-1">
+                              className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline mt-1">
                               <ExternalLink size={10} /> Where to get this key →
                             </a>
                           )}
@@ -592,7 +592,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   setEnabledKeys((p) => new Set([...p, cleaned]));
                   void persistAbilities(next);
                 }}
-                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:text-[#6b24da] transition-colors pt-1"
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-indigo-600 hover:text-indigo-500 transition-colors pt-1"
               >
                 <Plus size={13} /> Add API key manually
               </button>
@@ -627,7 +627,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   ) : (
                     <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
                   )}
-                  <CheckSquare size={18} className={`shrink-0 ml-1 ${githubExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
+                  <CheckSquare size={18} className={`shrink-0 ml-1 ${githubExpanded ? "text-indigo-600" : "text-[#cbd5e1]"}`} />
                 </button>
 
                 {githubExpanded && (
@@ -643,7 +643,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                           onChange={(e) => updateLinkConfig({ githubToken: e.target.value })}
                           placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                           autoComplete="off" spellCheck={false}
-                          className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                          className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-indigo-600 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                         />
                         <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, githubToken: !p["githubToken"] }))}
                           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#334155]">
@@ -659,12 +659,12 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                         value={linkConfig.githubOrg}
                         onChange={(e) => updateLinkConfig({ githubOrg: e.target.value })}
                         placeholder="my-org or my-username"
-                        className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                        className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-indigo-600 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                       />
                     </div>
                     {repoUrl && (
                       <a href={repoUrl} target="_blank" rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#712ae2] hover:underline">
+                        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-indigo-600 hover:underline">
                         <ExternalLink size={11} /> View Repository →
                       </a>
                     )}
@@ -692,7 +692,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   ) : (
                     <span className="shrink-0 text-[10px] font-bold text-[#94a3b8] bg-[#f1f5f9] px-2 py-0.5 rounded-full">Not configured</span>
                   )}
-                  <CheckSquare size={18} className={`shrink-0 ml-1 ${jiraExpanded ? "text-[#712ae2]" : "text-[#cbd5e1]"}`} />
+                  <CheckSquare size={18} className={`shrink-0 ml-1 ${jiraExpanded ? "text-indigo-600" : "text-[#cbd5e1]"}`} />
                 </button>
 
                 {jiraExpanded && (
@@ -714,7 +714,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                             onChange={(e) => updateLinkConfig({ [key]: e.target.value })}
                             placeholder={placeholder}
                             autoComplete="off" spellCheck={false}
-                            className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-[#712ae2] focus:outline-none focus:ring-1 focus:ring-[#712ae2]"
+                            className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5 pr-10 font-mono text-[12px] text-[#334155] placeholder:text-[#cbd5e1] focus:border-indigo-600 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                           />
                           {secret && (
                             <button type="button" onClick={() => setShowLinkSecrets((p) => ({ ...p, [key]: !p[key] }))}
@@ -726,7 +726,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                       </div>
                     ))}
                     <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline">
+                      className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline">
                       <ExternalLink size={10} /> Get your Atlassian API token →
                     </a>
                   </div>
@@ -745,7 +745,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
         <button
           onClick={() => nextStep && onNavigate(nextStep)}
           disabled={!isCompleted}
-          className="flex items-center gap-2 px-6 py-2.5 bg-[#712ae2] text-white text-[13px] font-semibold rounded-lg hover:bg-[#6b24da] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[13px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Task Breakdown <ArrowRight size={14} />
         </button>
