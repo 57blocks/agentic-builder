@@ -387,12 +387,20 @@ Field rules:
   - "reads": files this task only imports or references without editing.
   - CRITICAL: A file that appears in any other task's "creates" MUST appear in this task's "modifies" or "reads", NEVER in "creates" again. No file path may appear in "creates" across more than one task.
 - **dependencies**: array of task IDs that must be done first (e.g. ["T-001"]).
-  - Prefer a **single direct dependency** (the immediate predecessor). Only list multiple
-    dependencies when the task truly cannot start before **multiple independent** predecessors
-    are all complete.
-  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002,
-    and T-002 depends on T-001, T-003 should NOT also list T-001 — the dependency chain is
-    implicit through T-002.
+  - **PARALLEL BY DEFAULT**: Tasks in the same phase are almost always INDEPENDENT and should run in parallel. They share the same prerequisite (e.g. the Data Layer task), but they do NOT depend on each other.
+  - **CORRECT** — Backend Services tasks T-004..T-007 all depend only on T-002 (Data Layer), NOT on each other:
+      T-004 → ["T-002"]
+      T-005 → ["T-002"]   (NOT ["T-004"])
+      T-006 → ["T-002"]   (NOT ["T-005"])
+      T-007 → ["T-002"]   (NOT ["T-006"])
+  - **CORRECT** — Frontend page tasks T-012..T-014 all depend only on T-011 (App Shell), NOT on each other:
+      T-012 → ["T-011"]
+      T-013 → ["T-011"]   (NOT ["T-012"])
+      T-014 → ["T-011"]   (NOT ["T-013"])
+  - **WRONG** (serial chain — NEVER do this):
+      T-005 → ["T-004"] → T-006 → ["T-005"] → T-013 → ["T-012"] → T-014 → ["T-013"]
+  - Only list multiple dependencies when the task truly cannot start before **multiple independent** predecessors are all complete (e.g. a frontend page that needs both the app shell AND the API client).
+  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002, and T-002 depends on T-001, T-003 should NOT also list T-001 — the chain is implicit.
 - **priority**: "P0" (must have), "P1" (should have), "P2" (nice to have).
 - **subSteps**: array of 2-6 concrete implementation steps. Each step has:
   - "step": sequential number (1, 2, 3...)
