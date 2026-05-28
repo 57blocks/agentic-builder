@@ -37,6 +37,11 @@ export type {
   TaskCoverageRepairResult,
 } from "./task-coverage-repair";
 export { repairContractCoverage } from "./contract-coverage-repair";
+export { repairPageCoverage } from "./page-coverage-repair";
+export type {
+  PageCoverageRepairInput,
+  PageCoverageRepairResult,
+} from "./page-coverage-repair";
 export { getUnresolvedMigrationGaps } from "./migration-coverage-repair";
 export type {
   ContractCoverageRepairInput,
