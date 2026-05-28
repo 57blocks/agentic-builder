@@ -9,14 +9,22 @@ import { logger } from "../config/logger";
  *   L-tier projects are expected to run background work (aggregators, scanners,
  *   digest builders). For local dev / smoke tests we should not require Redis
  *   to be up — that turns "clone + pnpm dev" into a 4-step infra setup. So the
- *   default implementation is in-process: `enqueue` resolves with a run id
+ *   default implementation is in-process: `enqueueJob` resolves with a run id
  *   prefixed `inproc:`, and the worker runs in the same process via an
  *   EventEmitter.
  *
  *   For real production with multiple replicas, swap this module for the
  *   BullMQ-backed implementation in `./redisQueue.ts` (gated by
- *   `USE_REDIS_QUEUE=1` in `server.ts`). Both modules export the same
- *   `enqueueJob` / `registerWorker` shape so callers don't change.
+ *   `USE_REDIS_QUEUE=1`). Use `./queue` (the index selector) instead of
+ *   importing this file directly so the switch is environment-driven.
+ *
+ * Memory / lifecycle guarantees:
+ *   - `jobs` Map is bounded by `JOB_RETENTION_MS`: completed jobs are removed
+ *     by a `setTimeout(unref)` so a long-lived process doesn't OOM. The TTL
+ *     defaults to 1h, long enough for the SSE client to fetch terminal status
+ *     after disconnects.
+ *   - `inFlight` Set tracks promises so the graceful-shutdown path can
+ *     `await drainInFlight(timeoutMs)` instead of dropping work.
  *
  * Conventions:
  *   - `run_id` returned to the HTTP caller MUST be used end-to-end. The worker
@@ -45,11 +53,16 @@ export type JobHandler<TData, TResult> = (
   emit: (event: string, payload: unknown) => void,
 ) => Promise<TResult>;
 
+const JOB_RETENTION_MS = Number(
+  process.env.QUEUE_JOB_RETENTION_MS ?? 60 * 60 * 1000,
+);
+
 const events = new EventEmitter();
 events.setMaxListeners(0);
 
 const jobs = new Map<string, Job>();
 const handlers = new Map<string, JobHandler<unknown, unknown>>();
+const inFlight = new Set<Promise<void>>();
 
 /**
  * Enqueue a job. Returns the run id immediately; the work runs asynchronously.
@@ -62,10 +75,12 @@ export async function enqueueJob<TData>(
   queueName: string,
   data: TData,
 ): Promise<string> {
-  const handler = handlers.get(queueName) as JobHandler<TData, unknown> | undefined;
+  const handler = handlers.get(queueName) as
+    | JobHandler<TData, unknown>
+    | undefined;
   if (!handler) {
     throw new Error(
-      `[queue] No worker registered for queue "${queueName}". Call \`registerWorker(\"${queueName}\", …)\` from your worker bootstrap.`,
+      `[queue] No worker registered for queue "${queueName}". Call \`registerWorker("${queueName}", …)\` from your worker bootstrap.`,
     );
   }
 
@@ -79,8 +94,11 @@ export async function enqueueJob<TData>(
   jobs.set(id, job);
   logger.info({ jobId: id, queueName }, "job enqueued (in-process)");
 
-  // Detach from the request lifecycle.
-  void runJob(job, handler);
+  const promise = runJob(job, handler);
+  inFlight.add(promise);
+  // `void` — the request handler must return immediately, but the graceful-
+  // shutdown path can still wait via `drainInFlight()`.
+  void promise.finally(() => inFlight.delete(promise));
 
   return id;
 }
@@ -104,7 +122,11 @@ async function runJob<TData>(
     job.completedAt = Date.now();
     events.emit(`job:${job.id}`, { event: "succeeded", job });
     logger.info(
-      { jobId: job.id, queueName: job.queueName, durationMs: job.completedAt - (job.startedAt ?? 0) },
+      {
+        jobId: job.id,
+        queueName: job.queueName,
+        durationMs: job.completedAt - (job.startedAt ?? 0),
+      },
       "job succeeded",
     );
   } catch (err) {
@@ -116,6 +138,13 @@ async function runJob<TData>(
       { jobId: job.id, queueName: job.queueName, err: job.error },
       "job failed",
     );
+  } finally {
+    // Schedule eviction. `unref()` so the timer doesn't keep node alive
+    // during tests / short-lived scripts.
+    const t = setTimeout(() => {
+      jobs.delete(job.id);
+    }, JOB_RETENTION_MS);
+    t.unref?.();
   }
 }
 
@@ -124,7 +153,10 @@ export function registerWorker<TData, TResult>(
   handler: JobHandler<TData, TResult>,
 ): void {
   if (handlers.has(queueName)) {
-    logger.warn({ queueName }, "worker re-registered (existing handler replaced)");
+    logger.warn(
+      { queueName },
+      "worker re-registered (existing handler replaced)",
+    );
   }
   handlers.set(queueName, handler as JobHandler<unknown, unknown>);
   logger.info({ queueName }, "worker registered");
@@ -149,4 +181,30 @@ export function subscribeJob(
 
 export function isInProcessRunId(runId: string): boolean {
   return typeof runId === "string" && runId.startsWith("inproc:");
+}
+
+/**
+ * Number of jobs currently running. Useful for `/health` payloads and tests.
+ */
+export function inFlightCount(): number {
+  return inFlight.size;
+}
+
+/**
+ * Wait for every in-flight job to settle (succeed or fail). Returns true if
+ * the queue drained within `timeoutMs`, false if the timeout fired first.
+ *
+ * Called from `server.ts#registerGracefulShutdown` so SIGTERM doesn't kill
+ * mid-flight work. Safe to call multiple times; idempotent.
+ */
+export async function drainInFlight(timeoutMs = 30_000): Promise<boolean> {
+  if (inFlight.size === 0) return true;
+
+  const drained = Promise.allSettled(Array.from(inFlight)).then(() => true);
+  const timedOut = new Promise<false>((resolve) => {
+    const t = setTimeout(() => resolve(false), timeoutMs);
+    t.unref?.();
+  });
+
+  return Promise.race([drained, timedOut]);
 }

@@ -1,5 +1,6 @@
 import type Koa from "koa";
 import type { AppContext } from "../types/koa";
+import { logger } from "../config/logger";
 
 export interface AppError extends Error {
   status?: number;
@@ -7,6 +8,24 @@ export interface AppError extends Error {
   details?: any;
 }
 
+/**
+ * Canonical error handler. Two responsibilities:
+ *
+ *   1. Convert every thrown `AppError` (or unknown) into the project-wide
+ *      response envelope `{ ok: false, error: { code, message, details? } }`.
+ *      Frontends rely on this shape — if a handler returns a bare `{ error }`
+ *      object the client unwrapper falls through and renders "undefined".
+ *
+ *   2. Log the failure through `pino` (NOT `console.error`). Reasons:
+ *        - `console.error` bypasses pino's redaction config, so any
+ *          `password`/`refresh_token` smuggled in `requestBody` leaks to stdout
+ *          in plain text (audit + GDPR risk).
+ *        - pino's structured output is what log aggregators index; plain
+ *          `console.error` strings break dashboards.
+ *
+ * MUST be registered FIRST in `app.use(...)` chain so errors thrown by later
+ * middleware (auth, body parser, validation) are caught.
+ */
 export const errorHandlerMiddleware: Koa.Middleware = async (
   ctx: AppContext,
   next,
@@ -16,46 +35,51 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
   try {
     await next();
 
-    // Handle 404
     if (ctx.status === 404 && !ctx.body) {
       ctx.status = 404;
       ctx.body = {
-        error: "Not Found",
-        message: `Route ${ctx.method} ${ctx.url} not found`,
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: `Route ${ctx.method} ${ctx.url} not found`,
+        },
       };
     }
   } catch (err: any) {
     const error = err as AppError;
+    const status = error.status || 500;
+    const code = error.code || (status >= 500 ? "INTERNAL_SERVER_ERROR" : "BAD_REQUEST");
 
-    // Log error
-    console.error(`[Error] ${ctx.method} ${ctx.url}`, {
-      error: error.message,
-      stack: error.stack,
-      status: error.status,
-      details: error.details,
-      body: requestBody,
-      user: ctx.state.user?.id,
-    });
-
-    // Set response status
-    ctx.status = error.status || 500;
-
-    // Format error response
-    ctx.body = {
-      error: error.name || "InternalServerError",
-      message: error.message || "An unexpected error occurred",
-      ...(process.env.NODE_ENV === "development" && {
-        stack: error.stack,
+    logger.error(
+      {
+        method: ctx.method,
+        url: ctx.url,
+        status,
+        code,
         details: error.details,
-      }),
-    };
+        body: requestBody,
+        userId: ctx.state.user?.id,
+        err: error,
+      },
+      `request failed: ${error.message}`,
+    );
 
-    // Ensure JSON content type
+    ctx.status = status;
+    ctx.body = {
+      ok: false,
+      error: {
+        code,
+        message: error.message || "An unexpected error occurred",
+        ...(error.details !== undefined ? { details: error.details } : {}),
+        ...(process.env.NODE_ENV === "development" && error.stack
+          ? { stack: error.stack }
+          : {}),
+      },
+    };
     ctx.type = "application/json";
   }
 };
 
-// Helper function to create structured errors
 export function createError(
   message: string,
   status: number = 500,
@@ -69,7 +93,6 @@ export function createError(
   return error;
 }
 
-// Common error types
 export const Errors = {
   BadRequest: (message: string = "Bad Request", details?: any) =>
     createError(message, 400, "BAD_REQUEST", details),

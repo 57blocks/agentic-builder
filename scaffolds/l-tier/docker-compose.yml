@@ -58,13 +58,32 @@ services:
       NODE_ENV: production
       PORT: "4000"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
+      # CORS allowlist for the SPA served via nginx (see frontend service
+      # below). When you front the API with a custom domain, replace this
+      # with the public origin(s). `assertRequiredEnv()` fatal-exits in
+      # production if this is empty.
+      CORS_ORIGINS: http://localhost:8080
+      # AUTH_JWT_SECRET MUST be supplied via an actual secret store (CI
+      # var, k8s secret, Vault). The compose file is checked into git.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET must be set in shell env or .env}
       REDIS_URL: redis://redis:6379
-      USE_REDIS_QUEUE: "1"
+      # Default OFF — flip to "1" only when you actually deploy multiple
+      # backend replicas. With a single replica the in-process queue is
+      # faster and one fewer moving part to monitor.
+      USE_REDIS_QUEUE: "0"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # If you proxy the SPA via the same backend host (no separate nginx),
+      # the health path may be `/v1/health` instead of `/api/v1/health`. The
+      # default scaffold path is `/api/v1/health`, exposed by `src/api/modules`.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
     ports:
       - "4000:4000"
     restart: unless-stopped
@@ -75,7 +94,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"
     restart: unless-stopped
