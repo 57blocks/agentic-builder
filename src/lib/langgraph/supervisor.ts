@@ -81,6 +81,8 @@ import {
   runTscDiagnosticsAsTasks,
   runMigrationCoverageRepair,
   formatMigrationCoverageBlock,
+  runMigrationQualityRepair,
+  formatMigrationQualityBlock,
   repairContractCoverage,
   repairPageCoverage,
   getUnresolvedMigrationGaps,
@@ -5531,6 +5533,42 @@ async function integrationVerifyAndFix(
     );
   }
 
+  // ── Migration QUALITY repair (idempotency + FK ordering) ───────────────
+  // Sibling of migration-coverage above: that pass asks "is there a
+  // migration for every model touched?", this pass asks "is every existing
+  // migration safe to re-run?". Replan / partial-state retry loops re-run
+  // migrations regularly, and bare `queryInterface.createTable / addColumn
+  // / addIndex / bulkInsert` throw on second invocation — aborting the
+  // whole pipeline with no recovery short of manual DB drop.
+  //
+  // Cross-file FK ordering (014 REFERENCES 015 → fails) is also caught.
+  // The `task-breakdown/migration-idempotency` skill (priority 78) is the
+  // upstream prevention; this lint is the deterministic backstop.
+  let migrationQualityResult: Awaited<
+    ReturnType<typeof runMigrationQualityRepair>
+  > | null = null;
+  try {
+    migrationQualityResult = await runMigrationQualityRepair({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+      sessionId: state.sessionId,
+    });
+    if (migrationQualityResult.pendingRepairTasks.length > 0) {
+      console.log(
+        `${label}: migration-quality queued ${migrationQualityResult.pendingRepairTasks.length} repair task(s) across ${migrationQualityResult.filesScanned} migration file(s).`,
+      );
+    }
+    if (migrationQualityResult.scanFailed) {
+      console.warn(
+        `${label}: migration-quality scan partial — ${migrationQualityResult.scanFailed}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `${label}: migration-quality repair skipped — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   // ── Runtime integration audit (CODEGEN_HARDENING_PLAN.md §4.2 / §4.3 /
   //    §4.4 / §4.5 / §4.7) ────────────────────────────────────────────────
   // Static grep-based audit catching the runtime pitfalls Phase 4 prompts
@@ -6184,6 +6222,9 @@ async function integrationVerifyAndFix(
   const migrationCoverageBlock = migrationCoverageResult
     ? formatMigrationCoverageBlock(migrationCoverageResult)
     : "";
+  const migrationQualityBlock = migrationQualityResult
+    ? formatMigrationQualityBlock(migrationQualityResult)
+    : "";
   const tddRepairBlock = await formatTddRepairBlock(state.outputDir);
 
   const openingUserContent = [
@@ -6192,6 +6233,7 @@ async function integrationVerifyAndFix(
     prdBlock,
     coverageBlock,
     migrationCoverageBlock,
+    migrationQualityBlock,
     runtimeAuditBlock,
     tddRepairBlock,
     dependencyAuditBlock,
