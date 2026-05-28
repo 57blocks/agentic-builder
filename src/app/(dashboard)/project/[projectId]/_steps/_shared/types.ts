@@ -57,6 +57,8 @@ export interface StepAgentContext {
     result: import("@/lib/agents/intent/types").IntentResult;
     answers: import("@/lib/agents/intent/types").ClarificationAnswer[];
   } | null;
+  /** Signal to abort in-flight requests (e.g. on project switch). */
+  abortSignal?: AbortSignal;
   emitState: (update: Partial<StepAgentState>) => void;
   getState: () => StepAgentState;
 }

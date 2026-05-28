@@ -219,7 +219,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
           try {
             const event = JSON.parse(line.slice(6));
             if (event.type === "step_stream") {
-              kickoffContent += event.data?.chunk ?? "";
+              kickoffContent += event.data?.chunk ?? event.chunk ?? "";
             } else if (event.type === "step_complete") {
               kickoffContent = event.data?.content ?? kickoffContent;
             } else if (event.type === "done") {

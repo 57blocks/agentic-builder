@@ -466,7 +466,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
 
 // ─── Expanded task detail body ────────────────────────────────────────────
 function TaskDetailBody({ task }: { task: KickoffWorkItem }) {
-  const filePlan = normaliseFiles(task.files);
+  const filePlan = normalizeFiles(task.files);
   const subSteps = task.subSteps ?? [];
   const acceptance = task.acceptanceCriteria ?? [];
   const covers = task.coversRequirementIds ?? [];
@@ -605,7 +605,7 @@ function FileList({ label, icon, files }: { label: string; icon: React.ReactNode
   );
 }
 
-function normaliseFiles(files: KickoffWorkItem["files"]): TaskFilePlan {
+function normalizeFiles(files: KickoffWorkItem["files"]): TaskFilePlan {
   if (!files) return { creates: [], modifies: [], reads: [] };
   if (Array.isArray(files)) {
     // Legacy shape: flat string[] — best-effort treat as creates.

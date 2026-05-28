@@ -80,6 +80,7 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload(ctx)),
+          signal: ctx.abortSignal,
         });
 
         if (!resp.ok) {
@@ -157,6 +158,10 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
         });
 
       } catch (err) {
+        // Silent return on intentional abort — caller (step-store) already reset state.
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { stepId, status: "failed", error: "aborted", timestamp: new Date().toISOString() };
+        }
         resultError = err instanceof Error ? err.message : "Unknown error";
         ctx.emitState({ isRunning: false, error: resultError });
       }
@@ -227,6 +232,7 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload(ctx)),
+          signal: ctx.abortSignal,
         });
 
         if (!resp.ok) {
@@ -281,6 +287,10 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
         });
 
       } catch (err) {
+        // Silent return on intentional abort — caller (step-store) already reset state.
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { stepId, status: "failed", error: "aborted", timestamp: new Date().toISOString() };
+        }
         resultError = err instanceof Error ? err.message : "Unknown error";
         ctx.emitState({ isRunning: false, error: resultError });
       }
