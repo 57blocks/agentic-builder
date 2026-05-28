@@ -588,7 +588,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
             </select>
             <button
               onClick={handleStart}
-              className="flex items-center gap-2 px-5 py-2 bg-[#712ae2] hover:bg-[#5f24c2] text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+              className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
             >
               <Play size={13} />
               Start Coding
@@ -613,7 +613,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {(isDone || isFailed) && failedTaskIds.length > 0 && (
           <button
             onClick={handleRetryAllFailed}
-            className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
           >
             <RotateCcw size={13} />
             Retry Failed ({failedTaskIds.length})
@@ -637,7 +637,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {isDone && failedTaskIds.length === 0 && (
           <button
             onClick={() => onNavigate("serve")}
-            className="flex items-center gap-2 px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-bold rounded-lg transition-colors"
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
           >
             Continue to Preview →
           </button>

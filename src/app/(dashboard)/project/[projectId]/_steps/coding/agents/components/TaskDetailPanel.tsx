@@ -267,7 +267,7 @@ export function TaskDetailPanel({
           {panelTab === "subtasks" && (
             <motion.span
               layoutId="panel-tab-indicator"
-              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
             />
           )}
         </button>
@@ -283,7 +283,7 @@ export function TaskDetailPanel({
           {panelTab === "logs" && (
             <motion.span
               layoutId="panel-tab-indicator"
-              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
             />
           )}
         </button>
@@ -313,7 +313,7 @@ export function TaskDetailPanel({
           {panelTab === "files" && (
             <motion.span
               layoutId="panel-tab-indicator"
-              className="absolute bottom-0 left-0 right-0 h-[2px] bg-violet-500 rounded-t"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
             />
           )}
         </button>

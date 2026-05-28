@@ -270,7 +270,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
           Generated <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[13px]">.env</code> and{" "}
           <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[13px]">SETUP.md</code>. Now scaffolding the project…
         </p>
-        <Loader2 className="size-6 animate-spin text-[#712ae2]" />
+        <Loader2 className="size-6 animate-spin text-indigo-600" />
       </div>
     );
   }
@@ -280,7 +280,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
       <div className="max-w-3xl w-full mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-2">
-          <div className="size-10 rounded-xl bg-linear-to-br from-[#712ae2] to-[#5a1fc4] flex items-center justify-center">
+          <div className="size-10 rounded-xl bg-linear-to-br from-indigo-600 to-indigo-700 flex items-center justify-center">
             <Wrench size={18} className="text-white" />
           </div>
           <div>
@@ -328,7 +328,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
         {/* Phase 1: Infrastructure */}
         {phase === "infra" && (
           <PhaseCard
-            icon={<Server size={16} className="text-[#712ae2]" />}
+            icon={<Server size={16} className="text-indigo-600" />}
             title="How do you want PostgreSQL + Redis?"
             subtitle="Both are required for the app to run. The bundled option uses the docker-compose.yml that's generated alongside the project."
           >
@@ -379,7 +379,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
         {/* Phase 2: Vendor + Auth keys */}
         {phase === "vendor" && (
           <PhaseCard
-            icon={<Key size={16} className="text-[#712ae2]" />}
+            icon={<Key size={16} className="text-indigo-600" />}
             title={`${vendorKeys.length} vendor / auth credentials`}
             subtitle="Fill in what you have. Skip the rest — the backend boots regardless; affected data feeds get marked stale until you add the key later in .env."
           >
@@ -409,7 +409,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
         {/* Phase 3: Deploy keys + finalize */}
         {phase === "deploy" && (
           <PhaseCard
-            icon={<Rocket size={16} className="text-[#712ae2]" />}
+            icon={<Rocket size={16} className="text-indigo-600" />}
             title="Deploy credentials (optional)"
             subtitle="Only needed when you run deploy.sh. Safe to skip now — fill them in .env later."
           >
@@ -449,7 +449,7 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
               <Button
                 onClick={() => void handleSaveAndKickoff()}
                 disabled={submitting}
-                className="bg-emerald-600 hover:bg-emerald-500"
+                className="bg-indigo-600 hover:bg-indigo-500"
               >
                 {submitting ? <Loader2 size={14} className="animate-spin mr-2" /> : <Rocket size={14} className="mr-2" />}
                 {submitting ? "Saving…" : "Save & Run Kick-off"}
@@ -494,7 +494,7 @@ function PhaseChip({ active, done, label }: { active: boolean; done: boolean; la
     <span
       className={[
         "px-2.5 py-1 rounded-full font-medium flex items-center gap-1",
-        active ? "bg-[#712ae2] text-white" : done ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500",
+        active ? "bg-indigo-600 text-white" : done ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500",
       ].join(" ")}
     >
       {done && <Check size={11} />}
@@ -524,12 +524,12 @@ function RadioOption({
       onClick={onSelect}
       className={`flex items-start gap-3 text-left px-4 py-3 rounded-lg border transition-colors ${
         checked
-          ? "border-[#712ae2] bg-[rgba(113,42,226,0.04)]"
+          ? "border-indigo-600 bg-indigo-50"
           : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
       }`}
     >
-      <span className={`mt-0.5 size-4 rounded-full border-2 flex items-center justify-center ${checked ? "border-[#712ae2]" : "border-slate-300"}`}>
-        {checked && <span className="size-2 rounded-full bg-[#712ae2]" />}
+      <span className={`mt-0.5 size-4 rounded-full border-2 flex items-center justify-center ${checked ? "border-indigo-600" : "border-slate-300"}`}>
+        {checked && <span className="size-2 rounded-full bg-indigo-600" />}
       </span>
       <span className="flex-1">
         <div className="text-[13px] font-medium text-slate-900">{title}</div>
@@ -560,7 +560,7 @@ function LabeledInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-9 px-3 rounded-md border border-slate-200 bg-white text-[13px] focus:outline-none focus:border-[#712ae2] focus:ring-1 focus:ring-[#712ae2]"
+        className="h-9 px-3 rounded-md border border-slate-200 bg-white text-[13px] focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
       />
     </label>
   );
@@ -579,7 +579,7 @@ function KeyRow({
   const isAuto = field.state === "auto";
 
   return (
-    <div className={`rounded-lg border px-4 py-3 ${isSkipped ? "border-slate-200 bg-slate-50" : "border-[#712ae2]/30 bg-[rgba(113,42,226,0.03)]"}`}>
+    <div className={`rounded-lg border px-4 py-3 ${isSkipped ? "border-slate-200 bg-slate-50" : "border-indigo-600/30 bg-indigo-50"}`}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -601,7 +601,7 @@ function KeyRow({
               href={meta.signupUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] text-[#712ae2] hover:underline mt-0.5"
+              className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline mt-0.5"
             >
               <ExternalLink size={10} /> Get key: {prettyUrl(meta.signupUrl)}
             </a>
@@ -626,7 +626,7 @@ function KeyRow({
           readOnly={isAuto}
           placeholder={meta.defaultValue ? `e.g. ${meta.defaultValue}` : "Paste value…"}
           onChange={(e) => onChange({ value: e.target.value, state: "provided" })}
-          className={`w-full h-9 px-3 rounded-md border border-slate-200 bg-white text-[13px] font-mono focus:outline-none focus:border-[#712ae2] focus:ring-1 focus:ring-[#712ae2] ${
+          className={`w-full h-9 px-3 rounded-md border border-slate-200 bg-white text-[13px] font-mono focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 ${
             isAuto ? "text-slate-500" : ""
           }`}
         />
