@@ -64,22 +64,24 @@ export async function loginWithPassword(ctx: AuthedContext): Promise<void> {
     `${SESSION_EXPIRY_DAYS}d`,
   );
 
+  // NOTE: we intentionally don't persist `token` on the Session row — see
+  // the security note on `models/Session.ts`. Revocation works by
+  // deleting the row (`logoutSession`); cryptographic verification keeps
+  // running off `AUTH_JWT_SECRET`.
   await Session.create({
     id: sessionId,
     userId: user.id,
-    token,
     expiresAt,
     lastActivityAt: new Date(),
   });
 
   ctx.body = {
+    // `accessToken` is the canonical field; `token` is a legacy alias kept
+    // for frontends that still read `data.token`. Emitting both costs
+    // nothing and avoids a class of "Bearer header is empty" 401s.
     accessToken: token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    token,
+    user: serialiseUser(user),
   };
 }
 
@@ -91,12 +93,25 @@ export async function getCurrentUser(ctx: AuthedContext): Promise<void> {
   if (!user) throw Errors.Unauthorized("Session points at a deleted user");
 
   ctx.body = {
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    user: serialiseUser(user),
+  };
+}
+
+/**
+ * Single source of truth for the wire shape of a User. Both `login` and
+ * `getCurrentUser` emit the same fields so the frontend `AuthUser`
+ * interface in `frontend/src/api/auth-client.ts` stays in sync with one
+ * change point. `domainRole` is the business persona (family / teacher
+ * / student / coach, etc.) consumed by the frontend `useAuth` hook to
+ * drive route shells — distinct from the RBAC `role` enum.
+ */
+function serialiseUser(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+    domainRole: user.domainRole ?? null,
   };
 }
 

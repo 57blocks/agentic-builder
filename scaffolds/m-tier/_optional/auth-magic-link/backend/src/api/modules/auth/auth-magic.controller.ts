@@ -92,22 +92,20 @@ export async function verifyMagicLink(ctx: AuthedContext): Promise<void> {
     { sub: user.id, sessionId, role: user.role },
     `${SESSION_EXPIRY_DAYS}d`,
   );
+  // Session row stores `id` (matches JWT `sessionId`) + lifetime metadata
+  // ONLY. The raw JWT is NOT persisted — keeping it in the row turns
+  // every DB backup into a session leak with no revocation upside (the
+  // matching migration drops the `token` column on upgrade).
   await Session.create({
     id: sessionId,
     userId: user.id,
-    token: accessToken,
     expiresAt,
     lastActivityAt: new Date(),
   });
 
   ctx.body = {
     accessToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    user: serialiseUser(user),
   };
 }
 
@@ -117,12 +115,24 @@ export async function getCurrentUser(ctx: AuthedContext): Promise<void> {
   const user = await User.findByPk(userId);
   if (!user) throw Errors.Unauthorized("Session points at a deleted user");
   ctx.body = {
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    user: serialiseUser(user),
+  };
+}
+
+/**
+ * Single source of truth for the wire shape of a User. Mirrors the
+ * password-rbac variant so a project switching auth modes later doesn't
+ * need any frontend changes. `domainRole` is the business persona
+ * consumed by `useAuth` to drive route shells (distinct from the RBAC
+ * `role` enum).
+ */
+function serialiseUser(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+    domainRole: user.domainRole ?? null,
   };
 }
 

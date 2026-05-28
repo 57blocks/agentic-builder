@@ -22,8 +22,17 @@ export type AuthRole = "admin" | "operator" | "viewer";
 export interface AuthUser {
   id: string;
   email: string;
+  /** RBAC primitive — fixed 3-value enum enforced by `requireRole()`. */
   role: AuthRole;
   displayName?: string | null;
+  /**
+   * Business persona (e.g. "family" / "teacher" / "student" / "coach")
+   * sourced from `.blueprint/auth-decision.json#seedAccounts[].domainRole`
+   * and stored on `users.domain_role`. Consumed by `useAuth().sessionRole`
+   * to drive route shells INDEPENDENTLY of the RBAC `role` enum. May be
+   * null for accounts that aren't tied to a specific UI persona.
+   */
+  domainRole?: string | null;
 }
 
 export interface LoginResponse {

@@ -28,8 +28,9 @@ viewer / staff) OR when no auth provider is named at all (safe default).
 
 | Path | Purpose |
 |------|---------|
-| `backend/src/api/modules/index.ts` | **Overwrites** base — mounts `apiRouter` at `/api/v1` (NOT `/api`) so `/v1/auth/*` paths in API_CONTRACTS resolve correctly. |
+| `backend/src/api/modules/index.ts` | **Overwrites** base — mounts `apiRouter` at `/api/v1` (NOT `/api`) so `/v1/auth/*` paths in API_CONTRACTS resolve correctly. Pre-wires `registerAdminAliasesRoutes(apiRouter)` so the admin-aliases module is mounted for free. |
 | `backend/src/api/modules/auth/auth.routes.ts` | **Overwrites** base — registers `POST /v1/auth/login`, `GET /v1/auth/me`, `POST /v1/auth/logout`. |
+| `backend/src/api/modules/admin-aliases/admin-aliases.routes.ts` | Stable `/admin/<resource>` alias router (admin RBAC enforced). Empty body by default — worker fills in one handler per `/admin/*` frontend call. The `admin-route-coverage` self-heal lint flags any frontend call that lacks a matching alias here. |
 | `backend/src/api/modules/auth/auth-password.controller.ts` | Email + password login (bcryptjs hash compare) and current-user / logout handlers. |
 | `backend/src/middlewares/requireAuth.ts` | JWT-bearer middleware. Calls `next()` — safe to chain on routes. |
 | `backend/src/middlewares/requireRole.ts` | RBAC middleware factory `requireRole("admin")`. Chain AFTER `requireAuth`. |
@@ -46,9 +47,12 @@ viewer / staff) OR when no auth provider is named at all (safe default).
 | Path | Purpose |
 |------|---------|
 | `frontend/src/views/LoginPage.tsx` | **Overwrites** base — email + password form, calls `POST /v1/auth/login` (via apiClient → `/api/v1/auth/login`), stores token in localStorage, redirects to `/`. |
-| `frontend/src/api/auth-client.ts` | Typed wrappers: `loginWithPassword`, `getCurrentUser`, `logout`. Passes paths starting at `/v1/auth/*` — apiClient prepends `/api`. Do NOT pass `/api/...` here. |
-| `frontend/src/components/auth/ProtectedRoute.tsx` | Route guard. `<ProtectedRoute role="admin">{...}</ProtectedRoute>` — redirects to `/login` if no token, to `/forbidden` if role mismatch. |
-| `frontend/src/store/auth-store.ts` | Tiny zustand store holding `{ user, token, login(), logout() }`. Auto-hydrates from localStorage on first render. |
+| `frontend/src/views/UnauthorizedPage.tsx` | 403 placeholder rendered when `<ProtectedRoute>` rejects a request. Wire as `/unauthorized` in `router.tsx`. |
+| `frontend/src/api/auth-client.ts` | Typed wrappers: `loginWithPassword`, `getCurrentUser`, `logout`. Passes paths starting at `/v1/auth/*` — apiClient prepends `/api`. Do NOT pass `/api/...` here. `AuthUser` carries both `role` (RBAC) and `domainRole` (business persona). |
+| `frontend/src/components/auth/ProtectedRoute.tsx` | Route guard. Two independent gates: `role` (RBAC: `admin`/`operator`/`viewer`) AND `requiredDomainRole` (business persona). Admin RBAC role bypasses domainRole gates. Usable as a layout route (`<ProtectedRoute><Outlet /></ProtectedRoute>`). |
+| `frontend/src/components/layout/PersonaShell.tsx` | Generic persona-scoped layout. `<PersonaShell persona="family" navItems={...} />` wraps its children in `<ProtectedRoute requiredDomainRole={persona}>` and renders sidebar + header + `<Outlet />`. **Replaces** hand-rolled `FamilyShell` / `TeacherShell` / `AdminShell` files. |
+| `frontend/src/hooks/useAuth.ts` | Canonical auth hook. Exposes `{ user, token, isAuthenticated, sessionRole, login, logout, refresh, ... }`. `sessionRole` prioritises `user.domainRole` over `user.role` so persona-aware UIs work without leaking the RBAC enum into business code. |
+| `frontend/src/store/auth-store.ts` | Tiny zustand store holding `{ user, token, login(), logout() }`. Auto-hydrates from localStorage on first render. Prefer `useAuth()` over reading the store directly so the `sessionRole` derivation stays in one place. |
 
 ## Deps appended (via manifest)
 
@@ -94,9 +98,86 @@ viewer / staff) OR when no auth provider is named at all (safe default).
    one-shot scripts; tune cadence via `SESSION_CLEANUP_INTERVAL_MS`
    (minimum 60s).
 
+7. **Persona vs RBAC are two ORTHOGONAL concepts.** `role` answers "what
+   CRUD verbs can this user run" (admin = god, operator = write, viewer =
+   read). `domainRole` answers "which business persona's UI does this
+   account live in" (family, teacher, student, coach, ...). A single
+   account CAN have both — e.g. a "family head" might be
+   `role=operator, domainRole=family`. Components MUST read persona via
+   `useAuth().sessionRole` (which prioritises `domainRole`), NOT via
+   `user.role`.
+
+8. **Admin-flavoured frontend calls hit `/admin/<resource>` — register
+   them in `admin-aliases.routes.ts`.** When `frontend/src/api/admin.ts`
+   calls `apiClient.get("/admin/users")`, the backend MUST have a
+   matching `router.get("/admin/users", ...)` row in
+   `admin-aliases.routes.ts` (NOT in `users/users.routes.ts` — those
+   are the domain primitives). This keeps admin URLs decoupled from
+   module boundaries. The `admin-route-coverage` self-heal lint emits
+   a repair task for any frontend `/admin/*` call without a matching
+   backend alias.
+
+9. **One PersonaShell per persona — DO NOT hand-roll FamilyShell.tsx +
+   TeacherShell.tsx + AdminShell.tsx + ...** The generic
+   `<PersonaShell persona="family" navItems={...} />` covers every
+   persona surface. Three near-identical shell files always drift and
+   forget to gate on `domainRole` — that's the F-10 / F-13 / F-15
+   outage class.
+
 ## What the worker still has to wire up
 
-1. Add `<ProtectedRoute>` around routes that need auth in `frontend/src/router.tsx`.
-2. Add `requireAuth` + `requireRole(...)` to any module routes that need it.
-3. Run `pnpm run seed:auth-users` after `pnpm run migrate` to populate the
-   default accounts.
+1. In `frontend/src/router.tsx`, mount persona-scoped routes under
+   `<PersonaShell persona="..." navItems={...} />` (which internally
+   wraps in `<ProtectedRoute requiredDomainRole="...">`). Mount
+   RBAC-scoped admin routes under `<ProtectedRoute role="admin" />`.
+2. Add a `/unauthorized` route in `frontend/src/router.tsx` rendering
+   the shipped `<UnauthorizedPage />` (or restyle it to match the
+   project's design system).
+3. Chain `requireAuth` + `requireRole(...)` on any module routes that
+   need server-side enforcement (frontend gates are advisory only).
+4. Run `pnpm run seed:auth-users` after `pnpm run migrate` to populate
+   the default accounts (with `domainRole` from
+   `.blueprint/auth-decision.json`).
+
+### Wiring example (`router.tsx`)
+
+```tsx
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { PersonaShell } from "./components/layout/PersonaShell";
+import { UnauthorizedPage } from "./views/UnauthorizedPage";
+
+const familyNav = [
+  { to: "/family/dashboard", label: "Dashboard" },
+  { to: "/family/lessons",   label: "Lessons" },
+  { to: "/family/billing",   label: "Billing" },
+];
+
+const adminNav = [
+  { to: "/admin/users",  label: "Users" },
+  { to: "/admin/audit",  label: "Audit log" },
+];
+
+<Routes>
+  <Route path="/login"        element={<LoginPage />} />
+  <Route path="/unauthorized" element={<UnauthorizedPage />} />
+
+  {/* Family persona shell — gates on domainRole === "family" */}
+  <Route element={<PersonaShell persona="family" navItems={familyNav} />}>
+    <Route path="/family/dashboard" element={<FamilyDashboardPage />} />
+    <Route path="/family/lessons"   element={<FamilyLessonsPage />} />
+    <Route path="/family/billing"   element={<FamilyBillingPage />} />
+  </Route>
+
+  {/* Admin shell — gates on RBAC role admin */}
+  <Route
+    element={
+      <ProtectedRoute role="admin">
+        <PersonaShell persona="admin" navItems={adminNav} requiredDomainRole={["admin", "family", "teacher"]} />
+      </ProtectedRoute>
+    }
+  >
+    <Route path="/admin/users" element={<AdminUsersPage />} />
+    <Route path="/admin/audit" element={<AdminAuditPage />} />
+  </Route>
+</Routes>
+```
