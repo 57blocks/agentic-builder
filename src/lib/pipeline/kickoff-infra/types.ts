@@ -21,11 +21,32 @@ export interface InfraServiceInfo {
   externalPort: number;
 }
 
+/**
+ * Persisted state of the Dokploy compose stack created at first deploy. We
+ * stash it inside `kickoff-infra.json` so subsequent deploys reuse the same
+ * compose (update env + redeploy in place) instead of leaking a fresh one
+ * on every click — which produced N orphaned composes with N different URLs.
+ *
+ * `provisionInfra` (kickoff phase) does not write this field; the deploy
+ * pipeline merges it in after a successful first deploy. Re-running kickoff
+ * legitimately wipes it: that path implies fresh DB credentials, so the
+ * existing compose's env is stale and recreating is correct.
+ */
+export interface ComposeInfo {
+  composeId: string;
+  appName: string;
+  /** Hostname created at first deploy; reused on subsequent ones. */
+  appHost?: string;
+  savedAt: string;
+}
+
 export interface KickoffInfraFile {
   dokployProjectId: string;
   dokployEnvironmentId: string;
   appName: string;
   services: InfraServiceInfo[];
+  /** Set lazily by the deploy pipeline; absent until first deploy. */
+  compose?: ComposeInfo;
   savedAt: string;
 }
 
