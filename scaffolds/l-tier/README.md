@@ -157,7 +157,9 @@ backend/
 │   │   └── rateLimit.ts            # 窗口限流（默认内存，可换 Redis）
 │   ├── models/                     # Sequelize 模型 + syncModels()
 │   ├── queue/
-│   │   └── inProcessQueue.ts       # 队列 API（in-process 实现）
+│   │   ├── index.ts                # selector：按 USE_REDIS_QUEUE 切换实现
+│   │   ├── inProcessQueue.ts       # in-process 实现（单 replica 默认）
+│   │   └── redisQueue.ts           # BullMQ + Redis 实现（多 replica）
 │   ├── workers/
 │   │   ├── index.ts                # startAllWorkers() 启动入口
 │   │   └── exampleWorker.ts        # 参考实现（按业务替换）
@@ -202,10 +204,16 @@ apiRouter.post("/refresh-feed", expensiveLimiter, refreshHandler);
 ```
 默认内存存储，单进程够用；多 replica 部署请换 Redis 后端（接口保持一致）。
 
-#### `src/queue/inProcessQueue.ts`
-in-process 队列，API 与 BullMQ 同形：
+#### `src/queue/`
+统一的队列抽象，selector 在 `queue/index.ts` 按 `USE_REDIS_QUEUE` 切换实现：
+
+- `USE_REDIS_QUEUE=0`（默认）→ `inProcessQueue.ts`，Promise + EventEmitter，无 Redis 依赖，单 replica 跑路径最短。
+- `USE_REDIS_QUEUE=1` → `redisQueue.ts`，BullMQ + Redis，多 replica 安全，跨进程 / 跨节点共享队列。
+
+两个实现暴露**相同**的 API（`enqueueJob` / `registerWorker` / `getJob` / `subscribeJob` / `inFlightCount` / `drainInFlight`），所有 caller 只需 `import` selector：
+
 ```ts
-import { enqueueJob, registerWorker } from "@/queue/inProcessQueue";
+import { enqueueJob, registerWorker } from "@/queue";
 
 // 注册（在 src/workers/<name>Worker.ts）
 registerWorker("feed-ingest", async (job, emit) => {
@@ -215,9 +223,12 @@ registerWorker("feed-ingest", async (job, emit) => {
 
 // 入队（在 controller / service）
 const runId = await enqueueJob("feed-ingest", { userId, topic });
-// runId = "inproc:abc-def-..."
+// in-process: runId = "inproc:abc-def-..."
+// redis     : runId = "12" (BullMQ numeric id)
 ```
-切到 BullMQ：实现一份同形状的 `src/queue/redisQueue.ts`，在 `server.ts` 按 `USE_REDIS_QUEUE` flag 选择导出。
+
+切换策略由部署决定，不要在 worker / controller 里判断 `process.env.USE_REDIS_QUEUE` —— selector 已经处理。
+`drainInFlight(timeoutMs)` 在 `server.ts` 的 SIGTERM handler 中调用，保证优雅关停时不会丢正在跑的任务。
 
 #### `src/workers/`
 每个后台任务对应一个文件，所有 worker 在 `src/workers/index.ts` 的 `startAllWorkers()` 中统一注册。Worker 硬规则：
