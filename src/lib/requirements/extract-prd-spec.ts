@@ -4,6 +4,9 @@ const RE_AC = /\bAC-\d+\b/gi;
 const RE_FR = /\bFR-[A-Z]{2}\d{2,}\b/gi;
 const RE_US = /\bUS-\d+\b/gi;
 const RE_IC = /\bIC-\d+\b/gi;
+// Route/component IDs used by Chinese-style PRDs (e.g. PAGE-001, CMP-001)
+const RE_PAGE = /\bPAGE-\d+\b/gi;
+const RE_CMP = /\bCMP-\d+\b/gi;
 
 function uniq(matches: Iterable<string>): string[] {
   return [...new Set([...matches].map((s) => s.toUpperCase()))].sort();
@@ -20,6 +23,8 @@ export function extractPrdRequirementIndex(prdMarkdown: string): PrdRequirementI
     featureIds: uniq(text.match(RE_FR) ?? []),
     userStoryIds: uniq(text.match(RE_US) ?? []),
     componentIds: uniq(text.match(RE_IC) ?? []),
+    pageIds: uniq(text.match(RE_PAGE) ?? []),
+    cmpIds: uniq(text.match(RE_CMP) ?? []),
   };
 }
 
@@ -35,5 +40,7 @@ export function mergeRequirementIndex(
     featureIds: uniq([...a.featureIds, ...b.featureIds]),
     userStoryIds: uniq([...a.userStoryIds, ...b.userStoryIds]),
     componentIds: uniq([...a.componentIds, ...b.componentIds]),
+    pageIds: uniq([...(a.pageIds ?? []), ...(b.pageIds ?? [])]),
+    cmpIds: uniq([...(a.cmpIds ?? []), ...(b.cmpIds ?? [])]),
   };
 }

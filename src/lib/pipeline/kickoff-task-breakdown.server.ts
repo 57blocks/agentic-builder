@@ -211,6 +211,114 @@ export function parseJsonArrayFromLlmOutput(raw: string): {
   }
 }
 
+function getTaskCreates(task: KickoffWorkItem): string[] {
+  if (!task.files) return [];
+  if (Array.isArray(task.files)) return task.files;
+  return task.files.creates ?? [];
+}
+
+async function maybeExpandLTierTasks(opts: {
+  tier: ProjectTier;
+  tasks: KickoffWorkItem[];
+  prd: string;
+  agent: TaskBreakdownAgent;
+  trd?: string;
+  sysDesign?: string;
+  implGuide?: string;
+  prdSpecText?: string;
+  sessionId?: string;
+}): Promise<KickoffWorkItem[]> {
+  const EXPANSION_THRESHOLD = 20;
+  const MIN_PRD_LENGTH = 8000;
+
+  if (opts.tier !== "L") return opts.tasks;
+  if (opts.tasks.length >= EXPANSION_THRESHOLD) return opts.tasks;
+  if (opts.prd.length < MIN_PRD_LENGTH) return opts.tasks;
+
+  // Find overbroad tasks: those with the most creates, capped at half the list.
+  const sorted = [...opts.tasks].sort(
+    (a, b) => getTaskCreates(b).length - getTaskCreates(a).length,
+  );
+
+  // Prefer tasks with 5+ creates; fall back to top half if none qualify.
+  let candidates = sorted.filter((t) => getTaskCreates(t).length >= 5);
+  if (candidates.length === 0) {
+    candidates = sorted.slice(0, Math.max(1, Math.ceil(opts.tasks.length / 2)));
+  }
+  // Cap at 8 to keep the re-prompt focused.
+  const overbroadTasks = candidates.slice(0, 8);
+
+  const overbroadIds = new Set(overbroadTasks.map((t) => t.id));
+  const keptTasks = opts.tasks.filter((t) => !overbroadIds.has(t.id));
+
+  const lastNum = opts.tasks.reduce((max, t) => {
+    const m = t.id.match(/(\d+)$/);
+    return m ? Math.max(max, parseInt(m[1]!, 10)) : max;
+  }, 0);
+  const startingTaskId = `task-${String(lastNum + 1).padStart(3, "0")}`;
+
+  console.info(
+    `[task-breakdown] L-tier expansion triggered: ${opts.tasks.length} tasks < ${EXPANSION_THRESHOLD}. ` +
+      `Expanding ${overbroadTasks.length} task(s): ${overbroadTasks.map((t) => t.id).join(", ")}`,
+  );
+
+  let expansionResult;
+  try {
+    expansionResult = await opts.agent.expandOverbroadTasks(
+      {
+        overbroadTasks: overbroadTasks.map((t) => ({
+          id: t.id,
+          phase: t.phase,
+          title: t.title,
+          description: t.description,
+          creates: getTaskCreates(t),
+        })),
+        existingTaskSummary: keptTasks.map((t) => ({
+          id: t.id,
+          phase: t.phase,
+          title: t.title,
+          creates: getTaskCreates(t),
+        })),
+        totalOriginalCount: opts.tasks.length,
+        startingTaskId,
+        prd: opts.prd,
+        trd: opts.trd,
+        sysDesign: opts.sysDesign,
+        implGuide: opts.implGuide,
+        prdSpecText: opts.prdSpecText,
+      },
+      opts.sessionId,
+    );
+  } catch (err) {
+    console.warn(
+      "[task-breakdown] L-tier expansion failed — keeping original tasks:",
+      err,
+    );
+    return opts.tasks;
+  }
+
+  const expansionParsed = parseJsonArrayFromLlmOutput(expansionResult.content);
+  if (expansionParsed.parseFailed || expansionParsed.tasks.length === 0) {
+    console.warn(
+      "[task-breakdown] L-tier expansion produced no valid tasks — keeping originals",
+    );
+    return opts.tasks;
+  }
+
+  const expansionNormalized = normalizeOriginalTaskBreakdown(
+    expansionParsed.tasks,
+    opts.prd,
+  );
+  const merged = [...keptTasks, ...expansionNormalized];
+  const { tasks: withNewDeps } = inferTaskDependencies(merged);
+
+  console.info(
+    `[task-breakdown] L-tier expansion complete: ${opts.tasks.length} → ${withNewDeps.length} tasks`,
+  );
+
+  return withNewDeps;
+}
+
 function extractPrdRequirementIds(prd: string): Set<string> {
   const ids = new Set<string>();
   const re = /\b(?:AC|FR|US|IC)-[A-Z0-9]+(?:-[A-Z0-9]+)?\b/g;
@@ -394,8 +502,21 @@ export async function buildTaskBreakdownFromDocuments(params: {
     );
   }
 
+  // L-tier self-heal: when too few tasks for the PRD size, expand overbroad ones.
+  const expandedTasks = await maybeExpandLTierTasks({
+    tier,
+    tasks: withDeps,
+    prd: params.prd,
+    agent,
+    trd: params.trd,
+    sysDesign: params.sysDesign,
+    implGuide: params.implGuide,
+    prdSpecText,
+    sessionId: params.sessionId,
+  });
+
   return {
-    tasks: stripTestingPhaseTasks(withDeps),
+    tasks: stripTestingPhaseTasks(expandedTasks),
     costUsd: result.costUsd,
     durationMs: result.durationMs,
     model: result.model,

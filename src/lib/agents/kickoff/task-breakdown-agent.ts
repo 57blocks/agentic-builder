@@ -67,7 +67,14 @@ const TIER_CODING_STYLE: Record<ProjectTier, string> = {
 
   M: `Pipeline tier **M** (split frontend/backend app): stack is \`frontend/\` (**Vite + React + React Router + Ant Design**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**). **NEVER use Next.js for M-tier.** The scaffold is prebuilt and already copied; **do not plan a Scaffolding task that recreates the repo structure**. Keep backend/data tasks reasonably broad; split **frontend by page or major flow** when the PRD lists multiple surfaces — first an **app shell/layout** task, then page-level tasks. Add an **early contracts/client** task so API shapes and the web client stay aligned with PRD requirement IDs. Coding tasks should implement pages, API modules, and middleware files, but final registration closure is handled later by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\`.`,
 
-  L: `Pipeline tier **L** (production-grade full-stack): same stack as M — \`frontend/\` (**Vite + React + React Router + Tailwind**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**, NOT Fastify, NOT a pnpm monorepo). **NEVER use Next.js or Fastify for L-tier.** L tier additionally ships **production layers** that M does not: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue with BullMQ-shaped API and in-process fallback), \`backend/src/config/logger.ts\` (pino) + \`backend/src/middlewares/requestLogger.ts\`, \`backend/src/middlewares/rateLimit.ts\`, and a \`docker-compose.yml\` that brings up postgres + redis by default. Expect **thorough** coverage across phases the PRD actually requires — scaffolding, data, auth, backend services, **background workers**, frontend, integration, infrastructure — but only where the documents call for them; derive *how many* tasks from requirement breadth, not a quota. Any background-job / async-pipeline feature MUST register its worker through \`backend/src/workers/index.ts\` and use \`enqueueJob\` / \`registerWorker\` from \`backend/src/queue/inProcessQueue.ts\`; do NOT plan a task that introduces a parallel queue or worker bootstrap. Reuse the M-tier coarse-grained task shape (one Data Layer task, one Backend Services task per bounded context, app-shell + page-level frontend tasks); do not split per endpoint or per tiny component. Final registration closure is still handled by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\` — same as M.`,
+  L: `Pipeline tier **L** (production-grade full-stack): same stack as M — \`frontend/\` (**Vite + React + React Router + Tailwind**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**, NOT Fastify, NOT a pnpm monorepo). **NEVER use Next.js or Fastify for L-tier.** L tier additionally ships **production layers** that M does not: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue with BullMQ-shaped API and in-process fallback), \`backend/src/config/logger.ts\` (pino) + \`backend/src/middlewares/requestLogger.ts\`, \`backend/src/middlewares/rateLimit.ts\`, and a \`docker-compose.yml\` that brings up postgres + redis by default. Any background-job / async-pipeline feature MUST register its worker through \`backend/src/workers/index.ts\` and use \`enqueueJob\` / \`registerWorker\` from \`backend/src/queue/inProcessQueue.ts\`; do NOT plan a task that introduces a parallel queue or worker bootstrap. Final registration closure is still handled by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\` — same as M.
+
+**L-tier task granularity rules (overrides the "merge aggressively" default below for L-tier):**
+- **Data Layer**: split by bounded context when there are 3+ distinct domains (e.g. one task for user/session models, one for scoring/rules models, one for data-source/adapter models). A single Data Layer task is only acceptable for PRDs with ≤ 3 models total.
+- **Backend Services**: one task **per service or domain module** — e.g. "Data Ingestion Service", "Scoring Engine", "Admin API", "Notification Service" are separate tasks. Do NOT merge them into one task.
+- **Background Workers**: each distinct scheduled/async job is its own task (e.g. "Periodic Scoring Worker", "Data Sync Worker").
+- **Frontend**: one task per page or major flow (app-shell first, then one task per PRD page / CMP group). Do not merge multiple pages into one task.
+- **Expected range**: PRDs with 10–20 pages typically warrant 25–45 tasks for L-tier. If you are generating fewer than 20 tasks for a PRD with 10+ pages or 30+ requirement IDs, you are merging too aggressively — split until each task has a clear, single deliverable that one coding agent can implement well.`,
 };
 
 /**
@@ -458,7 +465,7 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
   2. Include a \`subStep\` that explicitly says: "Call \`[METHOD] /api/[path]\` via the API client to load/submit data".
   3. Include in \`acceptanceCriteria\` a criterion asserting no mock/hardcoded data is used.
   This information allows the AI coding agent to know which real endpoints to call instead of inventing mock data.
-- Merge related work aggressively for backend/data: combine multiple API endpoints and models into broader tasks unless scale clearly requires more split.
+- Merge related work for backend/data when scope is thin (M-tier or simple PRDs): combine multiple API endpoints and models into broader tasks. **For L-tier projects** with 10+ PRD pages or 30+ requirement IDs, follow the L-tier granularity rules above instead — do NOT merge across domain boundaries.
 - Order tasks by execution sequence (respecting dependencies).
 - Focus on CODING tasks — skip pure planning, meeting, or documentation-only items.
 - Reference PRD feature IDs (FR-xxx) and user stories (US-xx) where applicable.
@@ -490,7 +497,7 @@ export class TaskBreakdownAgent extends BaseAgent {
       systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock),
       defaultModel: MODEL_CONFIG.taskBreakdown,
       temperature: 0.3,
-      maxTokens: 16384,
+      maxTokens: 32768,
       customChatCompletion: async (messages, opts) => {
         const { model: _ignoredModel, ...rest } = opts;
         const reasoningOptions = buildTaskBreakdownReasoningOptions();
@@ -679,6 +686,111 @@ export class TaskBreakdownAgent extends BaseAgent {
       userMessage,
       context,
       "step-task-breakdown-supplementary",
+      sessionId,
+    );
+  }
+
+  /**
+   * L-tier self-heal: given a list of overbroad tasks (too few tasks for a
+   * large PRD), ask the model to produce fine-grained replacement tasks.
+   *
+   * Callers should remove the overbroad tasks from the list, merge in the
+   * returned replacements, and re-run dep inference.
+   */
+  async expandOverbroadTasks(
+    params: {
+      overbroadTasks: Array<{
+        id: string;
+        phase?: string;
+        title: string;
+        description: string;
+        creates: string[];
+      }>;
+      existingTaskSummary: Array<{
+        id: string;
+        phase?: string;
+        title: string;
+        creates: string[];
+      }>;
+      totalOriginalCount: number;
+      startingTaskId: string;
+      prd: string;
+      trd?: string;
+      sysDesign?: string;
+      implGuide?: string;
+      prdSpecText?: string;
+    },
+    sessionId?: string,
+  ) {
+    const keptSummary = params.existingTaskSummary
+      .map((t) => {
+        const head = `- \`${t.id}\`${t.phase ? ` (${t.phase})` : ""}: ${t.title}`;
+        if (!t.creates || t.creates.length === 0) return head;
+        const shown = t.creates.slice(0, 8);
+        const more = t.creates.length - shown.length;
+        const tail = shown.map((f) => `    • \`${f}\``).join("\n");
+        const overflow = more > 0 ? `\n    • …(+${more} more)` : "";
+        return `${head}\n${tail}${overflow}`;
+      })
+      .join("\n");
+
+    const expandLines = params.overbroadTasks
+      .map((t) => {
+        const lines = [`### \`${t.id}\` — ${t.title}`];
+        if (t.phase) lines.push(`**Phase**: ${t.phase}`);
+        if (t.description) lines.push(`**Description**: ${t.description}`);
+        if (t.creates.length > 0) {
+          lines.push(`**Creates** (${t.creates.length} files):`);
+          lines.push(...t.creates.map((f) => `  • \`${f}\``));
+        }
+        return lines.join("\n");
+      })
+      .join("\n\n");
+
+    const contextSections: string[] = [];
+    contextSections.push("## PRD (authoritative)\n\n" + params.prd);
+    if (params.prdSpecText) contextSections.push(params.prdSpecText);
+    if (params.trd) contextSections.push("## TRD\n\n" + params.trd);
+    if (params.sysDesign)
+      contextSections.push("## System Design\n\n" + params.sysDesign);
+    if (params.implGuide)
+      contextSections.push("## Implementation Guide\n\n" + params.implGuide);
+
+    const userMessage = [
+      "## L-tier task expansion (granularity self-heal)",
+      "",
+      `The initial task breakdown generated only ${params.totalOriginalCount} tasks for an L-tier project,`,
+      "which is too few for full PRD coverage. The tasks listed in §Overbroad tasks below",
+      "are overly broad — each covers too many domains or pages — and must be split.",
+      "",
+      "**Instructions:**",
+      "1. For each overbroad task, produce **2–5 replacement tasks** that together cover",
+      "   everything the original described. No scope may be silently dropped.",
+      "2. Do NOT include the original overbroad task IDs in the output.",
+      "3. Do NOT re-emit any kept task — output ONLY the new replacement tasks.",
+      `4. Number replacement tasks starting from \`${params.startingTaskId}\` and increment sequentially.`,
+      "5. Apply L-tier granularity rules from the system prompt: one task per page/flow,",
+      "   one task per service domain, one task per distinct background job.",
+      "6. Every task must have: `subSteps`, `tokenEstimate`, `acceptanceCriteria`, `coversRequirementIds`.",
+      "7. `files.creates`: each path must appear in exactly ONE task. Paths already listed",
+      "   under §Kept tasks must use `files.modifies` instead.",
+      "8. Output strict JSON array only. No markdown fencing, no prose.",
+      "",
+      `## Overbroad tasks to expand (${params.overbroadTasks.length})`,
+      "",
+      expandLines,
+      "",
+      "## Kept tasks (do NOT modify — reference via dependencies or files.modifies only)",
+      "",
+      keptSummary || "(none)",
+    ].join("\n");
+
+    const context = contextSections.join("\n\n---\n\n");
+
+    return this.run(
+      userMessage,
+      context,
+      "step-task-breakdown-expand",
       sessionId,
     );
   }

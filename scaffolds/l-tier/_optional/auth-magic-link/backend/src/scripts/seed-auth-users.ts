@@ -69,17 +69,24 @@ async function upsert(account: SeedAccount): Promise<void> {
   });
 }
 
-async function main(): Promise<void> {
-  await sequelize.authenticate();
-  await syncModels();
-
+/** Core seed logic — does NOT close the DB. Safe to call from server.ts. */
+export async function run(): Promise<void> {
   const accounts = await loadSeedAccounts();
-  for (const acc of accounts) await upsert(acc);
-
-  console.log("Pre-assigned roles (passwordless — login via magic link):");
+  for (const acc of accounts) {
+    await upsert(acc);
+  }
+  console.log("Seeded auth users:");
   for (const acc of accounts) {
     console.log(`  - ${acc.role.padEnd(8)} ${acc.email}`);
   }
+}
+
+/** Standalone CLI entry — used by `pnpm run seed`. */
+async function main(): Promise<void> {
+  await sequelize.authenticate();
+  await syncModels();
+  await run();
+  console.log("\n⚠️  Passwords above are demo defaults — change them in production.\n");
 }
 
 main()

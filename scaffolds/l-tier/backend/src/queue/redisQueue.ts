@@ -1,5 +1,4 @@
 import { Queue, Worker, QueueEvents, type Job as BullJob } from "bullmq";
-import IORedis, { type RedisOptions } from "ioredis";
 import { logger } from "../config/logger";
 import type {
   Job,
@@ -21,37 +20,49 @@ import type {
  *   - inFlightCount()
  *   - drainInFlight(timeoutMs)
  *
- * Implementation notes:
- *   - Connection is lazy. Importing this module costs ~nothing if the rest
- *     of the process never enqueues — the in-process selector path takes
- *     advantage of this so dev `pnpm dev` without Redis stays cheap even
- *     if both modules are imported by `./queue/index.ts`.
- *   - `subscribeJob` uses a QueueEvents instance per queueName, but only
- *     one is created on demand and cached.
- *   - `getJob` returns the local snapshot from the most recent event the
- *     subscriber observed; for cross-replica reads, query BullMQ directly
- *     via `queueFor(name).getJob(jobId)`.
+ * Connection model:
+ *   We hand BullMQ a plain `ConnectionOptions` object rather than a
+ *   shared `IORedis` instance. Reasons:
+ *     - Avoids a TypeScript headache where the locally installed
+ *       `ioredis` minor differs from the one BullMQ bundles internally;
+ *       the two `Redis` classes are structurally incompatible because
+ *       `AbstractConnector` has private fields, so TS rejects the
+ *       assignment even though the runtime behaviour is identical.
+ *     - BullMQ then owns connection lifecycle (one socket per Queue /
+ *       Worker), which is what its docs recommend.
+ *
+ *   The connection is implicitly lazy — importing this module never
+ *   opens a socket; the first `new Queue()` does. That keeps the
+ *   selector path cheap when `USE_REDIS_QUEUE=0`.
  */
 
-let connection: IORedis | null = null;
-function getConnection(): IORedis {
-  if (connection) return connection;
+interface ConnectionOpts {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  // BullMQ requires both — see https://docs.bullmq.io/guide/connections
+  maxRetriesPerRequest: null;
+  enableReadyCheck: false;
+}
+
+function getConnectionOptions(): ConnectionOpts {
   const url = process.env.REDIS_URL;
   if (!url) {
     throw new Error(
       "[queue:redis] REDIS_URL must be set when USE_REDIS_QUEUE=1",
     );
   }
-  const opts: RedisOptions = {
-    // BullMQ requires this — see https://docs.bullmq.io/guide/connections
+  const parsed = new URL(url);
+  const opts: ConnectionOpts = {
+    host: parsed.hostname || "localhost",
+    port: Number(parsed.port) || 6379,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   };
-  connection = new IORedis(url, opts);
-  connection.on("error", (err) => {
-    logger.error({ err }, "[queue:redis] connection error");
-  });
-  return connection;
+  if (parsed.password) opts.password = decodeURIComponent(parsed.password);
+  if (parsed.username) opts.username = decodeURIComponent(parsed.username);
+  return opts;
 }
 
 const queues = new Map<string, Queue>();
@@ -71,7 +82,7 @@ const JOB_RETENTION_MS = Number(
 function queueFor(name: string): Queue {
   let q = queues.get(name);
   if (!q) {
-    q = new Queue(name, { connection: getConnection() });
+    q = new Queue(name, { connection: getConnectionOptions() });
     queues.set(name, q);
   }
   return q;
@@ -80,7 +91,7 @@ function queueFor(name: string): Queue {
 function eventsFor(name: string): QueueEvents {
   let qe = events.get(name);
   if (!qe) {
-    qe = new QueueEvents(name, { connection: getConnection() });
+    qe = new QueueEvents(name, { connection: getConnectionOptions() });
     events.set(name, qe);
   }
   return qe;
@@ -191,7 +202,7 @@ export function registerWorker<TData, TResult>(
         inFlightIds.delete(id);
       }
     },
-    { connection: getConnection() },
+    { connection: getConnectionOptions() },
   );
   workers.set(queueName, worker);
   logger.info({ queueName }, "worker registered (redis)");

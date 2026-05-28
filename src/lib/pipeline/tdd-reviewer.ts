@@ -178,11 +178,20 @@ async function reviewOne(
     });
   }
   if (!coversRequirementIds(content, test.requirementIds)) {
+    // Fix 4: Downgrade to "warn" when the requirement IDs don't look like
+    // structured AC-*/FR-*/US-*/NFR-* identifiers (e.g. Chinese PRD tasks
+    // may use free-text descriptions as IDs). Only treat as P0 "error" when
+    // the IDs are standard structured references that tests are expected to
+    // cite explicitly.
+    const hasStructuredIds =
+      test.requirementIds?.some((id) =>
+        /^(AC|FR|US|ST|NFR|REQ)-?\d+/i.test(id),
+      ) ?? false;
     findings.push({
       testId: test.id,
       taskId: test.taskId,
       priority,
-      severity: "error",
+      severity: hasStructuredIds ? "error" : "warn",
       file: relPath,
       message:
         "TDD test does not cite any covered requirement id from coversRequirementIds.",

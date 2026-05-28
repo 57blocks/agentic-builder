@@ -118,7 +118,7 @@ export async function fsWrite(
         forceOverwrite: options?.forceProtectedOverwrite ?? false,
       });
       if (merged.kind === "skip") {
-        return `SKIPPED_PROTECTED: ${key} (${merged.reason})`;
+        return `SKIPPED_PROTECTED: ${key} (${merged.reason}). Do NOT retry this file — move on to the next task step.`;
       }
       if (merged.kind === "merged") {
         toWrite = merged.content;

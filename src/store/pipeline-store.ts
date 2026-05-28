@@ -250,6 +250,11 @@ interface PipelineState {
   ) => Promise<boolean>;
   deleteDesignReference: (id: string) => Promise<boolean>;
   clearDesignReferences: () => Promise<boolean>;
+  /** Use vision LLM to auto-match unmatched image references to PRD pages. */
+  autoMatchDesignReferences: (
+    prdContent: string,
+    options?: { force?: boolean },
+  ) => Promise<{ matched: number; skipped: number } | null>;
   reset: () => void;
   /** Called by the project page on mount — sets the slug used for DB sync. */
   setProjectSlugForSync: (slug: string) => void;
@@ -1839,6 +1844,42 @@ export const usePipelineStore = create<PipelineState>()(
               err instanceof Error ? err.message : "Network error.",
           });
           return false;
+        }
+      },
+
+      autoMatchDesignReferences: async (prdContent, options) => {
+        set({ designReferencesLoading: "updating", designReferencesError: null });
+        try {
+          const resp = await fetch("/api/agents/pipeline/design-references/auto-match", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prdContent, force: options?.force ?? false }),
+          });
+          const data = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+            matched?: number;
+            skipped?: number;
+            references?: DesignReferenceSummary[];
+          };
+          if (!resp.ok) {
+            set({
+              designReferencesLoading: "idle",
+              designReferencesError: data.error || "Auto-match failed.",
+            });
+            return null;
+          }
+          if (Array.isArray(data.references)) {
+            set({ designReferences: data.references, designReferencesLoading: "idle" });
+          } else {
+            set({ designReferencesLoading: "idle" });
+          }
+          return { matched: data.matched ?? 0, skipped: data.skipped ?? 0 };
+        } catch (err) {
+          set({
+            designReferencesLoading: "idle",
+            designReferencesError: err instanceof Error ? err.message : "Network error.",
+          });
+          return null;
         }
       },
 

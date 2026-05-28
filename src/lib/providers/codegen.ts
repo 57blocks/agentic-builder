@@ -284,7 +284,7 @@ export async function invokeCodegenOrOpenRouter(
   },
 ): Promise<OpenRouterResponse> {
   const key = options.openRouterVariant ?? "codeGen";
-  const codingMode = options.codingMode ?? "cost";
+  const codingMode = options.codingMode ?? "normal";
   const reasoningOptions = buildCodegenReasoningOptions(key);
   const modeForceOpenRouter = shouldForceOpenRouterForCodingMode(codingMode);
 

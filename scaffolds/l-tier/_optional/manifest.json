@@ -1,9 +1,48 @@
 {
   "$schema": "./manifest.schema.json",
-  "version": 1,
-  "description": "Optional scaffold features for the M-tier template. Each entry is copied into the generated project IFF the kickoff-detected ResourceRequirement[] declares ANY of its triggerEnvKeys (presence of the declaration is enough — the user does NOT need to have filled the value yet). See CODEGEN_HARDENING_PLAN.md §4.10.",
+  "version": 2,
+  "description": "Optional scaffold features for the L-tier template. Each entry is copied into the generated project when (a) `.blueprint/auth-decision.json` selects it via the `authMode` field (auth scaffolds only), OR (b) the kickoff-detected ResourceRequirement[] declares ANY of its triggerEnvKeys (legacy path). Mutually-exclusive groups: at most one `authMode` feature is applied per project.",
   "features": {
+    "auth-password-rbac": {
+      "label": "Email + Password + RBAC (admin / operator / viewer)",
+      "authMode": "password-rbac",
+      "triggerEnvKeys": [],
+      "extraDeps": {
+        "backend": {
+          "bcryptjs": "^2.4.3",
+          "jsonwebtoken": "^9.0.2",
+          "@types/bcryptjs": "^2.4.6",
+          "@types/jsonwebtoken": "^9.0.5"
+        },
+        "frontend": {
+          "zustand": "^4.5.0"
+        }
+      }
+    },
+    "auth-magic-link": {
+      "label": "Magic Link (passwordless, SMTP)",
+      "authMode": "magic-link",
+      "triggerEnvKeys": [
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_FROM"
+      ],
+      "extraDeps": {
+        "backend": {
+          "jsonwebtoken": "^9.0.2",
+          "@types/jsonwebtoken": "^9.0.5",
+          "nodemailer": "^6.9.16",
+          "@types/nodemailer": "^6.4.17"
+        },
+        "frontend": {
+          "zustand": "^4.5.0"
+        }
+      }
+    },
     "auth-privy": {
+      "authMode": "privy",
       "label": "Privy OAuth (server + client SDK)",
       "triggerEnvKeys": [
         "VITE_PRIVY_APP_ID",

@@ -140,3 +140,12 @@ export type {
   EscalateRepairCircuitInput,
   EscalateRepairCircuitResult,
 } from "./escalate-repair-circuit";
+export {
+  generateMissingRouteStubs,
+  formatMissingRouteStubBlock,
+} from "./missing-route-stubs";
+export type {
+  MissingEndpoint,
+  RouteStubGroup,
+  GenerateMissingRouteStubsResult,
+} from "./missing-route-stubs";
