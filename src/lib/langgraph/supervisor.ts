@@ -82,6 +82,7 @@ import {
   runMigrationCoverageRepair,
   formatMigrationCoverageBlock,
   repairContractCoverage,
+  repairPageCoverage,
   getUnresolvedMigrationGaps,
   generateMissingRouteStubs,
   formatMissingRouteStubBlock,
@@ -89,6 +90,7 @@ import {
 } from "@/lib/pipeline/self-heal";
 import {
   runContractCoverageGate,
+  runPageCoverageGate,
   type ContractEntryLike,
 } from "@/lib/pipeline/gates";
 import {
@@ -2976,6 +2978,118 @@ async function contractTaskCoverage(
 
   console.log(
     `${label}: injected ${repaired.added.length} supplementary task(s); re-classified into architect=${byRole.architect.length}, backend=${byRole.backend.length}, frontend=${byRole.frontend.length}, test=${byRole.test.length}.`,
+  );
+
+  return {
+    tasks: allTasks,
+    architectTasks: byRole.architect,
+    backendTasks: byRole.backend,
+    frontendTasks: byRole.frontend,
+    testTasks: byRole.test,
+  };
+}
+
+/**
+ * Page-coverage gate: inject supplementary frontend tasks for any PRD page
+ * that has no corresponding task after the contract-task-coverage pass.
+ *
+ * Mirrors contractTaskCoverage but operates on prdSpec.pages rather than
+ * API_CONTRACTS.json entries. Runs immediately after contract_task_coverage
+ * so both checks are resolved before any coding agent starts.
+ *
+ * Only fires when prdSpec has at least one page — skips silently for
+ * backend-only or API-only PRDs.
+ */
+async function pageTaskCoverage(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  const label = "[Supervisor] PageTaskCoverage";
+  const emit = getRepairEmitter(state.sessionId);
+
+  const pages = state.prdSpec?.pages ?? [];
+  if (pages.length === 0 || state.tasks.length === 0) return {};
+
+  // Quick early exit: if all pages are already covered, skip the LLM call.
+  const initialGate = runPageCoverageGate(pages, state.tasks);
+  if (initialGate.passed) {
+    console.log(
+      `${label}: all ${pages.length} PRD page(s) already have a frontend task — skipping.`,
+    );
+    return {};
+  }
+
+  console.warn(
+    `${label}: ${initialGate.missingPageIds.length} page(s) have no frontend task: ${initialGate.missingPageNames.join(", ")}. Injecting supplementary tasks.`,
+  );
+
+  const [prdRaw, trdRaw, sysDesignRaw, implGuideRaw, scaffoldSpecRaw] =
+    await Promise.all([
+      fsRead("PRD.md", state.outputDir),
+      fsRead("TRD.md", state.outputDir),
+      fsRead("SystemDesign.md", state.outputDir),
+      fsRead("ImplementationGuide.md", state.outputDir),
+      fsRead("SCAFFOLD_SPEC.md", state.outputDir),
+    ]);
+
+  const readable = (s: string): string | undefined =>
+    s.startsWith("FILE_NOT_FOUND") || s.startsWith("REJECTED") ? undefined : s;
+
+  const prd = readable(prdRaw) ?? "";
+  if (!prd) {
+    console.warn(`${label}: PRD.md not found — cannot inject page tasks.`);
+    return {};
+  }
+
+  const tierMatch = readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
+  const tier: ProjectTier = normalizeProjectTier(tierMatch?.[1]);
+
+  let repaired;
+  try {
+    repaired = await repairPageCoverage({
+      pages,
+      existingTasks: state.tasks,
+      prd,
+      trd: readable(trdRaw),
+      sysDesign: readable(sysDesignRaw),
+      implGuide: readable(implGuideRaw),
+      tier,
+      sessionId: state.sessionId,
+      emitter: emit,
+    });
+  } catch (err) {
+    console.warn(
+      `${label}: repair threw — ${err instanceof Error ? err.message : String(err)}. Proceeding with original task list.`,
+    );
+    return {};
+  }
+
+  if (repaired.added.length === 0) {
+    console.log(`${label}: no supplementary page tasks produced; ${repaired.finalMissingPageIds.length} page(s) still uncovered.`);
+    return {};
+  }
+
+  // Re-classify added tasks into role buckets and merge into state.
+  const allTasks = repaired.tasks.map((t) => {
+    const asCoding = t as unknown as CodingTask;
+    return {
+      ...asCoding,
+      assignedAgentId: asCoding.assignedAgentId ?? null,
+      codingStatus: asCoding.codingStatus ?? "pending",
+    };
+  });
+
+  const byRole: Record<CodingAgentRole, CodingTask[]> = {
+    architect: [],
+    backend: [],
+    frontend: [],
+    test: [],
+  };
+  for (const task of allTasks) {
+    byRole[inferRole(task)].push(task);
+  }
+
+  console.log(
+    `${label}: injected ${repaired.added.length} supplementary page task(s); frontend total: ${byRole.frontend.length}.`,
   );
 
   return {
@@ -7829,6 +7943,7 @@ export function createSupervisorGraph() {
     .addNode("dependency_baseline", dependencyBaseline)
     .addNode("generate_api_contracts", generateApiContracts)
     .addNode("contract_task_coverage", contractTaskCoverage)
+    .addNode("page_task_coverage", pageTaskCoverage)
     .addNode("tdd_test_writer", tddTestWriterAndRed)
     .addNode("be_worker", parallelWorkerNode)
     .addNode("be_phase_verify", (s) =>
@@ -7857,7 +7972,8 @@ export function createSupervisorGraph() {
     .addEdge("dispatch_gate", "dependency_baseline")
     .addEdge("dependency_baseline", "generate_api_contracts")
     .addEdge("generate_api_contracts", "contract_task_coverage")
-    .addEdge("contract_task_coverage", "tdd_test_writer")
+    .addEdge("contract_task_coverage", "page_task_coverage")
+    .addEdge("page_task_coverage", "tdd_test_writer")
     .addConditionalEdges("tdd_test_writer", dispatchBackendAndTestWorkers)
     .addEdge("be_worker", "be_phase_verify")
     .addEdge("be_phase_verify", "extract_real_contracts")
