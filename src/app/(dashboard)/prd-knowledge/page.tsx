@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
 
@@ -8,6 +8,7 @@ import type {
   PrdKnowledgeListItem,
   PrdKnowledgeListResponse,
 } from "@/app/api/memory/prd/records/route";
+import { KNOWN_PRD_INDUSTRIES } from "@/lib/memory/knowledge/prd-knowledge/types";
 
 type Tab = "pending" | "active" | "deprecated";
 
@@ -63,14 +64,30 @@ function RestoreIcon() {
     </svg>
   );
 }
+function UploadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+function SparkleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2z" />
+    </svg>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-const TAB_META: Record<Tab, { label: string; accent: string }> = {
-  active: { label: "Active", accent: "from-emerald-500 to-teal-500" },
-  pending: { label: "Pending", accent: "from-amber-500 to-orange-500" },
-  deprecated: { label: "Deprecated", accent: "from-slate-400 to-slate-500" },
+const TAB_META: Record<Tab, { label: string }> = {
+  active: { label: "Active" },
+  pending: { label: "Pending" },
+  deprecated: { label: "Deprecated" },
 };
 
 export default function PrdKnowledgePage() {
@@ -83,6 +100,7 @@ export default function PrdKnowledgePage() {
   const [filterIndustry, setFilterIndustry] = useState<string>("");
   const [filterProductType, setFilterProductType] = useState<string>("");
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const showToast = (msg: string, ok: boolean) => {
     setToast({ msg, ok });
@@ -143,7 +161,19 @@ export default function PrdKnowledgePage() {
     }
   };
 
-  const industries = useMemo(() => Array.from(new Set(records.map((r) => r.industry))).sort(), [records]);
+  // Industry pills use the predefined enum (always visible).
+  // Custom/unknown industries appearing in records are appended after the known ones.
+  const industries = useMemo(() => {
+    const fromRecords = new Set(records.map((r) => r.industry));
+    const known = KNOWN_PRD_INDUSTRIES.filter(() => true) as string[];
+    const extra = Array.from(fromRecords).filter((i) => !known.includes(i)).sort();
+    return [...known, ...extra];
+  }, [records]);
+  const industryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of records) counts[r.industry] = (counts[r.industry] ?? 0) + 1;
+    return counts;
+  }, [records]);
   const productTypes = useMemo(() => Array.from(new Set(records.map((r) => r.productType))).sort(), [records]);
 
   return (
@@ -170,92 +200,79 @@ export default function PrdKnowledgePage() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {uploadOpen && (
+          <UploadModal
+            onClose={() => setUploadOpen(false)}
+            onUploaded={async () => {
+              setUploadOpen(false);
+              showToast("Uploaded · moved to Pending", true);
+              setTab("pending");
+              await load();
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div className="border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-8 py-5 sticky top-0 z-40">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="border-b border-[#e2e8f0] bg-white/90 backdrop-blur-sm px-8 py-4 sticky top-0 z-40">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0 text-white">
               <DocumentIcon />
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg font-bold text-[#0f172a] leading-tight">PRD Knowledge Base</h1>
-              <p className="text-xs text-[#64748b] mt-0.5">
-                Auto-distilled PRD cases · {allCounts.active} active · {allCounts.pending} pending · injected into PRD generation
+              <p className="text-xs text-[#64748b] mt-0.5 truncate">
+                Auto-distilled PRD cases · injected into PRD generation
               </p>
             </div>
           </div>
-          <button
-            onClick={() => void handleRefresh()}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-[#475569] hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-50"
-          >
-            <RefreshIcon spinning={refreshing} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            <StatusSegmented value={tab} counts={allCounts} onChange={setTab} />
+            <span className="h-5 w-px bg-[#e2e8f0]" aria-hidden />
+            <button
+              onClick={() => setUploadOpen(true)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+            >
+              <UploadIcon />
+              Upload PRD
+            </button>
+            <button
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-[#475569] hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-50"
+              aria-label="Refresh"
+            >
+              <RefreshIcon spinning={refreshing} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="px-8 py-6 space-y-5">
-        {/* Tabs */}
-        <div className="flex items-center gap-2">
-          {(Object.keys(TAB_META) as Tab[]).map((t) => {
-            const meta = TAB_META[t];
-            const isActive = tab === t;
-            return (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`relative px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                  isActive
-                    ? "text-white shadow-md shadow-indigo-200"
-                    : "text-[#475569] bg-white border border-[#e2e8f0] hover:border-slate-300"
-                }`}
-              >
-                {isActive && (
-                  <motion.span
-                    layoutId="tab-pill-bg"
-                    className={`absolute inset-0 rounded-xl bg-gradient-to-r ${meta.accent}`}
-                    transition={{ type: "spring", stiffness: 400, damping: 32 }}
-                  />
-                )}
-                <span className="relative flex items-center gap-2">
-                  {meta.label}
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                    isActive ? "bg-white/25" : "bg-slate-100 text-[#64748b]"
-                  }`}>
-                    {allCounts[t]}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Filters */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-[#64748b] text-xs">Filter</span>
-          <select
+      <div className="px-8 py-6 space-y-6">
+        {/* Filters — primary browse mechanism */}
+        <div className="space-y-3">
+          <FilterRow
+            label="Industry"
+            options={industries}
+            counts={industryCounts}
             value={filterIndustry}
-            onChange={(e) => setFilterIndustry(e.target.value)}
-            className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white text-[#0f172a] text-xs hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          >
-            <option value="">All industries</option>
-            {industries.map((i) => <option key={i} value={i}>{i}</option>)}
-          </select>
-          <select
+            onChange={setFilterIndustry}
+          />
+          <FilterRow
+            label="Type"
+            options={productTypes}
             value={filterProductType}
-            onChange={(e) => setFilterProductType(e.target.value)}
-            className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white text-[#0f172a] text-xs hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          >
-            <option value="">All product types</option>
-            {productTypes.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+            onChange={setFilterProductType}
+          />
           {(filterIndustry || filterProductType) && (
             <button
               onClick={() => { setFilterIndustry(""); setFilterProductType(""); }}
-              className="text-[11px] text-[#64748b] hover:text-[#0f172a]"
+              className="text-[11px] text-[#64748b] hover:text-[#0f172a] underline-offset-2 hover:underline"
             >
-              Clear
+              Clear all
             </button>
           )}
         </div>
@@ -486,6 +503,125 @@ function Badge({ children, variant }: { children: React.ReactNode; variant: "ind
   );
 }
 
+function StatusSegmented({
+  value,
+  counts,
+  onChange,
+}: {
+  value: Tab;
+  counts: Record<Tab, number>;
+  onChange: (next: Tab) => void;
+}) {
+  const order: Tab[] = ["active", "pending", "deprecated"];
+  return (
+    <div
+      role="tablist"
+      aria-label="Filter by status"
+      className="inline-flex items-center rounded-lg border border-[#e2e8f0] bg-slate-50 p-0.5"
+    >
+      {order.map((t) => {
+        const isActive = value === t;
+        const showDot = t === "pending" && counts.pending > 0 && !isActive;
+        return (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(t)}
+            className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${
+              isActive
+                ? "bg-white text-[#0f172a] shadow-sm"
+                : "text-[#64748b] hover:text-[#0f172a]"
+            }`}
+          >
+            {TAB_META[t].label}
+            <span className={`text-[10px] font-semibold ${isActive ? "text-[#94a3b8]" : "text-[#cbd5e1]"}`}>
+              {counts[t]}
+            </span>
+            {showDot && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterRow({
+  label,
+  options,
+  counts,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: string[];
+  /** Optional per-option counts. Options with count 0 render muted (but stay clickable). */
+  counts?: Record<string, number>;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  if (options.length === 0) return null;
+
+  const pillBase =
+    "text-sm leading-none px-3.5 py-2 rounded-full border transition-colors duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1";
+
+  const allActive = value === "";
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label={`Filter by ${label}`}
+      className="flex items-center gap-2 flex-wrap"
+    >
+      <span className="text-xs font-semibold uppercase tracking-wider text-[#64748b] min-w-[4rem] shrink-0 leading-none">
+        {label}
+      </span>
+      <button
+        role="radio"
+        aria-checked={allActive}
+        onClick={() => onChange("")}
+        className={`${pillBase} ${
+          allActive
+            ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+            : "bg-white text-[#475569] border-[#e2e8f0] hover:border-indigo-200 hover:bg-indigo-50/40 hover:text-indigo-700"
+        }`}
+      >
+        All
+      </button>
+      {options.map((opt) => {
+        const active = value === opt;
+        const count = counts?.[opt];
+        const empty = counts !== undefined && (count ?? 0) === 0 && !active;
+        return (
+          <button
+            key={opt}
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(active ? "" : opt)}
+            title={empty ? `No records in ${opt}` : undefined}
+            className={`${pillBase} ${
+              active
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-200"
+                : empty
+                ? "bg-white text-[#cbd5e1] border-[#eef2f6] hover:border-slate-200 hover:text-slate-400"
+                : "bg-white text-[#475569] border-[#e2e8f0] hover:border-indigo-300 hover:bg-indigo-50/40 hover:text-indigo-700"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              {opt}
+              {count !== undefined && count > 0 && !active && (
+                <span className="text-[11px] font-semibold text-[#94a3b8]">{count}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8] mb-3">{children}</h3>
@@ -571,4 +707,163 @@ function EmptyState({ tab }: { tab: Tab }) {
 
 function prettyKey(key: string): string {
   return key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+}
+
+// ---------------------------------------------------------------------------
+// Upload modal
+// ---------------------------------------------------------------------------
+function UploadModal({
+  onClose,
+  onUploaded,
+}: {
+  onClose: () => void;
+  onUploaded: () => void | Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const pickFile = (f: File | null) => {
+    setError(null);
+    if (!f) return;
+    if (!/\.(md|markdown)$/i.test(f.name)) {
+      setError("Only .md / .markdown files are supported.");
+      return;
+    }
+    if (f.size > 2 * 1024 * 1024) {
+      setError("File too large (max 2 MB).");
+      return;
+    }
+    setFile(f);
+  };
+
+  const submit = async () => {
+    if (!file || uploading) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/memory/prd/upload", { method: "POST", body: fd });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !data?.ok) {
+        const err = data?.error ?? "unknown";
+        const msg =
+          err === "invalid_extension" ? "Only .md / .markdown files are supported."
+          : err === "file_too_short" ? "PRD is too short (minimum 200 characters)."
+          : err === "file_too_large" ? "File too large (max 2 MB)."
+          : err === "extract_failed" ? "LLM extraction failed. Check the file and try again."
+          : `Upload failed (${err}).`;
+        setError(msg);
+        return;
+      }
+      await onUploaded();
+    } catch (err) {
+      setError(`Network error: ${(err as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const fileSizeKb = file ? Math.max(1, Math.round(file.size / 1024)) : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={() => { if (!uploading) onClose(); }}
+    >
+      <motion.div
+        initial={{ scale: 0.96, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.96, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden"
+      >
+        <div className="px-6 py-5 border-b border-[#e2e8f0] flex items-center justify-between">
+          <h2 className="text-base font-semibold text-[#0f172a]">Upload PRD</h2>
+          <button
+            disabled={uploading}
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-[#64748b] disabled:opacity-40"
+            aria-label="Close"
+          >
+            <XMarkIcon />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              pickFile(e.dataTransfer.files?.[0] ?? null);
+            }}
+            className={`flex flex-col items-center justify-center text-center px-6 py-10 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
+              dragOver ? "border-indigo-400 bg-indigo-50/60" : "border-[#e2e8f0] hover:border-indigo-300 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".md,.markdown,text/markdown"
+              className="hidden"
+              onChange={(e) => {
+                pickFile(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+            <UploadIcon />
+            {file ? (
+              <>
+                <p className="mt-3 text-sm font-medium text-[#0f172a]">{file.name}</p>
+                <p className="text-xs text-[#64748b] mt-0.5">{fileSizeKb} KB · click to replace</p>
+              </>
+            ) : (
+              <>
+                <p className="mt-3 text-sm font-medium text-[#0f172a]">Drop a .md file here</p>
+                <p className="text-xs text-[#64748b] mt-0.5">or click to browse</p>
+              </>
+            )}
+          </div>
+
+          <p className="text-[11px] text-[#64748b] leading-relaxed">
+            Industry / product type will be auto-extracted by LLM (~2-5s). You can correct them after approval.
+          </p>
+        </div>
+
+        <div className="px-6 py-4 border-t border-[#e2e8f0] flex items-center justify-end gap-2 bg-slate-50/40">
+          <button
+            disabled={uploading}
+            onClick={onClose}
+            className="text-xs px-3 py-2 rounded-lg border border-[#e2e8f0] bg-white text-[#475569] hover:bg-slate-50 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!file || uploading}
+            onClick={() => void submit()}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {uploading ? <RefreshIcon spinning /> : <UploadIcon />}
+            {uploading ? "Extracting…" : "Upload"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 }
