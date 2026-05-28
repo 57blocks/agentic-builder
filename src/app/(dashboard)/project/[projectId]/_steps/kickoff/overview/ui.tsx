@@ -9,6 +9,7 @@ import type { ResourceRequirement } from "@/lib/pipeline/resource-requirements";
 import type { SkillTraceRecord } from "@/lib/agents/skills";
 import type { StepUIProps } from "../../_shared/types";
 import { SkillsTracePanel } from "./SkillsTracePanel";
+import InfraSection, { type InfraMeta } from "@/components/kickoff/InfraSection";
 
 const CATEGORY_LABEL: Record<string, string> = {
   auth: "Auth",
@@ -105,6 +106,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const [detectError, setDetectError] = useState<string | null>(null);
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set());
+  const [fallbackInfra, setFallbackInfra] = useState<InfraMeta | null>(null);
 
   // ── Project Links token config (GitHub + Jira) ──
   type ProjectLinkConfig = {
@@ -220,6 +222,31 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
     "taskBreakdownSkillsTrace"
   ] as SkillTraceRecord | undefined;
   const hasRunKickoff = isCompleted || isThisRunning;
+
+  const infraMetaFromMetadata = (
+    (metadata as Record<string, unknown> | undefined)?.[
+      "integrations"
+    ] as { infra?: InfraMeta } | undefined
+  )?.infra;
+  // Prefer the kickoff-run metadata; fall back to the on-disk
+  // `.blueprint/kickoff-infra.json` for runs that provisioned infra before
+  // the metadata wiring existed (or where DOKPLOY env wasn't set at run time).
+  const infraMeta = infraMetaFromMetadata ?? fallbackInfra ?? undefined;
+
+  // Fallback loader: only fetch when the metadata has no infra block.
+  useEffect(() => {
+    if (infraMetaFromMetadata) return;
+    let cancelled = false;
+    fetch("/api/kickoff/infra-meta")
+      .then((r) => r.json())
+      .then((data: { infra?: InfraMeta | null }) => {
+        if (!cancelled && data.infra) setFallbackInfra(data.infra);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [infraMetaFromMetadata]);
 
   useEffect(() => {
     fetch("/api/agents/push-generated-code")
@@ -471,6 +498,13 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
 
             </>
           )}
+
+            {infraMeta && (
+                <InfraSection
+                  infra={infraMeta}
+                  dokployBaseUrl={process.env.NEXT_PUBLIC_DOKPLOY_URL}
+                />
+              )}
 
           {/* ── Abilities + Project Links (stacked) ── */}
           <div className="flex flex-col gap-4">
