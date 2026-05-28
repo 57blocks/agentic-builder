@@ -20,6 +20,11 @@ import { memoryEnabled } from "@/lib/memory/env";
 import { summarizePrdDiff } from "@/lib/memory/prd-diff-summarize";
 import { getTraceLogger } from "@/lib/memory/trace";
 import { normalizeProjectTier, type ProjectTier } from "@/lib/agents/shared/project-classifier";
+import { extractPrdKnowledge } from "@/lib/memory/knowledge/prd-knowledge/extract";
+import {
+  buildPrdKnowledgeTags,
+  type PrdKnowledgeRecord,
+} from "@/lib/memory/knowledge/prd-knowledge/types";
 
 interface PrdCaptureRequest {
   sessionId: string;
@@ -110,6 +115,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         projectType,
         tier,
       });
+      await tryWritePrdKnowledge({ sessionId, finalPrd, projectType, tier });
       return NextResponse.json({ ok: true, recordId: record.id, outcome: "positive" });
     }
 
@@ -157,6 +163,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       projectType,
       tier,
     });
+    await tryWritePrdKnowledge({ sessionId, finalPrd, projectType, tier });
 
     return NextResponse.json({
       ok: true,
@@ -205,5 +212,64 @@ async function emitPrepOutcome(args: EmitPrepOutcomeArgs): Promise<void> {
     });
   } catch {
     /* swallow */
+  }
+}
+
+/**
+ * Attempt to extract structured knowledge from the finalised PRD and persist
+ * it as a `prd-knowledge` candidate record (status=pending, score=0).
+ * Failures are silently swallowed — this must never block the primary
+ * prd-pattern write path.
+ */
+async function tryWritePrdKnowledge(args: {
+  sessionId: string;
+  finalPrd: string;
+  projectType: string;
+  tier: ProjectTier;
+}): Promise<void> {
+  try {
+    const memory = getSystemMemory();
+
+    // Idempotency: skip if a prd-knowledge already exists for this kickoff.
+    const existing = await memory.recall({
+      layer: "L1",
+      kinds: ["prd-knowledge"],
+      kickoffId: args.sessionId,
+      limit: 1,
+    });
+    if (existing.length > 0) return;
+
+    const extracted = await extractPrdKnowledge({
+      finalPrd: args.finalPrd,
+      projectType: args.projectType,
+      tier: args.tier,
+    });
+    if (!extracted) return;
+
+    const record: PrdKnowledgeRecord = {
+      schemaVersion: 1,
+      ...extracted,
+      fullPrd: args.finalPrd,
+      sourceProjectId: args.sessionId,
+      status: "pending",
+    };
+
+    await memory.save({
+      layer: "L1",
+      kind: "prd-knowledge",
+      title: extracted.title,
+      body: JSON.stringify(record),
+      tags: buildPrdKnowledgeTags({
+        industry: extracted.industry,
+        productType: extracted.productType,
+        tier: args.tier,
+        status: "pending",
+      }),
+      source: "distill",
+      refs: { kickoffId: args.sessionId },
+      metrics: { score: 0 },
+    });
+  } catch (err) {
+    console.warn("[memory] tryWritePrdKnowledge failed (skipping):", (err as Error).message);
   }
 }

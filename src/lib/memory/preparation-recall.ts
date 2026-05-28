@@ -26,6 +26,7 @@ import type { ProjectTier } from "../agents/shared/project-classifier";
 import type { DesignIndustry } from "./knowledge/57b-library";
 import { condenseStyleSpecForRecall } from "./knowledge/style-spec/compose-body";
 import type { MemoryRecord } from "./types";
+import { parsePrdKnowledgeBody, renderInjectBody } from "./knowledge/prd-knowledge";
 
 export interface PreparationRecallInput {
   sessionId: string;
@@ -137,8 +138,8 @@ export interface PreparationRecallResult extends RecallContextResult {
 export async function recallPrdContext(
   input: PreparationRecallInput,
 ): Promise<PreparationRecallResult> {
-  const any = buildAnyTags(input);
-  const result = await recallAndPrepareInject({
+  // 1. Existing prd-pattern recall (unchanged).
+  const patternResult = await recallAndPrepareInject({
     agent: "pm",
     role: "pm",
     task: {
@@ -152,10 +153,67 @@ export async function recallPrdContext(
     kinds: ["prd-pattern"],
     tokenBudget: 1500,
     injectEnabled: memoryInjectEnabledForPrd,
-    ...(any.length > 0 ? { /* recall-context will not forward arbitrary tags; we rely on text */ } : {}),
   });
-  void any;
-  return { ...result, contextChunk: wrapPatternBlock("PRD", result.block) };
+
+  // 2. Pull active prd-knowledge cases (industry-tagged primary, fallback to all).
+  let knowledgeBlock = "";
+  let recalledKnowledgeIds: string[] = [];
+  if (memoryInjectEnabledForPrd()) {
+    try {
+      const industry = detectIndustry(input.featureBrief);
+      const primary = await getSystemMemory().recall({
+        layer: "L1",
+        kinds: ["prd-knowledge"],
+        tags: {
+          all: ["status:active"],
+          ...(industry ? { any: [`industry:${industry}`] } : {}),
+        },
+        limit: 6,
+      });
+      let cases = primary;
+      if (cases.length < 2) {
+        cases = await getSystemMemory().recall({
+          layer: "L1",
+          kinds: ["prd-knowledge"],
+          tags: { all: ["status:active"] },
+          limit: 6,
+        });
+      }
+      cases = cases.slice(0, 2);
+      recalledKnowledgeIds = cases.map((r) => r.id);
+      console.log(
+        `[memory:prd-recall] inject=${memoryInjectEnabledForPrd()} industry=${industry ?? "none"} active-cases=${cases.length} ids=[${recalledKnowledgeIds.join(",")}]`,
+      );
+      for (const rec of cases) {
+        await getSystemMemory().bumpHit(rec.id);
+      }
+
+      const xmlCases: string[] = [];
+      for (const rec of cases) {
+        const parsed = parsePrdKnowledgeBody(rec);
+        if (!parsed) continue;
+        xmlCases.push(renderInjectBody(parsed));
+      }
+      if (xmlCases.length > 0) {
+        knowledgeBlock = `<prd-knowledge>\n${xmlCases.join("\n")}\n</prd-knowledge>`;
+      }
+    } catch (err) {
+      console.warn("[memory] recallPrdContext: prd-knowledge fetch failed (skipping):", (err as Error).message);
+    }
+  } else {
+    console.log("[memory:prd-recall] inject=false (MEMORY_PRD_INJECT / MEMORY_INJECT off)");
+  }
+
+  const contextChunk = [knowledgeBlock, wrapPatternBlock("PRD", patternResult.block)]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    ...patternResult,
+    block: [patternResult.block, knowledgeBlock].filter(Boolean).join("\n\n"),
+    contextChunk,
+    recalledKnowledgeIds,
+  };
 }
 
 export async function recallDesignContext(
