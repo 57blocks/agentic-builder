@@ -539,7 +539,7 @@ export class TaskBreakdownAgent extends BaseAgent {
       systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock),
       defaultModel: MODEL_CONFIG.taskBreakdown,
       temperature: 0.3,
-      maxTokens: 32768,
+      maxTokens: 64000,
       customChatCompletion: async (messages, opts) => {
         const { model: _ignoredModel, ...rest } = opts;
         const reasoningOptions = buildTaskBreakdownReasoningOptions();
