@@ -228,13 +228,52 @@ async function maybeExpandLTierTasks(opts: {
   prdSpecText?: string;
   sessionId?: string;
 }): Promise<KickoffWorkItem[]> {
+  // M-tier: trigger expansion when tasks are few relative to PRD size.
+  // A large PRD with only 6 tasks almost always means pages/APIs were merged —
+  // the model needs to be prompted to split them.
+  const M_EXPANSION_THRESHOLD = 10;
+  const M_MIN_PRD_LENGTH = 5000;
+
   const EXPANSION_THRESHOLD = 20;
   const MIN_PRD_LENGTH = 8000;
+
+  if (opts.tier === "M") {
+    if (
+      opts.tasks.length < M_EXPANSION_THRESHOLD &&
+      opts.prd.length >= M_MIN_PRD_LENGTH
+    ) {
+      return maybeRunExpansion({
+        ...opts,
+        tierLabel: "M-tier",
+        threshold: M_EXPANSION_THRESHOLD,
+      });
+    }
+    return opts.tasks;
+  }
 
   if (opts.tier !== "L") return opts.tasks;
   if (opts.tasks.length >= EXPANSION_THRESHOLD) return opts.tasks;
   if (opts.prd.length < MIN_PRD_LENGTH) return opts.tasks;
 
+  return maybeRunExpansion({
+    ...opts,
+    tierLabel: "L-tier",
+    threshold: EXPANSION_THRESHOLD,
+  });
+}
+
+async function maybeRunExpansion(opts: {
+  tierLabel: string;
+  threshold: number;
+  tasks: KickoffWorkItem[];
+  prd: string;
+  agent: TaskBreakdownAgent;
+  trd?: string;
+  sysDesign?: string;
+  implGuide?: string;
+  prdSpecText?: string;
+  sessionId?: string;
+}): Promise<KickoffWorkItem[]> {
   // Find overbroad tasks: those with the most creates, capped at half the list.
   const sorted = [...opts.tasks].sort(
     (a, b) => getTaskCreates(b).length - getTaskCreates(a).length,
@@ -258,7 +297,7 @@ async function maybeExpandLTierTasks(opts: {
   const startingTaskId = `task-${String(lastNum + 1).padStart(3, "0")}`;
 
   console.info(
-    `[task-breakdown] L-tier expansion triggered: ${opts.tasks.length} tasks < ${EXPANSION_THRESHOLD}. ` +
+    `[task-breakdown] ${opts.tierLabel} expansion triggered: ${opts.tasks.length} tasks < ${opts.threshold}. ` +
       `Expanding ${overbroadTasks.length} task(s): ${overbroadTasks.map((t) => t.id).join(", ")}`,
   );
 
@@ -291,7 +330,7 @@ async function maybeExpandLTierTasks(opts: {
     );
   } catch (err) {
     console.warn(
-      "[task-breakdown] L-tier expansion failed — keeping original tasks:",
+      `[task-breakdown] ${opts.tierLabel} expansion failed — keeping original tasks:`,
       err,
     );
     return opts.tasks;
@@ -300,7 +339,7 @@ async function maybeExpandLTierTasks(opts: {
   const expansionParsed = parseJsonArrayFromLlmOutput(expansionResult.content);
   if (expansionParsed.parseFailed || expansionParsed.tasks.length === 0) {
     console.warn(
-      "[task-breakdown] L-tier expansion produced no valid tasks — keeping originals",
+      `[task-breakdown] ${opts.tierLabel} expansion produced no valid tasks — keeping originals`,
     );
     return opts.tasks;
   }
@@ -313,7 +352,7 @@ async function maybeExpandLTierTasks(opts: {
   const { tasks: withNewDeps } = inferTaskDependencies(merged);
 
   console.info(
-    `[task-breakdown] L-tier expansion complete: ${opts.tasks.length} → ${withNewDeps.length} tasks`,
+    `[task-breakdown] ${opts.tierLabel} expansion complete: ${opts.tasks.length} → ${withNewDeps.length} tasks`,
   );
 
   return withNewDeps;
