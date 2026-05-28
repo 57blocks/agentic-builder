@@ -479,6 +479,8 @@ function kindPrefix(kind: MemoryKind): string {
       return "DSG";
     case "design-knowledge":
       return "DK";
+    case "prd-knowledge":
+      return "PK";
     case "project-card":
       return "PC";
     case "task-history":
