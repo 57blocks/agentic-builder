@@ -81,12 +81,7 @@ export async function loginWithPassword(ctx: AuthedContext): Promise<void> {
     // nothing and avoids a class of "Bearer header is empty" 401s.
     accessToken: token,
     token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    user: serialiseUser(user),
   };
 }
 
@@ -98,12 +93,25 @@ export async function getCurrentUser(ctx: AuthedContext): Promise<void> {
   if (!user) throw Errors.Unauthorized("Session points at a deleted user");
 
   ctx.body = {
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-    },
+    user: serialiseUser(user),
+  };
+}
+
+/**
+ * Single source of truth for the wire shape of a User. Both `login` and
+ * `getCurrentUser` emit the same fields so the frontend `AuthUser`
+ * interface in `frontend/src/api/auth-client.ts` stays in sync with one
+ * change point. `domainRole` is the business persona (family / teacher
+ * / student / coach, etc.) consumed by the frontend `useAuth` hook to
+ * drive route shells — distinct from the RBAC `role` enum.
+ */
+function serialiseUser(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+    domainRole: user.domainRole ?? null,
   };
 }
 

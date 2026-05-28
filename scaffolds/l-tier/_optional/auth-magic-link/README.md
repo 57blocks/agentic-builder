@@ -49,9 +49,12 @@ consumer app with no role differentiation.
 |------|---------|
 | `frontend/src/views/LoginPage.tsx` | **Overwrites** base — email-only form, calls `POST /api/v1/auth/magic`. |
 | `frontend/src/views/MagicLinkCallbackPage.tsx` | Handles `?token=...` URL — verifies token, stores session, redirects. |
-| `frontend/src/api/auth-client.ts` | `requestMagicLink`, `verifyMagicLink`, `getCurrentUser`, `logout`. |
-| `frontend/src/store/auth-store.ts` | zustand store wrapping the API. |
-| `frontend/src/components/auth/ProtectedRoute.tsx` | Same as password-rbac. |
+| `frontend/src/views/UnauthorizedPage.tsx` | 403 placeholder rendered when `<ProtectedRoute>` rejects a request. Wire as `/unauthorized` in `router.tsx`. |
+| `frontend/src/api/auth-client.ts` | `requestMagicLink`, `verifyMagicLink`, `getCurrentUser`, `logout`. `AuthUser` carries both `role` (RBAC) and `domainRole` (business persona). |
+| `frontend/src/store/auth-store.ts` | zustand store wrapping the API. Prefer `useAuth()` over reading this directly so the `sessionRole` derivation stays in one place. |
+| `frontend/src/components/auth/ProtectedRoute.tsx` | Route guard. Two independent gates: `role` (RBAC: `admin`/`operator`/`viewer`) AND `requiredDomainRole` (business persona). Admin RBAC role bypasses domainRole gates. Usable as a layout route (`<ProtectedRoute><Outlet /></ProtectedRoute>`). |
+| `frontend/src/components/layout/PersonaShell.tsx` | Generic persona-scoped layout. `<PersonaShell persona="family" navItems={...} />` wraps its children in `<ProtectedRoute requiredDomainRole={persona}>` and renders sidebar + header + `<Outlet />`. **Replaces** hand-rolled `FamilyShell` / `TeacherShell` / `AdminShell` files. |
+| `frontend/src/hooks/useAuth.ts` | Canonical auth hook. Exposes `{ user, token, isAuthenticated, sessionRole, requestLink, consumeToken, logout, refresh, ... }`. `sessionRole` prioritises `user.domainRole` over `user.role` so persona-aware UIs work without leaking the RBAC enum into business code. |
 
 ## Deps appended (via manifest)
 
@@ -77,10 +80,34 @@ consumer app with no role differentiation.
 5. **Frontend route for the callback is `/auth/magic/callback`.** Don't
    rename without updating `frontendBase()` in `auth-magic.controller.ts`.
 
+6. **`sessions` table has NO `token` column.** The raw JWT is verified
+   per-request via `AUTH_JWT_SECRET`; persisting it turns every DB
+   backup into a session leak with no revocation benefit. Migration 100
+   drops the column on upgrade if it existed previously. The model and
+   controller must NOT pass `token` to `Session.create`.
+
+7. **Persona vs RBAC are two ORTHOGONAL concepts.** `role` answers "what
+   CRUD verbs can this user run". `domainRole` answers "which business
+   persona's UI does this account live in" (family / teacher / student
+   / coach / ...). Components MUST read persona via `useAuth().sessionRole`
+   (which prioritises `domainRole`), NOT via `user.role`.
+
+8. **One PersonaShell per persona — DO NOT hand-roll FamilyShell.tsx +
+   TeacherShell.tsx + AdminShell.tsx + ...** The generic
+   `<PersonaShell persona="family" navItems={...} />` covers every
+   persona surface. Three near-identical shell files always drift and
+   forget to gate on `domainRole` — that's the F-10 / F-13 / F-15
+   outage class.
+
 ## What the worker still has to wire up
 
 1. Add `<Route path="/auth/magic/callback" element={<MagicLinkCallbackPage />} />`
    in `frontend/src/router.tsx`.
-2. Add `<ProtectedRoute>` around routes that need auth.
-3. Set `SMTP_HOST` etc. in `backend/.env` for real email delivery.
-4. Run `pnpm run seed:auth-users` to create the role-mapped admin emails.
+2. Mount persona-scoped routes under `<PersonaShell persona="..." navItems={...} />`
+   (which internally wraps in `<ProtectedRoute requiredDomainRole="...">`).
+   Mount RBAC-scoped admin routes under `<ProtectedRoute role="admin" />`.
+3. Add a `/unauthorized` route rendering the shipped `<UnauthorizedPage />`
+   (or restyle it to match the project's design system).
+4. Set `SMTP_HOST` etc. in `backend/.env` for real email delivery.
+5. Run `pnpm run seed:auth-users` to create the role-mapped admin emails
+   with their `domainRole` from `.blueprint/auth-decision.json`.

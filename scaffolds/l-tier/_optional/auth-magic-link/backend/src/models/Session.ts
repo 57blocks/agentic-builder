@@ -3,6 +3,14 @@
  *
  * One row per active login. `id` is the JWT's `sessionId` claim so we can
  * revoke tokens by deleting the row.
+ *
+ * Security note — there is NO `token` column on `sessions`. The JWT is
+ * verified cryptographically per-request via `AUTH_JWT_SECRET`, so the
+ * server doesn't need to store the raw token to validate it. Persisting
+ * it turns every DB backup into a session leak (same liability as
+ * storing plaintext passwords) with no revocation benefit beyond what
+ * deleting the row already gives us. Migration 100 drops the column on
+ * upgrade if it was present in an older deployment.
  */
 
 import {
@@ -20,7 +28,6 @@ export class Session extends Model<
 > {
   declare id: string;
   declare userId: string;
-  declare token: string;
   declare expiresAt: Date;
   declare lastActivityAt: CreationOptional<Date>;
   declare createdAt: CreationOptional<Date>;
@@ -37,11 +44,6 @@ Session.init(
       type: DataTypes.UUID,
       allowNull: false,
       field: "user_id",
-    },
-    token: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-      field: "token",
     },
     expiresAt: {
       type: DataTypes.DATE,

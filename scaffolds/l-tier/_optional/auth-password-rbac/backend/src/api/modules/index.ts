@@ -19,6 +19,13 @@
 import Router from "@koa/router";
 import { registerHealthRoutes } from "./health/health.routes";
 import { registerAuthRoutes } from "./auth/auth.routes";
+// Admin alias router — provides stable `/admin/<resource>` URLs the
+// frontend's `admin.ts` callers can hit regardless of how the backend
+// modules are organised. Wired here so every project gets the mount
+// point for free; handlers are added inside admin-aliases.routes.ts on
+// demand (and the `admin-route-coverage` self-heal lint flags any
+// missing alias).
+import { registerAdminAliasesRoutes } from "./admin-aliases/admin-aliases.routes";
 import "../../workers/sessionCleanupWorker";
 
 export function createApiRouter(): Router {
@@ -26,6 +33,7 @@ export function createApiRouter(): Router {
 
   registerHealthRoutes(apiRouter);
   registerAuthRoutes(apiRouter);
+  registerAdminAliasesRoutes(apiRouter);
 
   return apiRouter;
 }
