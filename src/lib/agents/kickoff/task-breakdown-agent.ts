@@ -102,16 +102,24 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
   - **EXCEPTION (HARD)**: If a backend feature is a **multi-step pipeline that integrates more than 3 external HTTP APIs / third-party services** (e.g. news aggregator hitting HackerNews + Google News + Jina + OpenAI + multiple market venues; a scanner combining Twitter API + Jina + OpenAI + Polymarket + HyperLiquid + Deribit), it MUST NOT be a single task. Split it into at least 3 tasks: (a) external-API client layer, (b) pipeline orchestration / business logic, (c) HTTP routes + SSE/queue wiring. See "External API complexity split (HARD RULE)" below for the full specification.
 - **Integration (contracts/client)** — Add an **early** task that defines/aligns API contracts + frontend API client in \`frontend/src/api\` with PRD IDs before page implementation.
   - HARD SPLIT RULE: If the task would create files in both \`backend/src\` and \`frontend/src\`, keep it limited to shared contract/type alignment plus client bindings. Do not also bundle root infra files like \`.env\` or \`docker-compose.yml\` into that same task.
-- **Frontend** — First create **one** app shell/layout task, then create **one task per page** (never merge multiple pages into one task).
-  - **MANDATORY PAGE INVENTORY (do this before writing any frontend task)**: Write out every page/view mentioned in the PRD as a numbered list. Count them. Then produce exactly that many page-level frontend tasks — one task per page, no more, no less. If a page has no task, add one. Never skip a page silently.
-  - **SELF-CHECK (run this before finalising the JSON array)**: For every frontend task you have written, verify ALL of the following are true:
-    1. The task title contains exactly **one** page name (no "and", no comma-separated list, no plural like "pages").
-    2. \`files.creates\` contains exactly **one** file under \`frontend/src/views/\` (the one page component).
-    3. The first frontend task in the list is the **app shell / layout** task (sidebar, topbar, navigation skeleton — no data fetching).
-    If any check fails, split the offending task before outputting.
-  - **HARD RULE — title**: A frontend task title that contains "and" between two page names (e.g. "Implement Dashboard **and** Settings pages") is **forbidden** — that is two tasks.
-  - **HARD RULE — plural**: A frontend task title that uses a **plural noun for pages** (e.g. "Implement enrollment **pages**", "Implement authentication **pages** and flows") is **forbidden** when it covers more than one view file — split until each task title refers to exactly one page.
-  - **HARD RULE — files**: A frontend task whose \`files.creates\` lists **two or more** \`frontend/src/views/*.tsx\` files is **forbidden** — split it so each task creates exactly one view file. Example violation: creating \`PrivateEnrollmentPage.tsx\`, \`GroupEnrollmentPage.tsx\`, and \`LectureCampEnrollmentPage.tsx\` in one task → must become 3 separate tasks.
+- **Frontend** — follow these four steps IN ORDER before writing a single frontend task:
+
+  **STEP 1 — PAGE INVENTORY**: List every distinct page in the PRD as a numbered list (e.g. 1. Login page, 2. Dashboard page, 3. Admin Approvals page, 4. Admin Settings page …). A "page" = a unique URL/route. Pages in the same role section (admin, teacher, family) are still separate pages — do NOT group them. Count the total: N pages.
+
+  **STEP 2 — TITLE FORMAT (ABSOLUTE RULE, zero exceptions)**:
+  Every frontend page task title MUST match this template exactly: **"Implement [SinglePageName] page"**
+  - ONE noun phrase, singular, no conjunctions.
+  - The word **"and"** may NEVER appear in a frontend page task title — not for "closely related" pages, not for admin pages, not for teacher pages, not for any reason.
+  - The word **"pages"** (plural) may NEVER appear unless the task is the app shell (which is not a page task). A plural signals multiple pages merged — split them.
+
+  **STEP 3 — COUNT CHECK**: After writing all frontend tasks, count your page-level tasks (excluding the app shell). That count MUST equal N from STEP 1. If it is less, you have illegally merged tasks — find each task with "and" or plural in the title and split it before continuing.
+
+  **STEP 4 — FILES CHECK**: Every page task's \`files.creates\` MUST contain exactly ONE file under \`frontend/src/views/\`. If any task lists two view files, split it immediately into two tasks.
+
+  **WHY MERGING BREAKS THE APP**: When a coding agent receives "Implement admin approvals and user management pages", it attempts to implement two full pages in a single pass and always leaves at least one incomplete or wired with placeholder data. Every merged task directly causes a broken page in the generated app — this is not a style issue, it is a correctness issue.
+
+  Additional frontend rules:
+  - The **first** frontend task MUST be the app shell / layout (sidebar, topbar, navigation skeleton, auth guards). It has no "and", no plural, and does not fetch data.
   - **SPLIT SIGNAL**: If a frontend task's \`estimatedHours\` would exceed **0.5h**, it covers too much — split it.
   - Coding tasks should build the shell, navigation UI, and pages, but **must not** do the final route registration in \`frontend/src/router.tsx\`; that closure is handled by \`integrationVerifyAndFix\`.
   - **MANDATORY for every page-level frontend task**: the task \`description\` and at least one \`subStep\` MUST explicitly list every backend API endpoint the page reads from or writes to (e.g. \`GET /api/projects\`, \`POST /api/projects\`, \`DELETE /api/projects/:id\`). Derive these from the PRD and the Backend Services task's file list. If no endpoint applies (e.g. a static layout task), state "no API calls required" explicitly.
@@ -119,14 +127,20 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
 - **Integration** — **Optional** single task: Vite proxy assumptions, Koa CORS/auth headers, frontend API client error handling, and env/config alignment between frontend and backend.
 - **Testing** — **Do not** add separate tasks with phase "Testing". Instead, every P0/P1 implementation task MUST include an embedded \`tddPlan.tests[]\` array so Test Writer / Runtime Executor can create RED/GREEN evidence for that task.
 
-**Bad for M / L — frontend (these are ALL violations):**
-- "Implement course enrollment **pages**" that creates \`PrivateEnrollmentPage.tsx\` + \`GroupEnrollmentPage.tsx\` + \`LectureCampEnrollmentPage.tsx\` → must be 3 tasks
-- "Implement authentication **pages** and flows" that creates \`AuthPage.tsx\` + \`AgreementSigningPage.tsx\` → must be 2 tasks
-- "Implement course catalog **and** teacher directory pages" → must be 2 tasks
-- "Implement payment **and** billing pages" → must be 2 tasks
-- "Implement Dashboard, Settings, and Profile pages" → must be 3 tasks
+**Bad for M / L — frontend (every line below is a violation that MUST be split):**
+- "Implement authentication **and** onboarding pages" → 2 tasks: "Implement Authentication page" + "Implement Onboarding page"
+- "Implement course catalog **and** teacher directory pages" → 2 tasks
+- "Implement group enrollment **and** lecture/camp pages" → 2 tasks
+- "Implement payment **and** billing pages" → 2 tasks
+- "Implement my lessons **and** cart management pages" → 2 tasks
+- "Implement family profile **and** messages pages" → 2 tasks
+- "Implement teacher schedule **and** work hours pages" → 2 tasks
+- "Implement teacher students **and** profile pages" → 2 tasks
+- "Implement admin approvals **and** user management pages" → 2 tasks
+- "Implement admin course **and** enrollment management pages" → 2 tasks
+- "Implement admin finance **and** settings pages" → 2 tasks
+- "Implement course enrollment **pages**" creating 3 view files → 3 tasks
 - Any frontend task where \`files.creates\` has 2+ entries under \`frontend/src/views/\`
-- Starting frontend tasks with a page task — the **first** frontend task must always be the app shell/layout
 
 **Bad for M / L — backend / other:**
 - a single "Backend Services" task that covers 8+ endpoints across 4+ resource types;
