@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { DocViewerUi } from "../../../_shared/doc-viewer-ui";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
@@ -18,13 +17,6 @@ export function VerifyUI(props: StepUIProps) {
   const isThisRunning = isRunning && currentStep === "verify";
   const content = isThisRunning ? streamingContent : (step?.content ?? "");
   const isDone = step?.status === "completed";
-
-  // Auto-trigger Verify generation if not yet generated and nothing is running
-  useEffect(() => {
-    if (!step && !isRunning) {
-      // Triggered by parent via auto-trigger mechanism
-    }
-  }, [step, isRunning]);
 
   return (
     <DocViewerUi

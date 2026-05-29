@@ -1,0 +1,44 @@
+%%{init: {'theme': 'neutral', 'themeVariables': {'fontSize': '16px'}}}%%
+flowchart LR
+    classDef prep fill:#ffffff,stroke:#469bff,stroke-width:3px,color:#202631,font-size:14px
+    classDef kick fill:#ffffff,stroke:#8370f2,stroke-width:3px,color:#202631,font-size:14px
+    classDef code fill:#ffffff,stroke:#3fc484,stroke-width:3px,color:#202631,font-size:14px
+    classDef prev fill:#ffffff,stroke:#ffb700,stroke-width:3px,color:#202631,font-size:14px
+    classDef deploy fill:#ffffff,stroke:#ff4343,stroke-width:3px,color:#202631,font-size:14px
+
+    subgraph Prep["STAGE 01 - Preparation"]
+        direction TB
+        P1["Input - Describe your idea"] --> P2["Intent - AI clarifies requirements"]
+        P2 --> P3["PRD - Product Requirements Document"]
+        P3 --> P4["Design Spec and Mockups"]
+        P3 --> P5["Tech Docs and QA Plan (M and L projects only)"]
+    end
+
+    subgraph Kick["STAGE 02 - Kick-off"]
+        direction TB
+        K1["Overview - Project summary dashboard"] --> K2["Task Breakdown - Executable task list"]
+    end
+
+    subgraph Coding["STAGE 03 - Coding"]
+        direction TB
+        C1["Architect Agent - System design"] --> C2["Backend and Frontend Agents - Implementation"]
+        C2 --> C3["Test Agent - Automated testing"]
+    end
+
+    subgraph Preview["STAGE 04 - Preview"]
+        direction TB
+        V1["Dev Server - Live running instance"] --> V2["E2E Testing - End-to-end verification"]
+    end
+
+    subgraph Ship["STAGE 05 - Deploy"]
+        direction TB
+        D1["Deploy - One-click to production"]
+    end
+
+    Prep --> Kick --> Coding --> Preview --> Ship
+
+    Prep:::prep
+    Kick:::kick
+    Coding:::code
+    Preview:::prev
+    Ship:::deploy

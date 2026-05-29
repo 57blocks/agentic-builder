@@ -169,12 +169,15 @@ function buildFlowGraph(
 
 function calcProgress(tasks: CodingTask[]): number {
   if (tasks.length === 0) return 0;
-  const done = tasks.filter(
-    (t) =>
-      t.codingStatus === "completed" ||
-      t.codingStatus === "completed_with_warnings",
-  ).length;
-  return Math.round((done / tasks.length) * 100);
+  let score = 0;
+  for (const t of tasks) {
+    if (t.codingStatus === "completed" || t.codingStatus === "completed_with_warnings") {
+      score += 1;
+    } else if (t.codingStatus === "in_progress") {
+      score += 0.5;
+    }
+  }
+  return Math.round((score / tasks.length) * 100);
 }
 
 function useMergedTasks(
@@ -219,7 +222,14 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isIdle = codingState.status === "idle";
+  const [isRerunning, setIsRerunning] = useState(false);
+
+  // Clear rerunning state once the new session actually starts
+  useEffect(() => {
+    if (codingState.status === "running") setIsRerunning(false);
+  }, [codingState.status]);
+
+  const isIdle = codingState.status === "idle" && !isRerunning;
   const isRunning = codingState.status === "running";
   const isDone = codingState.status === "completed";
   const isFailed = codingState.status === "failed";
@@ -364,6 +374,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         `Already-saved kickoff artifacts (PRD / TRD / task breakdown / env / auth decision) are NOT touched.`,
     );
     if (!ok) return;
+    setIsRerunning(true);
     rerunCoding(
       runId,
       kickoffTasks,
@@ -406,8 +417,19 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     setEdges(e);
   }, [mergedTasks, selectedTaskId, setNodes, setEdges]);
 
-  // ── Timer ──────────────────────────────────────────────────────────────────
-  const { formatted: elapsed } = useElapsedTimer(isRunning);
+  // ── Timer (seed from earliest startedAt on return visits) ──────────────────
+  const initialElapsed = useMemo(() => {
+    if (!isReturnVisit) return 0;
+    const startedAt = codingState.tasks
+      .map((t) => t.startedAt)
+      .filter(Boolean)
+      .sort()
+      .at(0);
+    return startedAt
+      ? Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+      : 0;
+  }, []); // Run once on mount — depends on isReturnVisit which is stable
+  const { formatted: elapsed } = useElapsedTimer(isRunning, initialElapsed);
 
   // ── Progress ───────────────────────────────────────────────────────────────
   const progress = calcProgress(codingState.tasks);
@@ -566,7 +588,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
             </select>
             <button
               onClick={handleStart}
-              className="flex items-center gap-2 px-5 py-2 bg-[#712ae2] hover:bg-[#5f24c2] text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+              className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
             >
               <Play size={13} />
               Start Coding
@@ -591,7 +613,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {(isDone || isFailed) && failedTaskIds.length > 0 && (
           <button
             onClick={handleRetryAllFailed}
-            className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
           >
             <RotateCcw size={13} />
             Retry Failed ({failedTaskIds.length})
@@ -615,7 +637,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {isDone && failedTaskIds.length === 0 && (
           <button
             onClick={() => onNavigate("serve")}
-            className="flex items-center gap-2 px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-bold rounded-lg transition-colors"
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-colors shadow-sm"
           >
             Continue to Preview →
           </button>
@@ -671,7 +693,6 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                 <TaskDetailPanel
                   task={selectedTask}
                   allAgentLogs={allAgentLogs}
-                  supervisorLogs={codingState.supervisorLogs}
                   onClose={() => setSelectedTaskId(null)}
                   onRetry={!isRunning ? handleRetryTask : undefined}
                 />

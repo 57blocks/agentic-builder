@@ -4,7 +4,9 @@ import {
   type WebhookCallResult,
 } from "./kickoff-webhooks";
 import { saveKickoffRepoMetadata } from "./push-kickoff-repo";
-import { createKickoffDatabase } from "./kickoff-database";
+import fs from "fs/promises";
+import path from "path";
+import { provisionInfra } from "./kickoff-infra";
 
 const API_TIMEOUT_MS = 45_000;
 
@@ -296,32 +298,48 @@ export async function runKickoffIntegrations(params: {
     metadata.git = { skipped: true };
   }
 
-  // Provision a per-app database in the shared PostgreSQL instance
-  const sharedPgConn = process.env.SHARED_PG_CONNECTION_STRING?.trim();
-  if (sharedPgConn) {
-    const dbAppName = slugForGithubRepo(params.featureBrief, params.runId);
-    const dbResult = await createKickoffDatabase({
+  // Dokploy-based infra provisioning (Postgres + Redis per app).
+  // Writes `.blueprint/kickoff-infra.json` for the coding + deploy phases.
+  const dokployConfigured =
+    !!process.env.DOKPLOY_URL?.trim() &&
+    !!process.env.DOKPLOY_TOKEN?.trim();
+  if (dokployConfigured) {
+    const docsRoot = params.codeOutputRoot;
+    const readDoc = async (name: string) => {
+      try {
+        return await fs.readFile(path.join(docsRoot, name), "utf-8");
+      } catch {
+        return "";
+      }
+    };
+    const designDocs = [
+      await readDoc("TRD.md"),
+      await readDoc("SystemDesign.md"),
+      await readDoc("ImplementationGuide.md"),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const infraResult = await provisionInfra({
       projectRoot: process.cwd(),
-      appName: dbAppName,
-      connectionString: sharedPgConn,
+      appName: slugForGithubRepo(params.featureBrief, params.runId),
+      designDocs,
     });
-    metadata.database = dbResult.ok
-      ? { ok: true, appName: dbAppName }
-      : { ok: false, error: dbResult.error };
-    lines.push("### Database (shared PostgreSQL)");
-    if (dbResult.ok) {
-      lines.push(`- Provisioned database \`${dbAppName}\` (connection saved to \`.blueprint/kickoff-database.json\`)`);
-    } else {
-      lines.push(`- Failed: ${dbResult.error ?? "unknown"}`);
-    }
-    lines.push("");
-  } else {
-    lines.push(
-      "### Database",
-      "_Skipped — set `SHARED_PG_CONNECTION_STRING` to provision a per-app database._",
-      "",
-    );
-    metadata.database = { skipped: true };
+    metadata.infra = infraResult.skipped
+      ? { skipped: true, reason: infraResult.skipReason }
+      : {
+          ok: infraResult.ok,
+          error: infraResult.error,
+          dokployProjectId: infraResult.metadata?.dokployProjectId,
+          appName: infraResult.metadata?.appName,
+          services:
+            infraResult.metadata?.services?.map((s) => ({
+              kind: s.kind,
+              appName: s.appName,
+              externalPort: s.externalPort,
+              publicUrl: s.publicUrl,
+            })) ?? [],
+        };
+    lines.push(...infraResult.markdownLines);
   }
 
   const jiraEnabled = process.env.PROJECT_KICKOFF_JIRA_ENABLED === "true";

@@ -1,36 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Paperclip, Zap, ArrowRight, Info } from "lucide-react";
+import { Paperclip, ArrowRight, Info } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
-import { STAGE_ORDER, STAGE_META } from "@/store/stage-store";
 import ImportPrdDialog from "@/components/ImportPrdDialog";
 import type { StepUIProps } from "../../../_shared/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-
-function StageProgressBar() {
-  return (
-    <div className="w-full max-w-180 grid grid-cols-4 gap-6">
-      {STAGE_ORDER.map((stageId, i) => {
-        const meta = STAGE_META[stageId];
-        const isFirst = i === 0;
-        return (
-          <div key={stageId} className="relative flex flex-col items-start">
-            <div className={`absolute -left-1 top-0 bottom-0 w-0.75 rounded-xl ${isFirst ? "bg-[#712ae2] shadow-[0px_0px_8px_0px_rgba(113,42,226,0.5)]" : "bg-[#e2e8f0]"}`} />
-            <div className={`flex flex-col gap-[3.5px] pl-4 ${!isFirst ? "opacity-40" : ""}`}>
-              <span className={`text-[10px] font-bold uppercase leading-3.75 ${isFirst ? "text-[#712ae2]" : "text-[#94a3b8]"}`}>STAGE {meta.id}</span>
-              <span className="text-sm font-bold text-[#0b1c30] leading-5">{meta.name}</span>
-              <p className="text-xs text-[#64748b] leading-4">{meta.desc}</p>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 export function InitialUI(props: StepUIProps) {
   const [prompt, setPrompt] = useState("");
@@ -72,7 +50,7 @@ export function InitialUI(props: StepUIProps) {
           </Card>
           <Card className="max-w-180 w-full shadow-sm bg-white/70">
             <CardContent className="flex items-center gap-3 px-5 py-3">
-              <Info className="size-4 text-[#712ae2] shrink-0" />
+              <Info className="size-4 text-indigo-600 shrink-0" />
               <p className="text-sm text-[#7c839b] leading-5">Upload existing project docs to accelerate the <strong className="font-semibold text-[#475569]">Preparation</strong> phase.</p>
             </CardContent>
           </Card>

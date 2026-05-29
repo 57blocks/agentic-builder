@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" fill="none">
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#f0f0f0"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="pipe-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#469bff"/>
+      <stop offset="100%" stop-color="#2b7bf4"/>
+    </linearGradient>
+    <linearGradient id="pod-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#469bff"/>
+      <stop offset="100%" stop-color="#2b7bf4"/>
+    </linearGradient>
+    <linearGradient id="node-grad-1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <linearGradient id="node-grad-2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <linearGradient id="node-grad-3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <linearGradient id="node-grad-4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <linearGradient id="node-grad-5" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <filter id="shadow-sm">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#202631" flood-opacity="0.06"/>
+    </filter>
+    <filter id="shadow-lg">
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#202631" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="500" rx="20" fill="url(#bg-grad)"/>
+
+  <!-- Grid pattern overlay -->
+  <g opacity="0.04">
+    <line x1="0" y1="100" x2="1200" y2="100" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="0" y1="200" x2="1200" y2="200" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="0" y1="300" x2="1200" y2="300" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="0" y1="400" x2="1200" y2="400" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="200" y1="0" x2="200" y2="500" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="400" y1="0" x2="400" y2="500" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="600" y1="0" x2="600" y2="500" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="800" y1="0" x2="800" y2="500" stroke="#d7d7d7" stroke-width="1"/>
+    <line x1="1000" y1="0" x2="1000" y2="500" stroke="#d7d7d7" stroke-width="1"/>
+  </g>
+
+  <!-- Title -->
+  <text x="600" y="50" text-anchor="middle" fill="#202631" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700">Agentic Builder Pod</text>
+  <text x="600" y="72" text-anchor="middle" fill="#469bff" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" letter-spacing="3">AI-NATIVE SOFTWARE DELIVERY PIPELINE</text>
+
+  <!-- ── Pipeline connection arrows (horizontal) ── -->
+  <g stroke="#d7d7d7" stroke-width="2.5" fill="none">
+    <!-- Stage 1→2 -->
+    <line x1="195" y1="240" x2="240" y2="240"/>
+    <polygon points="235,235 245,240 235,245" fill="#d7d7d7" stroke="none"/>
+    <!-- Stage 2→3 -->
+    <line x1="425" y1="240" x2="470" y2="240"/>
+    <polygon points="465,235 475,240 465,245" fill="#d7d7d7" stroke="none"/>
+    <!-- Stage 3→4 -->
+    <line x1="655" y1="240" x2="700" y2="240"/>
+    <polygon points="695,235 705,240 695,245" fill="#d7d7d7" stroke="none"/>
+    <!-- Stage 4→5 -->
+    <line x1="885" y1="240" x2="930" y2="240"/>
+    <polygon points="925,235 935,240 925,245" fill="#d7d7d7" stroke="none"/>
+  </g>
+
+  <!-- ── Stage Nodes ── -->
+
+  <!-- Stage 1: Preparation → Primary Blue -->
+  <g filter="url(#shadow-sm)">
+    <rect x="30" y="160" width="165" height="160" rx="16" fill="url(#node-grad-1)" stroke="#d7d7d7" stroke-width="1.5"/>
+    <rect x="30" y="160" width="165" height="40" rx="16" fill="#469bff"/>
+    <rect x="30" y="184" width="165" height="16" fill="#469bff"/>
+    <text x="112" y="185" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="11" font-weight="700">STAGE 01</text>
+    <text x="112" y="218" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Preparation</text>
+    <text x="112" y="238" text-anchor="middle" fill="#469bff" font-family="system-ui, sans-serif" font-size="10" font-weight="500">Idea → Blueprint</text>
+    <line x1="50" y1="252" x2="175" y2="252" stroke="#eaeaea" stroke-width="1"/>
+    <text x="112" y="270" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Input · Intent · PRD</text>
+    <text x="112" y="286" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Design · Tech Docs</text>
+    <text x="112" y="302" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="10">6 AI agents</text>
+  </g>
+
+  <!-- Stage 2: Kick-off → Semantic Purple -->
+  <g filter="url(#shadow-sm)">
+    <rect x="245" y="160" width="180" height="160" rx="16" fill="url(#node-grad-2)" stroke="#d7d7d7" stroke-width="1.5"/>
+    <rect x="245" y="160" width="180" height="40" rx="16" fill="#8370f2"/>
+    <rect x="245" y="184" width="180" height="16" fill="#8370f2"/>
+    <text x="335" y="185" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="11" font-weight="700">STAGE 02</text>
+    <text x="335" y="218" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Kick-off</text>
+    <text x="335" y="238" text-anchor="middle" fill="#8370f2" font-family="system-ui, sans-serif" font-size="10" font-weight="500">Plan → Execute</text>
+    <line x1="265" y1="252" x2="405" y2="252" stroke="#eaeaea" stroke-width="1"/>
+    <text x="335" y="270" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Summary · Task Breakdown</text>
+    <text x="335" y="286" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="10">2 AI agents</text>
+  </g>
+
+  <!-- Stage 3: Coding → Semantic Success -->
+  <g filter="url(#shadow-lg)">
+    <rect x="480" y="145" width="175" height="190" rx="16" fill="url(#node-grad-3)" stroke="#3fc484" stroke-width="2"/>
+    <rect x="480" y="145" width="175" height="42" rx="16" fill="#3fc484"/>
+    <rect x="480" y="171" width="175" height="16" fill="#3fc484"/>
+    <text x="567" y="172" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="11" font-weight="700">STAGE 03</text>
+    <text x="567" y="206" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Coding</text>
+    <text x="567" y="226" text-anchor="middle" fill="#3fc484" font-family="system-ui, sans-serif" font-size="10" font-weight="500">Build → Test</text>
+    <line x1="500" y1="240" x2="635" y2="240" stroke="#eaeaea" stroke-width="1"/>
+    <text x="567" y="258" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Architect Agent</text>
+    <text x="567" y="275" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Backend Agent</text>
+    <text x="567" y="292" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Frontend Agent</text>
+    <text x="567" y="309" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Test Agent</text>
+    <text x="567" y="326" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="10">4 AI agents in parallel</text>
+  </g>
+
+  <!-- Stage 4: Preview → Semantic Warning -->
+  <g filter="url(#shadow-sm)">
+    <rect x="710" y="160" width="175" height="160" rx="16" fill="url(#node-grad-4)" stroke="#d7d7d7" stroke-width="1.5"/>
+    <rect x="710" y="160" width="175" height="40" rx="16" fill="#ffb700"/>
+    <rect x="710" y="184" width="175" height="16" fill="#ffb700"/>
+    <text x="797" y="185" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="11" font-weight="700">STAGE 04</text>
+    <text x="797" y="218" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Preview</text>
+    <text x="797" y="238" text-anchor="middle" fill="#ff9d2a" font-family="system-ui, sans-serif" font-size="10" font-weight="500">Verify → Validate</text>
+    <line x1="730" y1="252" x2="865" y2="252" stroke="#eaeaea" stroke-width="1"/>
+    <text x="797" y="270" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Dev Server</text>
+    <text x="797" y="286" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">E2E Testing</text>
+    <text x="797" y="302" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="10">2 AI agents</text>
+  </g>
+
+  <!-- Stage 5: Deploy → Semantic Error -->
+  <g filter="url(#shadow-sm)">
+    <rect x="940" y="160" width="165" height="160" rx="16" fill="url(#node-grad-5)" stroke="#d7d7d7" stroke-width="1.5"/>
+    <rect x="940" y="160" width="165" height="40" rx="16" fill="#ff4343"/>
+    <rect x="940" y="184" width="165" height="16" fill="#ff4343"/>
+    <text x="1022" y="185" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="11" font-weight="700">STAGE 05</text>
+    <text x="1022" y="218" text-anchor="middle" fill="#202631" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Deploy</text>
+    <text x="1022" y="238" text-anchor="middle" fill="#ff4343" font-family="system-ui, sans-serif" font-size="10" font-weight="500">Ship → Go Live</text>
+    <line x1="960" y1="252" x2="1085" y2="252" stroke="#eaeaea" stroke-width="1"/>
+    <text x="1022" y="270" text-anchor="middle" fill="#525559" font-family="system-ui, sans-serif" font-size="11">Production Deploy</text>
+    <text x="1022" y="302" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="10">1 AI agent</text>
+  </g>
+
+  <!-- ── Pod label below pipeline ── -->
+  <g filter="url(#shadow-sm)">
+    <rect x="350" y="370" width="500" height="48" rx="24" fill="url(#pod-grad)"/>
+    <text x="600" y="400" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="18" font-weight="700">15 AI Agents · 5 Stages · Zero Handoffs</text>
+  </g>
+
+  <!-- Bottom tagline -->
+  <text x="600" y="455" text-anchor="middle" fill="#94979b" font-family="system-ui, sans-serif" font-size="13">From a single idea to a deployed application — fully autonomous</text>
+
+  <!-- Decorative dots -->
+  <circle cx="30" cy="30" r="3" fill="#469bff" opacity="0.12"/>
+  <circle cx="1170" cy="30" r="3" fill="#469bff" opacity="0.12"/>
+  <circle cx="30" cy="470" r="3" fill="#469bff" opacity="0.12"/>
+  <circle cx="1170" cy="470" r="3" fill="#469bff" opacity="0.12"/>
+</svg>

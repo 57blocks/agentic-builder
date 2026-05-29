@@ -17,7 +17,7 @@ export function ServeUI(props: StepUIProps) {
             <h2 className="text-xl font-bold text-[#0b1c30]">Dev Server</h2>
             <p className="text-[13px] text-[#94a3b8] mt-0.5">Start the development server and preview the generated application.</p>
           </div>
-          <Button variant="outline" onClick={() => props.onNavigate("e2e")} className="gap-2 text-[#712ae2] border-[rgba(113,42,226,0.3)] hover:bg-[rgba(113,42,226,0.05)]">
+          <Button variant="outline" onClick={() => props.onNavigate("e2e")} className="gap-2 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
             <FlaskConical size={14} /> Run E2E Tests
           </Button>
         </div>
