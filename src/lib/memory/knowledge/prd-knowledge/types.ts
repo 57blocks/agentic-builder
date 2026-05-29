@@ -24,6 +24,23 @@ export interface PrdKnowledgeRecord {
 
 export const PRD_KNOWLEDGE_STATUSES = ["pending", "active", "deprecated"] as const;
 
+/**
+ * Official industry enum used by both the LLM extractor (see extract.ts prompt)
+ * and the filter UI. Keep these two in sync — extract.ts must list all of
+ * these as the allowed `industry` values.
+ */
+export const KNOWN_PRD_INDUSTRIES = [
+  "saas",
+  "fintech",
+  "ai-tools",
+  "ecommerce",
+  "devtools",
+  "social",
+  "generic",
+] as const;
+
+export type KnownPrdIndustry = (typeof KNOWN_PRD_INDUSTRIES)[number];
+
 export function buildPrdKnowledgeTags(input: {
   industry: string;
   productType: string;
