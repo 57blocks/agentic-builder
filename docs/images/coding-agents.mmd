@@ -1,0 +1,22 @@
+%%{init: {'theme': 'neutral', 'themeVariables': {'fontSize': '16px'}}}%%
+flowchart TB
+    classDef arch fill:#ffffff,stroke:#469bff,stroke-width:3px,font-size:15px
+    classDef impl fill:#ffffff,stroke:#3fc484,stroke-width:2px,font-size:15px
+    classDef test fill:#ffffff,stroke:#ffb700,stroke-width:2px,font-size:15px
+
+    subgraph CodingAgents["Coding Agent Team - Four Specialized Roles"]
+        A["Architect Agent\nSystem design, tech stack, project structure"]
+        B["Backend Agent\nAPIs, database schema, business logic"]
+        F["Frontend Agent\nUI components, pages, routing, styling"]
+        T["Test Agent\nUnit, integration, end-to-end tests"]
+    end
+
+    A --> B
+    A --> F
+    B --> T
+    F --> T
+
+    A:::arch
+    B:::impl
+    F:::impl
+    T:::test

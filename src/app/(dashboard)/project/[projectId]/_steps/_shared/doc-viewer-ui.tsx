@@ -7,10 +7,10 @@
  * Ported from _DocViewerSubStage.tsx — uses new step-navigation store.
  */
 
-import { useState } from "react";
+import React from "react";
 import {
-  Share2, MoreVertical, Download, ArrowRight, Sparkles,
-  Loader2, Send, CheckCircle2,
+  Download, ArrowRight,
+  Loader2, CheckCircle2,
 } from "lucide-react";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,6 @@ export function DocViewerUi({
   markdownVariant = "default",
   onNavigate,
 }: DocViewerUiProps) {
-  const [editInput, setEditInput] = useState("");
   const goToStep = onNavigate ?? useStepNavigationStore((s) => s.goToStep);
 
   const statusLabel = isRunning ? generatingLabel : isDone ? "DRAFT V1.0" : "PENDING";
@@ -92,7 +91,7 @@ export function DocViewerUi({
                 className={[
                   "relative flex items-center gap-1.5 py-4 text-sm font-semibold transition-colors",
                   isActive
-                    ? "text-[#712ae2] border-b-2 border-[#712ae2]"
+                    ? "text-indigo-600 border-b-2 border-indigo-600"
                     : "text-[#94a3b8] hover:text-[#64748b]",
                 ].join(" ")}
               >
@@ -106,7 +105,7 @@ export function DocViewerUi({
           variant="outline"
           size="sm"
           onClick={() => goToStep("summary")}
-          className="text-[#712ae2] border-[rgba(113,42,226,0.2)] hover:bg-[rgba(113,42,226,0.05)] hover:text-[#712ae2] text-xs font-bold"
+          className="text-indigo-600 border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 text-xs font-bold"
         >
           Proceed to Kick-off
           <ArrowRight className="size-3" />
@@ -147,12 +146,6 @@ export function DocViewerUi({
                   )}
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-[#94a3b8]">
-                    <Share2 className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-[#94a3b8]">
-                    <MoreVertical className="size-4" />
-                  </Button>
                 </div>
               </div>
 
@@ -163,7 +156,7 @@ export function DocViewerUi({
                     <span className="text-sm">Waiting for pipeline to start…</span>
                   </div>
                 ) : isRunning && !content ? (
-                  <div className="flex items-center gap-2 text-[#712ae2] text-sm">
+                  <div className="flex items-center gap-2 text-indigo-600 text-sm">
                     <Loader2 className="size-4 animate-spin" /> Generating…
                   </div>
                 ) : (
@@ -182,24 +175,6 @@ export function DocViewerUi({
       {/* ── Footer ── */}
       <Separator />
       <div className="shrink-0 bg-white/90 backdrop-blur-sm flex items-center justify-between px-8 py-3 gap-6">
-        {/* AI Edit Input */}
-        <div className="flex-1 min-w-0 relative">
-          <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-[#94a3b8] pointer-events-none" />
-          <input
-            value={editInput}
-            onChange={(e) => setEditInput(e.target.value)}
-            placeholder={editPlaceholder}
-            className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-md pl-9 pr-10 py-2.5 text-sm text-[#0f172a] placeholder:text-[#6b7280] focus:outline-none focus:ring-1 focus:ring-[#712ae2] focus:border-[#712ae2] transition-colors"
-          />
-          {editInput && (
-            <button
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#712ae2] hover:opacity-70 transition-opacity"
-              title="Send"
-            >
-              <Send className="size-3.5" />
-            </button>
-          )}
-        </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5 shrink-0">
@@ -218,7 +193,7 @@ export function DocViewerUi({
           <Button
             size="sm"
             onClick={onConfirm}
-            className="bg-[#712ae2] hover:bg-[#5b22b8] font-bold"
+            className="bg-indigo-600 hover:bg-indigo-500 font-bold"
           >
             {confirmLabel}
             <ArrowRight className="size-3.5" />

@@ -77,7 +77,7 @@ export function QaUI(props: StepUIProps) {
             <div className="bg-[rgba(248,250,252,0.5)] border-b border-[#f1f5f9] px-8 pt-8 pb-[33px] flex items-start justify-between">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-[rgba(113,42,226,0.1)] text-[#712ae2] text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
+                  <span className="bg-indigo-50 text-indigo-600 text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
                     {isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}
                   </span>
                   {isDone && (
@@ -119,7 +119,7 @@ export function QaUI(props: StepUIProps) {
                   <span className="text-[13px]">Waiting for pipeline to start…</span>
                 </div>
               ) : isThisRunning && !content ? (
-                <div className="flex items-center gap-2 text-[#712ae2] text-[13px]">
+                <div className="flex items-center gap-2 text-indigo-600 text-[13px]">
                   <SpinnerIcon /> Generating QA Plan…
                 </div>
               ) : (

@@ -39,7 +39,6 @@ function statusBadge(status: string) {
 
 export function AgentLogUi({ role, title, description, nextStep, onNavigate }: AgentLogUiProps) {
   const agents       = useCodingStore((s) => s.agents);
-  const tasks        = useCodingStore((s) => s.tasks);
   const goToStep     = onNavigate ?? useStepNavigationStore((s) => s.goToStep);
 
   const agent       = agents.find((a) => a.role === role);
@@ -118,7 +117,7 @@ export function AgentLogUi({ role, title, description, nextStep, onNavigate }: A
           <Button
             variant="outline"
             onClick={() => goToStep(nextStep)}
-            className="gap-2 text-[#712ae2] border-[rgba(113,42,226,0.3)] hover:bg-[rgba(113,42,226,0.05)]"
+            className="gap-2 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
           >
             Next <ArrowRight size={14} />
           </Button>

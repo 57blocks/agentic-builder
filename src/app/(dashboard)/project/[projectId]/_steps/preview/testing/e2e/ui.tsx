@@ -41,7 +41,7 @@ export function E2eUI(props: StepUIProps) {
           <div className="flex flex-col items-center justify-center h-40 gap-4 text-center">
             <div className="w-10 h-10 rounded-full border-2 border-[#e2e8f0] flex items-center justify-center"><Clock size={16} className="text-[#cbd5e1]" /></div>
             <p className="text-[14px] text-[#94a3b8] max-w-xs">E2E tests haven't run yet. Start the dev server and trigger the test run.</p>
-            <Button variant="ghost" size="sm" onClick={() => props.onNavigate("serve")} className="text-[#712ae2]">← Back to Dev Server</Button>
+            <Button variant="ghost" size="sm" onClick={() => props.onNavigate("serve")} className="text-indigo-600">← Back to Dev Server</Button>
           </div>
         )}
         {e2eVerify?.errors && (

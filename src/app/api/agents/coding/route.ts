@@ -23,6 +23,8 @@ import {
 } from "@/lib/pipeline/scaffold-spec";
 import {
   formatGeneratedCodeDotEnv,
+  upsertRedisUrlEnv,
+  resolveBlueprintGeneratedRedisUrl,
   resolveBlueprintGeneratedDatabaseUrl,
   upsertDatabaseUrlEnv,
   upsertJwtEnvVars,
@@ -34,6 +36,14 @@ import {
 } from "@/lib/pipeline/generated-code-env";
 import { normalizeProjectTier } from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
+import { InfraAgent } from "@/lib/agents/infra/infra-agent";
+import { applyInfra } from "@/lib/pipeline/infra/apply";
+import { buildInfraSpecFromKickoff } from "@/lib/pipeline/infra/from-kickoff";
+import {
+  readKickoffInfraMetadata,
+  databaseUrlFrom,
+  redisUrlFrom,
+} from "@/lib/pipeline/kickoff-infra";
 import {
   readResourceRequirements,
   upsertResourceEnvVars,
@@ -920,6 +930,105 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ── Infra step (deployment-ready Dockerfile + docker-compose) ───────────
+  // Preferred path: when `.blueprint/kickoff-infra.json` exists (Dokploy
+  // already provisioned per-app Postgres/Redis), derive an InfraSpec from
+  // the scaffold layout + provisioned URLs and render compose that *connects*
+  // to those services on `dokploy-network` instead of self-starting them.
+  // The scaffold's local-dev compose is preserved as `docker-compose.local.yml`.
+  //
+  // Failure is non-fatal: we fall back to the scaffold defaults.
+  let appliedKickoffInfra = false;
+  try {
+    const kickoffInfraMeta = await readKickoffInfraMetadata(process.cwd());
+    if (kickoffInfraMeta && kickoffInfraMeta.services.length > 0) {
+      const { spec, provisioned } = await buildInfraSpecFromKickoff(
+        outputRoot,
+        tier as "S" | "M" | "L",
+        kickoffInfraMeta,
+      );
+      const applied = await applyInfra(
+        outputRoot,
+        spec,
+        path.join(outputRoot, ".blueprint"),
+        { provisioned, preserveLocalCompose: true },
+      );
+      appliedKickoffInfra = true;
+      console.log(
+        `[CodingAPI] Kickoff-infra rendered: tier=${tier} provisioned=${[
+          provisioned.postgres && "postgres",
+          provisioned.redis && "redis",
+        ]
+          .filter(Boolean)
+          .join("+") || "none"} → wrote ${applied.writtenFiles.join(", ")}${
+          applied.preservedComposePath
+            ? `; preserved ${path.basename(applied.preservedComposePath)}`
+            : ""
+        }`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[CodingAPI] Kickoff-infra render failed (non-fatal, keeping scaffold defaults): ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+
+  // ── Legacy LLM-driven infra path ───────────────────────────────────────
+  // Only runs when no kickoff-infra metadata existed (e.g. Dokploy not
+  // configured). Gated behind INFRA_AGENT_ENABLED for staged rollout.
+  if (
+    !appliedKickoffInfra &&
+    (process.env.INFRA_AGENT_ENABLED === "true" ||
+      process.env.INFRA_AGENT_ENABLED === "1")
+  ) {
+    try {
+      const trdForInfra = await fs
+        .readFile(path.join(outputRoot, "TRD.md"), "utf-8")
+        .catch(() => "");
+      const sysDesignForInfra = await fs
+        .readFile(path.join(outputRoot, "SystemDesign.md"), "utf-8")
+        .catch(() => "");
+      if (trdForInfra.trim() && sysDesignForInfra.trim()) {
+        const infraAgent = new InfraAgent();
+        const infraResult = await infraAgent.generateInfraSpec({
+          tier,
+          trdContent: trdForInfra,
+          sysDesignContent: sysDesignForInfra,
+        });
+        if (infraResult.parsed.ok && infraResult.spec) {
+          const applied = await applyInfra(
+            outputRoot,
+            infraResult.spec,
+            path.join(outputRoot, ".blueprint"),
+          );
+          console.log(
+            `[CodingAPI] InfraAgent applied: tier=${tier} services=${infraResult.spec.services
+              .map((s) => s.name)
+              .join(",")} → wrote ${applied.writtenFiles.join(", ")}`,
+          );
+        } else {
+          console.warn(
+            `[CodingAPI] InfraAgent produced invalid spec, keeping scaffold defaults. Errors: ${(
+              infraResult.parsed.errors ?? []
+            ).join("; ")}`,
+          );
+        }
+      } else {
+        console.log(
+          "[CodingAPI] InfraAgent skipped: TRD.md / SystemDesign.md missing or empty.",
+        );
+      }
+    } catch (e) {
+      console.warn(
+        `[CodingAPI] InfraAgent failed (non-fatal, keeping scaffold defaults): ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }
+
   // Replicate the TRD-confirmed shared schema (.blueprint/shared-schema.ts)
   // into the per-tier consumer roots so workers see a single source of
   // truth for cross-boundary types. No-op when the TRD step did not emit
@@ -998,10 +1107,24 @@ export async function POST(request: NextRequest) {
     const existingBackendEnv = await fs
       .readFile(backendEnvPath, "utf-8")
       .catch(() => "");
-    const withDbUrl = resolvedDbUrl
-      ? upsertDatabaseUrlEnv(existingBackendEnv, resolvedDbUrl)
+    // Read kickoff-infra.json (Dokploy-managed per-app PG+Redis) for the
+    // backend's DATABASE_URL. Falls back to explicit override env / per-request
+    // body when infra metadata is missing.
+    const kickoffInfra = await readKickoffInfraMetadata(process.cwd()).catch(
+      () => null,
+    );
+    const dbFromInfra = databaseUrlFrom(kickoffInfra);
+    const effectiveDbUrl = resolvedDbUrl ?? dbFromInfra;
+    const withDbUrl = effectiveDbUrl
+      ? upsertDatabaseUrlEnv(existingBackendEnv, effectiveDbUrl)
       : existingBackendEnv;
-    const withJwt = upsertJwtEnvVars(withDbUrl);
+    const redisOverride = resolveBlueprintGeneratedRedisUrl();
+    const redisFromInfra = redisUrlFrom(kickoffInfra);
+    const redisUrlForEnv = redisOverride ?? redisFromInfra;
+    const withRedisUrl = redisUrlForEnv
+      ? upsertRedisUrlEnv(withDbUrl, redisUrlForEnv)
+      : withDbUrl;
+    const withJwt = upsertJwtEnvVars(withRedisUrl);
     const withPort = upsertBackendPortEnv(withJwt);
     const withResources = upsertResourceEnvVars(withPort, backendResources);
     const privyMirror =

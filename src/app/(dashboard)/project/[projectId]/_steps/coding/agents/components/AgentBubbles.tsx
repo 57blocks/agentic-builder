@@ -17,7 +17,7 @@ export function AgentBubbles({ agents }: AgentBubblesProps) {
   if (agents.length === 0) {
     return (
       <div className="flex items-center gap-1">
-        {["A", "B", "F"].map((l) => (
+        {["A", "B", "F", "T"].map((l) => (
           <div
             key={l}
             className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400"

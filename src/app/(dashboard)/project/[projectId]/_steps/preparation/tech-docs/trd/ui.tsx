@@ -116,16 +116,14 @@ export function TrdUI(props: StepUIProps) {
 
   // Auto-start: when both PRD and design spec are available and TRD hasn't been generated yet
   useEffect(() => {
-    console.log("[TrdUI] auto-start effect running", { isHydrated, autoStarted: autoStartedRef.current, isRunning, hasContent: !!step?.content, hasPrd: !!steps.prd?.content, hasDesign: !!steps.design?.content, prdStatus: steps.prd?.status, designStatus: steps.design?.status });
-    if (!isHydrated) { console.log("[TrdUI] skip: not hydrated"); return; }
-    if (autoStartedRef.current) { console.log("[TrdUI] skip: already started"); return; }
-    if (isRunning) { console.log("[TrdUI] skip: isRunning is true"); return; }
-    if (step?.content) { console.log("[TrdUI] skip: already has content"); return; }
+    if (!isHydrated) return;
+    if (autoStartedRef.current) return;
+    if (isRunning) return;
+    if (step?.content) return;
     const prdContent = steps.prd?.content ?? featureBrief;
-    if (!prdContent.trim()) { console.log("[TrdUI] skip: no prd content"); return; }
+    if (!prdContent.trim()) return;
     const designContent = steps.design?.content ?? "";
-    if (!designContent.trim()) { console.log("[TrdUI] skip: no design content"); return; }
-    console.log("[TrdUI] ALL CHECKS PASSED, starting executeStep");
+    if (!designContent.trim()) return;
     autoStartedRef.current = true;
     void executeStep("trd");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,7 +199,7 @@ export function TrdUI(props: StepUIProps) {
             <div className="bg-[rgba(248,250,252,0.5)] border-b border-[#f1f5f9] px-8 pt-8 pb-[33px] flex items-start justify-between">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-[rgba(113,42,226,0.1)] text-[#712ae2] text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
+                  <span className="bg-indigo-50 text-indigo-600 text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">
                     {isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}
                   </span>
                   {isDone && (
@@ -242,7 +240,7 @@ export function TrdUI(props: StepUIProps) {
                 <button
                   onClick={handleRegenerate}
                   disabled={isThisRunning || !isDone}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Regenerate TRD from scratch against the latest PRD"
                 >
                   <RefreshCw size={12} className={isThisRunning ? "animate-spin" : ""} />
@@ -267,7 +265,7 @@ export function TrdUI(props: StepUIProps) {
                   </span>
                 </div>
               ) : isThisRunning && !content ? (
-                <div className="flex items-center gap-2 text-[#712ae2] text-[13px]">
+                <div className="flex items-center gap-2 text-indigo-600 text-[13px]">
                   <SpinnerIcon /> Generating TRD…
                 </div>
               ) : (
@@ -315,7 +313,7 @@ export function TrdUI(props: StepUIProps) {
               }}
               className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95"
             >
-              Confirm TRD
+              Next Step
               <ArrowRight size={16} color="white" />
             </button>
           </div>
