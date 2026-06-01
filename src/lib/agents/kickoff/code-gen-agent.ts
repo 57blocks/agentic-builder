@@ -75,16 +75,16 @@ If the project context includes **Design Tokens**, you MUST faithfully reproduce
 ## Tech Stack
 - React 18 (React Router)
 - TypeScript 5
-- Tailwind CSS v4 (via `@tailwindcss/vite` plugin — NOT v3)
+- Tailwind CSS v4 (via \`@tailwindcss/vite\` plugin — NOT v3)
 - Zustand for state
 - TanStack Query for server state
 
 ## CRITICAL: Tailwind CSS v4 configuration
 The scaffold uses **Tailwind CSS v4**. This means:
-- Configuration is done via the `@tailwindcss/vite` Vite plugin in `vite.config.ts` — it is **already configured** in the scaffold.
-- CSS entry file uses `@import "tailwindcss"` (NOT `@tailwind base/components/utilities`).
-- **NEVER create `tailwind.config.js`, `tailwind.config.ts`, or `postcss.config.js`** — these are v3 patterns. Creating them alongside a v4 setup will cause a version conflict and break the build in an infinite loop.
-- **NEVER add `postcss` or `autoprefixer`** as devDependencies — they are not needed with v4.
+- Configuration is done via the \`@tailwindcss/vite\` Vite plugin in \`vite.config.ts\` — it is **already configured** in the scaffold.
+- CSS entry file uses \`@import "tailwindcss"\` (NOT \`@tailwind base/components/utilities\`).
+- **NEVER create \`tailwind.config.js\`, \`tailwind.config.ts\`, or \`postcss.config.js\`** — these are v3 patterns. Creating them alongside a v4 setup will cause a version conflict and break the build in an infinite loop.
+- **NEVER add \`postcss\` or \`autoprefixer\`** as devDependencies — they are not needed with v4.
 
 ## Shared schemas and TypeScript hygiene
 - Zod: use \`loginSchema.parse(...)\`; types for form values: \`import type { LoginInput }\` from the schemas module. Do **not** export or import a **value** named \`LoginSchema\` next to \`loginSchema\`.
