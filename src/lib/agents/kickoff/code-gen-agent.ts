@@ -12,7 +12,7 @@ You work FIRST before any other agents. Your output forms the base that frontend
 
 ## Responsibilities
 - Project structure (directories, package.json, tsconfig, docker-compose, etc.)
-- Database schemas and migration files
+- Database schemas as Sequelize models (no migration files — syncModels() runs sequelize.sync() to build the schema at boot)
 - API route skeletons and middleware
 - Environment configuration templates
 - CI/CD pipeline files

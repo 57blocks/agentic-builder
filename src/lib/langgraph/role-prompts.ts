@@ -132,11 +132,13 @@ Before consuming a hook in a View/Page, \`read_file\` the hook file and copy fie
 
 const SEQUELIZE_JSONB_DEFAULT_RULE = `**Sequelize JSONB default values (HARD RULE):**
 NEVER write \`defaultValue: {}\` or \`defaultValue: []\` for JSONB / JSON columns — Sequelize's SQL serializer crashes with \`Invalid value {}\`.
-- In \`Model.init()\` wrap in a factory  →  \`defaultValue: () => ({})\` or \`defaultValue: () => []\` (JS-side only, not written to SQL).
-- In \`queryInterface.createTable()\` migrations use a Literal  →  \`defaultValue: qi.sequelize.literal("'{}'::jsonb")\` (Postgres-side).`;
+- In \`Model.init()\` wrap in a factory  →  \`defaultValue: () => ({})\` or \`defaultValue: () => []\` (JS-side only, not written to SQL). \`sync()\` issues the underlying DDL, so this applies to every model.`;
 
-const SYNC_VS_MIGRATIONS_RULE = `**\`sequelize.sync\` vs migrations (HARD RULE):**
-When the project owns a migrations directory (e.g. \`backend/src/database/migrations/\`), schema management belongs to the migration runner. \`syncModels()\` MUST default to \`sync({ alter: false })\` and only flip to \`alter: true\` behind an explicit \`DB_SYNC_ALTER=true\` env. \`alter: true\` reruns DDL on every boot and will surface every \`Invalid value\` / \`column does not exist\` error from the rule above.`;
+const SYNC_VS_MIGRATIONS_RULE = `**Schema = models, NO migrations (HARD RULE):**
+This project has NO migrations and NO migration runner. The Sequelize models are the SINGLE source of truth for the schema — \`syncModels()\` runs \`sequelize.sync()\` on boot and issues CREATE TABLE straight from the model definitions. Therefore:
+- Declare EVERYTHING on the model: columns, \`unique: true\`, secondary indexes via \`indexes: [{ fields: ["col"] }]\` in the \`init()\` options, and foreign keys via the column's \`references: { model: "<table>", key: "id" }\` + \`onDelete: "CASCADE"\`. If it is not on the model, \`sync()\` will NOT create it.
+- Do NOT create migration files, a \`backend/src/database/migrations/\` directory, or call \`queryInterface\` for schema DDL. There is nothing to run them.
+- Adding a field to an existing model is enough — no ALTER migration needed. (For local iteration against a persisted dev DB, the operator sets \`DB_SYNC_ALTER=true\` / \`DB_SYNC_FORCE=true\`; you never write code for this.)`;
 
 // ─── Backend operational invariants (HARD RULES) ──────────────────────────
 // These 7 invariants encode common production failure modes that the
@@ -146,20 +148,17 @@ When the project owns a migrations directory (e.g. \`backend/src/database/migrat
 const BACKEND_OPERATIONAL_INVARIANTS_RULE = `**Backend operational invariants (HARD RULES — apply WHENEVER you touch the matching pattern):**
 
 ### 1. TimescaleDB hypertable creation
-If the stack includes TimescaleDB AND the table you are creating is time-series
+If the stack includes TimescaleDB AND the table is time-series
 (\`raw_metrics\`, \`score_history\`, \`audit_logs\`, anything with a \`*_at\` time
-column and high-volume inserts), the migration MUST follow \`CREATE TABLE\`
-with \`SELECT create_hypertable('<table>', '<time_column>', if_not_exists => TRUE);\`.
+column and high-volume inserts), promote it to a hypertable AFTER \`syncModels()\`
+has created the table. There are no migrations — do it in \`initDb()\` via the
+scaffold helper, which no-ops gracefully when the extension is absent:
+\`\`\`ts
+// in initDb(), after syncModels()
+await createHypertableIfPossible(sequelize.getQueryInterface(), "raw_metrics", "observed_at");
+\`\`\`
 Skipping this turns the table into a regular PG table; time-range queries fall
 back to seq scans and the platform's perf targets become unachievable.
-
-Pattern:
-\`\`\`ts
-await queryInterface.createTable("raw_metrics", { ...columns });
-await queryInterface.sequelize.query(
-  \`SELECT create_hypertable('raw_metrics', 'observed_at', if_not_exists => TRUE);\`
-);
-\`\`\`
 
 ### 2. Magic-link verification MUST be atomic (no race)
 A magic link is single-use. The naive \`findOne → check consumedAt → update\`

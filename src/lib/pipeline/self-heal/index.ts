@@ -42,7 +42,6 @@ export type {
   PageCoverageRepairInput,
   PageCoverageRepairResult,
 } from "./page-coverage-repair";
-export { getUnresolvedMigrationGaps } from "./migration-coverage-repair";
 export type {
   ContractCoverageRepairInput,
   ContractCoverageRepairResult,
@@ -106,63 +105,6 @@ export type {
   TscDiagnosticsInput,
   TscDiagnosticsResult,
 } from "./tsc-diagnostics-as-tasks";
-export {
-  checkMigrationCoverage,
-  formatMigrationGapInstruction,
-} from "./migration-coverage";
-export type {
-  MigrationCoverageInput,
-  MigrationCoverageResult,
-  MigrationCoverageGap,
-} from "./migration-coverage";
-export {
-  runMigrationCoverageRepair,
-  formatMigrationCoverageBlock,
-} from "./migration-coverage-repair";
-export type {
-  MigrationRepairTask,
-  MigrationCoverageRepairInput,
-  MigrationCoverageRepairResult,
-} from "./migration-coverage-repair";
-export { checkMigrationQuality } from "./migration-quality";
-export type {
-  MigrationQualityRuleId,
-  MigrationQualityFinding,
-  MigrationQualityCheckInput,
-  MigrationQualityCheckResult,
-  MigrationFile,
-} from "./migration-quality";
-export {
-  runMigrationQualityRepair,
-  formatMigrationQualityBlock,
-} from "./migration-quality-repair";
-export type {
-  MigrationQualityRepairTask,
-  MigrationQualityRepairInput,
-  MigrationQualityRepairResult,
-} from "./migration-quality-repair";
-export {
-  checkSchemaDrift,
-  extractModelFields,
-  extractFieldRemaps,
-} from "./schema-drift";
-export type {
-  SchemaDriftRuleId,
-  SchemaDriftFinding,
-  SchemaDriftInput,
-  SchemaDriftResult,
-  ModelFile,
-  MigrationTextFile,
-} from "./schema-drift";
-export {
-  runSchemaDriftRepair,
-  formatSchemaDriftBlock,
-} from "./schema-drift-repair";
-export type {
-  SchemaDriftRepairTask,
-  SchemaDriftRepairInput,
-  SchemaDriftRepairResult,
-} from "./schema-drift-repair";
 export {
   checkAdminRouteCoverage,
   normaliseAdminPath,

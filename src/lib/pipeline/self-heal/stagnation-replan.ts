@@ -34,8 +34,6 @@ export interface StagnationReplanInput {
     contractCoverageGaps?: string[];
     /** Route audit findings — unregistered modules + unresolved registrations. */
     routeAudit?: string[];
-    /** Migration coverage gaps from .ralph/migration-coverage.json. */
-    migrationGaps?: string[];
     /** Runtime integration audit ERROR-level tasks (file:line — directive). */
     runtimeAuditErrors?: string[];
   };
@@ -197,13 +195,6 @@ export function buildReplanContext(input: StagnationReplanInput): string {
     parts.push(
       `## Contract usage coverage gaps`,
       ...d.contractCoverageGaps.slice(0, 10).map((e) => `- ${e}`),
-      "",
-    );
-  }
-  if (d.migrationGaps && d.migrationGaps.length > 0) {
-    parts.push(
-      `## Migration coverage gaps`,
-      ...d.migrationGaps.slice(0, 10).map((e) => `- ${e}`),
       "",
     );
   }
