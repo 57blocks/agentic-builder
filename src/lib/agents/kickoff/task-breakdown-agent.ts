@@ -144,6 +144,84 @@ The L-tier scaffold ships these files. NEVER plan a task whose subSteps recreate
 `;
 }
 
+/**
+ * Existing-task context + requirement-scope instructions for INCREMENTAL mode.
+ *
+ * Sibling prompt builder to `buildSystemPrompt`. The base system prompt is
+ * built once at agent construction and only depends on tier/scaffold/skills,
+ * so per-call incremental context is threaded through the *user* message
+ * (same pattern as `improvementNotes`). When this block is present the model
+ * must generate ONLY tasks for the listed requirement IDs and must not
+ * regenerate or duplicate the existing tasks.
+ *
+ * Returns an empty string when no incremental payload is supplied, leaving the
+ * full-breakdown path byte-for-byte identical to before.
+ */
+function buildIncrementalInstructionBlock(incremental?: {
+  existingTasks: Array<{
+    id: string;
+    title: string;
+    coversRequirementIds: string[];
+  }>;
+  requirementsToCover: string[];
+}): string {
+  if (!incremental || incremental.requirementsToCover.length === 0) return "";
+
+  const existingLines =
+    incremental.existingTasks.length > 0
+      ? incremental.existingTasks
+          .map((t) => {
+            const covers =
+              t.coversRequirementIds.length > 0
+                ? ` — covers ${t.coversRequirementIds.join(", ")}`
+                : "";
+            return `- \`${t.id}\`: ${t.title}${covers}`;
+          })
+          .join("\n")
+      : "(none)";
+
+  // Suggest the next sequential T-id so the model continues the existing
+  // naming convention. The caller re-IDs defensively, so this is a hint only.
+  const maxNum = incremental.existingTasks.reduce((max, t) => {
+    const m = /^T-(\d+)$/.exec(t.id);
+    if (!m) return max;
+    const n = Number.parseInt(m[1]!, 10);
+    return Number.isNaN(n) ? max : Math.max(max, n);
+  }, 0);
+  const nextId = `T-${String(maxNum + 1).padStart(3, "0")}`;
+
+  return [
+    "## INCREMENTAL MODE — generate ONLY new tasks (do NOT re-break-down the whole PRD)",
+    "",
+    "The task list below already exists and is considered **done**. The PRD was",
+    "edited; only a small set of requirement IDs are new or changed. Your job is",
+    "to emit ONLY the additional tasks needed to cover those new/changed IDs.",
+    "",
+    "Hard rules:",
+    "1. **Do NOT** regenerate, renumber, restate, or duplicate any existing task",
+    "   listed under §Existing tasks. Treat them as already-implemented.",
+    "2. Generate NEW tasks **only** for the requirement IDs in §Requirements to",
+    "   cover. Every new task's `coversRequirementIds` MUST include at least one",
+    "   of those IDs. Do not emit tasks for requirements already covered by an",
+    "   existing task.",
+    `3. Continue the existing ID naming convention. Existing IDs go up to ` +
+      `\`T-${String(maxNum).padStart(3, "0")}\`, so start new IDs at \`${nextId}\` ` +
+      "and increment sequentially.",
+    "4. Keep the SAME output JSON schema (an array of task objects) described in",
+    "   the Output Format section. Output ONLY the JSON array — no prose.",
+    "",
+    "## Requirements to cover (" +
+      incremental.requirementsToCover.length +
+      ")",
+    "",
+    incremental.requirementsToCover.map((id) => `- ${id}`).join("\n"),
+    "",
+    "## Existing tasks (already done — do NOT touch these)",
+    "",
+    existingLines,
+  ].join("\n");
+}
+
 function buildSystemPrompt(
   tier: ProjectTier,
   scaffoldBlock?: string,
@@ -516,6 +594,19 @@ export class TaskBreakdownAgent extends BaseAgent {
       improvementNotes?: string[];
       /** Pre-formatted markdown block describing user-uploaded design references. */
       designReferencesBlock?: string;
+      /**
+       * INCREMENTAL mode. When present, the agent generates ONLY tasks for the
+       * `requirementsToCover` IDs, treating `existingTasks` as already done.
+       * Absent → behavior is identical to the full-breakdown path.
+       */
+      incremental?: {
+        existingTasks: Array<{
+          id: string;
+          title: string;
+          coversRequirementIds: string[];
+        }>;
+        requirementsToCover: string[];
+      };
     },
     sessionId?: string,
   ) {
@@ -555,6 +646,10 @@ export class TaskBreakdownAgent extends BaseAgent {
       ? ` The user attached design reference screenshots (see the **Design references** section below) — for every frontend task whose scope matches a screenshot's target/label, cite the reference path in the task description so coding agents consult it.`
       : "";
 
+    const incrementalBlock = buildIncrementalInstructionBlock(
+      documents.incremental,
+    );
+
     const userMessage =
       `Analyze all provided documents and generate a coding task breakdown as a JSON array. ` +
       `Respect the **ProjectTier** and any **Pipeline coding tier** / scaffold section in the system prompt. ` +
@@ -562,6 +657,7 @@ export class TaskBreakdownAgent extends BaseAgent {
       (documents.improvementNotes && documents.improvementNotes.length > 0
         ? `\n\nApply these selected improvement suggestions while regenerating:\n- ${documents.improvementNotes.join("\n- ")}`
         : "") +
+      (incrementalBlock ? `\n\n${incrementalBlock}` : "") +
       `\n\n` +
       sections[0];
 

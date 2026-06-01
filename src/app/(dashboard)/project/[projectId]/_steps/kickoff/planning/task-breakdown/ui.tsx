@@ -212,6 +212,14 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
 
   const metadata = taskBreakdownResult?.metadata ?? summaryResult?.metadata;
   const tasks = parseKickoffTaskBreakdownFromMetadata(metadata);
+  // Tasks added / flagged for rerun by the last PRD-edit propagation. Present
+  // only after an incremental kickoff (absent on a fresh full breakdown).
+  const newTaskIds = new Set<string>(
+    (metadata?.newTaskIds as string[] | undefined) ?? [],
+  );
+  const rerunTaskIds = new Set<string>(
+    (metadata?.tasksToRerunIds as string[] | undefined) ?? [],
+  );
   const isCompleted = summaryResult?.status === "completed";
   const pendingCount = tasks.filter((t) => t.executionKind === "ai_autonomous").length;
 
@@ -315,6 +323,11 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
                         <td className="px-4 py-3 max-w-70">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-[11px] text-[#94a3b8]">{task.id ?? `T-${String(i + 1).padStart(3, "0")}`}</span>
+                            {task.id && newTaskIds.has(task.id) ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase tracking-wide shrink-0">NEW</span>
+                            ) : task.id && rerunTaskIds.has(task.id) ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase tracking-wide shrink-0">RERUN</span>
+                            ) : null}
                             <p className="text-[13px] font-semibold text-[#1e293b] truncate">{task.title}</p>
                           </div>
                           {task.description && !isExpanded && (

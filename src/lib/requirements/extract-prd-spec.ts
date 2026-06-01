@@ -1,7 +1,7 @@
 import type { PrdRequirementIndex } from "./prd-spec-types";
 
 const RE_AC = /\bAC-\d+\b/gi;
-const RE_FR = /\bFR-[A-Z]{2}\d{2,}\b/gi;
+const RE_FR = /\bFR-[A-Z]+\d+\b/gi;
 const RE_US = /\bUS-\d+\b/gi;
 const RE_IC = /\bIC-\d+\b/gi;
 

@@ -50,6 +50,11 @@ export interface StepAgentContext {
   sessionId: string;
   /** Optional edit instruction for re-run flows */
   editInstruction?: string;
+  /** When true (alongside `editInstruction`): after the PRD edit, the
+   *  pipeline propagates the change downstream — regenerating TRD/design
+   *  docs and producing an incremental task delta. Forwarded to
+   *  /api/agents/pipeline as `propagateAfterEdit`. */
+  propagateAfterEdit?: boolean;
   /** User-confirmed PRD clarifications (questions + answers).
    *  Forwarded to /api/agents/pipeline by the PRD step agent so the
    *  pipeline engine can prepend them to the PRD prompt context. */

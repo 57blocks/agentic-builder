@@ -616,7 +616,11 @@ export function PrdUI(props: StepUIProps) {
         value={editInput} onChange={setEditInput}
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning || confirmCooldown) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning || confirmCooldown}
-        actions={<div className="flex items-center gap-3 shrink-0"><button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={async () => {
+        actions={<div className="flex items-center gap-3 shrink-0">
+          {error && !isThisRunning && (
+            <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
+          )}
+          <button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={async () => {
           // Await memory capture BEFORE navigating so the fetch is never
           // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
