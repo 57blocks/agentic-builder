@@ -12,6 +12,11 @@ import {
   normalizeProjectTier,
   extractClassificationFromPrd,
 } from "@/lib/agents/shared/project-classifier";
+import { readKickoffSnapshot } from "@/lib/pipeline/kickoff-snapshot";
+import { diffPrdRequirements } from "@/lib/pipeline/incremental-rerun";
+import { diffPrdSections } from "@/lib/pipeline/prd-section-diff";
+import { extractPrdRequirementIndex } from "@/lib/requirements/extract-prd-spec";
+import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 
 export const maxDuration = 300;
 
@@ -160,7 +165,39 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const result = await engine.executeKickoffOnly(run, outputRoot);
+        // Incremental vs full: when a baseline snapshot exists and the new PRD
+        // differs from it — either an ID was added/removed OR any markdown
+        // section body changed — do an incremental task-breakdown so the UI
+        // can badge NEW/RERUN and coding only re-runs affected tasks. Pure
+        // prose edits used to fall through to a full breakdown because the
+        // ID set was identical; the section-diff check fixes that.
+        let useIncremental = false;
+        try {
+          const prevSnapshot = await readKickoffSnapshot(outputRoot);
+          if (prevSnapshot) {
+            const canonicalNewPrd = stripChangeMarkers(prd);
+            const newIdx = extractPrdRequirementIndex(canonicalNewPrd);
+            const idDiff = diffPrdRequirements(
+              prevSnapshot.prdRequirementIndex,
+              newIdx,
+            );
+            const idsChanged =
+              idDiff.added.length > 0 || idDiff.removed.length > 0;
+            const sectionsChanged =
+              !idsChanged &&
+              diffPrdSections(prevSnapshot.prdContent, canonicalNewPrd).changed
+                .length > 0;
+            useIncremental = idsChanged || sectionsChanged;
+          }
+        } catch (e) {
+          console.warn(
+            "[KickoffAPI] incremental detection failed, using full breakdown:",
+            e instanceof Error ? e.message : e,
+          );
+        }
+        const result = useIncremental
+          ? await engine.executeIncrementalKickoffOnly(run, outputRoot)
+          : await engine.executeKickoffOnly(run, outputRoot);
 
         // Auto-save pipeline snapshot for debug reuse
         try {

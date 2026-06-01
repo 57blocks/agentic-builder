@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Upload, X, FileImage, Code, Link, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowRight, Upload, X, FileImage, Code, Link, Loader2, CheckCircle2, AlertCircle, RefreshCw, GitCompare } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import type { StepId } from "@/_config/pipeline-flow";
@@ -10,6 +10,7 @@ import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
 import type { StepUIProps } from "../../../_shared/types";
+import { DocDiffView } from "../../../_shared/DocDiffView";
 import {
   setDesignContext,
   generateDesignStyles,
@@ -598,6 +599,10 @@ export function DesignUI(props: StepUIProps) {
 
   // ── Local design state ──────────────────────────────────────────────────
   const [phase, setPhase] = useState<DesignPhase>("style");
+  // Previous design spec captured right before a Regenerate, so the user can
+  // see what the regenerate changed. Session-scoped (not persisted).
+  const [prevDesignContent, setPrevDesignContent] = useState<string | null>(null);
+  const [showDesignChanges, setShowDesignChanges] = useState(false);
 
   // Style selection — initialized from persisted metadata
   const [designStyles, setDesignStyles] = useState<DesignStyle[] | null>(() => designMeta.designStyles ?? null);
@@ -937,6 +942,21 @@ export function DesignUI(props: StepUIProps) {
     }).catch((e) => console.error("[DesignUI] executeStep failed:", e));
   };
 
+  // Regenerate the design spec against the latest PRD/TRD, keeping the current
+  // style selection. Mirrors the TRD step's Regenerate; the per-step "edit PRD
+  // then regenerate each step" flow relies on this.
+  const handleRegenerateDesign = () => {
+    if (isDesignRunning) return;
+    const ok = window.confirm(
+      "Regenerate the design spec?\n\nThis re-runs the design agent against the latest PRD/TRD using the current style selection and replaces the current design spec.",
+    );
+    if (!ok) return;
+    // Snapshot the current spec so the user can diff what the regenerate changed.
+    setPrevDesignContent(steps.design?.content ?? null);
+    setShowDesignChanges(false);
+    handleGenerateDesignDoc();
+  };
+
   const handleGenerateWithStitch = (instruction?: string) => {
     if (!prdContent.trim()) return;
     setStitchGenerating(true);
@@ -1098,7 +1118,30 @@ export function DesignUI(props: StepUIProps) {
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
       {/* ── Top center step navigation ── */}
-      <div className="shrink-0 flex items-center justify-center gap-4 py-3 border-b border-[#e2e8f0] bg-white">
+      <div className="shrink-0 relative flex items-center justify-center gap-4 py-3 border-b border-[#e2e8f0] bg-white">
+        {phase === "spec" && hasDesignSpec && (
+          <div className="absolute right-4 flex items-center gap-2">
+            {prevDesignContent != null && !isDesignRunning && (
+              <button
+                onClick={() => setShowDesignChanges((v) => !v)}
+                title="Show what the last regenerate changed"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${showDesignChanges ? "text-white bg-[#712ae2]" : "text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)]"}`}
+              >
+                <GitCompare size={12} />
+                {showDesignChanges ? "Hide changes" : "Changes"}
+              </button>
+            )}
+            <button
+              onClick={handleRegenerateDesign}
+              disabled={isDesignRunning}
+              title="Regenerate the design spec against the latest PRD/TRD"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={12} className={isDesignRunning ? "animate-spin" : ""} />
+              {isDesignRunning ? "Regenerating…" : "Regenerate"}
+            </button>
+          </div>
+        )}
         {showLeftArrow && (
           <button
             onClick={goToPrevPhase}
@@ -1155,9 +1198,20 @@ export function DesignUI(props: StepUIProps) {
       {/* ── Main Content ── */}
       <div className={
         phase === "spec" || phase === "stitch"
-          ? "flex-1 min-h-0 flex flex-col overflow-hidden"
-          : "flex-1 overflow-y-auto px-16"
+          ? "relative flex-1 min-h-0 flex flex-col overflow-hidden"
+          : "relative flex-1 overflow-y-auto px-16"
       }>
+        {/* Diff overlay: what the last regenerate changed vs the previous spec. */}
+        {phase === "spec" && showDesignChanges && prevDesignContent != null && (
+          <div className="absolute inset-0 z-20 bg-white p-6">
+            <DocDiffView
+              oldText={prevDesignContent}
+              newText={steps.design?.content ?? ""}
+              label="DesignSpec.md"
+              onClose={() => setShowDesignChanges(false)}
+            />
+          </div>
+        )}
         {/* ══ Phase 1: Style Selection ══ */}
         {phase === "style" && (
           <>

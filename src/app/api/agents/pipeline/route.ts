@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
     sessionId,
     prdEditInstruction,
     existingPrd,
+    propagateAfterEdit,
     prdIntent,
   } = body as {
     featureBrief?: string;
@@ -32,6 +33,10 @@ export async function POST(request: NextRequest) {
     sessionId?: string;
     prdEditInstruction?: string;
     existingPrd?: string;
+    /** When true (alongside prdEditInstruction): after the PRD edit,
+     *  regenerate downstream docs and produce an incremental task
+     *  delta. See engine.runIncrementalDownstream for details. */
+    propagateAfterEdit?: boolean;
     /** User-confirmed answers to PRD intent clarifications. Optional —
      *  when present, the engine prepends them to the PRD agent context. */
     prdIntent?: {
@@ -66,7 +71,12 @@ export async function POST(request: NextRequest) {
             : undefined,
       });
       const engine = new PipelineEngine(memoryAwareSend, projectRoot);
-      const run = engine.createRun(featureBrief);
+      const run = engine.createRun(
+        featureBrief,
+        typeof sessionId === "string" && sessionId.length > 0
+          ? sessionId
+          : undefined,
+      );
 
       try {
         const result = await engine.executePipeline(run, {
@@ -82,6 +92,7 @@ export async function POST(request: NextRequest) {
             typeof existingPrd === "string" && existingPrd.trim()
               ? existingPrd.trim()
               : undefined,
+          propagateAfterEdit: propagateAfterEdit === true,
           prdIntent:
             prdIntent &&
             prdIntent.result &&

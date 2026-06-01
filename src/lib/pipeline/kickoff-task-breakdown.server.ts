@@ -306,6 +306,20 @@ export async function buildTaskBreakdownFromDocuments(params: {
    * when no references were uploaded.
    */
   designReferencesBlock?: string;
+  /**
+   * INCREMENTAL mode (PRD edit → propagate downstream). When present, the
+   * breakdown agent generates ONLY tasks for `requirementsToCover`, treating
+   * `existingTasks` as already done — instead of re-breaking-down the whole
+   * PRD. Absent → full breakdown, identical to before.
+   */
+  incremental?: {
+    existingTasks: Array<{
+      id: string;
+      title: string;
+      coversRequirementIds: string[];
+    }>;
+    requirementsToCover: string[];
+  };
 }): Promise<{
   tasks: KickoffWorkItem[];
   costUsd: number;
@@ -373,6 +387,7 @@ export async function buildTaskBreakdownFromDocuments(params: {
       prdSpecText,
       improvementNotes: params.improvementNotes,
       designReferencesBlock: params.designReferencesBlock,
+      incremental: params.incremental,
     },
     params.sessionId,
   );

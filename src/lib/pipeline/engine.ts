@@ -80,7 +80,22 @@ import {
   type ClarificationAnswer,
   type IntentResult,
 } from "@/lib/agents/intent";
-import { applyPrdPatches, type PrdPatch } from "@/lib/agents/pm/prd-patch";
+import {
+  applyPrdPatches,
+  stripChangeMarkers,
+  type PrdPatch,
+} from "@/lib/agents/pm/prd-patch";
+import {
+  writeKickoffSnapshot,
+  readKickoffSnapshot,
+  type KickoffSnapshot,
+} from "./kickoff-snapshot";
+import { buildRegenerationContext } from "./incremental-rerun";
+import { kickoffIncremental } from "./kickoff-incremental";
+import {
+  writeSessionCheckpoint,
+  type TaskCheckpointEntry,
+} from "./session-checkpoint";
 
 interface PatchAgentResponse {
   summary?: string;
@@ -154,6 +169,16 @@ export interface ExecutePipelineOptions {
   /** The existing PRD markdown to be edited. Required when prdEditInstruction is set. */
   existingPrd?: string;
   /**
+   * When true and `prdEditInstruction` is set: after the PRD edit completes,
+   * automatically propagate downstream — regenerate TRD/SysDesign/ImplGuide
+   * /Design, compute task delta against the previous kickoff snapshot, and
+   * inject a session-checkpoint so the next coding run touches only the
+   * affected tasks. Requires a prior `.blueprint/last-kickoff-snapshot.json`.
+   * If the snapshot is missing, propagation is skipped and the edit-only
+   * behavior is preserved (warning logged).
+   */
+  propagateAfterEdit?: boolean;
+  /**
    * User-confirmed product clarifications gathered via the PRD Intent agent
    * before PRD generation. When supplied, these are prepended to the PRD
    * agent's additionalContext as binding requirements.
@@ -215,11 +240,18 @@ export class PipelineEngine {
     this.projectRoot = projectRoot ?? process.cwd();
   }
 
-  createRun(featureBrief: string): PipelineRun {
+  createRun(featureBrief: string, sessionId?: string): PipelineRun {
     const now = new Date().toISOString();
     return {
       id: uuidv4(),
-      sessionId: uuidv4(),
+      // Honor a caller-supplied sessionId so a PRD-edit propagation run reuses
+      // the original kickoff's id. This keeps the snapshot/checkpoint (and the
+      // memory kickoffId, which the route already overrides with the same id)
+      // on one stable session across edits. Falls back to a fresh uuid.
+      sessionId:
+        typeof sessionId === "string" && sessionId.length > 0
+          ? sessionId
+          : uuidv4(),
       featureBrief,
       status: "idle",
       currentStep: null,
@@ -327,19 +359,65 @@ export class PipelineEngine {
     // ── PRD (tier-aware prompt) ──
     const pmAgent = new PMAgent(tier);
 
-    // ── Edit-only mode: re-run only the PRD step using the edit instruction ──
-    if (options.prdEditInstruction && options.existingPrd) {
-      const editInstruction = options.prdEditInstruction;
-      const existingPrd = options.existingPrd;
+    // ── Edit / propagate modes ───────────────────────────────────────────
+    //  (a) instruction-driven edit: prdEditInstruction + existingPrd → the PM
+    //      agent re-applies the instruction to produce the edited PRD.
+    //  (b) manual-edit propagate: existingPrd + propagateAfterEdit but NO
+    //      instruction → the caller already hand-edited the PRD; take it
+    //      as-is (skip the patch agent) and propagate the diff downstream.
+    const isInstructionEdit = !!(
+      options.prdEditInstruction && options.existingPrd
+    );
+    const isManualPropagate = !!(
+      options.propagateAfterEdit &&
+      options.existingPrd &&
+      !options.prdEditInstruction
+    );
+    if (isInstructionEdit || isManualPropagate) {
+      const existingPrd = options.existingPrd as string;
 
-      run = await this.executeStep(run, "prd", () =>
-        this.runPrdEdit(run, pmAgent, existingPrd, editInstruction),
-      );
+      if (isInstructionEdit) {
+        const editInstruction = options.prdEditInstruction as string;
+        run = await this.executeStep(run, "prd", () =>
+          this.runPrdEdit(run, pmAgent, existingPrd, editInstruction),
+        );
+      } else {
+        // Manual-edit propagate: the PRD is already final. Record it verbatim
+        // as the PRD step output (no LLM patch) so the diff baseline is the
+        // user's hand-edited document.
+        const manualPrd = stripChangeMarkers(existingPrd);
+        run = await this.executeStep(run, "prd", async () => ({
+          content: manualPrd,
+          model: "manual-edit",
+          costUsd: 0,
+          durationMs: 0,
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        }));
+      }
       if (run.status === "failed") return run;
 
       run = this.attachPrdSpecGateToPrdStep(run);
 
-      // Edit-only mode always pauses — emit done immediately
+      // ── Propagation branch: continue downstream from the edited PRD ──
+      if (options.propagateAfterEdit) {
+        run = await this.runIncrementalDownstream(run, outputRoot, tier);
+        if (run.status === "failed") return run;
+        this.emit({
+          type: "pipeline_complete",
+          runId: run.id,
+          stepId: "kickoff",
+          data: {
+            status: "completed",
+            metadata: { propagatedFromEdit: true },
+          },
+        });
+        run.status = "completed";
+        run.currentStep = null;
+        run.updatedAt = new Date().toISOString();
+        return run;
+      }
+
+      // Edit-only mode (no propagation) — pause as before
       this.emit({
         type: "pipeline_complete",
         runId: run.id,
@@ -875,6 +953,221 @@ export class PipelineEngine {
     return run;
   }
 
+  /**
+   * Incremental task-breakdown for a step-level "Regenerate" after a PRD edit.
+   * Unlike {@link executeKickoffOnly} (a full re-breakdown), this diffs the
+   * current PRD's requirement index against the last kickoff snapshot, keeps
+   * surviving tasks unchanged, and only generates tasks for newly-added /
+   * changed requirements. It writes a fresh snapshot plus a coding checkpoint
+   * that flags the rerun set as "failed" so the next coding run only re-runs
+   * the affected tasks. Falls back to a full breakdown when there is no
+   * baseline snapshot to diff against.
+   */
+  async executeIncrementalKickoffOnly(
+    run: PipelineRun,
+    outputRoot: string,
+  ): Promise<PipelineRun> {
+    run.status = "running";
+    run.updatedAt = new Date().toISOString();
+
+    const previousSnapshot = await readKickoffSnapshot(outputRoot);
+    if (!previousSnapshot) {
+      console.warn(
+        "[engine] executeIncrementalKickoffOnly: no baseline snapshot; falling back to full kickoff.",
+      );
+      return this.executeKickoffOnly(run, outputRoot);
+    }
+
+    const tier = normalizeProjectTier(
+      (
+        run.steps.intent?.metadata?.classification as
+          | { tier?: ProjectTier }
+          | undefined
+      )?.tier ?? "M",
+    );
+
+    const canonicalPrd = stripChangeMarkers(run.steps.prd?.content ?? "");
+    const newRequirementIndex = extractPrdRequirementIndex(canonicalPrd);
+    const regenCtx = buildRegenerationContext({
+      previousSnapshot,
+      newRequirementIndex,
+      newPrdContent: canonicalPrd,
+    });
+    console.info(
+      `[engine] incremental kickoff diff: +${regenCtx.prdDiff.added.length} ` +
+        `-${regenCtx.prdDiff.removed.length} ~${regenCtx.prdDiff.modified.length} ` +
+        `requirements; sections=${regenCtx.changedSectionHeadings.length}; ` +
+        `obsolete=${regenCtx.taskDelta.obsoleteTaskIds.length}, ` +
+        `rerun=${regenCtx.taskDelta.taskIdsToRerun.length}, ` +
+        `needs-new=${regenCtx.taskDelta.requirementsNeedingNewTasks.length}.`,
+    );
+
+    const trdContent = run.steps.trd?.content || previousSnapshot.docs.trd || "";
+    const sysDesignContent =
+      run.steps.sysdesign?.content || previousSnapshot.docs.sysdesign || "";
+    const implGuideContent =
+      run.steps.implguide?.content || previousSnapshot.docs.implguide || "";
+    const designContent =
+      run.steps.design?.content || previousSnapshot.docs.design || "";
+    const prdSpec =
+      ((run.steps.prd?.metadata as { prdSpec?: PrdSpec } | undefined)
+        ?.prdSpec) ??
+      previousSnapshot.prdSpec ??
+      null;
+
+    const incremental = await kickoffIncremental({
+      regenCtx,
+      newDocs: {
+        prd: canonicalPrd,
+        trd: trdContent || undefined,
+        sysDesign: sysDesignContent || undefined,
+        implGuide: implGuideContent || undefined,
+        designSpec: designContent || undefined,
+      },
+      prdSpec,
+      tier,
+      sessionId: run.sessionId,
+    });
+    console.info(
+      `[engine] kickoffIncremental: dropped=${incremental.droppedTaskIds.length}, ` +
+        `new=${incremental.newTaskIds.length}, rerun=${incremental.tasksToRerunIds.length}, ` +
+        `total=${incremental.tasks.length}.`,
+    );
+
+    // Coding checkpoint: flag the rerun set as "failed" so the next coding run's
+    // existing retry-failed flow only re-runs those tasks. Written to
+    // this.projectRoot to match where the coding route reads/writes it.
+    const rerunSet = new Set(incremental.tasksToRerunIds);
+    const checkpointMap = new Map<string, TaskCheckpointEntry>();
+    for (const task of incremental.tasks) {
+      checkpointMap.set(
+        task.id,
+        rerunSet.has(task.id)
+          ? { status: "failed", generatedFiles: [] }
+          : { status: "completed", generatedFiles: [] },
+      );
+    }
+    await writeSessionCheckpoint(
+      this.projectRoot,
+      run.sessionId,
+      checkpointMap,
+      incremental.tasks.map((t) => t.id),
+    );
+
+    await writeKickoffSnapshot(outputRoot, {
+      sessionId: run.sessionId,
+      runId: run.id,
+      savedAt: new Date().toISOString(),
+      prdContent: canonicalPrd,
+      prdRequirementIndex: newRequirementIndex,
+      prdSpec: prdSpec ?? undefined,
+      tasks: incremental.tasks,
+      docs: {
+        prd: canonicalPrd,
+        trd: trdContent || undefined,
+        sysdesign: sysDesignContent || undefined,
+        implguide: implGuideContent || undefined,
+        design: designContent || undefined,
+      },
+    });
+
+    // Write CHANGES.md into the generated project so the DELIVERABLE itself
+    // marks what this increment touched (new tasks + the files they create /
+    // modify) — visible without the UI.
+    try {
+      type Task = (typeof incremental.tasks)[number];
+      const filesOf = (t: Task) => {
+        const f = t.files;
+        return {
+          creates: Array.isArray(f) ? f : f?.creates ?? [],
+          modifies: Array.isArray(f) ? [] : f?.modifies ?? [],
+        };
+      };
+      const byId = new Map(incremental.tasks.map((t) => [t.id, t]));
+      const newSet = new Set(incremental.newTaskIds);
+      const rerunOnly = incremental.tasksToRerunIds.filter((id) => !newSet.has(id));
+      const fileLine = (id: string): string => {
+        const t = byId.get(id);
+        if (!t) return `- ${id}`;
+        const { creates, modifies } = filesOf(t);
+        const parts: string[] = [];
+        if (creates.length)
+          parts.push(`creates: ${creates.map((p) => "`" + p + "`").join(", ")}`);
+        if (modifies.length)
+          parts.push(`modifies: ${modifies.map((p) => "`" + p + "`").join(", ")}`);
+        return `- **${t.id}** ${t.title}` + (parts.length ? `\n  - ${parts.join("\n  - ")}` : "");
+      };
+      const touched = new Set<string>();
+      for (const id of incremental.tasksToRerunIds) {
+        const t = byId.get(id);
+        if (!t) continue;
+        const { creates, modifies } = filesOf(t);
+        for (const p of [...creates, ...modifies]) touched.add(p);
+      }
+      const changes = [
+        "# Incremental Changes",
+        "",
+        `_Updated ${new Date().toISOString()} from a PRD edit. This increment adds / re-runs the tasks below; unaffected code is left unchanged._`,
+        "",
+        `## New tasks (${incremental.newTaskIds.length})`,
+        ...(incremental.newTaskIds.length ? incremental.newTaskIds.map(fileLine) : ["_none_"]),
+        "",
+        `## Tasks to re-run (${rerunOnly.length})`,
+        ...(rerunOnly.length ? rerunOnly.map(fileLine) : ["_none_"]),
+        "",
+        `## Obsolete tasks dropped (${incremental.droppedTaskIds.length})`,
+        ...(incremental.droppedTaskIds.length ? incremental.droppedTaskIds.map((id) => `- ${id}`) : ["_none_"]),
+        "",
+        `## Files this increment touches (${touched.size})`,
+        ...([...touched].sort().map((p) => `- \`${p}\``)),
+        "",
+      ].join("\n");
+      await fs.writeFile(path.join(outputRoot, "CHANGES.md"), changes, "utf-8");
+    } catch (e) {
+      console.warn(
+        "[engine] failed to write CHANGES.md (ignored):",
+        e instanceof Error ? e.message : e,
+      );
+    }
+
+    const summary = [
+      "## Incremental task breakdown (updated from PRD edit)",
+      "",
+      `- New tasks: ${incremental.newTaskIds.length}`,
+      `- Tasks to rerun: ${incremental.tasksToRerunIds.length}`,
+      `- Obsolete tasks dropped: ${incremental.droppedTaskIds.length}`,
+      `- Total tasks: ${incremental.tasks.length}`,
+    ].join("\n");
+
+    run.steps.kickoff = this.buildStepResult("kickoff", "completed", {
+      content: summary,
+      model: "incremental",
+      costUsd: incremental.diagnostics.costUsd,
+      durationMs: incremental.diagnostics.durationMs,
+      metadata: {
+        incrementalFromEdit: true,
+        prdDiff: regenCtx.prdDiff,
+        taskDelta: regenCtx.taskDelta,
+        newTaskIds: incremental.newTaskIds,
+        tasksToRerunIds: incremental.tasksToRerunIds,
+        droppedTaskIds: incremental.droppedTaskIds,
+        diagnostics: incremental.diagnostics,
+        taskBreakdown: incremental.tasks,
+      },
+    });
+    run.totalCostUsd += incremental.diagnostics.costUsd;
+    run.status = "completed";
+    run.currentStep = null;
+    run.updatedAt = new Date().toISOString();
+    this.emit({
+      type: "step_complete",
+      runId: run.id,
+      stepId: "kickoff",
+      data: run.steps.kickoff,
+    });
+    return run;
+  }
+
   // ── Kick-off step ──
 
   private async runKickoffStep(
@@ -1392,6 +1685,27 @@ export class PipelineEngine {
       run.steps.kickoff = stepResult;
       run.updatedAt = new Date().toISOString();
 
+      // Persist a kickoff snapshot so a later "PRD edit → propagate downstream"
+      // flow can diff requirements and compute task deltas. Failure is logged
+      // and swallowed inside writeKickoffSnapshot — never blocks the pipeline.
+      const canonicalPrd = stripChangeMarkers(prdBody);
+      await writeKickoffSnapshot(outputRoot, {
+        sessionId: run.sessionId,
+        runId: run.id,
+        savedAt: new Date().toISOString(),
+        prdContent: canonicalPrd,
+        prdRequirementIndex: extractPrdRequirementIndex(canonicalPrd),
+        prdSpec: prdSpec ?? undefined,
+        tasks: finalTaskBreakdown,
+        docs: {
+          prd: canonicalPrd,
+          trd: trdBody || undefined,
+          sysdesign: sysDesignBody || undefined,
+          implguide: implGuideBody || undefined,
+          design: designSpecBody || undefined,
+        },
+      });
+
       this.emit({
         type: "step_complete",
         runId: run.id,
@@ -1781,6 +2095,291 @@ export class PipelineEngine {
       },
       run.sessionId,
     );
+  }
+
+  /**
+   * Propagate a PRD edit downstream: regenerate dependent docs, compute task
+   * delta against the previous kickoff snapshot, and inject a session
+   * checkpoint so coding re-runs only the affected tasks.
+   *
+   * Soft-fails: if no prior snapshot exists, logs a warning and returns the
+   * run unchanged (caller will fall back to edit-only pause behavior).
+   */
+  private async runIncrementalDownstream(
+    run: PipelineRun,
+    outputRoot: string,
+    tier: ProjectTier,
+  ): Promise<PipelineRun> {
+    const prdContent = run.steps.prd?.content ?? "";
+    if (!prdContent) {
+      console.warn("[engine] propagateAfterEdit: PRD content empty, skipping.");
+      return run;
+    }
+
+    // 1. Load the previous snapshot — required as the diff baseline.
+    const previousSnapshot: KickoffSnapshot | null =
+      await readKickoffSnapshot(outputRoot);
+    if (!previousSnapshot) {
+      console.warn(
+        "[engine] propagateAfterEdit: no last-kickoff-snapshot.json found; skipping propagation. Run a full pipeline first.",
+      );
+      return run;
+    }
+
+    // 2. Build regeneration context (PRD diff + task delta).
+    const canonicalPrd = stripChangeMarkers(prdContent);
+    const newRequirementIndex = extractPrdRequirementIndex(canonicalPrd);
+    const regenCtx = buildRegenerationContext({
+      previousSnapshot,
+      newRequirementIndex,
+      newPrdContent: canonicalPrd,
+    });
+    console.info(
+      `[engine] propagate diff: +${regenCtx.prdDiff.added.length} ` +
+        `-${regenCtx.prdDiff.removed.length} ~${regenCtx.prdDiff.modified.length} ` +
+        `requirements; sections=${regenCtx.changedSectionHeadings.length}; ` +
+        `taskDelta obsolete=${regenCtx.taskDelta.obsoleteTaskIds.length}, ` +
+        `rerun=${regenCtx.taskDelta.taskIdsToRerun.length}, ` +
+        `needs-new=${regenCtx.taskDelta.requirementsNeedingNewTasks.length}.`,
+    );
+
+    const plan = stepsForTier(tier);
+
+    // 3. Re-run dependent docs (full regenerate; Phase B will patch).
+    if (plan.needsTrd) {
+      const prdMetadata = run.steps.prd?.metadata as
+        | { prdSpec?: PrdSpec }
+        | undefined;
+      const prdSpec = prdMetadata?.prdSpec ?? null;
+      const authDecision = await readAuthDecision(process.cwd());
+      run = await this.executeStep(run, "trd", () =>
+        this.trdAgent.generateTRD(
+          canonicalPrd,
+          tier,
+          undefined,
+          run.sessionId,
+          prdSpec,
+          undefined,
+          authDecision,
+        ),
+      );
+      if (run.status === "failed") return run;
+      await this.persistTrdArtifacts(run);
+    }
+
+    const trdContent = run.steps.trd?.content ?? previousSnapshot.docs.trd ?? "";
+
+    if (plan.needsSysDesign) {
+      run = await this.executeStep(run, "sysdesign", () =>
+        this.sysDesignAgent.generateSysDesign(
+          canonicalPrd,
+          trdContent,
+          run.sessionId,
+        ),
+      );
+      if (run.status === "failed") return run;
+    }
+    const sysDesignContent =
+      run.steps.sysdesign?.content ?? previousSnapshot.docs.sysdesign ?? "";
+
+    if (plan.needsImplGuide) {
+      run = await this.executeStep(run, "implguide", () =>
+        this.implGuideAgent.generateImplGuide(
+          canonicalPrd,
+          trdContent,
+          sysDesignContent,
+          run.sessionId,
+        ),
+      );
+      if (run.status === "failed") return run;
+    }
+    const implGuideContent =
+      run.steps.implguide?.content ?? previousSnapshot.docs.implguide ?? "";
+
+    // Design Spec — always run (no tier gating in original pipeline either).
+    run = await this.executeStep(run, "design", () =>
+      this.designAgent.generateDesign(canonicalPrd, undefined, run.sessionId),
+    );
+    if (run.status === "failed") return run;
+    const designContent =
+      run.steps.design?.content ?? previousSnapshot.docs.design ?? "";
+
+    // 3b. Re-run QA + Verify against the updated PRD/design so their audits
+    //     reflect the change. The full pipeline runs these before kickoff;
+    //     propagation previously skipped them, leaving stale QA/verify. Same
+    //     tier gating as the full run (needsQa/needsVerify = tier !== "S").
+    if (plan.needsQa) {
+      run = await this.executeStep(run, "qa", () =>
+        this.qaAgent.generateAudit(canonicalPrd, designContent, run.sessionId),
+      );
+      if (run.status === "failed") return run;
+      run = this.attachQaCoverageGate(run, canonicalPrd);
+    }
+    if (plan.needsVerify) {
+      run = await this.executeStep(run, "verify", () =>
+        this.verifierAgent.verifyAlignment(
+          canonicalPrd,
+          designContent,
+          run.sessionId,
+        ),
+      );
+      if (run.status === "failed") return run;
+    }
+
+    // 4. Extract a fresh structured PRD spec from the EDITED PRD so the
+    //    B-phase page/component diff sees the post-edit spec, not the stale
+    //    baseline. The edit branch skips attachPrdStructuredSpec, so without
+    //    this the snapshot/sidecar would carry only the previous spec (or
+    //    null). Best-effort: fall back to step metadata → previous snapshot.
+    let freshPrdSpec: PrdSpec | null = null;
+    try {
+      freshPrdSpec = await extractPrdSpec(canonicalPrd, run.sessionId);
+    } catch (e) {
+      console.warn(
+        "[engine] propagate: prdSpec extraction failed (using fallback):",
+        e instanceof Error ? e.message : e,
+      );
+    }
+    const prdSpec =
+      freshPrdSpec ??
+      ((run.steps.prd?.metadata as { prdSpec?: PrdSpec } | undefined)
+        ?.prdSpec) ??
+      previousSnapshot.prdSpec ??
+      null;
+    if (freshPrdSpec && run.steps.prd) {
+      run.steps.prd = {
+        ...run.steps.prd,
+        metadata: { ...run.steps.prd.metadata, prdSpec: freshPrdSpec },
+      };
+    }
+
+    const incremental = await kickoffIncremental({
+      regenCtx,
+      newDocs: {
+        prd: canonicalPrd,
+        trd: trdContent || undefined,
+        sysDesign: sysDesignContent || undefined,
+        implGuide: implGuideContent || undefined,
+        designSpec: designContent || undefined,
+      },
+      prdSpec,
+      tier,
+      sessionId: run.sessionId,
+    });
+    console.info(
+      `[engine] kickoffIncremental: dropped=${incremental.droppedTaskIds.length}, ` +
+        `new=${incremental.newTaskIds.length}, rerun=${incremental.tasksToRerunIds.length}, ` +
+        `total=${incremental.tasks.length}.`,
+    );
+
+    // 5. Write a session-checkpoint that flags the rerun set as "failed" so
+    //    the next coding run's existing retry-failed-tasks flow picks them up
+    //    without any coding-side code changes.
+    const rerunSet = new Set(incremental.tasksToRerunIds);
+    const checkpointMap = new Map<string, TaskCheckpointEntry>();
+    for (const task of incremental.tasks) {
+      checkpointMap.set(
+        task.id,
+        rerunSet.has(task.id)
+          ? { status: "failed", generatedFiles: [] }
+          : { status: "completed", generatedFiles: [] },
+      );
+    }
+    // Write the checkpoint where the coding flow reads/writes it
+    // (coding/route.ts and coding/checkpoint GET both use process.cwd() ===
+    // this.projectRoot), NOT outputRoot — otherwise the "retry failed tasks"
+    // lookup never sees the rerun set and the propagate→coding loop breaks.
+    await writeSessionCheckpoint(
+      this.projectRoot,
+      run.sessionId,
+      checkpointMap,
+      incremental.tasks.map((t) => t.id),
+    );
+
+    // 6. Persist a fresh kickoff snapshot reflecting the new state.
+    await writeKickoffSnapshot(outputRoot, {
+      sessionId: run.sessionId,
+      runId: run.id,
+      savedAt: new Date().toISOString(),
+      prdContent: canonicalPrd,
+      prdRequirementIndex: newRequirementIndex,
+      prdSpec: prdSpec ?? undefined,
+      tasks: incremental.tasks,
+      docs: {
+        prd: canonicalPrd,
+        trd: trdContent || undefined,
+        sysdesign: sysDesignContent || undefined,
+        implguide: implGuideContent || undefined,
+        design: designContent || undefined,
+      },
+    });
+
+    // 6b. Persist the structured-spec sidecar so the coding API (a separate
+    //     HTTP request) and B-phase tooling pick up the post-edit spec.
+    //     Mirrors the full-kickoff write in runKickoffStep.
+    if (prdSpec) {
+      try {
+        const blueprintDir = path.join(outputRoot, ".blueprint");
+        await fs.mkdir(blueprintDir, { recursive: true });
+        await fs.writeFile(
+          path.join(blueprintDir, "PRD_SPEC.json"),
+          JSON.stringify(prdSpec, null, 2),
+          "utf-8",
+        );
+      } catch (e) {
+        console.warn(
+          "[engine] propagate: failed to persist .blueprint/PRD_SPEC.json (ignored):",
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
+    // 7. Surface a kickoff step result for the UI so the existing step
+    //    timeline picks up the propagation outcome.
+    const summary = [
+      "## Incremental kickoff (propagated from PRD edit)",
+      "",
+      `- New tasks: ${incremental.newTaskIds.length}`,
+      `- Tasks to rerun: ${incremental.tasksToRerunIds.length}`,
+      `- Obsolete tasks dropped: ${incremental.droppedTaskIds.length}`,
+      `- Total tasks: ${incremental.tasks.length}`,
+      "",
+      `Coverage: requested=${incremental.diagnostics.requirementsRequested.length}, ` +
+        `covered=${incremental.diagnostics.requirementsActuallyCovered.length}, ` +
+        `still uncovered=${incremental.diagnostics.requirementsStillUncovered.length}.`,
+    ].join("\n");
+
+    run.steps.kickoff = this.buildStepResult("kickoff", "completed", {
+      content: summary,
+      model: "incremental",
+      costUsd: incremental.diagnostics.costUsd,
+      durationMs: incremental.diagnostics.durationMs,
+      tokenUsage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      },
+      metadata: {
+        propagatedFromEdit: true,
+        prdDiff: regenCtx.prdDiff,
+        taskDelta: regenCtx.taskDelta,
+        newTaskIds: incremental.newTaskIds,
+        tasksToRerunIds: incremental.tasksToRerunIds,
+        droppedTaskIds: incremental.droppedTaskIds,
+        diagnostics: incremental.diagnostics,
+        taskBreakdown: incremental.tasks,
+      },
+    });
+    run.totalCostUsd += incremental.diagnostics.costUsd;
+    run.updatedAt = new Date().toISOString();
+    this.emit({
+      type: "step_complete",
+      runId: run.id,
+      stepId: "kickoff",
+      data: run.steps.kickoff,
+    });
+
+    return run;
   }
 
   private async executeStep(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, RefreshCw, GitCompare } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -10,6 +10,7 @@ import StageInputBar from "@/components/StageInputBar";
 import TrdReviewPanel from "@/components/TrdReviewPanel";
 import type { TrdReviewResult } from "@/lib/agents/architect/trd-reviewer-agent";
 import type { StepUIProps } from "../../../_shared/types";
+import { DocDiffView } from "../../../_shared/DocDiffView";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 function SpinnerIcon() {
@@ -65,6 +66,10 @@ export function TrdUI(props: StepUIProps) {
 
   const [editInput, setEditInput] = useState("");
   const [isPrinting, setIsPrinting] = useState(false);
+  // Previous TRD content captured right before a Regenerate, so the user can
+  // see what the regenerate changed. Session-scoped (not persisted).
+  const [prevContent, setPrevContent] = useState<string | null>(null);
+  const [showChanges, setShowChanges] = useState(false);
   const autoStartedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +156,9 @@ export function TrdUI(props: StepUIProps) {
       "Regenerate TRD from scratch?\n\nThis discards the current TRD content and any pending review, then runs the TRD agent again against the latest PRD.",
     );
     if (!ok) return;
+    // Snapshot the current TRD so the user can diff what the regenerate changed.
+    setPrevContent(step?.content ?? content ?? null);
+    setShowChanges(false);
     // Clear the prior review so the panel doesn't show stale results while
     // the new TRD streams. The auto-review effect will re-fire once the
     // fresh TRD content lands.
@@ -246,6 +254,16 @@ export function TrdUI(props: StepUIProps) {
                   <RefreshCw size={12} className={isThisRunning ? "animate-spin" : ""} />
                   {isThisRunning ? "Regenerating…" : "Regenerate"}
                 </button>
+                {prevContent != null && isDone && !isThisRunning && (
+                  <button
+                    onClick={() => setShowChanges((v) => !v)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${showChanges ? "text-white bg-[#712ae2]" : "text-[#712ae2] bg-[rgba(113,42,226,0.07)] hover:bg-[rgba(113,42,226,0.13)]"}`}
+                    title="Show what the last regenerate changed"
+                  >
+                    <GitCompare size={12} />
+                    {showChanges ? "Hide changes" : "Changes"}
+                  </button>
+                )}
                 <button
                   onClick={handleDownloadPdf}
                   disabled={!isDone || isPrinting || isThisRunning}
@@ -258,7 +276,16 @@ export function TrdUI(props: StepUIProps) {
               </div>
             </div>
             <div className="p-8">
-              {!content && !isThisRunning ? (
+              {showChanges && prevContent != null ? (
+                <div className="h-[60vh]">
+                  <DocDiffView
+                    oldText={prevContent}
+                    newText={content}
+                    label="TRD.md"
+                    onClose={() => setShowChanges(false)}
+                  />
+                </div>
+              ) : !content && !isThisRunning ? (
                 <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]">
                   <span className="text-[13px]">
                     Waiting for pipeline to start…

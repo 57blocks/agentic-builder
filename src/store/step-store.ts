@@ -143,8 +143,9 @@ export interface StepStoreState {
   /** Mark a step as failed */
   setStepFailed: (stepId: StepId, error: string) => void;
 
-  /** Execute a step via its registered agent with SSE streaming + snapshot saving */
-  executeStep: (stepId: StepId, editInstruction?: string) => Promise<void>;
+  /** Execute a step via its registered agent with SSE streaming + snapshot saving.
+   *  `propagateAfterEdit` only applies alongside an `editInstruction` (PRD step). */
+  executeStep: (stepId: StepId, editInstruction?: string, propagateAfterEdit?: boolean) => Promise<void>;
 
   /** Set the project slug for DB sync */
   setProjectSlug: (slug: string) => void;
@@ -305,11 +306,15 @@ export const useStepStore = create<StepStoreState>()(
       },
 
       setStepFailed: (stepId, error) => {
-        saveStepSnapshot(get, stepId);
+        // Preserve any existing content/metadata — a failed (re)run must not
+        // erase previously-good output. This is critical for propagation, where
+        // a downstream failure surfaces as a "prd" step failure and would
+        // otherwise wipe the PRD and persist an empty snapshot.
         set((s) => ({
           steps: {
             ...s.steps,
             [stepId]: {
+              ...(s.steps[stepId] ?? { stepId }),
               stepId,
               status: "failed",
               error,
@@ -419,9 +424,9 @@ export const useStepStore = create<StepStoreState>()(
       },
 
       // ── Step Execution (replaces pipeline-store SSE flow) ──
-      executeStep: async (stepId: StepId, editInstruction?: string) => {
+      executeStep: async (stepId: StepId, editInstruction?: string, propagateAfterEdit?: boolean) => {
         const s = get();
-        console.log("[step-store] executeStep called", { stepId, isRunning: s.isRunning, currentStep: s.currentStep, editInstruction });
+        console.log("[step-store] executeStep called", { stepId, isRunning: s.isRunning, currentStep: s.currentStep, editInstruction, propagateAfterEdit });
         if (s.isRunning) {
           console.warn("[step-store] executeStep bailed: isRunning is true", { stepId, currentStep: s.currentStep });
           return;
@@ -445,8 +450,34 @@ export const useStepStore = create<StepStoreState>()(
         }
 
         const sessionId = newSessionId();
-        console.log("[step-store] calling setStepRunning for", stepId);
-        get().setStepRunning(stepId);
+        // Manual-edit propagation (propagateAfterEdit without an editInstruction)
+        // re-runs DOWNSTREAM only — the PRD itself is unchanged. Keep it visible
+        // instead of blanking it for the whole (long) downstream run; otherwise
+        // the PRD vanishes mid-run and is lost if propagation fails. Instruction
+        // edits still blank + stream the regenerated PRD as usual.
+        const preservePrdContent =
+          stepId === "prd" && propagateAfterEdit === true && !editInstruction;
+        console.log("[step-store] calling setStepRunning for", stepId, { preservePrdContent });
+        if (preservePrdContent) {
+          set((st) => ({
+            currentStep: stepId,
+            isRunning: true,
+            error: null,
+            streamingContent: "",
+            streamingThinking: "",
+            steps: {
+              ...st.steps,
+              [stepId]: {
+                ...(st.steps[stepId] ?? { stepId }),
+                stepId,
+                status: "running",
+                timestamp: new Date().toISOString(),
+              },
+            },
+          }));
+        } else {
+          get().setStepRunning(stepId);
+        }
 
         // ── Abort controller for this execution ──
         _isStepAborted = false;
@@ -483,6 +514,7 @@ export const useStepStore = create<StepStoreState>()(
             tier: effectiveTier,
             sessionId,
             editInstruction,
+            propagateAfterEdit,
             prdIntent: s.prdIntent,
             abortSignal: controller.signal,
             emitState: (update: Partial<import("@/app/(dashboard)/project/[projectId]/_steps/_shared/types").StepAgentState>) => {
