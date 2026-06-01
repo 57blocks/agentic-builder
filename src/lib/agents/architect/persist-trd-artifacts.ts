@@ -82,6 +82,18 @@ export async function persistTrdArtifactsFromContent(
     dagValidation = validateWorkflowDag(artifacts.pipelineDagYaml, {
       trdMarkdown: content,
     });
+  } else {
+    // No pipeline DAG in this TRD — clear any leftover file from a previous
+    // project so the coding agent doesn't inherit stale workers/pipelines.
+    try {
+      await fs.writeFile(
+        path.join(blueprintDir, "pipeline-dag.yaml"),
+        "",
+        "utf8",
+      );
+    } catch {
+      // best-effort
+    }
   }
 
   return {

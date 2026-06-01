@@ -103,6 +103,17 @@ export async function distributePipelineDag(
 ): Promise<DistributePipelineDagResult> {
   const sourceDir = options?.sourceDir ?? process.cwd();
   const sourcePath = path.resolve(sourceDir, DAG_BLUEPRINT_REL);
+  const dest = path.join(outputDir, DAG_REL_TARGET);
+
+  // Always clear the destination first so stale DAGs from a previous project
+  // never bleed into a new coding session (regardless of whether the current
+  // project generates a fresh DAG or not).
+  try {
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, "", "utf8");
+  } catch {
+    // best-effort: if we can't clear, proceed anyway
+  }
 
   let content: string;
   try {
@@ -114,8 +125,6 @@ export async function distributePipelineDag(
     return { found: false, written: null, sourcePath };
   }
 
-  const dest = path.join(outputDir, DAG_REL_TARGET);
-  await fs.mkdir(path.dirname(dest), { recursive: true });
   await fs.writeFile(dest, content, "utf8");
   return { found: true, written: DAG_REL_TARGET, sourcePath };
 }
