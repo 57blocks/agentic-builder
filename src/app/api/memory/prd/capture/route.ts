@@ -20,11 +20,10 @@ import { memoryEnabled } from "@/lib/memory/env";
 import { summarizePrdDiff } from "@/lib/memory/prd-diff-summarize";
 import { getTraceLogger } from "@/lib/memory/trace";
 import { normalizeProjectTier, type ProjectTier } from "@/lib/agents/shared/project-classifier";
-import { extractPrdKnowledge } from "@/lib/memory/knowledge/prd-knowledge/extract";
 import {
-  buildPrdKnowledgeTags,
-  type PrdKnowledgeRecord,
-} from "@/lib/memory/knowledge/prd-knowledge/types";
+  persistPrdKnowledge,
+  PrdKnowledgeDuplicateError,
+} from "@/lib/memory/knowledge/prd-knowledge/persist";
 
 interface PrdCaptureRequest {
   sessionId: string;
@@ -228,48 +227,20 @@ async function tryWritePrdKnowledge(args: {
   tier: ProjectTier;
 }): Promise<void> {
   try {
-    const memory = getSystemMemory();
-
-    // Idempotency: skip if a prd-knowledge already exists for this kickoff.
-    const existing = await memory.recall({
-      layer: "L1",
-      kinds: ["prd-knowledge"],
-      kickoffId: args.sessionId,
-      limit: 1,
-    });
-    if (existing.length > 0) return;
-
-    const extracted = await extractPrdKnowledge({
+    await persistPrdKnowledge({
       finalPrd: args.finalPrd,
       projectType: args.projectType,
       tier: args.tier,
-    });
-    if (!extracted) return;
-
-    const record: PrdKnowledgeRecord = {
-      schemaVersion: 1,
-      ...extracted,
-      fullPrd: args.finalPrd,
-      sourceProjectId: args.sessionId,
-      status: "pending",
-    };
-
-    await memory.save({
-      layer: "L1",
-      kind: "prd-knowledge",
-      title: extracted.title,
-      body: JSON.stringify(record),
-      tags: buildPrdKnowledgeTags({
-        industry: extracted.industry,
-        productType: extracted.productType,
-        tier: args.tier,
-        status: "pending",
-      }),
       source: "distill",
-      refs: { kickoffId: args.sessionId },
-      metrics: { score: 0 },
+      sourceProjectId: args.sessionId,
+      kickoffId: args.sessionId,
+      idempotencyCheck: true,
     });
   } catch (err) {
-    console.warn("[memory] tryWritePrdKnowledge failed (skipping):", (err as Error).message);
+    if (err instanceof PrdKnowledgeDuplicateError) return;
+    console.warn(
+      "[memory] tryWritePrdKnowledge failed (skipping):",
+      (err as Error).message,
+    );
   }
 }
