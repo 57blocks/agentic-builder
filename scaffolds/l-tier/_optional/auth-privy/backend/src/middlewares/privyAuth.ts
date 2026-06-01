@@ -47,18 +47,35 @@ export const privyAuthMiddleware: Middleware = async (ctx, next) => {
 };
 
 /**
+ * Phantom brand that makes {@link requirePrivyAuth} structurally INCOMPATIBLE
+ * with `Koa.Middleware`. The optional second parameter is never supplied at a
+ * call site — its only job is to turn `router.get(path, requirePrivyAuth)`
+ * into a COMPILE error: Koa's `Next` is not assignable to `AssertionGuardOnly`,
+ * so the type checker rejects mounting the guard as middleware. This converts
+ * the old silent-404 runtime bug (the #1 "OAuth succeeds but every /api/* 404s"
+ * cause) into a type error the worker cannot ship. See the `auth-guard-as-
+ * middleware` rule in runtime-integration-audit.ts — this type is the primary
+ * guard; that lint is now only a backstop for hand-written code.
+ */
+declare const ASSERTION_GUARD_ONLY: unique symbol;
+type AssertionGuardOnly = { readonly [ASSERTION_GUARD_ONLY]: true };
+
+/**
  * Assertion guard. Call from inside a handler to assert that a verified
  * Privy session is on the context. Throws 401 otherwise. Returns the claims
  * for convenience.
  *
- * IMPORTANT: This is NOT a Koa middleware. Do NOT pass it to
- * `router.get(path, requirePrivyAuth, handler)` — it has no `next()` call
- * and would leave the chain stalled (the request silently 404s once Koa
- * fails to find a downstream responder). Use `requirePrivyAuthMiddleware`
- * for that.
+ * IMPORTANT: This is NOT a Koa middleware. Passing it to
+ * `router.get(path, requirePrivyAuth, handler)` is now a COMPILE error (see
+ * `AssertionGuardOnly` above) — it has no `next()` call and would leave the
+ * chain stalled (the request silently 404s once Koa fails to find a downstream
+ * responder). Use `requirePrivyAuthMiddleware` to mount on a route; call
+ * `requirePrivyAuth(ctx)` directly to assert auth from inside a handler body.
  */
 export function requirePrivyAuth(
   ctx: Parameters<Middleware>[0],
+  // Phantom — never passed. Forces a type error if used as Koa middleware.
+  _assertionGuardOnly?: AssertionGuardOnly,
 ): PrivyVerifiedClaims {
   if (!ctx.state.user || !ctx.state.privy) {
     ctx.throw(401, "Not authenticated");
