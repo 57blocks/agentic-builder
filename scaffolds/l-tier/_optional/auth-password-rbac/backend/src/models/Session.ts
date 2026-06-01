@@ -45,6 +45,11 @@ Session.init(
       type: DataTypes.UUID,
       allowNull: false,
       field: "user_id",
+      // FK + cascade declared on the model so `sync()` reproduces what the
+      // old 100-create-auth-users migration used to create (deleting a user
+      // removes their sessions). Models are the single source of truth.
+      references: { model: "users", key: "id" },
+      onDelete: "CASCADE",
     },
     expiresAt: {
       type: DataTypes.DATE,
@@ -76,5 +81,6 @@ Session.init(
     tableName: "sessions",
     timestamps: true,
     underscored: true,
+    indexes: [{ fields: ["user_id"] }, { fields: ["expires_at"] }],
   },
 );

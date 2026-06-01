@@ -55,12 +55,7 @@ export async function initDb(): Promise<void> {
   // extension error, so a fresh Postgres install never crashes startup.
   await enableTimescaleExtension(sequelize);
 
-  // Apply pending Sequelize migrations from `src/database/migrations/`.
-  // Default ON so a fresh checkout boots into a usable schema; set
-  // `AUTO_MIGRATE=0` to run them manually via `pnpm migrate` (recommended
-  // for production deploys with a separate release step).
-  if (process.env.AUTO_MIGRATE !== "0") {
-    const { runMigrations } = await import("./database/runMigrations");
-    await runMigrations();
-  }
+  // No migrations: the Sequelize models are the single source of truth for
+  // the schema. `syncModels()` (called from server.ts / seed-runner) issues
+  // the CREATE TABLE / index DDL straight from the model definitions.
 }

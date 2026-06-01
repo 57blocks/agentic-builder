@@ -44,6 +44,10 @@ Session.init(
       type: DataTypes.UUID,
       allowNull: false,
       field: "user_id",
+      // FK + cascade on the model so `sync()` reproduces the old migration's
+      // behaviour (deleting a user removes their sessions). No migrations.
+      references: { model: "users", key: "id" },
+      onDelete: "CASCADE",
     },
     expiresAt: {
       type: DataTypes.DATE,
@@ -75,5 +79,6 @@ Session.init(
     tableName: "sessions",
     timestamps: true,
     underscored: true,
+    indexes: [{ fields: ["user_id"] }, { fields: ["expires_at"] }],
   },
 );

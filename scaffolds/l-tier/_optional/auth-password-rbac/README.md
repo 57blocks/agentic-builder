@@ -37,8 +37,7 @@ viewer / staff) OR when no auth provider is named at all (safe default).
 | `backend/src/models/User.ts` | Sequelize model — `id (uuid)`, `email`, `passwordHash`, `role`, `displayName`. |
 | `backend/src/models/Session.ts` | Sequelize model — `id`, `userId`, `expiresAt`, `lastActivityAt`. **No `token` column** by design (cryptographic verification via `AUTH_JWT_SECRET` keeps revocation working without the DB-leak liability). |
 | `backend/src/workers/sessionCleanupWorker.ts` | Periodic sweep (default 1h) deleting expired `sessions` rows. Self-starts on first import — no edits to `backend/src/workers/index.ts` needed. Configure via `SESSION_CLEANUP_INTERVAL_MS` / `SESSION_CLEANUP_DISABLED`. |
-| `backend/src/models/index.ts` | **Overwrites** base — wires `User` + `Session` into `syncModels`. |
-| `backend/src/database/migrations/100-create-auth-users.ts` | DDL for `users` + `sessions` tables (snake_case columns, uuid PK, partial indexes). |
+| `backend/src/models/index.ts` | **Overwrites** base — wires `User` + `Session` into `syncModels`. The `users` / `sessions` tables (incl. role/domain_role indexes + the `sessions.user_id → users.id` ON DELETE CASCADE FK) are declared on the models and built by `sequelize.sync()`. No migrations. |
 | `backend/src/scripts/seed-auth-users.ts` | Idempotent seeder — inserts admin / operator / viewer with bcrypt-hashed passwords from `.blueprint/auth-decision.json`. |
 | `backend/src/utils/jwt.ts` | Sign / verify helpers around `AUTH_JWT_SECRET`. |
 
@@ -135,9 +134,10 @@ viewer / staff) OR when no auth provider is named at all (safe default).
    project's design system).
 3. Chain `requireAuth` + `requireRole(...)` on any module routes that
    need server-side enforcement (frontend gates are advisory only).
-4. Run `pnpm run seed:auth-users` after `pnpm run migrate` to populate
-   the default accounts (with `domainRole` from
-   `.blueprint/auth-decision.json`).
+4. The schema is created from the models by `syncModels()` on boot — there
+   is no migration step. To populate the default accounts (with `domainRole`
+   from `.blueprint/auth-decision.json`), run `pnpm run seed` (it runs
+   `syncModels()` first), or just start the backend, which auto-seeds.
 
 ### Wiring example (`router.tsx`)
 
