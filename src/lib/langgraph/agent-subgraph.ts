@@ -33,10 +33,6 @@ import { recallAndPrepareInject } from "@/lib/memory/recall-context";
 import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
 import { classifyFailureMode } from "@/lib/memory/distill/failure-mode";
 import { parseMemoryCites, recordMemoryCites } from "@/lib/memory/cite";
-import {
-  checkMigrationCoverage,
-  formatMigrationGapInstruction,
-} from "@/lib/pipeline/self-heal/migration-coverage";
 import { resolveModel } from "@/lib/openrouter";
 import { resolveModelChain } from "@/lib/model-config";
 import type {
@@ -542,23 +538,22 @@ export async function buildProjectConventionCard(
         "- **ORM**: Sequelize — model field declarations MUST use `declare`. System fields (id, createdAt, updatedAt) must NOT be in request DTOs.",
       );
       lines.push(
-        "- **Sequelize migration RULE (CRITICAL)**: If your task modifies any " +
-          "file under `backend/src/models/` (add/remove column, change type, " +
-          "change association, change index), you MUST also write a NEW " +
-          "migration under `backend/src/database/migrations/NNNN_<short-desc>.ts`. " +
-          "NNNN is one greater than the highest existing migration number. " +
-          "Export both `async up({ context: queryInterface })` and " +
-          "`async down({ context: queryInterface })` covering every change. " +
-          "Do NOT modify existing migrations — always add a new file. The " +
-          "post-task migration-coverage check will flag missing migrations " +
-          "and create a repair task. The umzug runner in `src/database/runMigrations.ts` " +
-          "applies these on backend startup.",
+        "- **Schema = models, NO migrations (CRITICAL)**: This project has NO " +
+          "migrations and NO migration runner — `syncModels()` runs " +
+          "`sequelize.sync()` and builds every table from the model. Declare " +
+          "EVERYTHING on the model under `backend/src/models/`: columns, " +
+          "`unique: true`, secondary indexes via `indexes: [{ fields: [\"col\"] }]` " +
+          "in the `init()` options, and foreign keys via the column's " +
+          "`references: { model: \"<table>\", key: \"id\" }` + `onDelete`. If it " +
+          "is not on the model, `sync()` will NOT create it. Do NOT create a " +
+          "`backend/src/database/migrations/` directory or call `queryInterface` " +
+          "for schema DDL. Adding a field to a model is sufficient — no ALTER needed.",
       );
 
       // ── TimescaleDB safety RULE ─────────────────────────────────────────
       // Fires when the project references TimescaleDB anywhere — db.ts
-      // helper, PRD/TRD mention, or existing migrations. Raw
-      // `CREATE EXTENSION timescaledb` in migrations is the single most
+      // helper, PRD/TRD mention, or model/schema code. Raw
+      // `CREATE EXTENSION timescaledb` at startup is the single most
       // common reason an M-tier backend won't start on a fresh Postgres.
       const timescaleHelper = await fsRead(
         "backend/src/utils/timescale.ts",
@@ -576,17 +571,19 @@ export async function buildProjectConventionCard(
             "of stock PostgreSQL — Homebrew, Docker dev images, CI runners, " +
             "and most cloud preview DBs do not have it. Calling " +
             "`CREATE EXTENSION timescaledb` or `create_hypertable` directly " +
-            "in any migration's `up()` body will THROW and kill backend " +
-            "startup. Use the helpers in `backend/src/utils/timescale.ts` " +
-            "instead — they respect `TIMESCALE_DISABLED=1` (set in `.env.example`) " +
-            "and silently fall back to plain Postgres tables when the " +
-            "extension is unavailable. Specifically: " +
+            "at startup will THROW and kill the backend. There are no " +
+            "migrations — promote hypertables in `initDb()` AFTER " +
+            "`syncModels()` has created the tables, using the helpers in " +
+            "`backend/src/utils/timescale.ts` — they respect " +
+            "`TIMESCALE_DISABLED=1` (set in `.env.example`) and silently fall " +
+            "back to plain Postgres tables when the extension is unavailable. " +
+            "Specifically: " +
             "(a) `enableTimescaleExtension(sequelize)` for CREATE EXTENSION; " +
-            "(b) `createHypertableIfPossible(queryInterface, 'table', 'time_col')` " +
+            "(b) `createHypertableIfPossible(sequelize.getQueryInterface(), 'table', 'time_col')` " +
             "for hypertable conversion; " +
             "(c) `runTimescaleQuery(sequelize, sql, 'description')` for " +
             "compression / retention / continuous aggregate SQL. " +
-            "NEVER inline raw Timescale SQL in a migration's up() body.",
+            "NEVER inline raw Timescale SQL at startup outside these helpers.",
         );
       }
     }
@@ -2916,80 +2913,6 @@ async function generateCode(state: WorkerState) {
     console.log(
       `[Worker:${state.workerLabel}] Codegen metrics task="${task.title}" mode=${codegenMode} llmCalls=${llmCalls} promptTokens=${promptTokens} completionTokens=${completionTokens} totalTokens=${totalTokens} readOnlyRounds=${readOnlyRounds} writeToolCalls=${writeToolCalls} roundWrites=${totalRoundWrites} roundWritesByRound=[${roundWritesByRound.join(",")}] deletedFiles=${deletedFileCount} movedFiles=${movedFileCount} durationSec=${(durationMs / 1000).toFixed(1)} model=${lastModel} completion=${completionReason}`,
     );
-
-    // Migration-coverage check — fires per-task immediately after writes.
-    // If the worker touched a Sequelize model without a migration, log a
-    // warning and persist the gap to .ralph/migration-coverage.json so
-    // downstream self-heal can convert it into a repair task.
-    try {
-      const coverage = checkMigrationCoverage({ writtenFiles });
-      if (
-        coverage.modelFilesTouched.length > 0 ||
-        coverage.migrationFilesTouched.length > 0
-      ) {
-        const ralphDir = path.join(state.outputDir, ".ralph");
-        await nodeFs.mkdir(ralphDir, { recursive: true });
-        const reportPath = path.join(ralphDir, "migration-coverage.json");
-        let report: {
-          version: number;
-          updatedAt: string;
-          tasks: Record<
-            string,
-            {
-              taskId: string;
-              taskTitle: string;
-              ok: boolean;
-              modelFilesTouched: string[];
-              migrationFilesTouched: string[];
-              gaps: {
-                modelPath: string;
-                modelName: string;
-                instruction: string;
-              }[];
-              checkedAt: string;
-            }
-          >;
-        };
-        try {
-          const raw = await nodeFs.readFile(reportPath, "utf8");
-          report = JSON.parse(raw);
-          if (typeof report?.tasks !== "object" || report?.tasks === null) {
-            throw new Error("malformed");
-          }
-        } catch {
-          report = { version: 1, updatedAt: "", tasks: {} };
-        }
-        const checkedAt = new Date().toISOString();
-        report.tasks[task.id] = {
-          taskId: task.id,
-          taskTitle: task.title,
-          ok: coverage.ok,
-          modelFilesTouched: coverage.modelFilesTouched,
-          migrationFilesTouched: coverage.migrationFilesTouched,
-          gaps: coverage.gaps.map((g) => ({
-            ...g,
-            instruction: formatMigrationGapInstruction(g, task.id),
-          })),
-          checkedAt,
-        };
-        report.updatedAt = checkedAt;
-        await nodeFs.writeFile(
-          reportPath,
-          JSON.stringify(report, null, 2) + "\n",
-          "utf8",
-        );
-
-        if (!coverage.ok) {
-          console.warn(
-            `[Worker:${state.workerLabel}] Migration coverage gap: task "${task.id}" touched ${coverage.modelFilesTouched.length} model file(s) without writing a migration. ${coverage.gaps.length} gap(s) recorded in .ralph/migration-coverage.json.`,
-          );
-        }
-      }
-    } catch (e) {
-      console.warn(
-        `[Worker:${state.workerLabel}] Migration coverage check failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
 
     // RALPH: check for missing promise and log a warning (enforcement happens in routeAfterGenerate)
     if (state.ralphConfig.enabled) {

@@ -26,7 +26,6 @@ const ARTIFACT_PATHS: Record<string, string> = {
   runtime_integration_audit: ".ralph/runtime-integration-audit.json",
   runtime_audit_tasks: ".ralph/runtime-audit-tasks.json",
   tsc_diagnostics: ".ralph/tsc-diagnostics.json",
-  migration_coverage: ".ralph/migration-coverage.json",
   contract_usage_coverage: ".ralph/contract-usage-coverage.json",
 };
 
