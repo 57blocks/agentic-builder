@@ -11,6 +11,7 @@ import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
 import {
   copyScaffold,
   listScaffoldTemplateRelativePaths,
+  resolveScaffoldTier,
   type ScaffoldTier,
 } from "@/lib/pipeline/scaffold-copy";
 import {
@@ -34,7 +35,10 @@ import {
   upsertBackendPrivyAppIdMirror,
   resolvePrivyAppIdMirrorFromFilledResources,
 } from "@/lib/pipeline/generated-code-env";
-import { normalizeProjectTier } from "@/lib/agents/shared/project-classifier";
+import {
+  normalizeProjectTier,
+  prdSignalsBackend,
+} from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
 import { InfraAgent } from "@/lib/agents/infra/infra-agent";
 import { applyInfra } from "@/lib/pipeline/infra/apply";
@@ -851,6 +855,25 @@ export async function POST(request: NextRequest) {
 
   const tier = await resolveTier(projectTier, outputRoot);
 
+  // S-scope PRDs that need a backend reuse the M scaffold (s-tier is
+  // frontend-only). Scope tier (S/M/L) still drives task granularity and
+  // UI behaviour; only the scaffold directory is promoted here.
+  const scaffoldTier: ScaffoldTier = await (async (): Promise<ScaffoldTier> => {
+    if (tier !== "S") return tier;
+    try {
+      const prdPath = path.join(outputRoot, "PRD.md");
+      const prdContent = await fs.readFile(prdPath, "utf-8");
+      return resolveScaffoldTier(tier, prdSignalsBackend(prdContent));
+    } catch {
+      return tier;
+    }
+  })();
+  if (scaffoldTier !== tier) {
+    console.log(
+      `[CodingAPI] S-scope PRD signals backend → scaffold upgraded ${tier} → ${scaffoldTier}`,
+    );
+  }
+
   // Read user-provided resource requirements (API keys, OAuth secrets, etc.)
   // collected during the kickoff phase BEFORE the scaffold copy so the
   // optional-feature layer can use them as triggers (e.g. VITE_PRIVY_APP_ID
@@ -868,7 +891,7 @@ export async function POST(request: NextRequest) {
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
   try {
-    const result = await copyScaffold(tier, outputRoot, {
+    const result = await copyScaffold(scaffoldTier, outputRoot, {
       forceOverwrite: true,
       resourceRequirements,
       authDecision,
@@ -894,7 +917,8 @@ export async function POST(request: NextRequest) {
         path.join(outputRoot, ".blueprint", "scaffold-applied.json"),
         JSON.stringify(
           {
-            tier,
+            tier: scaffoldTier,
+            scopeTier: tier,
             generatedAt: new Date().toISOString(),
             appliedOptionalFeatures: appliedOptionalScaffolds,
           },
@@ -923,7 +947,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await writeScaffoldSpecFile(outputRoot, tier);
+    await writeScaffoldSpecFile(outputRoot, scaffoldTier);
   } catch (e) {
     console.warn(
       `[CodingAPI] writeScaffoldSpecFile warning: ${e instanceof Error ? e.message : String(e)}`,
@@ -944,7 +968,7 @@ export async function POST(request: NextRequest) {
     if (kickoffInfraMeta && kickoffInfraMeta.services.length > 0) {
       const { spec, provisioned } = await buildInfraSpecFromKickoff(
         outputRoot,
-        tier as "S" | "M" | "L",
+        scaffoldTier,
         kickoffInfraMeta,
       );
       const applied = await applyInfra(

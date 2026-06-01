@@ -9,6 +9,21 @@ import type { AuthDecision } from "@/lib/agents/architect/auth-decision-types";
 
 export type ScaffoldTier = "S" | "M" | "L";
 
+/**
+ * Map a project's *scope* tier to the scaffold it should use. Scope (S/M/L) and
+ * "needs a backend" are orthogonal: a small S-scope project that requires a
+ * backend has no usable scaffold of its own (the s-tier scaffold is
+ * frontend-only), so it reuses the minimal full-stack scaffold (M). Scope tier
+ * still drives task granularity elsewhere — only the scaffold is upgraded here.
+ */
+export function resolveScaffoldTier(
+  scopeTier: ScaffoldTier,
+  needsBackend: boolean,
+): ScaffoldTier {
+  if (scopeTier === "S" && needsBackend) return "M";
+  return scopeTier;
+}
+
 /** Never copy dependency trees or VCS — pnpm workspace symlinks break fs.copyFile (ENOTSUP). */
 const SKIP_DIR_NAMES = new Set([
   "node_modules",

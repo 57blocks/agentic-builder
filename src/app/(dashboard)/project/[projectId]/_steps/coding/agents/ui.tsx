@@ -461,10 +461,13 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone, isFailed]);
 
-  // ── Agent logs (flat, all agents) ──────────────────────────────────────────
+  // ── Agent logs (flat, all agents) + TDD per-test logs, ordered by time ──────
   const allAgentLogs = useMemo(
-    () => codingState.agents.flatMap((a) => a.logs),
-    [codingState.agents],
+    () =>
+      [...codingState.agents.flatMap((a) => a.logs), ...codingState.tddLogs].sort(
+        (a, b) => a.timestamp.localeCompare(b.timestamp),
+      ),
+    [codingState.agents, codingState.tddLogs],
   );
 
   // ── Handlers ──────────────────────────────────────────────────────────────

@@ -270,11 +270,15 @@ function buildSystemPrompt(
   tier: ProjectTier,
   scaffoldBlock?: string,
   skillsBlock?: string,
+  scaffoldTier?: "S" | "M" | "L",
 ): string {
+  const effectiveScaffoldTier = scaffoldTier ?? (tier as "S" | "M" | "L");
   const tierStyle = TIER_CODING_STYLE[tier];
   const phaseGuide =
-    tier === "M" || tier === "L" ? flatStackPhaseGuide() : "";
-  const lAddendum = tier === "L" ? lTierAddendum() : "";
+    effectiveScaffoldTier === "M" || effectiveScaffoldTier === "L"
+      ? flatStackPhaseGuide()
+      : "";
+  const lAddendum = effectiveScaffoldTier === "L" ? lTierAddendum() : "";
   const scaffoldSection =
     scaffoldBlock && scaffoldBlock.trim().length > 0
       ? `\n${scaffoldBlock.trim()}\n`
@@ -307,7 +311,7 @@ Before generating tasks, analyze the PRD to determine the project type:
    → Do NOT use Prisma, API routes, Docker, Kubernetes, or any server-side technology.
 
 2. **Full-stack with separate backend** — The PRD requires persistence, APIs, user data, or a separate backend service.
-   → **S-tier**: Vite + React frontend with Express/Node backend in a single repo.
+   → **S-scope using M scaffold** (S-tier PRD with backend): scaffold is **identical to M-tier** — **Koa + Sequelize** backend in \`backend/\`, **Vite + React** frontend in \`frontend/\`. Follow all M-tier conventions below. **NEVER use Express/Node or a single-repo layout for this case.**
    → **M-tier**: **Koa + Sequelize** backend in \`backend/\`, **Vite + React** frontend in \`frontend/\`. **NEVER use Next.js for M-tier.** **NEVER use Prisma** — Prisma's binary footprint and separate migration runner are not supported here. All persistence goes through Sequelize models, associations, and migrations.
    → **L-tier**: **same stack as M-tier** (Koa + Sequelize backend in \`backend/\`, Vite + React frontend in \`frontend/\`) PLUS production layers: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue, BullMQ-shaped, with in-process fallback), pino logger (\`backend/src/config/logger.ts\`) wired via \`requestLoggerMiddleware\`, \`createRateLimit\` middleware, and \`docker-compose.yml\` running postgres + redis. **NEVER use Next.js, Fastify, or a pnpm monorepo for L-tier** — that is the old layout and no longer exists. **NEVER use Prisma** at any tier.
    → All phases are allowed except **Testing** (do not emit phase "Testing"). Backend Services phase is **mandatory** — see rule below.
@@ -379,7 +383,7 @@ Example \`tddPlan\`:
 - **Derive** the list by: (1) enumerating what must exist in code to satisfy the PRD; (2) grouping into tasks that respect dependencies and parallelizable units; (3) **merging** work that belongs in one deliverable; **splitting** only when dependency order or review boundaries require it.
 - **Fewer tasks** for narrow PRDs; **more tasks** only when the PRD truly implies many separable surfaces (many pages, many services, strict phases). Never add filler tasks to match an imagined count.
 - **ProjectTier** (S/M/L) below is a **style and stack hint** — it does **not** set a minimum or maximum number of tasks.
-- **HARD LIMIT — S-tier**: Simple frontend projects MUST NOT exceed **4 tasks total**. If generating more than 4 tasks for S-tier, merge related work until at or below 4. Typical breakdown: (1) Scaffolding + project setup, (2) Core feature(s), (3) UI polish + integration, (4) optional infra — collapse further for thin-scope PRDs.
+- **HARD LIMIT — S-tier (frontend-only)**: When the project is a pure frontend S-tier app (no backend, scaffold is still S), MUST NOT exceed **4 tasks total**. If generating more than 4 tasks, merge related work until at or below 4. Typical breakdown: (1) Scaffolding + project setup, (2) Core feature(s), (3) UI polish + integration, (4) optional infra — collapse further for thin-scope PRDs. **This limit does NOT apply when the S-scope PRD needs a backend (M scaffold used).**
 
 ## Project tier hint (style only — not task count)
 ${tierStyle}
@@ -392,22 +396,23 @@ Each element has this shape:
 {
   "id": "T-001",
   "phase": "Scaffolding",
-  "title": "Initialize Vite + React project with Tailwind CSS",
-  "description": "Setup package.json with Vite, vite.config.ts, index.html, src/main.tsx, Tailwind CSS config.",
+  "title": "Initialize Vite + React project (S-tier only — M/L scaffold is already copied)",
+  "description": "S-tier only: Setup package.json with Vite, vite.config.ts, index.html, src/main.tsx. The scaffold uses Tailwind CSS v4 via @tailwindcss/vite plugin — do NOT create tailwind.config.js or postcss.config.js.",
   "estimatedHours": 2,
   "humanReviewHours": 0,
   "executionKind": "ai_autonomous",
   "files": {
-    "creates": ["package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/main.tsx"],
+    "creates": ["package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/main.tsx", "src/index.css"],
     "modifies": [],
     "reads": []
   },
   "dependencies": [],
   "priority": "P0",
   "subSteps": [
-    { "step": 1, "action": "Create package.json", "detail": "Initialize with name, version, type: module, scripts (dev: vite, build: vite build, preview: vite preview), dependencies (react, react-dom), devDependencies (vite, @vitejs/plugin-react, typescript, @types/react, @types/react-dom, tailwindcss, postcss, autoprefixer)." },
-    { "step": 2, "action": "Create vite.config.ts", "detail": "Import defineConfig from vite and react plugin from @vitejs/plugin-react." },
-    { "step": 3, "action": "Create index.html and entry point", "detail": "Root HTML with div#root and script type=module src=/src/main.tsx. Create src/main.tsx with ReactDOM.createRoot." }
+    { "step": 1, "action": "Create package.json", "detail": "Initialize with name, version, type: module, scripts (dev: vite, build: vite build, preview: vite preview), dependencies (react, react-dom, react-router-dom), devDependencies (vite, @vitejs/plugin-react, @tailwindcss/vite, typescript, @types/react, @types/react-dom, tailwindcss). NOTE: tailwindcss v4 uses @tailwindcss/vite plugin — do NOT add postcss, autoprefixer, or tailwind.config.js." },
+    { "step": 2, "action": "Create vite.config.ts", "detail": "Import defineConfig from vite, react from @vitejs/plugin-react, tailwindcss from @tailwindcss/vite. Add both to plugins array. No postcss.config.js needed." },
+    { "step": 3, "action": "Create index.html and entry point", "detail": "Root HTML with div#root and script type=module src=/src/main.tsx. Create src/main.tsx with ReactDOM.createRoot." },
+    { "step": 4, "action": "Create src/index.css", "detail": "Add @import 'tailwindcss'; at the top. This is all that is needed for Tailwind v4 — no @tailwind base/components/utilities directives." }
   ],
   "tokenEstimate": {
     "inputTokens": 2000,
@@ -416,9 +421,9 @@ Each element has this shape:
     "estimatedCostUsd": 0.08
   },
   "acceptanceCriteria": [
-    "npm install runs without errors",
-    "npm run build succeeds",
-    "npm run dev starts the dev server on localhost"
+    "pnpm install runs without errors",
+    "pnpm build succeeds without errors",
+    "pnpm dev starts the dev server on localhost"
   ],
   "coversRequirementIds": ["AC-01", "FR-FE01", "F-01"],
   "tddPlan": {
@@ -508,11 +513,15 @@ The scaffold is **already copied** from a prebuilt template before coding begins
 - If a Scaffolding task is needed at all, it should ONLY make small alignment changes (e.g. add env files, adjust scripts) on top of the existing skeleton.
 - **M-tier and L-tier BOTH use the same stack and layout**: \`frontend/\` (**React + Vite + React Router + Tailwind**) and \`backend/\` (**Koa + Sequelize + PostgreSQL**). **NEVER use Next.js, Fastify, or pnpm monorepo** for M or L. **NEVER introduce Prisma** — use Sequelize models and migrations only.
 - The only difference: L-tier additionally ships \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue), pino logger + request logger middleware, rate-limit middleware, and a richer \`docker-compose.yml\` (postgres + redis by default). Treat those as **already shipped** — never plan a task that recreates them.
+- **Tailwind CSS v4 (CRITICAL)**: M-tier and L-tier scaffolds use **Tailwind CSS v4** configured via \`@tailwindcss/vite\` Vite plugin and \`@import "tailwindcss"\` in \`src/index.css\`. **NEVER create \`tailwind.config.js\`, \`tailwind.config.ts\`, or \`postcss.config.js\`** — these are Tailwind v3 patterns and will break the build with a version conflict. The correct devDependencies are \`tailwindcss: ^4.x\` and \`@tailwindcss/vite: ^4.x\` — do NOT add \`postcss\` or \`autoprefixer\` as separate packages.
 
-### For S-tier (single app) projects:
+### For S-tier (single app) projects — frontend-only scaffold:
 The scaffold is also prebuilt (Vite + React + TypeScript + Tailwind CSS). If a Scaffolding task exists, it should only extend the existing template.
 - **Build tool**: Vite with @vitejs/plugin-react. NEVER use create-react-app, react-scripts, or Next.js.
 - **Import convention** (applies to ALL subsequent tasks): all cross-directory imports inside \`src/\` use \`@/\` alias (e.g. \`import Button from '@/components/Button'\`), never relative \`../\` paths.
+
+### For S-scope projects using the M scaffold (S-tier PRD that needs a backend):
+The scaffold is the **M-tier prebuilt template** — \`frontend/\` (Vite + React + React Router + Tailwind) and \`backend/\` (Koa + Sequelize + PostgreSQL). Apply **all M-tier conventions** above: same file layout, same Koa routing pattern, same Sequelize migration style. The only difference from pure M is task count — keep tasks **smaller in number** consistent with the S-scope PRD, but there is **no 4-task cap**.
 
 If a scaffolding task is generated, its acceptanceCriteria MUST include: "pnpm install && pnpm build succeeds without errors" and "pnpm dev starts the dev server".
 
@@ -613,6 +622,9 @@ export class TaskBreakdownAgent extends BaseAgent {
      *  the skills loader. When present, gets injected into the system
      *  prompt right before the Output Format section. */
     skillsBlock?: string,
+    /** The scaffold tier actually used (may differ from scope tier for
+     *  S-scope projects that need a backend — they reuse the M scaffold). */
+    scaffoldTier?: "S" | "M" | "L",
   ) {
     const modelChain = resolveModelChain(
       MODEL_CONFIG.taskBreakdown,
@@ -621,7 +633,7 @@ export class TaskBreakdownAgent extends BaseAgent {
     super({
       name: "Task Breakdown Agent",
       role: "Engineering Lead",
-      systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock),
+      systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock, scaffoldTier),
       defaultModel: MODEL_CONFIG.taskBreakdown,
       temperature: 0.3,
       maxTokens: 64000,
