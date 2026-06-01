@@ -167,12 +167,24 @@ function directiveForGreenFailure(
   const testId = String(event.testId ?? "?");
   const status = String(event.status ?? "fail");
   const command = String(event.command ?? "");
+  const test = testsByFile.get(String(event.file ?? "")) ?? undefined;
+  const reqHint = test?.requirementIds.length
+    ? ` Requirement ids it covers: ${test.requirementIds.join(", ")}.`
+    : "";
   if (status === "infra_fail") {
     return `\`${testId}\` failed with infra_fail (exit ${event.exitCode ?? "?"}). The host is missing a tool or service. Either change the command \`${command}\` to a host-available equivalent, or skip the test by removing it from the manifest task.`;
   }
   // Heuristic root-cause hints based on the excerpt.
   const excerpt = String(event.failureExcerpt ?? "");
   const lower = excerpt.toLowerCase();
+  // The TDD gate strips DATABASE_URL so unit tests can't reach the real DB. A
+  // failure citing the stripped URL (or our gate marker) means the test depends
+  // on a live DB — the fix is to MOCK it, NOT to "run it locally" (which falsely
+  // passes because the real URL is present outside the gate). Return early so
+  // the worker doesn't get the misleading generic "run locally" directive.
+  if (/\[tdd-gate\]|database_url is required/i.test(excerpt)) {
+    return `\`${testId}\` GREEN failed because it needs a live database, but the TDD gate runs with DATABASE_URL stripped. Mock the db module — \`vi.mock("../../../db", () => ({ sequelize: new Sequelize("sqlite::memory:", { logging: false }) }))\` (adjust the relative path) and \`await syncModels()\` in beforeAll — mirroring backend/src/models/index.test.ts. Do NOT verify by running the command locally; it falsely passes because the real DATABASE_URL is present outside the gate.${reqHint}`;
+  }
   const hints: string[] = [];
   if (/eaddrinuse/.test(lower)) {
     hints.push("Backend port is already bound — release it or run on a random port.");
@@ -195,10 +207,6 @@ function directiveForGreenFailure(
       "waitFor / async assertion timed out — confirm the implementation actually renders the expected DOM or resolves the awaited promise.",
     );
   }
-  const test = testsByFile.get(String(event.file ?? "")) ?? undefined;
-  const reqHint = test?.requirementIds.length
-    ? ` Requirement ids it covers: ${test.requirementIds.join(", ")}.`
-    : "";
   const hintBlock = hints.length > 0 ? ` Probable cause: ${hints.join(" ")}` : "";
   return `\`${testId}\` GREEN failed (exit ${event.exitCode ?? "?"}). Run \`${command}\` locally, read the failing assertion, and fix EITHER the test or the implementation it asserts against.${reqHint}${hintBlock}`;
 }
