@@ -591,7 +591,6 @@ export const useStepStore = create<StepStoreState>()(
       name: "agentic-step-v1",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        codeOutputDir: state.codeOutputDir,
         fastFromPrd: state.fastFromPrd,
         featureBrief: state.featureBrief,
       }),
