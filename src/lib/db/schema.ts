@@ -18,10 +18,11 @@ import {
 // ─── projects ────────────────────────────────────────────────────────────────
 
 export const projects = pgTable("projects", {
-  id:        text("id").primaryKey(),
-  slug:      text("slug").notNull().unique(),
-  name:      text("name").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  id:              text("id").primaryKey(),
+  slug:            text("slug").notNull().unique(),
+  name:            text("name").notNull(),
+  codeOutputDir:   text("code_output_dir").notNull().default(""),
+  createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ─── project_stage_state ─────────────────────────────────────────────────────
