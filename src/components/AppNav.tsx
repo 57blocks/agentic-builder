@@ -153,6 +153,10 @@ export default function AppNav() {
   async function handleNewProject() {
     resetStage();
     resetPipeline();
+    // Prompt user to select a directory first (mandatory)
+    const folder = await window.electronAPI?.selectFolder?.() ?? null;
+    if (!folder) return; // user cancelled — abort project creation
+
     // Create local project immediately for instant UI feedback
     const localProject = addLocalProject("New Project");
     setProjectSlugForSync(localProject.id);
@@ -161,7 +165,7 @@ export default function AppNav() {
     router.push(`/project/${localProject.id}`);
     // Try creating on the server in the background; replace local placeholder on success
     try {
-      await createProject("New Project", localProject.id);
+      await createProject("New Project", folder, localProject.id);
     } catch (err) {
       console.error("[AppNav] Server project creation failed (will retry on next action):", err);
     }
