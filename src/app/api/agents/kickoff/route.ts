@@ -17,6 +17,7 @@ import { diffPrdRequirements } from "@/lib/pipeline/incremental-rerun";
 import { diffPrdSections } from "@/lib/pipeline/prd-section-diff";
 import { extractPrdRequirementIndex } from "@/lib/requirements/extract-prd-spec";
 import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
+import { triggerCodegenPrepReconcile } from "@/lib/memory/distill/codegen-prep-reconcile";
 
 export const maxDuration = 300;
 
@@ -72,6 +73,11 @@ export async function POST(request: NextRequest) {
       }
 
       const projectRoot = process.cwd();
+      // Reconcile prior runs' codegen outcomes back onto the prd-pattern
+      // records before this kickoff generates its PRD — pull-based + cursor-
+      // idempotent, so aborted/crashed past runs get attributed here from
+      // their durable on-disk signals. Fire-and-forget: never blocks kickoff.
+      triggerCodegenPrepReconcile({ projectRoot: outputRoot, l1Root: projectRoot });
       const memoryAwareSend = wrapPipelineEventHandler(send, {
         projectRoot,
         codeOutputDir:

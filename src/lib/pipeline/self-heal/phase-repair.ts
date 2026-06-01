@@ -32,6 +32,8 @@ export interface PhaseRepairInput {
   prdSpec?: PrdSpec | null;
   scaffoldBlock?: string;
   tier: ProjectTier;
+  scaffoldTier?: "S" | "M" | "L";
+  skillsBlock?: string;
   /** PRD ids that could be the "home" for the synthetic backend task. */
   uncoveredIds?: string[];
   sessionId?: string;
@@ -67,6 +69,7 @@ export async function repairMissingBackendPhase(
     prdSpecText,
     scaffoldBlock,
     tier,
+    scaffoldTier,
     uncoveredIds,
     sessionId,
     emitter,
@@ -118,7 +121,7 @@ export async function repairMissingBackendPhase(
   });
 
   if (MAX_ATTEMPTS >= 1 && targetIds.length > 0) {
-    const agent = new TaskBreakdownAgent(tier, scaffoldBlock);
+    const agent = new TaskBreakdownAgent(tier, scaffoldBlock, undefined, scaffoldTier);
     const start = Date.now();
     try {
       const resp = await agent.generateSupplementaryTasks(
