@@ -469,6 +469,7 @@ Field rules:
   - "modifies": files this task edits. These MUST already exist (created by a dependency task).
   - "reads": files this task only imports or references without editing.
   - CRITICAL: A file that appears in any other task's "creates" MUST appear in this task's "modifies" or "reads", NEVER in "creates" again. No file path may appear in "creates" across more than one task.
+  - **File name consistency (CRITICAL)**: Every file path used across ALL tasks MUST be identical — same capitalization, same extension, same directory. If T-003 creates \`frontend/src/views/DiffView.tsx\`, then T-006 must list \`frontend/src/views/DiffView.tsx\` in its "modifies" — NOT \`frontend/src/views/MainDiffPage.tsx\`, NOT \`frontend/src/views/diffView.tsx\`. Inconsistent naming causes the worker to look for a file that does not exist, triggering an infinite read-loop. Before emitting the final JSON, do a global name-collision pass: for every path that appears in more than one task, confirm the spelling is byte-for-byte identical.
 - **dependencies**: array of task IDs that must be done first (e.g. ["T-001"]).
   - **PARALLEL BY DEFAULT**: Tasks in the same phase are almost always INDEPENDENT and should run in parallel. They share the same prerequisite (e.g. the Data Layer task), but they do NOT depend on each other.
   - **CORRECT** — Backend Services tasks T-004..T-007 all depend only on T-002 (Data Layer), NOT on each other:
@@ -484,6 +485,11 @@ Field rules:
       T-005 → ["T-004"] → T-006 → ["T-005"] → T-013 → ["T-012"] → T-014 → ["T-013"]
   - Only list multiple dependencies when the task truly cannot start before **multiple independent** predecessors are all complete (e.g. a frontend page that needs both the app shell AND the API client).
   - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002, and T-002 depends on T-001, T-003 should NOT also list T-001 — the chain is implicit.
+  - **App Shell dependency (CRITICAL)**: If the task list contains an "App Shell" or "Routing" task (a task that creates \`router.tsx\`, \`App.tsx\`, or the root layout), **every page task MUST list it as a dependency**. A page task that runs before the App Shell exists cannot be wired into the router — it creates a floating component with no entry point.
+  - **Integration task dependency (CRITICAL)**: A task in the "Integration" phase that wires frontend pages to backend APIs MUST depend on BOTH:
+      1. The backend API task(s) that expose the endpoints being called.
+      2. The frontend page task(s) whose files it modifies to add API calls.
+      Example: if T-006 (Integration) modifies \`DiffView.tsx\` and \`HistoryPage.tsx\` AND calls APIs from T-005, it MUST declare \`deps: ["T-003", "T-004", "T-005"]\` (where T-003 creates DiffView.tsx, T-004 creates HistoryPage.tsx, T-005 is the backend task). Failing to do so causes the agent to run integration before the pages exist, leading to an infinite read-loop trying to find missing files.
 - **priority**: "P0" (must have), "P1" (should have), "P2" (nice to have).
 - **subSteps**: array of 2-6 concrete implementation steps. Each step has:
   - "step": sequential number (1, 2, 3...)
