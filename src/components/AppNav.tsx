@@ -154,8 +154,13 @@ export default function AppNav() {
     resetStage();
     resetPipeline();
     // Prompt user to select a directory first (mandatory)
-    const folder = await window.electronAPI?.selectFolder?.() ?? null;
-    if (!folder) return; // user cancelled — abort project creation
+    let folder: string | null = null;
+    if (window.electronAPI?.selectFolder) {
+      folder = await window.electronAPI.selectFolder();
+    } else {
+      folder = prompt("Enter the absolute path for this project's code output directory:");
+    }
+    if (!folder || !folder.trim()) return; // user cancelled or gave empty input
 
     // Create local project immediately for instant UI feedback
     const localProject = addLocalProject("New Project");

@@ -106,6 +106,7 @@ export default function ProjectPage() {
       fetch(`/api/projects/${projectId}`)
         .then((r) => r.ok ? r.json() : null)
         .then((data: { project?: { codeOutputDir?: string } } | null) => {
+          // Empty string means legacy project — reset() already set the "generated-code" fallback
           if (data?.project?.codeOutputDir) {
             useStepStore.getState().setCodeOutputDir(data.project.codeOutputDir);
           }
