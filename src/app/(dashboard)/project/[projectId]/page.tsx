@@ -101,6 +101,16 @@ export default function ProjectPage() {
       // Clear step-store so stale data from the previous project does not
       // persist into the new project before DB snapshots are loaded.
       useStepStore.getState().reset();
+
+      // Load this project's directory from DB so generated code goes to the right place.
+      fetch(`/api/projects/${projectId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { project?: { codeOutputDir?: string } } | null) => {
+          if (data?.project?.codeOutputDir) {
+            useStepStore.getState().setCodeOutputDir(data.project.codeOutputDir);
+          }
+        })
+        .catch((err) => console.error("[ProjectPage] failed to load codeOutputDir:", err));
     }
 
     // Hydrate the step-navigation store and stage store from DB
