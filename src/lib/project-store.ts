@@ -20,33 +20,55 @@ import type { Project } from "@/types/project";
 export async function getProjects(): Promise<Project[]> {
   const rows = await db
     .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
     })
     .from(projects)
     .orderBy(desc(projects.createdAt));
 
-  return rows as Project[];
+  return rows as unknown as Project[];
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
   const rows = await db
     .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
     })
     .from(projects)
     .where(eq(projects.slug, slug))
     .limit(1);
 
-  return (rows[0] as Project) ?? null;
+  return (rows[0] as unknown as Project) ?? null;
 }
 
-export async function createProject(name: string, clientId?: string): Promise<Project> {
+export async function getProjectById(id: string): Promise<Project | null> {
+  const rows = await db
+    .select({
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
+    })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
+
+  return (rows[0] as unknown as Project) ?? null;
+}
+
+export async function createProject(
+  name: string,
+  codeOutputDir: string,
+  clientId?: string,
+): Promise<Project> {
   const baseSlug =
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
     `project-${Date.now()}`;
@@ -66,15 +88,16 @@ export async function createProject(name: string, clientId?: string): Promise<Pr
   const id = clientId ?? crypto.randomUUID();
   const rows = await db
     .insert(projects)
-    .values({ id, slug: finalSlug, name: name.trim() })
+    .values({ id, slug: finalSlug, name: name.trim(), codeOutputDir })
     .returning({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
     });
 
-  return rows[0] as Project;
+  return rows[0] as unknown as Project;
 }
 
 export async function updateProjectName(projectId: string, name: string): Promise<void> {
