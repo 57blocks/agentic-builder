@@ -155,7 +155,13 @@ async function runOneTest(
       cwd: outputDir,
       timeout: TDD_COMMAND_TIMEOUT_MS,
       maxBuffer: 5 * 1024 * 1024,
-      env: { ...process.env, FORCE_COLOR: "0" },
+      // Hard guarantee: TDD unit tests must never reach the real (kickoff)
+      // database. Blanking DATABASE_URL means a test that imports the real db
+      // module (instead of mocking it) fails fast with "DATABASE_URL is
+      // required" rather than dialing the live Postgres. backend/.env is also
+      // neutralized for the phase (see runTddRuntimePhase) because the
+      // generated db.ts re-loads it via dotenv.
+      env: { ...process.env, FORCE_COLOR: "0", DATABASE_URL: "" },
     });
     const output = `${stdout ?? ""}${stderr ?? ""}`.trim();
     const greenPass = phase === "green";
@@ -206,6 +212,47 @@ async function runOneTest(
   }
 }
 
+/**
+ * Temporarily blank the `DATABASE_URL` line in backend/.env so the generated
+ * `db.ts` (which re-loads .env via dotenv in non-production) cannot hand the
+ * real kickoff Postgres URL to a test. Returns a restore closure to call in a
+ * finally. No-op when there is no .env or no DATABASE_URL line.
+ *
+ * Correctly-mocked tests are unaffected: `vi.mock("../db")` replaces the module
+ * so db.ts never runs. Tests that DON'T mock it now fail fast with a clear
+ * "DATABASE_URL is required" instead of touching (or polluting) the live DB.
+ */
+async function neutralizeBackendDatabaseUrl(
+  outputDir: string,
+): Promise<() => Promise<void>> {
+  const envPath = path.join(outputDir, "backend", ".env");
+  let original: string;
+  try {
+    original = await fs.readFile(envPath, "utf-8");
+  } catch {
+    return async () => {};
+  }
+  if (!/^[ \t]*DATABASE_URL[ \t]*=/m.test(original)) {
+    return async () => {};
+  }
+  const blanked = original.replace(/^([ \t]*DATABASE_URL[ \t]*=).*$/m, "$1");
+  try {
+    await fs.writeFile(envPath, blanked, "utf-8");
+    console.log(
+      "[tdd-runtime] neutralized backend/.env DATABASE_URL for the test phase (restored after).",
+    );
+  } catch {
+    return async () => {};
+  }
+  return async () => {
+    try {
+      await fs.writeFile(envPath, original, "utf-8");
+    } catch {
+      /* best-effort restore — next real run rewrites .env anyway */
+    }
+  };
+}
+
 export async function runTddRuntimePhase(input: {
   outputDir: string;
   phase: TddPhase;
@@ -239,26 +286,34 @@ export async function runTddRuntimePhase(input: {
   let skipped = 0;
   const p0Failures: string[] = [];
 
-  for (const test of manifest.tests) {
-    const event = await runOneTest(
-      input.outputDir,
-      input.phase,
-      test,
-      input.sessionId,
-    );
-    await appendEvidence(input.outputDir, event);
+  // Neutralize the real DATABASE_URL for the whole phase so any test that
+  // imports the real db module (instead of mocking it) fails fast rather than
+  // dialing the live kickoff Postgres. Restored in finally.
+  const restoreDbUrl = await neutralizeBackendDatabaseUrl(input.outputDir);
+  try {
+    for (const test of manifest.tests) {
+      const event = await runOneTest(
+        input.outputDir,
+        input.phase,
+        test,
+        input.sessionId,
+      );
+      await appendEvidence(input.outputDir, event);
 
-    if (event.status === "pass") passed += 1;
-    else if (event.status === "expected_fail") expectedFailed += 1;
-    else if (event.status === "skipped") skipped += 1;
-    else failed += 1;
+      if (event.status === "pass") passed += 1;
+      else if (event.status === "expected_fail") expectedFailed += 1;
+      else if (event.status === "skipped") skipped += 1;
+      else failed += 1;
 
-    const priority = normalizePriority(test.priority);
-    const isBlocking =
-      priority === "P0" &&
-      ((input.phase === "red" && event.status !== "expected_fail") ||
-        (input.phase === "green" && event.status !== "pass"));
-    if (isBlocking) p0Failures.push(test.id);
+      const priority = normalizePriority(test.priority);
+      const isBlocking =
+        priority === "P0" &&
+        ((input.phase === "red" && event.status !== "expected_fail") ||
+          (input.phase === "green" && event.status !== "pass"));
+      if (isBlocking) p0Failures.push(test.id);
+    }
+  } finally {
+    await restoreDbUrl();
   }
 
   const summary =

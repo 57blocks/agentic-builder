@@ -78,6 +78,11 @@ import {
   formatRuntimeAuditTasksBlock,
   type RuntimeAuditFinding,
   runRuntimeSmokeGate,
+  prepareTestSchema,
+  seedTestSchema,
+  teardownTestSchema,
+  type PreparedTestSchema,
+  type SeedResult,
   runTscDiagnosticsAsTasks,
   runAdminRouteCoverageRepair,
   formatAdminRouteCoverageBlock,
@@ -7747,15 +7752,41 @@ async function integrationVerifyAndFix(
     process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1" &&
     runtimeAuditErrorFindings.length === 0
   ) {
+    // Tier-2 (real-data integration gate) is opt-in. When enabled, we stand up
+    // an isolated, migrated+seeded Postgres SCHEMA on the kickoff-provisioned
+    // DB and point the booted backend at it so endpoints can be asserted
+    // against real data (2xx + matching response shape), not just routability.
+    const dataGateEnabled = process.env.INTEGRATION_DATA_GATE === "1";
+    let prepared: PreparedTestSchema | null = null;
+    let seedResult: SeedResult | null = null;
     try {
+      if (dataGateEnabled) {
+        prepared = await prepareTestSchema(state.outputDir);
+        if (prepared) {
+          seedResult = await seedTestSchema(
+            state.outputDir,
+            prepared.testDatabaseUrl,
+          );
+        }
+      }
+
       const smoke = await runRuntimeSmokeGate({
         outputDir: state.outputDir,
         emitter: getRepairEmitter(state.sessionId),
         sessionId: state.sessionId,
+        // Only run data assertions if the schema is prepared AND migrations
+        // applied cleanly — otherwise Tier-2 would false-fail on a setup issue.
+        dataAssertions: Boolean(prepared) && !seedResult?.failure,
+        testDatabaseUrl: prepared?.testDatabaseUrl,
       });
-      if (!smoke.pass) {
+
+      // A migrate failure is a real (broken-migrations) finding even though it
+      // happens before boot — surface it alongside the gate failures.
+      const seedFailures = seedResult?.failure ? [seedResult.failure] : [];
+      const allFailures = [...seedFailures, ...smoke.failures];
+      if (!smoke.pass || seedFailures.length > 0) {
         finalStatus = "fail";
-        const top = smoke.failures
+        const top = allFailures
           .slice(0, 6)
           .map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
         finalSummary = [
@@ -7763,7 +7794,7 @@ async function integrationVerifyAndFix(
           "Runtime smoke gate failed:",
           smoke.bootFailed
             ? "Backend did not start — see .ralph/runtime-smoke.json `evidence` field."
-            : `${smoke.failures.length} endpoint failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
+            : `${allFailures.length} failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
         ]
           .filter(Boolean)
           .join("\n\n")
@@ -7781,6 +7812,11 @@ async function integrationVerifyAndFix(
           error: err instanceof Error ? err.message : String(err),
         },
       });
+    } finally {
+      // Always drop the isolated test schema, even on failure/throw.
+      if (prepared) {
+        await teardownTestSchema(prepared.appDatabaseUrl, prepared.schemaName);
+      }
     }
   }
   if (finalApiClientUniquenessHardFail) {

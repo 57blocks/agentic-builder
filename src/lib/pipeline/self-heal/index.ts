@@ -99,6 +99,17 @@ export type {
   RuntimeSmokeGateResult,
   RuntimeSmokeSuccess,
 } from "./runtime-smoke-gate";
+export {
+  prepareTestSchema,
+  seedTestSchema,
+  teardownTestSchema,
+  TEST_SCHEMA_NAME,
+} from "./integration-data-gate";
+export type {
+  PreparedTestSchema,
+  SeedResult,
+  DataGateFailureCode,
+} from "./integration-data-gate";
 export { runTscDiagnosticsAsTasks } from "./tsc-diagnostics-as-tasks";
 export type {
   TscDiagnosticTask,
