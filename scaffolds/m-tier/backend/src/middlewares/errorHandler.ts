@@ -16,18 +16,21 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
   try {
     await next();
 
-    // Handle 404
+    // Handle 404 — emit the canonical error envelope so the frontend
+    // can branch on `body.error.code` without having to detect two shapes.
     if (ctx.status === 404 && !ctx.body) {
       ctx.status = 404;
       ctx.body = {
-        error: "Not Found",
-        message: `Route ${ctx.method} ${ctx.url} not found`,
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: `Route ${ctx.method} ${ctx.url} not found`,
+        },
       };
     }
   } catch (err: any) {
     const error = err as AppError;
 
-    // Log error
     console.error(`[Error] ${ctx.method} ${ctx.url}`, {
       error: error.message,
       stack: error.stack,
@@ -37,20 +40,30 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
       user: ctx.state.user?.id,
     });
 
-    // Set response status
     ctx.status = error.status || 500;
 
-    // Format error response
+    // Canonical error envelope — must stay in lock-step with the success
+    // envelope produced by responseEnvelope.ts and the unwrap logic in
+    // frontend/src/api/client.ts. The contract is:
+    //
+    //   { ok: false, error: { code: string, message: string, details? } }
+    //
+    // `code` is a stable machine-readable string the frontend can switch on
+    // (e.g. "UNAUTHORIZED", "NOT_FOUND", "VALIDATION_ERROR"). It comes from
+    // `Errors.X()` factories below; we fall back to `HTTP_<status>` so even
+    // un-coded throws stay queryable.
     ctx.body = {
-      error: error.name || "InternalServerError",
-      message: error.message || "An unexpected error occurred",
+      ok: false,
+      error: {
+        code: error.code || `HTTP_${ctx.status}`,
+        message: error.message || "An unexpected error occurred",
+        ...(error.details !== undefined && { details: error.details }),
+      },
       ...(process.env.NODE_ENV === "development" && {
         stack: error.stack,
-        details: error.details,
       }),
     };
 
-    // Ensure JSON content type
     ctx.type = "application/json";
   }
 };

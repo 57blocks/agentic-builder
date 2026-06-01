@@ -140,7 +140,11 @@ function normaliseSeedAccounts(raw: unknown): SeedAccount[] {
       typeof o.password === "string" && o.password.length > 0
         ? o.password
         : undefined;
-    out.push({ email, role, password });
+    const domainRole =
+      typeof o.domainRole === "string" && o.domainRole.trim().length > 0
+        ? o.domainRole.trim()
+        : undefined;
+    out.push({ email, role, password, domainRole });
   }
   return out.length > 0 ? out : DEFAULT_SEED_ACCOUNTS.map((s) => ({ ...s }));
 }

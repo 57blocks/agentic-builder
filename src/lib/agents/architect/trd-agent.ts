@@ -87,7 +87,8 @@ table mapping each capability to a concrete CLI script file:
 
 | Script | Path | CLI usage | Side effects |
 |--------|------|-----------|--------------|
-| Rescore one coin | \`backend/scripts/rescoreCoin.ts\` | \`pnpm tsx scripts/rescoreCoin.ts <symbol>\` | Triggers an immediate scoring cycle for one stablecoin; writes audit row |
+| Rescore one coin | \`backend/scripts/rescoreCoin.ts\` | \`pnpm tsx scripts/ls
+cd .ts <symbol>\` | Triggers an immediate scoring cycle for one stablecoin; writes audit row |
 | ... | ... | ... | ... |
 
 Rules:

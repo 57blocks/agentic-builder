@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import path from "path";
+import fs from "fs/promises";
+import { readManifest } from "@/lib/pipeline/design-references";
 import {
   TRDAgent,
   SysDesignAgent,
@@ -60,6 +62,7 @@ function buildAgentMap(
   designKnowledgeContext?: string,
   authDecision?: AuthDecision | null,
   instruction?: string,
+  referenceImages?: Array<{ dataUrl: string; pageHint?: string; label?: string }>,
 ): Record<string, DocAgentFn> {
   const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
     .filter((s) => s && s.trim().length > 0)
@@ -91,6 +94,11 @@ function buildAgentMap(
     design: (prd, _trd, _sys, _ds, sid, _prdSpec, onChunk) => {
       const agent = new DesignAgent();
       const ctx = designAdditional.trim() ? designAdditional : undefined;
+      // Multi-image path: uploaded per-page screenshots take priority
+      if (referenceImages && referenceImages.length > 0) {
+        return agent.generateDesignWithReferenceImages(prd, referenceImages, ctx, sid);
+      }
+      // Single-image legacy path
       if (referenceImageBase64?.trim()) {
         return agent.generateDesignWithReferenceImage(prd, referenceImageBase64, ctx, sid);
       }
@@ -150,6 +158,8 @@ export async function POST(request: NextRequest) {
     designStyleId,
     designSpecContent,
     styleReferenceImageBase64,
+    styleReferenceImages,
+    useUploadedDesignReferences,
     prdSpec,
     instruction,
   } = body as {
@@ -157,19 +167,16 @@ export async function POST(request: NextRequest) {
     selectedDocs: string[];
     sessionId: string;
     codeOutputDir?: string;
-    /** Structured PRD excerpt from client (steps.prd.metadata). */
     pencilAugmentMarkdown?: string;
     tier?: string;
-    /** Visual style preset id — drives Design Spec + Pencil prompts. */
+    useUploadedDesignReferences?: boolean;
     designStyleId?: string;
-    /** Required when `selectedDocs` is Pencil-only: confirmed Design Spec markdown. */
     designSpecContent?: string;
-    /** Base64 data URL of a reference image for style matching. */
+    /** Legacy single-image style reference. */
     styleReferenceImageBase64?: string;
-    /** Structured PRD spec from `steps.prd.metadata.prdSpec` — used by
-     *  TRD to inject domain.rules as authoritative source. */
+    /** Multiple inline base64 data URLs — style reference mode (not from disk). */
+    styleReferenceImages?: string[];
     prdSpec?: PrdSpec | null;
-    /** User edit instruction for re-generating a specific doc. */
     instruction?: string;
   };
 
@@ -255,6 +262,47 @@ export async function POST(request: NextRequest) {
     authDecision = await readAuthDecision(process.cwd());
   }
 
+  // ── Resolve reference images for vision-based Design Spec generation ─────────
+  // Priority:
+  //   1. styleReferenceImages — inline base64 from client (style reference mode)
+  //   2. useUploadedDesignReferences — read from .blueprint/design-references/ (restoration mode)
+  let referenceImages: Array<{ dataUrl: string; pageHint?: string; label?: string }> | undefined;
+
+  if (styleReferenceImages?.length && selectedDocs.includes("design")) {
+    referenceImages = styleReferenceImages.map((dataUrl) => ({ dataUrl }));
+    console.log(`[parallel-generate] Using ${referenceImages.length} inline style reference image(s) for Design Spec.`);
+  } else if (useUploadedDesignReferences && selectedDocs.includes("design")) {
+    try {
+      const refs = await readManifest(process.cwd());
+      const imageRefs = refs.filter((r) => r.kind === "image");
+      if (imageRefs.length > 0) {
+        referenceImages = [];
+        for (const ref of imageRefs) {
+          try {
+            const imgPath = path.join(
+              process.cwd(),
+              ".blueprint",
+              "design-references",
+              ref.storedFileName,
+            );
+            const imgBytes = await fs.readFile(imgPath);
+            referenceImages.push({
+              dataUrl: `data:${ref.mime};base64,${imgBytes.toString("base64")}`,
+              pageHint: ref.pageHint || undefined,
+              label: ref.label || ref.fileName,
+            });
+          } catch {
+            console.warn(`[parallel-generate] Could not load design reference image: ${ref.storedFileName}`);
+          }
+        }
+        if (referenceImages.length === 0) referenceImages = undefined;
+        else console.log(`[parallel-generate] Loaded ${referenceImages.length} design reference image(s) for vision-based spec generation.`);
+      }
+    } catch (e) {
+      console.warn("[parallel-generate] Failed to load design references (falling back to text-only):", (e as Error).message);
+    }
+  }
+
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
@@ -263,6 +311,7 @@ export async function POST(request: NextRequest) {
     designKnowledgeContext,
     authDecision,
     instruction,
+    referenceImages,
   );
 
   const encoder = new TextEncoder();

@@ -59,7 +59,17 @@ services:
       PORT: "4000"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
       REDIS_URL: redis://redis:6379
-      USE_REDIS_QUEUE: "1"
+      # NOTE: `USE_REDIS_QUEUE=1` is a no-op until `src/queue/redisQueue.ts`
+      # ships. Keep it commented out so multi-replica deploys aren't
+      # misled into thinking jobs are shared across pods.
+      # USE_REDIS_QUEUE: "1"
+      # Frontend container talks to backend via nginx on port 80, so this
+      # is the only origin that needs to be allowlisted in compose. Add
+      # extra origins (preview URLs, staging) as comma-separated entries.
+      CORS_ORIGINS: "http://localhost:8080"
+      # AUTH_JWT_SECRET MUST be supplied via an external .env / secrets
+      # manager — DO NOT bake a value in here. `assertRequiredEnv` will
+      # process.exit(1) on boot if it's missing in production.
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,6 +77,16 @@ services:
         condition: service_healthy
     ports:
       - "4000:4000"
+    healthcheck:
+      # `/api/v1/health` is the path when the `auth-password-rbac` (or any
+      # other scaffold that mounts apiRouter at `/api/v1`) overlay is
+      # applied. For a bare base-only deployment the path is `/api/health`
+      # — edit this line during codegen if your generated project doesn't
+      # use a versioned API prefix.
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   frontend:
@@ -75,7 +95,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"
     restart: unless-stopped

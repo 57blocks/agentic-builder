@@ -43,6 +43,16 @@ const UNPROTECTED_SCAFFOLD_PATHS = new Set([
   "backend/src/models/index.ts",
   "backend/src/middlewares/errorHandler.ts",
   "backend/src/middlewares/cors.ts",
+  // Root project files that workers legitimately need to customize per-project
+  "docker-compose.yml",
+  "README.md",
+  // Backend wiring points workers need to extend
+  "backend/.env.example",
+  "backend/src/workers/index.ts",
+  "backend/src/api/modules/auth/auth.routes.ts",
+  // Frontend build config — workers may add proxy rules or path aliases
+  "frontend/vite.config.ts",
+  "frontend/index.html",
   // E2E files — agents write generated test specs here; scaffold only ships a baseline
   "frontend/e2e/smoke.spec.ts",
   "frontend/playwright.config.ts",

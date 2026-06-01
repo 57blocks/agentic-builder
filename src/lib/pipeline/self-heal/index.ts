@@ -37,6 +37,11 @@ export type {
   TaskCoverageRepairResult,
 } from "./task-coverage-repair";
 export { repairContractCoverage } from "./contract-coverage-repair";
+export { repairPageCoverage } from "./page-coverage-repair";
+export type {
+  PageCoverageRepairInput,
+  PageCoverageRepairResult,
+} from "./page-coverage-repair";
 export { getUnresolvedMigrationGaps } from "./migration-coverage-repair";
 export type {
   ContractCoverageRepairInput,
@@ -119,6 +124,65 @@ export type {
   MigrationCoverageRepairInput,
   MigrationCoverageRepairResult,
 } from "./migration-coverage-repair";
+export { checkMigrationQuality } from "./migration-quality";
+export type {
+  MigrationQualityRuleId,
+  MigrationQualityFinding,
+  MigrationQualityCheckInput,
+  MigrationQualityCheckResult,
+  MigrationFile,
+} from "./migration-quality";
+export {
+  runMigrationQualityRepair,
+  formatMigrationQualityBlock,
+} from "./migration-quality-repair";
+export type {
+  MigrationQualityRepairTask,
+  MigrationQualityRepairInput,
+  MigrationQualityRepairResult,
+} from "./migration-quality-repair";
+export {
+  checkSchemaDrift,
+  extractModelFields,
+  extractFieldRemaps,
+} from "./schema-drift";
+export type {
+  SchemaDriftRuleId,
+  SchemaDriftFinding,
+  SchemaDriftInput,
+  SchemaDriftResult,
+  ModelFile,
+  MigrationTextFile,
+} from "./schema-drift";
+export {
+  runSchemaDriftRepair,
+  formatSchemaDriftBlock,
+} from "./schema-drift-repair";
+export type {
+  SchemaDriftRepairTask,
+  SchemaDriftRepairInput,
+  SchemaDriftRepairResult,
+} from "./schema-drift-repair";
+export {
+  checkAdminRouteCoverage,
+  normaliseAdminPath,
+} from "./admin-route-coverage";
+export type {
+  AdminRouteCoverageRuleId,
+  AdminRouteCoverageFinding,
+  AdminRouteCoverageInput,
+  AdminRouteCoverageResult,
+  AdminRouteCoverageFile,
+} from "./admin-route-coverage";
+export {
+  runAdminRouteCoverageRepair,
+  formatAdminRouteCoverageBlock,
+} from "./admin-route-coverage-repair";
+export type {
+  AdminRouteCoverageRepairTask,
+  AdminRouteCoverageRepairInput,
+  AdminRouteCoverageRepairResult,
+} from "./admin-route-coverage-repair";
 export {
   computeStagnationReplan,
   buildReplanContext,
@@ -140,3 +204,12 @@ export type {
   EscalateRepairCircuitInput,
   EscalateRepairCircuitResult,
 } from "./escalate-repair-circuit";
+export {
+  generateMissingRouteStubs,
+  formatMissingRouteStubBlock,
+} from "./missing-route-stubs";
+export type {
+  MissingEndpoint,
+  RouteStubGroup,
+  GenerateMissingRouteStubsResult,
+} from "./missing-route-stubs";

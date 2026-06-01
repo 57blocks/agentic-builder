@@ -5,5 +5,7 @@ COPY pnpm-lock.yaml package.json ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
-EXPOSE 3001
+# Must match `src/config/env.ts#PORT` and the upstream port in
+# `frontend/nginx.conf` (`server backend:4000`).
+EXPOSE 4000
 CMD ["node", "dist/server.js"]

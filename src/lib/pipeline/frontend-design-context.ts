@@ -1,6 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
 import { fetchStitchScreenHtml } from "@/lib/stitch-api";
+import {
+  readManifest,
+  buildVisionDescriptionsForReferences,
+  formatVisionDescriptionsBlock,
+} from "@/lib/pipeline/design-references";
 
 const TOOL_TRANSCRIPT_MARKER = "## Tool Transcript";
 const MAX_PENCIL_SUMMARY_CHARS = 12_000;
@@ -171,6 +176,7 @@ export async function buildFrontendDesignContextForCodegen(
   designSpecDoc: string,
   pencilDesignRaw: string,
   stitchMeta?: StitchDesignMeta,
+  projectRoot?: string,
 ): Promise<string> {
   // ── Fetch fresh Stitch design at coding time ──────────────────────────────
   // The user may have modified the design in Stitch after kickoff, so the
@@ -233,7 +239,24 @@ export async function buildFrontendDesignContextForCodegen(
     ? `## Pencil design (implementation summary) — fallback when no Stitch design\n\n${pencil}`
     : "";
 
-  return [stitchBlock, designSpecBlock, pencilBlock, assets]
+  // ── Vision descriptions from per-page screenshots ─────────────────────────
+  // When the user has uploaded per-page screenshots during the design step,
+  // generate AI descriptions of each screenshot so coding agents can replicate
+  // the exact layout, colors, and components.
+  let visionBlock = "";
+  const rootForVision = projectRoot ?? process.cwd();
+  try {
+    const refEntries = await readManifest(rootForVision);
+    const imageRefs = refEntries.filter((e) => e.kind === "image");
+    if (imageRefs.length > 0) {
+      const descriptions = await buildVisionDescriptionsForReferences(rootForVision, imageRefs);
+      visionBlock = formatVisionDescriptionsBlock(imageRefs, descriptions);
+    }
+  } catch (err) {
+    console.warn("[FrontendDesignContext] Failed to build vision descriptions (ignored):", err instanceof Error ? err.message : err);
+  }
+
+  return [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets]
     .filter(Boolean)
     .join("\n\n---\n\n");
 }

@@ -9,19 +9,27 @@ import type { StepAgent } from "../../../_shared/types";
 
 let _pendingDesignStyleId: string | undefined;
 let _pendingStyleRefBase64: string | undefined;
+let _pendingStyleRefImages: string[] | undefined;
 let _pendingDesignDirectionPrompt: string | undefined;
+let _pendingUseUploadedDesignReferences = false;
 
 export interface DesignContext {
   designStyleId?: string | null;
   styleReferenceImageBase64?: string | null;
+  /** Multiple base64 data URLs — style reference mode (local, not persisted). */
+  styleReferenceImages?: string[];
   designDirectionPrompt?: string | null;
+  /** When true, the API route reads images from .blueprint/design-references/ and passes them to vision LLM. */
+  useUploadedDesignReferences?: boolean;
 }
 
 /** Call before executeStep("design") to inject style / custom-ref context. */
 export function setDesignContext(params: DesignContext) {
   _pendingDesignStyleId = params.designStyleId ?? undefined;
   _pendingStyleRefBase64 = params.styleReferenceImageBase64 ?? undefined;
+  _pendingStyleRefImages = params.styleReferenceImages?.length ? params.styleReferenceImages : undefined;
   _pendingDesignDirectionPrompt = params.designDirectionPrompt ?? undefined;
+  _pendingUseUploadedDesignReferences = params.useUploadedDesignReferences ?? false;
 }
 
 // ── StepAgent (registered in step-registry) ──────────────────────────────────
@@ -37,7 +45,9 @@ export const designAgent: StepAgent = createParallelGenerateAgent({
     tier: ctx.tier,
     designStyleId: _pendingDesignStyleId,
     styleReferenceImageBase64: _pendingStyleRefBase64,
+    styleReferenceImages: _pendingStyleRefImages,
     designDirectionPrompt: _pendingDesignDirectionPrompt,
+    useUploadedDesignReferences: _pendingUseUploadedDesignReferences || undefined,
     ...(ctx.editInstruction?.trim() ? {
       editInstruction: ctx.editInstruction.trim(),
       existingDesign: ctx.previousSteps.design?.content ?? "",

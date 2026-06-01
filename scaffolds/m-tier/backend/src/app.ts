@@ -3,12 +3,21 @@ import bodyParser from "koa-bodyparser";
 import { createApiRouter } from "./api/modules";
 import { corsMiddleware } from "./middlewares/cors";
 import { errorHandlerMiddleware } from "./middlewares/errorHandler";
+import { responseEnvelopeMiddleware } from "./middlewares/responseEnvelope";
 
 export function createApp(): Koa {
   const app = new Koa();
   const apiRouter = createApiRouter();
 
+  // Middleware order matters:
+  //   1. errorHandler      → catches throws from any downstream layer and
+  //                          emits the canonical { ok:false, error } envelope
+  //   2. responseEnvelope  → wraps successful 2xx bodies into { ok:true, data }
+  //                          (skips already-enveloped bodies, errors pass through)
+  //   3. cors / bodyParser → request shaping
+  //   4. routes            → handlers write `ctx.body = <raw data>`
   app.use(errorHandlerMiddleware);
+  app.use(responseEnvelopeMiddleware);
   app.use(corsMiddleware);
   app.use(bodyParser());
   // Auth middleware:

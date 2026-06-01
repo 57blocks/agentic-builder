@@ -1,12 +1,17 @@
 /**
  * Lightweight index of PRD requirement IDs extracted for coverage gates.
  * IDs follow conventions from PM prompts: AC-*, FR-*, US-*, IC-*.
+ * Also supports route/component IDs from Chinese-style PRDs: PAGE-*, CMP-*.
  */
 export interface PrdRequirementIndex {
   acceptanceCriteriaIds: string[];
   featureIds: string[];
   userStoryIds: string[];
   componentIds: string[];
+  /** PAGE-* IDs from Chinese-style PRDs. */
+  pageIds?: string[];
+  /** CMP-* IDs from Chinese-style PRDs. */
+  cmpIds?: string[];
 }
 
 // ─── Structured PRD Spec (LLM-extracted, richer than raw ID scan) ──────────

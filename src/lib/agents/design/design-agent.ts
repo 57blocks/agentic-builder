@@ -118,30 +118,56 @@ export class DesignAgent extends BaseAgent {
     additionalContext?: string,
     sessionId?: string,
   ) {
+    return this.generateDesignWithReferenceImages(
+      prdContent,
+      [{ dataUrl: referenceImageBase64 }],
+      additionalContext,
+      sessionId,
+    );
+  }
+
+  /**
+   * Generate a Design Spec using one or more per-page reference screenshots.
+   * All images are sent in a single vision message so the model sees the full
+   * visual system before writing the Design System document.
+   */
+  async generateDesignWithReferenceImages(
+    prdContent: string,
+    images: Array<{ dataUrl: string; pageHint?: string; label?: string }>,
+    additionalContext?: string,
+    sessionId?: string,
+  ) {
     const startTime = Date.now();
     const model = resolveModel(this.config.defaultModel as string);
 
-    const userTextParts: VisionContentPart[] = [
-      {
-        type: "text",
-        text: [
-          additionalContext?.trim() ? additionalContext.trim() : "",
-          "The user has uploaded a reference image to guide the visual style. Analyze the image and incorporate its color palette, typography style, spacing, component shapes, and overall aesthetic into the HTML Design System document.",
-          "",
-          `Based on the following PRD, generate a complete self-contained HTML Design System document as described in your instructions. Output ONLY the HTML — start with <!DOCTYPE html> and end with </html>.\n\nPRD:\n\n${prdContent}`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      },
-      {
+    const parts: VisionContentPart[] = [];
+
+    parts.push({
+      type: "text",
+      text: [
+        additionalContext?.trim() ?? "",
+        `The user has uploaded ${images.length} reference screenshot(s) showing the target UI to build. Analyze every image carefully — extract the exact color palette, typography, spacing, component shapes, layout patterns, and overall aesthetic — then incorporate these into the HTML Design System document.`,
+        "",
+        `Based on the following PRD, generate a complete self-contained HTML Design System document as described in your instructions. Output ONLY the HTML — start with <!DOCTYPE html> and end with </html>.\n\nPRD:\n\n${prdContent}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+
+    for (const img of images) {
+      const caption = img.label ?? img.pageHint;
+      if (caption) {
+        parts.push({ type: "text", text: `Screenshot: ${caption}` });
+      }
+      parts.push({
         type: "image_url",
-        image_url: { url: referenceImageBase64, detail: "auto" },
-      },
-    ];
+        image_url: { url: img.dataUrl, detail: "high" },
+      });
+    }
 
     const messages = [
       { role: "system" as const, content: this.config.systemPrompt },
-      { role: "user" as const, content: userTextParts },
+      { role: "user" as const, content: parts },
     ];
 
     const resp = await openRouterVisionChatCompletion(messages, {
