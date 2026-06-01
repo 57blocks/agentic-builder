@@ -21,8 +21,13 @@ import { normalizeScaffoldRelPath } from "@/lib/pipeline/scaffold-file-merge";
 import {
   estimateCost,
   type ChatMessage,
+  type VisionChatMessage,
   chatCompletionWithFallback,
 } from "@/lib/openrouter";
+import {
+  readDesignReferencesFromOutput,
+  type DesignReferenceEntry,
+} from "@/lib/pipeline/design-references";
 import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
 import { recallAndPrepareInject } from "@/lib/memory/recall-context";
 import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
@@ -1099,6 +1104,9 @@ async function runCodegenWorkerLoop(
   /** Worker role — used to select the codegen model variant. */
   role?: CodingAgentRole,
   codingMode: CodingMode = "normal",
+  /** When true, this frontend task has a matched design reference image injected.
+   *  Use codex (vision-capable). When false, use DeepSeek direct (cheaper). */
+  hasVisionImage = false,
 ): Promise<{
   content: string;
   rawContent: string;
@@ -1129,9 +1137,11 @@ async function runCodegenWorkerLoop(
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
   const toolChangedFiles = new Set<string>();
-  // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity;
-  // other roles (backend/architect/test) keep DeepSeek as primary.
-  const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
+  // Frontend page-restoration tasks (vision image injected) → codex for UI fidelity.
+  // Frontend logic tasks (no vision image) → deepseek direct (cheaper).
+  // Backend/architect/test → deepseek direct.
+  const codegenVariant =
+    role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
 
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
@@ -2374,6 +2384,48 @@ function routeAfterGenerate(state: WorkerState): string {
   return "verify";
 }
 
+/**
+ * Try to find a design-reference image whose pageHint matches the given task.
+ * Matching is two-pass:
+ *   1. PAGE-xxx ID match (most reliable — extracted from task title + description)
+ *   2. Normalized page-name substring match (fallback)
+ * Returns the first matching entry or undefined.
+ */
+function findTaskDesignReference(
+  task: { title: string; description: string },
+  refs: DesignReferenceEntry[],
+): DesignReferenceEntry | undefined {
+  const imageRefs = refs.filter((r) => r.kind === "image" && r.pageHint);
+  if (imageRefs.length === 0) return undefined;
+
+  const taskText = `${task.title} ${task.description}`;
+  const pageIdMatches = taskText.match(/\bPAGE-\d+\b/gi);
+  const taskPageIds = new Set(
+    (pageIdMatches ?? []).map((s) => s.toUpperCase()),
+  );
+
+  if (taskPageIds.size > 0) {
+    const found = imageRefs.find((r) => {
+      const hint = r.pageHint.toUpperCase();
+      return (
+        taskPageIds.has(hint) ||
+        [...taskPageIds].some((pid) => hint.includes(pid))
+      );
+    });
+    if (found) return found;
+  }
+
+  // Name-based fallback: normalize both sides and check containment
+  const titleNorm = task.title.toLowerCase().replace(/[-_\s]+/g, "");
+  return imageRefs.find((r) => {
+    const hintNorm = r.pageHint.toLowerCase().replace(/[-_\s]+/g, "");
+    return (
+      hintNorm.length >= 4 &&
+      (titleNorm.includes(hintNorm) || hintNorm.includes(titleNorm.slice(0, 12)))
+    );
+  });
+}
+
 async function generateCode(state: WorkerState) {
   const task = state.tasks[state.currentTaskIndex];
   const attempt = state.currentTaskRetryCount + 1;
@@ -2556,10 +2608,49 @@ async function generateCode(state: WorkerState) {
         ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
         : "";
 
-    messages.push({
-      role: "user",
-      content: `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${agenticInstruction}${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available tools (\`read_file\`, \`read_many_files\`, \`list_files\`, \`grep\`) to inspect the generated project before coding. Prefer \`write_file\` for new files or full-file rewrites. For small edits to existing generated files, prefer \`apply_patch\`; use \`delete_file\` or \`move_file\` only to remove duplicates or fix incorrect generated paths.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`,
-    });
+    const userTaskText = `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${agenticInstruction}${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available tools (\`read_file\`, \`read_many_files\`, \`list_files\`, \`grep\`) to inspect the generated project before coding. Prefer \`write_file\` for new files or full-file rewrites. For small edits to existing generated files, prefer \`apply_patch\`; use \`delete_file\` or \`move_file\` only to remove duplicates or fix incorrect generated paths.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`;
+
+    // ── Vision: inject matching design-reference image for frontend tasks ──────
+    // When the user uploaded a per-page screenshot, read the mirrored copy from
+    // `.design-references/` in the output tree and include it directly in the
+    // first user message so the coding model can see the exact target layout.
+    let injectedVisionImage = false;
+    if (state.role === "frontend") {
+      try {
+        const refs = await readDesignReferencesFromOutput(state.outputDir);
+        const matchedRef = findTaskDesignReference(task, refs);
+        if (matchedRef) {
+          const imgPath = path.join(
+            state.outputDir,
+            ".design-references",
+            matchedRef.storedFileName,
+          );
+          const imgBytes = await nodeFs.readFile(imgPath);
+          const b64 = imgBytes.toString("base64");
+          const dataUrl = `data:${matchedRef.mime};base64,${b64}`;
+          const visionMsg: VisionChatMessage = {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              { type: "text", text: userTaskText },
+            ],
+          };
+          messages.push(visionMsg as unknown as ChatMessage);
+          injectedVisionImage = true;
+          console.log(
+            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint})`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[Worker:${state.workerLabel}] Failed to load design-reference image for task "${task.title}" (ignored):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    if (!injectedVisionImage) {
+      messages.push({ role: "user", content: userTaskText });
+    }
 
     const startMs = Date.now();
     const fsOpts =
@@ -2690,6 +2781,7 @@ async function generateCode(state: WorkerState) {
           { fsWriteOptions: fsOpts, taskId: task.id },
           state.role,
           state.codingMode,
+          injectedVisionImage,
         );
         const content = response.content;
         validateCodegenFileOutput(content);

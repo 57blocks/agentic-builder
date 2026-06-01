@@ -67,7 +67,14 @@ const TIER_CODING_STYLE: Record<ProjectTier, string> = {
 
   M: `Pipeline tier **M** (split frontend/backend app): stack is \`frontend/\` (**Vite + React + React Router + Ant Design**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**). **NEVER use Next.js for M-tier.** The scaffold is prebuilt and already copied; **do not plan a Scaffolding task that recreates the repo structure**. Keep backend/data tasks reasonably broad; split **frontend by page or major flow** when the PRD lists multiple surfaces — first an **app shell/layout** task, then page-level tasks. Add an **early contracts/client** task so API shapes and the web client stay aligned with PRD requirement IDs. Coding tasks should implement pages, API modules, and middleware files, but final registration closure is handled later by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\`.`,
 
-  L: `Pipeline tier **L** (production-grade full-stack): same stack as M — \`frontend/\` (**Vite + React + React Router + Tailwind**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**, NOT Fastify, NOT a pnpm monorepo). **NEVER use Next.js or Fastify for L-tier.** L tier additionally ships **production layers** that M does not: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue with BullMQ-shaped API and in-process fallback), \`backend/src/config/logger.ts\` (pino) + \`backend/src/middlewares/requestLogger.ts\`, \`backend/src/middlewares/rateLimit.ts\`, and a \`docker-compose.yml\` that brings up postgres + redis by default. Expect **thorough** coverage across phases the PRD actually requires — scaffolding, data, auth, backend services, **background workers**, frontend, integration, infrastructure — but only where the documents call for them; derive *how many* tasks from requirement breadth, not a quota. Any background-job / async-pipeline feature MUST register its worker through \`backend/src/workers/index.ts\` and use \`enqueueJob\` / \`registerWorker\` from \`backend/src/queue/inProcessQueue.ts\`; do NOT plan a task that introduces a parallel queue or worker bootstrap. Reuse the M-tier coarse-grained task shape (one Data Layer task, one Backend Services task per bounded context, app-shell + page-level frontend tasks); do not split per endpoint or per tiny component. Final registration closure is still handled by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\` — same as M.`,
+  L: `Pipeline tier **L** (production-grade full-stack): same stack as M — \`frontend/\` (**Vite + React + React Router + Tailwind**, NOT Next.js) plus \`backend/\` (**Koa + Sequelize + PostgreSQL**, NOT Fastify, NOT a pnpm monorepo). **NEVER use Next.js or Fastify for L-tier.** L tier additionally ships **production layers** that M does not: \`backend/src/workers/\` + \`backend/src/queue/inProcessQueue.ts\` (background-job queue with BullMQ-shaped API and in-process fallback), \`backend/src/config/logger.ts\` (pino) + \`backend/src/middlewares/requestLogger.ts\`, \`backend/src/middlewares/rateLimit.ts\`, and a \`docker-compose.yml\` that brings up postgres + redis by default. Any background-job / async-pipeline feature MUST register its worker through \`backend/src/workers/index.ts\` and use \`enqueueJob\` / \`registerWorker\` from \`backend/src/queue/inProcessQueue.ts\`; do NOT plan a task that introduces a parallel queue or worker bootstrap. Final registration closure is still handled by \`integrationVerifyAndFix\` in \`frontend/src/router.tsx\`, \`backend/src/api/modules/index.ts\`, and \`backend/src/app.ts\` — same as M.
+
+**L-tier task granularity rules (overrides the "merge aggressively" default below for L-tier):**
+- **Data Layer**: split by bounded context when there are 3+ distinct domains (e.g. one task for user/session models, one for scoring/rules models, one for data-source/adapter models). A single Data Layer task is only acceptable for PRDs with ≤ 3 models total.
+- **Backend Services**: one task **per service or domain module** — e.g. "Data Ingestion Service", "Scoring Engine", "Admin API", "Notification Service" are separate tasks. Do NOT merge them into one task.
+- **Background Workers**: each distinct scheduled/async job is its own task (e.g. "Periodic Scoring Worker", "Data Sync Worker").
+- **Frontend**: one task per page or major flow (app-shell first, then one task per PRD page / CMP group). Do not merge multiple pages into one task.
+- **Expected range**: PRDs with 10–20 pages typically warrant 25–45 tasks for L-tier. If you are generating fewer than 20 tasks for a PRD with 10+ pages or 30+ requirement IDs, you are merging too aggressively — split until each task has a clear, single deliverable that one coding agent can implement well.`,
 };
 
 /**
@@ -88,23 +95,60 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
   - System-generated fields (e.g. \`id\`, \`createdAt\`, \`updatedAt\`, timestamp aliases, slugs generated by the server) must be identified as server-managed unless the PRD explicitly says the client supplies them.
   - For M-tier Sequelize projects, use exactly one canonical DB entry file: \`backend/src/db.ts\`. Do not plan a second database bootstrap file such as \`backend/src/config/database.ts\` or \`backend/src/database/connection.ts\` unless you are MODIFYING the existing canonical file.
   - HARD SPLIT RULE: Do **NOT** combine backend model/bootstrap work with frontend API client generation in the same task. If both are needed, emit separate tasks.
-- **Backend Services** — **REQUIRED for full-stack.** Prefer **one** broad task for \`backend/src\` (Koa routes, controllers, services, domain logic), unless the API surface is unusually large. This task implements the actual feature code — the scaffold only ships a starter Koa app.
+- **Backend Services** — **REQUIRED for full-stack.** Start with ONE broad backend task, then apply these **mandatory split rules**:
+  - **SPLIT RULE (HARD)**: If the PRD describes **4 or more distinct resource types** (e.g. users, products, orders, payments, reports) — each with their own CRUD operations — split backend tasks **by resource domain** (e.g. "User & Auth API", "Product & Inventory API", "Order & Payment API"). A single backend task that covers 4+ resources will always be incomplete because one coding agent cannot implement 20+ endpoints in a single task.
+  - **SPLIT RULE (HARD)**: If the total estimated API endpoint count is **8 or more**, split backend tasks so that no single task has more than 6 endpoints.
+  - **CRUD COMPLETENESS (MANDATORY)**: For every data entity that has a Sequelize model, the backend task that owns that entity MUST implement ALL FIVE standard operations even if the PRD only mentions a subset: list (\`GET /api/{entities}\`), get-one (\`GET /api/{entities}/:id\`), create (\`POST /api/{entities}\`), update (\`PUT /api/{entities}/:id\`), and delete (\`DELETE /api/{entities}/:id\`). The only valid exception is when the PRD explicitly states an operation is forbidden (e.g. "records can never be deleted"). Missing CRUD operations produce apps where users cannot add new records, edit existing ones, or clean up stale data — even if the PRD didn't describe each endpoint individually, the app is incomplete without them.
   - **EXCEPTION (HARD)**: If a backend feature is a **multi-step pipeline that integrates more than 3 external HTTP APIs / third-party services** (e.g. news aggregator hitting HackerNews + Google News + Jina + OpenAI + multiple market venues; a scanner combining Twitter API + Jina + OpenAI + Polymarket + HyperLiquid + Deribit), it MUST NOT be a single task. Split it into at least 3 tasks: (a) external-API client layer, (b) pipeline orchestration / business logic, (c) HTTP routes + SSE/queue wiring. See "External API complexity split (HARD RULE)" below for the full specification.
 - **Integration (contracts/client)** — Add an **early** task that defines/aligns API contracts + frontend API client in \`frontend/src/api\` with PRD IDs before page implementation.
   - HARD SPLIT RULE: If the task would create files in both \`backend/src\` and \`frontend/src\`, keep it limited to shared contract/type alignment plus client bindings. Do not also bundle root infra files like \`.env\` or \`docker-compose.yml\` into that same task.
-- **Frontend** — First create **one** app shell/layout task, then split into **page-level** tasks (one task per page/flow, not per tiny component).
+- **Frontend** — follow these four steps IN ORDER before writing a single frontend task:
+
+  **STEP 1 — PAGE INVENTORY**: List every distinct page in the PRD as a numbered list (e.g. 1. Login page, 2. Dashboard page, 3. Admin Approvals page, 4. Admin Settings page …). A "page" = a unique URL/route. Pages in the same role section (admin, teacher, family) are still separate pages — do NOT group them. Count the total: N pages.
+
+  **STEP 2 — TITLE FORMAT (ABSOLUTE RULE, zero exceptions)**:
+  Every frontend page task title MUST match this template exactly: **"Implement [SinglePageName] page"**
+  - ONE noun phrase, singular, no conjunctions.
+  - The word **"and"** may NEVER appear in a frontend page task title — not for "closely related" pages, not for admin pages, not for teacher pages, not for any reason.
+  - The word **"pages"** (plural) may NEVER appear unless the task is the app shell (which is not a page task). A plural signals multiple pages merged — split them.
+
+  **STEP 3 — COUNT CHECK**: After writing all frontend tasks, count your page-level tasks (excluding the app shell). That count MUST equal N from STEP 1. If it is less, you have illegally merged tasks — find each task with "and" or plural in the title and split it before continuing.
+
+  **STEP 4 — FILES CHECK**: Every page task's \`files.creates\` MUST contain exactly ONE file under \`frontend/src/views/\`. If any task lists two view files, split it immediately into two tasks.
+
+  **WHY MERGING BREAKS THE APP**: When a coding agent receives "Implement admin approvals and user management pages", it attempts to implement two full pages in a single pass and always leaves at least one incomplete or wired with placeholder data. Every merged task directly causes a broken page in the generated app — this is not a style issue, it is a correctness issue.
+
+  Additional frontend rules:
+  - The **first** frontend task MUST be the app shell / layout (sidebar, topbar, navigation skeleton, auth guards). It has no "and", no plural, and does not fetch data.
+  - **SPLIT SIGNAL**: If a frontend task's \`estimatedHours\` would exceed **0.5h**, it covers too much — split it.
   - Coding tasks should build the shell, navigation UI, and pages, but **must not** do the final route registration in \`frontend/src/router.tsx\`; that closure is handled by \`integrationVerifyAndFix\`.
   - **MANDATORY for every page-level frontend task**: the task \`description\` and at least one \`subStep\` MUST explicitly list every backend API endpoint the page reads from or writes to (e.g. \`GET /api/projects\`, \`POST /api/projects\`, \`DELETE /api/projects/:id\`). Derive these from the PRD and the Backend Services task's file list. If no endpoint applies (e.g. a static layout task), state "no API calls required" explicitly.
   - **FORBIDDEN in frontend tasks**: any subStep that says "use mock data", "hardcode data", or "TODO: replace with API". All data must come from real API calls via the frontend API client.
 - **Integration** — **Optional** single task: Vite proxy assumptions, Koa CORS/auth headers, frontend API client error handling, and env/config alignment between frontend and backend.
 - **Testing** — **Do not** add separate tasks with phase "Testing". Instead, every P0/P1 implementation task MUST include an embedded \`tddPlan.tests[]\` array so Test Writer / Runtime Executor can create RED/GREEN evidence for that task.
 
-**Bad for M / L:**
-- separate tasks per endpoint or per tiny UI component, or \"create frontend/package.json from scratch\";
+**Bad for M / L — frontend (every line below is a violation that MUST be split):**
+- "Implement authentication **and** onboarding pages" → 2 tasks: "Implement Authentication page" + "Implement Onboarding page"
+- "Implement course catalog **and** teacher directory pages" → 2 tasks
+- "Implement group enrollment **and** lecture/camp pages" → 2 tasks
+- "Implement payment **and** billing pages" → 2 tasks
+- "Implement my lessons **and** cart management pages" → 2 tasks
+- "Implement family profile **and** messages pages" → 2 tasks
+- "Implement teacher schedule **and** work hours pages" → 2 tasks
+- "Implement teacher students **and** profile pages" → 2 tasks
+- "Implement admin approvals **and** user management pages" → 2 tasks
+- "Implement admin course **and** enrollment management pages" → 2 tasks
+- "Implement admin finance **and** settings pages" → 2 tasks
+- "Implement course enrollment **pages**" creating 3 view files → 3 tasks
+- Any frontend task where \`files.creates\` has 2+ entries under \`frontend/src/views/\`
+
+**Bad for M / L — backend / other:**
+- a single "Backend Services" task that covers 8+ endpoints across 4+ resource types;
+- separate tasks per tiny UI component, or \"create frontend/package.json from scratch\";
 - bundling a multi-venue / multi-API pipeline (e.g. \"Implement feed aggregation pipeline and APIs\" doing HackerNews + Google News + Jina + OpenAI + Polymarket + HyperLiquid + Deribit + BullMQ + SSE + REST routes all in one task — this MUST be split, see External API complexity split rule).
 
 **Good for M / L:**
-- one contracts/client task, one app-shell/layout task, one broad backend services task, then page-level tasks like "Implement Dashboard view" and "Implement Project detail flow";
+- one contracts/client task, one app-shell/layout task, backend tasks split by resource domain when 4+ resource types exist, then **one task per PRD page** like "Implement Private Enrollment page", "Implement Group Enrollment page", "Implement Lecture/Camp Enrollment page";
 - when a multi-API pipeline exists, split it into 3 tasks like "Build external API clients for {services}", "Implement {pipeline-name} orchestration", "Add {pipeline-name} HTTP routes + SSE streaming".
 
 ## Tier M / L — scaffold utilities are CANONICAL (do not re-plan)
@@ -421,12 +465,20 @@ Field rules:
   - "reads": files this task only imports or references without editing.
   - CRITICAL: A file that appears in any other task's "creates" MUST appear in this task's "modifies" or "reads", NEVER in "creates" again. No file path may appear in "creates" across more than one task.
 - **dependencies**: array of task IDs that must be done first (e.g. ["T-001"]).
-  - Prefer a **single direct dependency** (the immediate predecessor). Only list multiple
-    dependencies when the task truly cannot start before **multiple independent** predecessors
-    are all complete.
-  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002,
-    and T-002 depends on T-001, T-003 should NOT also list T-001 — the dependency chain is
-    implicit through T-002.
+  - **PARALLEL BY DEFAULT**: Tasks in the same phase are almost always INDEPENDENT and should run in parallel. They share the same prerequisite (e.g. the Data Layer task), but they do NOT depend on each other.
+  - **CORRECT** — Backend Services tasks T-004..T-007 all depend only on T-002 (Data Layer), NOT on each other:
+      T-004 → ["T-002"]
+      T-005 → ["T-002"]   (NOT ["T-004"])
+      T-006 → ["T-002"]   (NOT ["T-005"])
+      T-007 → ["T-002"]   (NOT ["T-006"])
+  - **CORRECT** — Frontend page tasks T-012..T-014 all depend only on T-011 (App Shell), NOT on each other:
+      T-012 → ["T-011"]
+      T-013 → ["T-011"]   (NOT ["T-012"])
+      T-014 → ["T-011"]   (NOT ["T-013"])
+  - **WRONG** (serial chain — NEVER do this):
+      T-005 → ["T-004"] → T-006 → ["T-005"] → T-013 → ["T-012"] → T-014 → ["T-013"]
+  - Only list multiple dependencies when the task truly cannot start before **multiple independent** predecessors are all complete (e.g. a frontend page that needs both the app shell AND the API client).
+  - Do **NOT** include transitive/indirect dependencies. If T-003 already depends on T-002, and T-002 depends on T-001, T-003 should NOT also list T-001 — the chain is implicit.
 - **priority**: "P0" (must have), "P1" (should have), "P2" (nice to have).
 - **subSteps**: array of 2-6 concrete implementation steps. Each step has:
   - "step": sequential number (1, 2, 3...)
@@ -499,6 +551,11 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
    - For schema changes, include Sequelize migration files under \`backend/src/database/migrations/*.ts\` (or \`.js\`). Do NOT introduce \`prisma/schema.prisma\`, \`@prisma/client\`, or \`npx prisma ...\` commands — they are explicitly disallowed.
    - Add a subStep: \`"Run: npx sequelize-cli db:migrate (or an equivalent \`sequelize.sync()\` bootstrap in backend/src/db.ts) to apply the schema."\`
    - acceptanceCriteria MUST include: \`"Sequelize models load and migrations/sync complete without errors"\`.
+   - **SEED DATA (MANDATORY)**: Every Data Layer task that defines one or more Sequelize models MUST include a subStep that creates an initial seed script at \`backend/src/scripts/seed-<entity>.ts\` (or a combined \`seed-demo-data.ts\` if multiple entities are seeded together). The seed script MUST:
+     - Insert **3–5 realistic demo records** per entity (not "Test Item 1", use real-looking names/values that match the domain).
+     - Use **upsert** semantics (findOrCreate / upsert) so re-running on an existing database is safe.
+     - Export a \`run()\` function (no DB close inside) and call it from a \`main()\` wrapper that opens and closes the DB, following the same pattern as \`backend/src/scripts/seed-auth-users.ts\`.
+     - Be callable from \`server.ts\` startup via \`AUTO_SEED\` env flag (same pattern as auth seed), so the demo data is present from the first \`pnpm dev\`.\n   - acceptanceCriteria MUST include: \`"pnpm run seed (or AUTO_SEED=1) inserts demo records; re-running is idempotent"\`.
 
 3. If the project uses **SQLite** (e.g. better-sqlite3, sql.js):
    - The init subStep must create the DB file and execute \`CREATE TABLE\` statements on app startup.
@@ -536,7 +593,7 @@ Scan the PRD for any persistence requirement (database, file storage, cache, que
   2. Include a \`subStep\` that explicitly says: "Call \`[METHOD] /api/[path]\` via the API client to load/submit data".
   3. Include in \`acceptanceCriteria\` a criterion asserting no mock/hardcoded data is used.
   This information allows the AI coding agent to know which real endpoints to call instead of inventing mock data.
-- Merge related work aggressively for backend/data: combine multiple API endpoints and models into broader tasks unless scale clearly requires more split.
+- Merge related work for backend/data when scope is thin (M-tier or simple PRDs): combine multiple API endpoints and models into broader tasks. **For L-tier projects** with 10+ PRD pages or 30+ requirement IDs, follow the L-tier granularity rules above instead — do NOT merge across domain boundaries.
 - Order tasks by execution sequence (respecting dependencies).
 - Focus on CODING tasks — skip pure planning, meeting, or documentation-only items.
 - Reference PRD feature IDs (FR-xxx) and user stories (US-xx) where applicable.
@@ -568,7 +625,7 @@ export class TaskBreakdownAgent extends BaseAgent {
       systemPrompt: buildSystemPrompt(tier, scaffoldBlock, skillsBlock),
       defaultModel: MODEL_CONFIG.taskBreakdown,
       temperature: 0.3,
-      maxTokens: 16384,
+      maxTokens: 64000,
       customChatCompletion: async (messages, opts) => {
         const { model: _ignoredModel, ...rest } = opts;
         const reasoningOptions = buildTaskBreakdownReasoningOptions();
@@ -775,6 +832,111 @@ export class TaskBreakdownAgent extends BaseAgent {
       userMessage,
       context,
       "step-task-breakdown-supplementary",
+      sessionId,
+    );
+  }
+
+  /**
+   * L-tier self-heal: given a list of overbroad tasks (too few tasks for a
+   * large PRD), ask the model to produce fine-grained replacement tasks.
+   *
+   * Callers should remove the overbroad tasks from the list, merge in the
+   * returned replacements, and re-run dep inference.
+   */
+  async expandOverbroadTasks(
+    params: {
+      overbroadTasks: Array<{
+        id: string;
+        phase?: string;
+        title: string;
+        description: string;
+        creates: string[];
+      }>;
+      existingTaskSummary: Array<{
+        id: string;
+        phase?: string;
+        title: string;
+        creates: string[];
+      }>;
+      totalOriginalCount: number;
+      startingTaskId: string;
+      prd: string;
+      trd?: string;
+      sysDesign?: string;
+      implGuide?: string;
+      prdSpecText?: string;
+    },
+    sessionId?: string,
+  ) {
+    const keptSummary = params.existingTaskSummary
+      .map((t) => {
+        const head = `- \`${t.id}\`${t.phase ? ` (${t.phase})` : ""}: ${t.title}`;
+        if (!t.creates || t.creates.length === 0) return head;
+        const shown = t.creates.slice(0, 8);
+        const more = t.creates.length - shown.length;
+        const tail = shown.map((f) => `    • \`${f}\``).join("\n");
+        const overflow = more > 0 ? `\n    • …(+${more} more)` : "";
+        return `${head}\n${tail}${overflow}`;
+      })
+      .join("\n");
+
+    const expandLines = params.overbroadTasks
+      .map((t) => {
+        const lines = [`### \`${t.id}\` — ${t.title}`];
+        if (t.phase) lines.push(`**Phase**: ${t.phase}`);
+        if (t.description) lines.push(`**Description**: ${t.description}`);
+        if (t.creates.length > 0) {
+          lines.push(`**Creates** (${t.creates.length} files):`);
+          lines.push(...t.creates.map((f) => `  • \`${f}\``));
+        }
+        return lines.join("\n");
+      })
+      .join("\n\n");
+
+    const contextSections: string[] = [];
+    contextSections.push("## PRD (authoritative)\n\n" + params.prd);
+    if (params.prdSpecText) contextSections.push(params.prdSpecText);
+    if (params.trd) contextSections.push("## TRD\n\n" + params.trd);
+    if (params.sysDesign)
+      contextSections.push("## System Design\n\n" + params.sysDesign);
+    if (params.implGuide)
+      contextSections.push("## Implementation Guide\n\n" + params.implGuide);
+
+    const userMessage = [
+      "## L-tier task expansion (granularity self-heal)",
+      "",
+      `The initial task breakdown generated only ${params.totalOriginalCount} tasks for an L-tier project,`,
+      "which is too few for full PRD coverage. The tasks listed in §Overbroad tasks below",
+      "are overly broad — each covers too many domains or pages — and must be split.",
+      "",
+      "**Instructions:**",
+      "1. For each overbroad task, produce **2–5 replacement tasks** that together cover",
+      "   everything the original described. No scope may be silently dropped.",
+      "2. Do NOT include the original overbroad task IDs in the output.",
+      "3. Do NOT re-emit any kept task — output ONLY the new replacement tasks.",
+      `4. Number replacement tasks starting from \`${params.startingTaskId}\` and increment sequentially.`,
+      "5. Apply L-tier granularity rules from the system prompt: one task per page/flow,",
+      "   one task per service domain, one task per distinct background job.",
+      "6. Every task must have: `subSteps`, `tokenEstimate`, `acceptanceCriteria`, `coversRequirementIds`.",
+      "7. `files.creates`: each path must appear in exactly ONE task. Paths already listed",
+      "   under §Kept tasks must use `files.modifies` instead.",
+      "8. Output strict JSON array only. No markdown fencing, no prose.",
+      "",
+      `## Overbroad tasks to expand (${params.overbroadTasks.length})`,
+      "",
+      expandLines,
+      "",
+      "## Kept tasks (do NOT modify — reference via dependencies or files.modifies only)",
+      "",
+      keptSummary || "(none)",
+    ].join("\n");
+
+    const context = contextSections.join("\n\n---\n\n");
+
+    return this.run(
+      userMessage,
+      context,
+      "step-task-breakdown-expand",
       sessionId,
     );
   }

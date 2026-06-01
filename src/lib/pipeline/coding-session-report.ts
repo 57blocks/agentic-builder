@@ -11,8 +11,10 @@ import {
 } from "@/lib/pipeline/tdd-evidence";
 import {
   calculateCodingOutcomeScores,
+  scoreToGrade,
   type CodingOutcomeScores,
   type ScoreBreakdown,
+  type ScoreLine,
 } from "@/lib/pipeline/coding-outcome-score";
 
 const execFileAsync = promisify(execFile);
@@ -325,14 +327,6 @@ async function ensureRalphDir(outputDir: string): Promise<string> {
 
 function clampScore(value: number): number {
   return Math.max(0, Math.min(100, value));
-}
-
-function scoreToGrade(score: number): string {
-  if (score >= 90) return "A";
-  if (score >= 80) return "B";
-  if (score >= 70) return "C";
-  if (score >= 60) return "D";
-  return "F";
 }
 
 function formatDuration(durationMs: number): string {
@@ -1413,15 +1407,6 @@ function parseE2eTelemetry(errorBlob: string | undefined): E2eTelemetry {
       out.deterministic === 0 && out.flaky === 0 && out.infra > 0;
   }
   return out;
-}
-
-interface ScoreLine {
-  /** Negative for penalty, positive for bonus. */
-  delta: number;
-  /** Short label used in the readable formula; e.g. "fail status". */
-  label: string;
-  /** Long-form reason printed in the bullet list. */
-  reason: string;
 }
 
 /**

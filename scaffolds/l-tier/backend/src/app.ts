@@ -4,15 +4,23 @@ import { createApiRouter } from "./api/modules";
 import { corsMiddleware } from "./middlewares/cors";
 import { errorHandlerMiddleware } from "./middlewares/errorHandler";
 import { requestLoggerMiddleware } from "./middlewares/requestLogger";
+import { responseEnvelopeMiddleware } from "./middlewares/responseEnvelope";
 
 export function createApp(): Koa {
   const app = new Koa();
   const apiRouter = createApiRouter();
 
-  // requestLogger MUST come first so the error handler (and every downstream
-  // middleware) can write to `ctx.state.log` with the requestId already bound.
+  // Middleware order matters:
+  //   1. requestLogger     → bind requestId / ctx.state.log first
+  //   2. errorHandler      → catches throws from any downstream layer and
+  //                          emits the canonical { ok:false, error } envelope
+  //   3. responseEnvelope  → wraps successful 2xx bodies into { ok:true, data }
+  //                          (skips already-enveloped bodies, errors pass through)
+  //   4. cors / bodyParser → request shaping
+  //   5. routes            → handlers write `ctx.body = <raw data>`
   app.use(requestLoggerMiddleware);
   app.use(errorHandlerMiddleware);
+  app.use(responseEnvelopeMiddleware);
   app.use(corsMiddleware);
   app.use(bodyParser());
   // Auth middleware:

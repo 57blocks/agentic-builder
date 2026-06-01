@@ -1,5 +1,6 @@
 import type Koa from "koa";
 import type { AppContext } from "../types/koa";
+import { logger } from "../config/logger";
 
 export interface AppError extends Error {
   status?: number;
@@ -16,41 +17,70 @@ export const errorHandlerMiddleware: Koa.Middleware = async (
   try {
     await next();
 
-    // Handle 404
+    // Handle 404 — emit the canonical error envelope so the frontend
+    // can branch on `body.error.code` instead of having to detect two
+    // shapes (legacy `{ error, message }` vs the new `{ ok, error: { code, message } }`).
     if (ctx.status === 404 && !ctx.body) {
       ctx.status = 404;
       ctx.body = {
-        error: "Not Found",
-        message: `Route ${ctx.method} ${ctx.url} not found`,
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: `Route ${ctx.method} ${ctx.url} not found`,
+        },
       };
     }
   } catch (err: any) {
     const error = err as AppError;
 
-    // Log error
-    console.error(`[Error] ${ctx.method} ${ctx.url}`, {
-      error: error.message,
-      stack: error.stack,
-      status: error.status,
-      details: error.details,
-      body: requestBody,
-      user: ctx.state.user?.id,
-    });
+    // Log error via the structured logger so the `redact` paths configured
+    // on `config/logger.ts` (`password`, `*.password`, `passwordHash`,
+    // `authorization`, `cookie`, …) actually take effect. Using
+    // `console.error` bypasses redaction → /auth/login validation
+    // failures used to leak plaintext credentials to stdout / CloudWatch.
+    logger.error(
+      {
+        method: ctx.method,
+        url: ctx.url,
+        status: error.status,
+        code: error.code,
+        details: error.details,
+        // `body` is the parsed request body. pino's redact path matches
+        // `body.password` (and any nested *.password) because we expose
+        // the body under `body` — see logger.ts#redact.paths.
+        body: requestBody,
+        userId: ctx.state.user?.id,
+        err: error,
+      },
+      `request failed: ${error.message}`,
+    );
 
-    // Set response status
     ctx.status = error.status || 500;
 
-    // Format error response
+    // Canonical error envelope — must stay in lock-step with the success
+    // envelope produced by responseEnvelope.ts and the unwrap logic in
+    // frontend/src/api/client.ts. The contract is:
+    //
+    //   { ok: false, error: { code: string, message: string, details? } }
+    //
+    // `code` is a stable machine-readable string the frontend can switch on
+    // (e.g. "UNAUTHORIZED", "NOT_FOUND", "VALIDATION_ERROR"). It comes from
+    // `Errors.X()` factories below; we fall back to `HTTP_<status>` so even
+    // un-coded throws stay queryable. NOTE: even in development we never
+    // echo the raw request body back — `details` is for backend-emitted
+    // structured error context only (see `Errors.ValidationError` callers).
     ctx.body = {
-      error: error.name || "InternalServerError",
-      message: error.message || "An unexpected error occurred",
+      ok: false,
+      error: {
+        code: error.code || `HTTP_${ctx.status}`,
+        message: error.message || "An unexpected error occurred",
+        ...(error.details !== undefined && { details: error.details }),
+      },
       ...(process.env.NODE_ENV === "development" && {
         stack: error.stack,
-        details: error.details,
       }),
     };
 
-    // Ensure JSON content type
     ctx.type = "application/json";
   }
 };

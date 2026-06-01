@@ -43,9 +43,16 @@ export function normalizeProjectTier(tier?: string | null): ProjectTier {
  */
 export function parseTierFromPrd(content?: string | null): ProjectTier | null {
   if (!content) return null;
-  const match = content.match(/\*\*Project Tier:\s*([SML])\*\*/i);
-  if (!match) return null;
-  return normalizeProjectTier(match[1]);
+  // English badge: **Project Tier: L**
+  const enMatch = content.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+  if (enMatch) return normalizeProjectTier(enMatch[1]);
+  // Chinese table cell: | **L 级** | or **L级** or "L 级" anywhere
+  const zhMatch = content.match(/\*?\*?([SML])\s*[级级]\*?\*?/i);
+  if (zhMatch) return normalizeProjectTier(zhMatch[1]);
+  // Markdown table row pattern: | **项目规模** | **L 级** ...
+  const zhTableMatch = content.match(/项目规模[^|]*\|\s*\*?\*?\s*([SML])\s*[级级]/i);
+  if (zhTableMatch) return normalizeProjectTier(zhTableMatch[1]);
+  return null;
 }
 
 /**
@@ -223,11 +230,11 @@ export async function classifyProject(
   featureBrief: string,
   /**
    * Optional PRD content. When provided AND it contains the canonical
-   * `**Project Tier: <S|M|L>**` badge, the badge is authoritative and is
-   * returned directly without invoking the LLM. This prevents the brief-only
-   * classifier from disagreeing with an explicit tier declared in the PRD
-   * (which can happen if the user uploaded a pre-classified PRD or manually
-   * edited the badge).
+   * `**Project Tier: <S|M|L>**` badge (or Chinese equivalent), the badge is
+   * authoritative and returned directly without invoking the LLM. When the
+   * feature brief is empty and a PRD is provided, the first 3 000 characters
+   * of the PRD are used as the classification input so the LLM can infer tier
+   * from the product description rather than defaulting to S.
    */
   prdContent?: string | null,
 ): Promise<ProjectClassification> {
@@ -235,8 +242,17 @@ export async function classifyProject(
   const fromPrd = extractClassificationFromPrd(prdContent);
   if (fromPrd) return fromPrd;
 
+  // When no feature brief was supplied but a PRD exists, use the PRD excerpt
+  // as the classification input. Without this, an empty brief forces the LLM
+  // to guess and it defaults to S-tier, causing the task breakdown to produce
+  // far too few tasks for M/L-tier projects.
+  const effectiveBrief =
+    featureBrief.trim().length === 0 && prdContent
+      ? prdContent.slice(0, 3000)
+      : featureBrief;
+
   const model = resolveModel(MODEL_CONFIG.intent);
-  const briefHash = classificationCacheKey(featureBrief, model);
+  const briefHash = classificationCacheKey(effectiveBrief, model);
 
   if (memoryCacheEnabled()) {
     const hit = await tryClassificationCache(briefHash, model);
@@ -244,7 +260,7 @@ export async function classifyProject(
   }
 
   const { classification, didFallback } = await runClassifierLLM(
-    featureBrief,
+    effectiveBrief,
     model,
   );
 

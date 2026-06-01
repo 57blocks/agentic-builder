@@ -50,6 +50,20 @@ events.setMaxListeners(0);
 
 const jobs = new Map<string, Job>();
 const handlers = new Map<string, JobHandler<unknown, unknown>>();
+const inFlight = new Set<Promise<void>>();
+
+/**
+ * How long completed jobs are retained in the in-memory `jobs` Map so that
+ * SSE / status endpoints can still look them up by id after the worker
+ * finishes. Default 1h; override with `JOB_RETENTION_MS` (min 60s).
+ *
+ * Without this TTL the Map grows unboundedly → heap OOM in long-running
+ * services (the historic S-21 leak).
+ */
+const JOB_RETENTION_MS = (() => {
+  const raw = Number(process.env.JOB_RETENTION_MS);
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : 60 * 60 * 1000;
+})();
 
 /**
  * Enqueue a job. Returns the run id immediately; the work runs asynchronously.
@@ -79,8 +93,12 @@ export async function enqueueJob<TData>(
   jobs.set(id, job);
   logger.info({ jobId: id, queueName }, "job enqueued (in-process)");
 
-  // Detach from the request lifecycle.
-  void runJob(job, handler);
+  // Detach from the request lifecycle, but keep the promise tracked so
+  // `drainInFlight()` can await pending work during graceful shutdown.
+  const handle = runJob(job, handler).finally(() => {
+    inFlight.delete(handle);
+  });
+  inFlight.add(handle);
 
   return id;
 }
@@ -116,6 +134,15 @@ async function runJob<TData>(
       { jobId: job.id, queueName: job.queueName, err: job.error },
       "job failed",
     );
+  } finally {
+    // TTL eviction — keep the row around long enough for late SSE / status
+    // pollers to read the final outcome, then drop it so the Map doesn't
+    // grow unboundedly. `unref()` ensures the timer never keeps the
+    // process alive on its own (graceful shutdown still wins).
+    const ttl = setTimeout(() => {
+      jobs.delete(job.id);
+    }, JOB_RETENTION_MS);
+    if (typeof ttl.unref === "function") ttl.unref();
   }
 }
 
@@ -149,4 +176,47 @@ export function subscribeJob(
 
 export function isInProcessRunId(runId: string): boolean {
   return typeof runId === "string" && runId.startsWith("inproc:");
+}
+
+/**
+ * Wait for every in-flight job to finish, up to `timeoutMs` (default 10s).
+ *
+ * Intended for graceful shutdown — `server.ts` calls this from the
+ * SIGTERM / SIGINT handler before closing the DB connection so a rolling
+ * deploy doesn't strand half-written DB rows.
+ *
+ * Returns `true` when all jobs settle in time; `false` when the timeout
+ * elapses with jobs still running (caller should hard-exit and let the
+ * orchestrator restart anything that didn't finish).
+ */
+export async function drainInFlight(timeoutMs = 10_000): Promise<boolean> {
+  if (inFlight.size === 0) return true;
+
+  logger.info({ pending: inFlight.size, timeoutMs }, "draining in-flight jobs");
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+
+  // Snapshot the set so jobs that resolve mid-await don't cause us to
+  // re-await an empty list and exit early before tracking new arrivals.
+  const settled = Promise.allSettled([...inFlight]).then(() => true as const);
+
+  const result = await Promise.race([settled, timeout]);
+  if (timer) clearTimeout(timer);
+  if (result) {
+    logger.info("in-flight jobs drained");
+  } else {
+    logger.warn(
+      { stillPending: inFlight.size },
+      "drain timed out; remaining jobs will be lost",
+    );
+  }
+  return result;
+}
+
+/** Pending job count — exposed for tests and shutdown observability. */
+export function inFlightCount(): number {
+  return inFlight.size;
 }

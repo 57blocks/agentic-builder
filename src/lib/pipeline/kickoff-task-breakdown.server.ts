@@ -19,6 +19,7 @@ import { buildTaskBreakdownScaffoldBlock } from "@/lib/pipeline/scaffold-spec";
 import type { KickoffWorkItem } from "./types";
 import { stripTestingPhaseTasks } from "./strip-testing-tasks";
 import { inferTaskDependencies } from "./task-dep-inference";
+import { splitMultiPageFrontendTasks } from "./split-multipage-tasks";
 
 function isKickoffWorkItem(x: unknown): x is KickoffWorkItem {
   if (!x || typeof x !== "object") return false;
@@ -211,6 +212,154 @@ export function parseJsonArrayFromLlmOutput(raw: string): {
   }
 }
 
+function getTaskCreates(task: KickoffWorkItem): string[] {
+  if (!task.files) return [];
+  if (Array.isArray(task.files)) return task.files;
+  return task.files.creates ?? [];
+}
+
+async function maybeExpandLTierTasks(opts: {
+  tier: ProjectTier;
+  tasks: KickoffWorkItem[];
+  prd: string;
+  agent: TaskBreakdownAgent;
+  trd?: string;
+  sysDesign?: string;
+  implGuide?: string;
+  prdSpecText?: string;
+  sessionId?: string;
+}): Promise<KickoffWorkItem[]> {
+  // M-tier: trigger expansion when tasks are few relative to PRD size.
+  // A large PRD with only 6 tasks almost always means pages/APIs were merged —
+  // the model needs to be prompted to split them.
+  const M_EXPANSION_THRESHOLD = 10;
+  const M_MIN_PRD_LENGTH = 5000;
+
+  const EXPANSION_THRESHOLD = 20;
+  const MIN_PRD_LENGTH = 8000;
+
+  if (opts.tier === "M") {
+    if (
+      opts.tasks.length < M_EXPANSION_THRESHOLD &&
+      opts.prd.length >= M_MIN_PRD_LENGTH
+    ) {
+      return maybeRunExpansion({
+        ...opts,
+        tierLabel: "M-tier",
+        threshold: M_EXPANSION_THRESHOLD,
+      });
+    }
+    return opts.tasks;
+  }
+
+  if (opts.tier !== "L") return opts.tasks;
+  if (opts.tasks.length >= EXPANSION_THRESHOLD) return opts.tasks;
+  if (opts.prd.length < MIN_PRD_LENGTH) return opts.tasks;
+
+  return maybeRunExpansion({
+    ...opts,
+    tierLabel: "L-tier",
+    threshold: EXPANSION_THRESHOLD,
+  });
+}
+
+async function maybeRunExpansion(opts: {
+  tierLabel: string;
+  threshold: number;
+  tasks: KickoffWorkItem[];
+  prd: string;
+  agent: TaskBreakdownAgent;
+  trd?: string;
+  sysDesign?: string;
+  implGuide?: string;
+  prdSpecText?: string;
+  sessionId?: string;
+}): Promise<KickoffWorkItem[]> {
+  // Find overbroad tasks: those with the most creates, capped at half the list.
+  const sorted = [...opts.tasks].sort(
+    (a, b) => getTaskCreates(b).length - getTaskCreates(a).length,
+  );
+
+  // Prefer tasks with 5+ creates; fall back to top half if none qualify.
+  let candidates = sorted.filter((t) => getTaskCreates(t).length >= 5);
+  if (candidates.length === 0) {
+    candidates = sorted.slice(0, Math.max(1, Math.ceil(opts.tasks.length / 2)));
+  }
+  // Cap at 8 to keep the re-prompt focused.
+  const overbroadTasks = candidates.slice(0, 8);
+
+  const overbroadIds = new Set(overbroadTasks.map((t) => t.id));
+  const keptTasks = opts.tasks.filter((t) => !overbroadIds.has(t.id));
+
+  const lastNum = opts.tasks.reduce((max, t) => {
+    const m = t.id.match(/(\d+)$/);
+    return m ? Math.max(max, parseInt(m[1]!, 10)) : max;
+  }, 0);
+  const startingTaskId = `task-${String(lastNum + 1).padStart(3, "0")}`;
+
+  console.info(
+    `[task-breakdown] ${opts.tierLabel} expansion triggered: ${opts.tasks.length} tasks < ${opts.threshold}. ` +
+      `Expanding ${overbroadTasks.length} task(s): ${overbroadTasks.map((t) => t.id).join(", ")}`,
+  );
+
+  let expansionResult;
+  try {
+    expansionResult = await opts.agent.expandOverbroadTasks(
+      {
+        overbroadTasks: overbroadTasks.map((t) => ({
+          id: t.id,
+          phase: t.phase,
+          title: t.title,
+          description: t.description,
+          creates: getTaskCreates(t),
+        })),
+        existingTaskSummary: keptTasks.map((t) => ({
+          id: t.id,
+          phase: t.phase,
+          title: t.title,
+          creates: getTaskCreates(t),
+        })),
+        totalOriginalCount: opts.tasks.length,
+        startingTaskId,
+        prd: opts.prd,
+        trd: opts.trd,
+        sysDesign: opts.sysDesign,
+        implGuide: opts.implGuide,
+        prdSpecText: opts.prdSpecText,
+      },
+      opts.sessionId,
+    );
+  } catch (err) {
+    console.warn(
+      `[task-breakdown] ${opts.tierLabel} expansion failed — keeping original tasks:`,
+      err,
+    );
+    return opts.tasks;
+  }
+
+  const expansionParsed = parseJsonArrayFromLlmOutput(expansionResult.content);
+  if (expansionParsed.parseFailed || expansionParsed.tasks.length === 0) {
+    console.warn(
+      `[task-breakdown] ${opts.tierLabel} expansion produced no valid tasks — keeping originals`,
+    );
+    return opts.tasks;
+  }
+
+  const expansionNormalized = normalizeOriginalTaskBreakdown(
+    expansionParsed.tasks,
+    opts.prd,
+  );
+  const merged = [...keptTasks, ...expansionNormalized];
+  const { tasks: withNewDeps } = inferTaskDependencies(merged);
+  const withSplit = splitMultiPageFrontendTasks(withNewDeps);
+
+  console.info(
+    `[task-breakdown] ${opts.tierLabel} expansion complete: ${opts.tasks.length} → ${withSplit.length} tasks`,
+  );
+
+  return withSplit;
+}
+
 function extractPrdRequirementIds(prd: string): Set<string> {
   const ids = new Set<string>();
   const re = /\b(?:AC|FR|US|IC)-[A-Z0-9]+(?:-[A-Z0-9]+)?\b/g;
@@ -334,6 +483,17 @@ export async function buildTaskBreakdownFromDocuments(params: {
    *  Persisted on the kickoff step metadata so the UI + audit script can
    *  show "which rules fired this run" without re-running the loader. */
   skillsTrace: SkillTraceRecord;
+  /** Pre-formatted scaffold contract block injected into the primary
+   *  task-breakdown system prompt. Surfaced so coverage-gate / phase-gate
+   *  self-heal can reuse the exact same context when they spawn their
+   *  own TaskBreakdownAgent instances. */
+  scaffoldBlock: string;
+  /** Pre-formatted applied-skills block injected into the primary
+   *  task-breakdown system prompt. Surfaced for the same reason as
+   *  `scaffoldBlock` above — without it, self-heal LLM calls would
+   *  bypass hard rules like `scaffold-owned-files` and freely re-create
+   *  canonical paths (User.ts, Session.ts, modules/admin/*). */
+  skillsBlock: string;
 }> {
   const tier = normalizeProjectTier(params.tier ?? "M");
   const scaffoldTier = tier as ScaffoldTier;
@@ -409,8 +569,26 @@ export async function buildTaskBreakdownFromDocuments(params: {
     );
   }
 
+  // Deterministically split any frontend task that creates 2+ view files.
+  // This catches pages the LLM merged despite prompt rules (e.g. "lecture and
+  // camp enrollment pages" → two separate page tasks).
+  const splitTasks = splitMultiPageFrontendTasks(withDeps);
+
+  // L-tier self-heal: when too few tasks for the PRD size, expand overbroad ones.
+  const expandedTasks = await maybeExpandLTierTasks({
+    tier,
+    tasks: splitTasks,
+    prd: params.prd,
+    agent,
+    trd: params.trd,
+    sysDesign: params.sysDesign,
+    implGuide: params.implGuide,
+    prdSpecText,
+    sessionId: params.sessionId,
+  });
+
   return {
-    tasks: stripTestingPhaseTasks(withDeps),
+    tasks: stripTestingPhaseTasks(expandedTasks),
     costUsd: result.costUsd,
     durationMs: result.durationMs,
     model: result.model,
@@ -420,5 +598,14 @@ export async function buildTaskBreakdownFromDocuments(params: {
     droppedFromTruncation: parsed.droppedCount,
     truncationOffset: parsed.truncationOffset,
     skillsTrace: toSkillTraceRecord(skillsLoaded),
+    // Surface scaffold + skills system-prompt blocks so coverage-gate /
+    // phase-gate self-heal can reuse them when spawning their own
+    // TaskBreakdownAgent instances. Without these, self-heal LLM calls
+    // get a stripped-down prompt and happily re-create scaffold-owned
+    // files (e.g. backend/src/models/User.ts) or invent parallel module
+    // trees (e.g. backend/src/api/modules/admin/*.ts) instead of
+    // honouring the canonical scaffold-owned-files contract.
+    scaffoldBlock,
+    skillsBlock,
   };
 }

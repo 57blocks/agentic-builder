@@ -246,7 +246,7 @@ function scoreCostSpeed(input: CodingOutcomeScoreInput): ScoreBreakdown {
   return finishScore(100, lines, "Cost and call volume are within expected range.");
 }
 
-interface ScoreLine {
+export interface ScoreLine {
   delta: number;
   label: string;
   reason: string;
@@ -323,12 +323,12 @@ function taskCounts(tasks: AuditTaskSummary[]): {
   };
 }
 
-function roundScore(value: number): number {
+export function roundScore(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function scoreToGrade(score: number): string {
+export function scoreToGrade(score: number): string {
   if (score >= 90) return "A";
   if (score >= 80) return "B";
   if (score >= 70) return "C";
