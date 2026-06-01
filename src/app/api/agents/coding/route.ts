@@ -777,11 +777,59 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds && retryFailedTaskIds.length > 0
       ? new Set(retryFailedTaskIds)
       : null;
-  const tasksToRun = retrySet
-    ? tasksAfterStrip.filter((t) => retrySet.has(t.id))
+  // In retry mode, expand the retry set to include any dependency tasks whose
+  // output files do not yet exist on disk. This prevents a scenario where a
+  // retry task (e.g. T-006 Integration) depends on pages created by T-003/T-004
+  // but those tasks were never completed — the worker would spin trying to find
+  // absent files. We include missing-dependency tasks silently so the retry
+  // remains targeted but self-healing.
+  let expandedRetrySet = retrySet;
+  if (retrySet) {
+    const expandedIds = new Set(retrySet);
+    const taskMap = new Map(tasksAfterStrip.map((t) => [t.id, t]));
+
+    const addMissingDeps = (taskId: string, visited = new Set<string>()) => {
+      if (visited.has(taskId)) return;
+      visited.add(taskId);
+      const task = taskMap.get(taskId);
+      if (!task) return;
+      for (const depId of task.dependencies ?? []) {
+        addMissingDeps(depId, visited);
+        const depTask = taskMap.get(depId);
+        if (!depTask) continue;
+        // Check if every "creates" file from the dep task exists on disk
+        const allCreatesExist = (depTask.files?.creates ?? []).every((f: string) => {
+          try {
+            require("fs").accessSync(path.join(outputRoot, f));
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!allCreatesExist) {
+          expandedIds.add(depId);
+        }
+      }
+    };
+
+    for (const id of retrySet) {
+      addMissingDeps(id);
+    }
+
+    if (expandedIds.size > retrySet.size) {
+      const added = [...expandedIds].filter((id) => !retrySet.has(id));
+      console.log(
+        `[CodingAPI] Retry mode: expanded retry set with missing-dependency tasks: ${added.join(", ")}`,
+      );
+      expandedRetrySet = expandedIds;
+    }
+  }
+
+  const tasksToRun = expandedRetrySet
+    ? tasksAfterStrip.filter((t) => expandedRetrySet!.has(t.id))
     : tasksAfterStrip;
-  const tasksSkipped = retrySet
-    ? tasksAfterStrip.filter((t) => !retrySet.has(t.id))
+  const tasksSkipped = expandedRetrySet
+    ? tasksAfterStrip.filter((t) => !expandedRetrySet!.has(t.id))
     : [];
 
   if (retrySet && tasksToRun.length === 0) {
