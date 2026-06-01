@@ -5,5 +5,6 @@ export interface Project {
   id: string;
   slug: string;
   name: string;
+  codeOutputDir: string;
   createdAt: string; // ISO string
 }
