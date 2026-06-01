@@ -8,6 +8,7 @@ import {
   deleteProject,
   updateProjectName,
   getProjectBySlug,
+  getProjectById,
 } from "@/lib/project-store";
 import { db } from "@/lib/db/client";
 import { projects } from "@/lib/db/schema";
@@ -32,6 +33,20 @@ async function resolveProjectId(idOrSlug: string): Promise<string | null> {
   // Fall back to slug.
   const bySlug = await getProjectBySlug(idOrSlug);
   return bySlug?.id ?? null;
+}
+
+export async function GET(_req: NextRequest, ctx: RouteContext) {
+  try {
+    const { projectId } = await ctx.params;
+    const project = await getProjectById(projectId);
+    if (!project) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    return NextResponse.json({ project });
+  } catch (err) {
+    console.error("[GET /api/projects/:id]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {

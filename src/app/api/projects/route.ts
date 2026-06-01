@@ -15,7 +15,11 @@ export async function GET() {
 /** POST /api/projects — create a new project */
 export async function POST(req: NextRequest) {
   try {
-    const { name, id: clientId } = (await req.json()) as { name?: string; id?: string };
+    const { name, id: clientId, codeOutputDir } = (await req.json()) as {
+      name?: string;
+      id?: string;
+      codeOutputDir?: string;
+    };
 
     if (!name || !name.trim()) {
       return NextResponse.json(
@@ -24,7 +28,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const project = await createProject(name, clientId);
+    if (!codeOutputDir || !codeOutputDir.trim()) {
+      return NextResponse.json(
+        { message: "Project directory is required." },
+        { status: 400 },
+      );
+    }
+
+    const project = await createProject(name, codeOutputDir.trim(), clientId);
     return NextResponse.json({ project }, { status: 201 });
   } catch (err) {
     console.error("[api/projects] POST error:", err);
