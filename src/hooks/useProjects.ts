@@ -7,7 +7,7 @@ interface UseProjectsReturn {
   projects: Project[];
   loading: boolean;
   /** Create a new project by name. Pass localId to replace a placeholder. */
-  createProject: (name: string, localId?: string) => Promise<Project>;
+  createProject: (name: string, codeOutputDir: string, localId?: string) => Promise<Project>;
   /**
    * Add a placeholder project to local state only — no API call.
    * Inserted at the front of the list so it appears first in the sidebar.
@@ -41,11 +41,11 @@ export function useProjects(): UseProjectsReturn {
   }, [refresh]);
 
   const createProject = useCallback(
-    async (name: string, localId?: string): Promise<Project> => {
+    async (name: string, codeOutputDir: string, localId?: string): Promise<Project> => {
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, id: localId }),
+        body: JSON.stringify({ name, id: localId, codeOutputDir }),
       });
 
       let body: unknown;
@@ -87,6 +87,7 @@ export function useProjects(): UseProjectsReturn {
       id: crypto.randomUUID(),
       slug,
       name,
+      codeOutputDir: "",
       createdAt: new Date().toISOString(),
     };
 
