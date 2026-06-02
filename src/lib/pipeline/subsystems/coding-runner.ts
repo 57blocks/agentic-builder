@@ -107,7 +107,7 @@ export function verdictFromCheckpoint(
 
 /** Drain an SSE/NDJSON response body to completion (we rely on the checkpoint
  *  for the verdict; this just waits for the run to finish). */
-async function drainStream(
+export async function drainStream(
   body: ReadableStream<Uint8Array> | null,
   onChunk?: (chunk: string) => void,
 ): Promise<void> {
