@@ -1140,6 +1140,7 @@ async function runCodegenWorkerLoop(
   const codegenVariant =
     role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
 
+  console.log('run task with role', role,'codegenVariant', codegenVariant)
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
     if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
@@ -1380,6 +1381,7 @@ async function runCodegenAgentSession(
 ): Promise<CodegenAgentSessionResult> {
   // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity.
   const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
+    console.log('run task with role', role,'codegenVariant', codegenVariant)
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;

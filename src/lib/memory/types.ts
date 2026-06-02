@@ -90,8 +90,9 @@ export interface RecallQuery {
 
 export type SaveInput = Omit<
   MemoryRecord,
-  "createdAt" | "updatedAt" | "schemaVersion" | "metrics"
+  "id" | "createdAt" | "updatedAt" | "schemaVersion" | "metrics"
 > & {
+  id?: string;
   metrics?: MemoryMetrics;
 };
 
