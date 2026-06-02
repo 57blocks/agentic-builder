@@ -194,8 +194,9 @@ export default function ImportPrdDialog({
       onPrdImported?.(trimmed);
       setDraft("");
       setLocalError(null);
+      onClose();
     }
-  }, [draft, importPrd, onPrdImported]);
+  }, [draft, importPrd, onPrdImported, onClose]);
 
   const handleClear = useCallback(async () => {
     const ok = await clearImportedPrd();
@@ -240,12 +241,12 @@ export default function ImportPrdDialog({
                   Import PRD
                 </h2>
                 <p className="mt-0.5 text-xs leading-snug text-[#64748b]">
-                  Provide an existing PRD (paste or upload) to skip the PRD
-                  generation step. Stored at{" "}
+                  Paste or upload an existing PRD to skip the generation step.
+                  Stored at{" "}
                   <code className="rounded bg-[#f1f5f9] px-1 py-0.5 font-mono text-[11px] text-[#475569]">
                     .blueprint/PRD.md
-                  </code>{" "}
-                  for the current pipeline run.
+                  </code>
+                  .
                 </p>
               </div>
               <button
@@ -365,9 +366,9 @@ export default function ImportPrdDialog({
                   className="min-h-65 resize-y rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-3 font-mono text-[12px] leading-relaxed text-[#0b1c30] placeholder:text-[#94a3b8] transition-colors focus:border-[#0f172a]/30 focus:outline-none focus:ring-2 focus:ring-[#0f172a]/8"
                 />
                 <p className="text-[10.5px] text-[#94a3b8]">
-                  Max {formatBytes(MAX_BYTES)} for text files, {formatBytes(MAX_PDF_BYTES)} for PDF.
-                  PDF text will be extracted automatically. The next pipeline run
-                  will reuse this PRD verbatim and skip PM generation.
+                  Max {formatBytes(MAX_BYTES)} for text, {formatBytes(MAX_PDF_BYTES)} for PDF
+                  (extracted automatically). The pipeline will reuse this PRD
+                  verbatim.
                 </p>
               </div>
 
