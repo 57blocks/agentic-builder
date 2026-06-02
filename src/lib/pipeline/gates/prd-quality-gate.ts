@@ -28,7 +28,13 @@ export type PrdQualityDimension =
   | "buildability"
   | "page"
   | "user-path"
-  | "business-flow";
+  | "business-flow"
+  // Layer-2 (semantic) dimensions — produced by the LLM PRD reviewer, not by
+  // the deterministic gate. Kept in the same union so both layers' findings
+  // merge into one report.
+  | "completeness"
+  | "ambiguity"
+  | "contradiction";
 
 export type PrdQualitySeverity = "blocker" | "warn" | "info";
 
