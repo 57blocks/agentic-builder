@@ -263,20 +263,25 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Resolve reference images for vision-based Design Spec generation ─────────
-  // Priority:
-  //   1. styleReferenceImages — inline base64 from client (style reference mode)
-  //   2. useUploadedDesignReferences — read from .blueprint/design-references/ (restoration mode)
+  // Both sources are merged (not mutually exclusive) so a restoration-mode
+  // request can combine an inline Electron-rendered URL screenshot with
+  // disk-persisted uploads:
+  //   1. styleReferenceImages — inline base64 from client (style ref / rendered URL)
+  //   2. useUploadedDesignReferences — read from .blueprint/design-references/
   let referenceImages: Array<{ dataUrl: string; pageHint?: string; label?: string }> | undefined;
 
-  if (styleReferenceImages?.length && selectedDocs.includes("design")) {
-    referenceImages = styleReferenceImages.map((dataUrl) => ({ dataUrl }));
-    console.log(`[parallel-generate] Using ${referenceImages.length} inline style reference image(s) for Design Spec.`);
-  } else if (useUploadedDesignReferences && selectedDocs.includes("design")) {
-    try {
-      const refs = await readManifest(process.cwd());
-      const imageRefs = refs.filter((r) => r.kind === "image");
-      if (imageRefs.length > 0) {
-        referenceImages = [];
+  if (selectedDocs.includes("design")) {
+    const collected: Array<{ dataUrl: string; pageHint?: string; label?: string }> = [];
+
+    if (styleReferenceImages?.length) {
+      for (const dataUrl of styleReferenceImages) collected.push({ dataUrl });
+      console.log(`[parallel-generate] Using ${styleReferenceImages.length} inline reference image(s) for Design Spec.`);
+    }
+
+    if (useUploadedDesignReferences) {
+      try {
+        const refs = await readManifest(process.cwd());
+        const imageRefs = refs.filter((r) => r.kind === "image");
         for (const ref of imageRefs) {
           try {
             const imgPath = path.join(
@@ -286,7 +291,7 @@ export async function POST(request: NextRequest) {
               ref.storedFileName,
             );
             const imgBytes = await fs.readFile(imgPath);
-            referenceImages.push({
+            collected.push({
               dataUrl: `data:${ref.mime};base64,${imgBytes.toString("base64")}`,
               pageHint: ref.pageHint || undefined,
               label: ref.label || ref.fileName,
@@ -295,12 +300,15 @@ export async function POST(request: NextRequest) {
             console.warn(`[parallel-generate] Could not load design reference image: ${ref.storedFileName}`);
           }
         }
-        if (referenceImages.length === 0) referenceImages = undefined;
-        else console.log(`[parallel-generate] Loaded ${referenceImages.length} design reference image(s) for vision-based spec generation.`);
+        if (imageRefs.length > 0) {
+          console.log(`[parallel-generate] Loaded ${collected.length} total design reference image(s) for vision-based spec generation.`);
+        }
+      } catch (e) {
+        console.warn("[parallel-generate] Failed to load design references (falling back to text-only):", (e as Error).message);
       }
-    } catch (e) {
-      console.warn("[parallel-generate] Failed to load design references (falling back to text-only):", (e as Error).message);
     }
+
+    if (collected.length > 0) referenceImages = collected;
   }
 
   const agentMap = buildAgentMap(
