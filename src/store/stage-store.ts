@@ -108,7 +108,7 @@ export const SUB_STAGE_META: Record<SubStageId, SubStageMeta> = {
   pencil:       { label: "Pencil",           desc: "Wireframe generation" },
   mockup:       { label: "Mockup",           desc: "Visual mockup" },
   qa:           { label: "QA",               desc: "QA checklist" },
-  // verify is shared with coding sub-stage; label reused below
+  verify:       { label: "Verify",           desc: "Pre-kickoff verification" },
   // kickoff
   "env-setup":       { label: "Env Setup",       desc: "Scaffold project environment" },
   "summary":         { label: "Summary",         desc: "Kick-off summary" },
