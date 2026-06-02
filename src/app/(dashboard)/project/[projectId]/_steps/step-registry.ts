@@ -6,7 +6,7 @@
 // "initial" have custom implementations.
 
 import type { StepId } from "@/_config/pipeline-flow";
-import type { StepAgent, StepUIProps } from "./_shared/types";
+import type { StepAgent, StepUIProps, StepSnapshot } from "./_shared/types";
 import type { ComponentType } from "react";
 import { createStepDataSnapshot } from "./_shared/snapshot-context";
 
@@ -80,7 +80,7 @@ import { DeployUI } from "./preview/deployment/deploy/ui";
 export interface StepEntry {
   component: ComponentType<StepUIProps>;
   agent: StepAgent;
-  snapshot: { load: (projectSlug: string) => Promise<unknown>; save: (projectSlug: string, data: unknown) => Promise<void>; getContextFromPrevious: (previousSnapshot: unknown) => Record<string, unknown> };
+  snapshot: StepSnapshot;
 }
 
 export const STEP_REGISTRY: Record<StepId, StepEntry> = {
