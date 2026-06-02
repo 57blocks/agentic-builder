@@ -19,6 +19,7 @@
 
 import type { KickoffWorkItem } from "../types";
 import { readSessionCheckpoint } from "../session-checkpoint";
+import { writeActiveScope } from "./active-scope";
 import {
   drainStream,
   verdictFromCheckpoint,
@@ -94,12 +95,16 @@ export async function runFoundationBuild(
     subsystemId: FOUNDATION_ID,
     taskIds: foundationTaskIds,
     dependsOn: [],
+    scopeEndpoints: [], // foundation has no business endpoints (boot/health only)
   };
   if (foundationTaskIds.length === 0) {
     return { ok: true, summary: "foundation: no shared tasks (nothing to build).", generatedFiles: [] };
   }
 
   const projectRoot = ctx.projectRoot ?? process.cwd();
+  // Foundation owns no business endpoints — scope gates to none so the route
+  // audit / smoke gate check only boot + health (no contract endpoint exists yet).
+  await writeActiveScope(projectRoot, { subsystemId: FOUNDATION_ID, endpoints: [] });
   const body = buildFoundationCodingRequest(allTasks, foundationTaskIds, ctx);
   const controller = new AbortController();
   const timer = ctx.timeoutMs ? setTimeout(() => controller.abort(), ctx.timeoutMs) : null;

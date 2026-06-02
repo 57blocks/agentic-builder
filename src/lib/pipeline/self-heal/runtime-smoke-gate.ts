@@ -33,6 +33,11 @@ import { promisify } from "util";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import type { RepairEmitter } from "./events";
 import { runDataAssertions, type DataGateFailureCode } from "./integration-data-gate";
+import {
+  readActiveScope,
+  scopeKeySet,
+  filterEndpointsToScope,
+} from "@/lib/pipeline/subsystems/active-scope";
 
 const execFileP = promisify(execFile);
 
@@ -491,6 +496,11 @@ export async function runRuntimeSmokeGate(
     endpoints = endpoints.filter(
       (e) => !isExemptEndpoint(e.method, e.endpoint),
     );
+    // Subsystem scope: when a build is scoped to one domain, only probe its
+    // (and its deps') endpoints — not the not-yet-built domains' (which would
+    // 404). No sidecar ⇒ whole-system mode (unchanged).
+    const scopeKeys = scopeKeySet(await readActiveScope(outputDir));
+    endpoints = filterEndpointsToScope(endpoints, scopeKeys);
     // Dedupe.
     const seen = new Set<string>();
     endpoints = endpoints.filter((e) => {

@@ -26,7 +26,7 @@ const ALL: KickoffWorkItem[] = [
 
 // plan where scaffold/models/contracts are unassigned (foundation), auth-1 is owned.
 const PLAN: SubsystemBuildPlan = {
-  layers: [[{ layer: 0, subsystemId: "auth", taskIds: ["models", "scaffold", "auth-1"], dependsOn: [] }]],
+  layers: [[{ layer: 0, subsystemId: "auth", taskIds: ["models", "scaffold", "auth-1"], dependsOn: [], scopeEndpoints: [] }]],
   unassignedTaskIds: ["contracts", "scaffold", "models"],
   errors: [],
 };
