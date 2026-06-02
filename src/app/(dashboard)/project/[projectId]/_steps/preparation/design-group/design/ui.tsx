@@ -20,6 +20,17 @@ import {
   type DesignStyle,
   type StitchGenerateResult,
 } from "./agent";
+import { formatReferenceTokens } from "@/lib/design/format-reference-tokens";
+
+/**
+ * Build the `designDirectionPrompt` fragment for a fetched reference URL.
+ * Prefers the Electron-extracted token block; falls back to the raw HTML
+ * returned by the non-Electron server fetch.
+ */
+function urlReferencePrompt(ref: { url: string; html: string; tokensText?: string }): string {
+  return ref.tokensText ?? `<!-- Reference URL: ${ref.url} -->\n${ref.html}`;
+}
+
 interface KbRecord {
   id: string;
   body: string;
@@ -616,7 +627,17 @@ export function DesignUI(props: StepUIProps) {
   const [urlInput, setUrlInput] = useState("");
   const [urlFetching, setUrlFetching] = useState(false);
   const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
-  const [urlFetchedHtml, setUrlFetchedHtml] = useState<{ url: string; html: string } | null>(null);
+  // `html` is set by the non-Electron fallback fetch; `screenshotDataUrl` +
+  // `tokensText` are set by the Electron render-capture path.
+  const [urlFetchedHtml, setUrlFetchedHtml] = useState<{
+    url: string;
+    html: string;
+    screenshotDataUrl?: string;
+    tokensText?: string;
+  } | null>(null);
+  // True while an Electron capture is paused on a detected login wall — drives
+  // the manual "I've logged in — capture now" fallback button.
+  const [awaitingLogin, setAwaitingLogin] = useState(false);
 
   // Stitch — initialized from persisted metadata
   const [stitchResult, setStitchResult] = useState<StitchGenerateResult | null>(() => designMeta.stitchResult ?? null);
@@ -922,28 +943,26 @@ export function DesignUI(props: StepUIProps) {
     } else if (referenceMode === "style") {
       // Style reference mode: pass local images inline (not persisted to disk).
       const htmlParts: string[] = [];
-      if (urlFetchedHtml) {
-        htmlParts.push(`<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`);
-      }
+      if (urlFetchedHtml) htmlParts.push(urlReferencePrompt(urlFetchedHtml));
       setDesignContext({
         designStyleId: null,
         styleReferenceImageBase64: null,
-        styleReferenceImages: styleRefImages
-          .filter((img) => img.dataUrl)
-          .map((img) => img.dataUrl!),
+        styleReferenceImages: [
+          ...styleRefImages.filter((img) => img.dataUrl).map((img) => img.dataUrl!),
+          ...(urlFetchedHtml?.screenshotDataUrl ? [urlFetchedHtml.screenshotDataUrl] : []),
+        ],
         designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
         useUploadedDesignReferences: false,
       });
     } else {
-      // Page restoration mode: use screenshots stored in .blueprint/design-references/.
+      // Page restoration mode: use screenshots stored in .blueprint/design-references/,
+      // merged with the Electron-rendered URL screenshot (if any) by the API route.
       const htmlParts: string[] = [];
-      if (urlFetchedHtml) {
-        htmlParts.push(`<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`);
-      }
+      if (urlFetchedHtml) htmlParts.push(urlReferencePrompt(urlFetchedHtml));
       setDesignContext({
         designStyleId: null,
         styleReferenceImageBase64: null,
-        styleReferenceImages: undefined,
+        styleReferenceImages: urlFetchedHtml?.screenshotDataUrl ? [urlFetchedHtml.screenshotDataUrl] : undefined,
         designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
         useUploadedDesignReferences: true,
       });
@@ -1399,21 +1418,46 @@ export function DesignUI(props: StepUIProps) {
                         setUrlFetching(true);
                         setUrlFetchError(null);
                         setUrlFetchedHtml(null);
+                        setAwaitingLogin(false);
+                        let unsubLoginNeeded: (() => void) | undefined;
                         try {
-                          const res = await fetch("/api/fetch-url-content", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ url: trimmed }),
-                          });
-                          const data = await res.json() as { html?: string; url?: string; error?: string };
-                          if (!res.ok || data.error) {
-                            setUrlFetchError(data.error ?? "Failed to fetch URL");
+                          // In Electron, render the page in a hidden window so CSR SPAs
+                          // yield a real screenshot + live CSS tokens. Otherwise fall
+                          // back to the server-side raw-HTML fetch.
+                          if (typeof window !== "undefined" && window.electronAPI?.isElectron) {
+                            unsubLoginNeeded = window.electronAPI.onReferenceLoginNeeded?.(() =>
+                              setAwaitingLogin(true),
+                            );
+                            const result = await window.electronAPI.renderReferenceUrl(trimmed);
+                            if (!result.ok || !result.screenshotDataUrl) {
+                              setUrlFetchError(result.error ?? "Failed to render URL");
+                            } else {
+                              const finalUrl = result.finalUrl ?? trimmed;
+                              setUrlFetchedHtml({
+                                url: finalUrl,
+                                html: "",
+                                screenshotDataUrl: result.screenshotDataUrl,
+                                tokensText: formatReferenceTokens(finalUrl, result.tokens),
+                              });
+                            }
                           } else {
-                            setUrlFetchedHtml({ url: data.url!, html: data.html! });
+                            const res = await fetch("/api/fetch-url-content", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ url: trimmed }),
+                            });
+                            const data = await res.json() as { html?: string; url?: string; error?: string };
+                            if (!res.ok || data.error) {
+                              setUrlFetchError(data.error ?? "Failed to fetch URL");
+                            } else {
+                              setUrlFetchedHtml({ url: data.url!, html: data.html! });
+                            }
                           }
                         } catch (err) {
                           setUrlFetchError(err instanceof Error ? err.message : "Network error");
                         } finally {
+                          unsubLoginNeeded?.();
+                          setAwaitingLogin(false);
                           setUrlFetching(false);
                         }
                       }}
@@ -1452,13 +1496,41 @@ export function DesignUI(props: StepUIProps) {
                         {urlFetchError}
                       </div>
                     )}
-                    {urlFetchedHtml && (
-                      <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-                        <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-medium text-emerald-800 truncate">{urlFetchedHtml.url}</p>
-                          <p className="text-[10px] text-emerald-600">{(urlFetchedHtml.html.length / 1024).toFixed(1)} KB fetched · Ready as reference</p>
+                    {awaitingLogin && (
+                      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                        <div className="flex-1 min-w-0 text-[11px] text-amber-800">
+                          A login window opened. Sign in there — capture continues automatically.
+                          If it doesn&apos;t, click here once you&apos;re logged in.
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => window.electronAPI?.confirmReferenceCapture?.()}
+                          className="px-2.5 py-1.5 text-[11px] font-medium text-white bg-amber-600 rounded-md hover:bg-amber-500 transition-colors shrink-0"
+                        >
+                          I&apos;m logged in — capture now
+                        </button>
+                      </div>
+                    )}
+                    {urlFetchedHtml && (
+                      <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-medium text-emerald-800 truncate">{urlFetchedHtml.url}</p>
+                            <p className="text-[10px] text-emerald-600">
+                              {urlFetchedHtml.screenshotDataUrl
+                                ? "Rendered page captured · Ready as reference"
+                                : `${(urlFetchedHtml.html.length / 1024).toFixed(1)} KB fetched · Ready as reference`}
+                            </p>
+                          </div>
+                        </div>
+                        {urlFetchedHtml.screenshotDataUrl && (
+                          <img
+                            src={urlFetchedHtml.screenshotDataUrl}
+                            alt="Captured reference page"
+                            className="max-h-40 w-full rounded-md border border-emerald-200 object-cover object-top"
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -1792,20 +1864,28 @@ export function DesignUI(props: StepUIProps) {
                 const i = specInput.trim();
                 if (!i || isDesignRunning) return;
                 setSpecInput("");
-                setDesignContext({
-                  designStyleId: designSourceMode === "ai" ? selectedStyleId : undefined,
-                  styleReferenceImageBase64: null,
-                  styleReferenceImages:
+                {
+                  const urlScreenshot =
+                    designSourceMode === "custom" && urlFetchedHtml?.screenshotDataUrl
+                      ? [urlFetchedHtml.screenshotDataUrl]
+                      : [];
+                  const styleImgs =
                     designSourceMode === "custom" && referenceMode === "style"
                       ? styleRefImages.filter((img) => img.dataUrl).map((img) => img.dataUrl!)
-                      : undefined,
-                  designDirectionPrompt:
-                    designSourceMode === "custom" && urlFetchedHtml
-                      ? `<!-- Reference URL: ${urlFetchedHtml.url} -->\n${urlFetchedHtml.html}`
-                      : null,
-                  useUploadedDesignReferences:
-                    designSourceMode === "custom" && referenceMode === "restoration",
-                });
+                      : [];
+                  const mergedImgs = [...styleImgs, ...urlScreenshot];
+                  setDesignContext({
+                    designStyleId: designSourceMode === "ai" ? selectedStyleId : undefined,
+                    styleReferenceImageBase64: null,
+                    styleReferenceImages: mergedImgs.length > 0 ? mergedImgs : undefined,
+                    designDirectionPrompt:
+                      designSourceMode === "custom" && urlFetchedHtml
+                        ? urlReferencePrompt(urlFetchedHtml)
+                        : null,
+                    useUploadedDesignReferences:
+                      designSourceMode === "custom" && referenceMode === "restoration",
+                  });
+                }
                 void executeStep("design", i);
               }}
               placeholder="Edit the design spec…"
