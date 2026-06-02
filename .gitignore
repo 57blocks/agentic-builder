@@ -70,3 +70,6 @@ CLAUDE.md
 .blueprint/kickoff-infra.json
 .blueprint/kickoff-database.json
 .claude/settings.json
+
+# AI
+.trae/
