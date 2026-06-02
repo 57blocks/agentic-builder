@@ -103,6 +103,11 @@ export interface KickoffWorkItem {
   acceptanceCriteria?: string[];
   /** PRD requirement IDs this task implements (AC-*, FR-*), for coverage gates. */
   coversRequirementIds?: string[];
+  /** Business-domain subsystem this task belongs to (e.g. "auth-accounts",
+   *  "enrollment"). Set from the subsystems manifest (.blueprint/subsystems.json)
+   *  when a large PRD is developed subsystem-by-subsystem. Absent = whole-system
+   *  (legacy) mode. See src/lib/pipeline/subsystems/. */
+  subsystem?: string;
   /** TDD seed plan consumed by future Test Writer / Runtime Executor gates. */
   tddPlan?: {
     tests: Array<{
