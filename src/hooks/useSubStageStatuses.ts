@@ -88,31 +88,12 @@ export function useSubStageStatuses(): Record<SubStageId, StageStatus> {
 
   // ── Coding sub-stages ─────────────────────────────────────────────────────
 
-  function codingSubStatus(subId: CodingSubStageId): StageStatus {
-    if (subId === "verify") {
-      if (!integrationVerify) return "idle";
-      if (integrationVerify.status === "passed")  return "completed";
-      if (integrationVerify.status === "failed")  return "error";
-      if (integrationVerify.status === "verifying" || integrationVerify.status === "fixing") return "active";
-      return "idle";
-    }
-
-    // Map sub-stage → agent role, then inspect CodingAgentInstance (not tasks)
-    const roleMap: Record<Exclude<CodingSubStageId, "verify">, string> = {
-      architect: "architect",
-      backend:   "backend",
-      frontend:  "frontend",
-      test:      "test",
-    };
-    const role = roleMap[subId as Exclude<CodingSubStageId, "verify">];
-    // Use agents list which has per-role status
-    const agents = useCodingStore.getState().agents;
-    const agent = agents.find((a) => a.role === role);
-
-    if (!agent) return "idle";
-    if (agent.status === "completed") return "completed";
-    if (agent.status === "failed")    return "error";
-    if (agent.status === "working")   return "active";
+  function codingSubStatus(_subId: CodingSubStageId): StageStatus {
+    // Coding is a single sub-stage ("agents"); integrationVerify is tracked
+    // via the overall status (the store sets status="running" during verify).
+    if (codingStatus === "running")   return "active";
+    if (codingStatus === "completed") return "completed";
+    if (codingStatus === "failed")    return "error";
     return "idle";
   }
 
