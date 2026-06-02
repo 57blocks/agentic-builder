@@ -97,9 +97,9 @@ describe("planSubsystemBuilds", () => {
 describe("runSubsystemBuilds", () => {
   const plan: SubsystemBuildPlan = {
     layers: [
-      [{ layer: 0, subsystemId: "auth", taskIds: ["auth-1"], dependsOn: [] }],
-      [{ layer: 1, subsystemId: "enrollment", taskIds: ["enr-1"], dependsOn: ["auth"] }],
-      [{ layer: 2, subsystemId: "billing", taskIds: ["bill-1"], dependsOn: ["enrollment"] }],
+      [{ layer: 0, subsystemId: "auth", taskIds: ["auth-1"], dependsOn: [], scopeEndpoints: [] }],
+      [{ layer: 1, subsystemId: "enrollment", taskIds: ["enr-1"], dependsOn: ["auth"], scopeEndpoints: [] }],
+      [{ layer: 2, subsystemId: "billing", taskIds: ["bill-1"], dependsOn: ["enrollment"], scopeEndpoints: [] }],
     ],
     unassignedTaskIds: [],
     errors: [],

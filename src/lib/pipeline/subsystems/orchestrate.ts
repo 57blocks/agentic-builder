@@ -107,6 +107,28 @@ export interface SubsystemBuildStep {
   taskIds: string[];
   /** Subsystem ids that must be built before this one. */
   dependsOn: string[];
+  /** API endpoints in scope when validating this build — owned by this subsystem
+   *  plus its transitive subsystem-dependencies (all guaranteed already built).
+   *  Written to the active-scope sidecar so gates skip not-yet-built domains. */
+  scopeEndpoints: string[];
+}
+
+/** Transitive subsystem-dependency closure (including self) over the DAG. */
+function subsystemDepClosure(manifest: SubsystemManifest): Map<string, Set<string>> {
+  const depsOf = new Map(manifest.subsystems.map((s) => [s.id, s.dependsOn]));
+  const closure = new Map<string, Set<string>>();
+  for (const s of manifest.subsystems) {
+    const seen = new Set<string>();
+    const stack = [s.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const d of depsOf.get(id) ?? []) if (!seen.has(d)) stack.push(d);
+    }
+    closure.set(s.id, seen);
+  }
+  return closure;
 }
 
 export interface SubsystemBuildPlan {
@@ -135,6 +157,8 @@ export function planSubsystemBuilds(
   const { bySubsystem, unassigned } = assignTasksToSubsystems(tasks, manifest);
   const taskOrder = new Map(tasks.map((t, i) => [t.id, i]));
   const depsOf = new Map(manifest.subsystems.map((s) => [s.id, s.dependsOn]));
+  const endpointsOf = new Map(manifest.subsystems.map((s) => [s.id, s.ownedApiEndpoints]));
+  const depClosure = subsystemDepClosure(manifest);
 
   const layers: SubsystemBuildStep[][] = validation.buildLayers.map(
     (layerIds, layerIdx) =>
@@ -143,11 +167,18 @@ export function planSubsystemBuilds(
         const closed = closeOverDependencies(own, tasks).sort(
           (a, b) => (taskOrder.get(a) ?? 0) - (taskOrder.get(b) ?? 0),
         );
+        // Scope = endpoints owned by this subsystem + its transitive deps
+        // (all guaranteed built before this step runs).
+        const scope = new Set<string>();
+        for (const dep of depClosure.get(subsystemId) ?? [subsystemId]) {
+          for (const ep of endpointsOf.get(dep) ?? []) scope.add(ep);
+        }
         return {
           layer: layerIdx,
           subsystemId,
           taskIds: closed,
           dependsOn: depsOf.get(subsystemId) ?? [],
+          scopeEndpoints: [...scope].sort(),
         };
       }),
   );

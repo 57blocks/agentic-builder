@@ -24,6 +24,7 @@ const step: SubsystemBuildStep = {
   subsystemId: "enrollment",
   taskIds: ["auth-1", "enr-1"],
   dependsOn: ["auth"],
+  scopeEndpoints: [],
 };
 
 describe("buildSubsystemCodingRequest", () => {

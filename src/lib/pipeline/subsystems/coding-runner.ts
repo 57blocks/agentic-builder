@@ -22,6 +22,7 @@ import {
   readSessionCheckpoint,
   type SessionCheckpoint,
 } from "../session-checkpoint";
+import { writeActiveScope } from "./active-scope";
 import type {
   SubsystemBuildStep,
   SubsystemCodingRunner,
@@ -134,6 +135,12 @@ export function makeHttpCodingRunner(
     if (step.taskIds.length === 0) {
       return { ok: true, summary: `${step.subsystemId}: nothing to build.` };
     }
+    // Scope the gates to this subsystem + its deps so not-yet-built domains'
+    // endpoints don't fail route-registration / smoke as "missing".
+    await writeActiveScope(projectRoot, {
+      subsystemId: step.subsystemId,
+      endpoints: step.scopeEndpoints,
+    });
     const body = buildSubsystemCodingRequest(step, ctx);
     const controller = new AbortController();
     const timer = ctx.timeoutMs
