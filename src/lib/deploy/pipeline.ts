@@ -125,7 +125,7 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
       failJob(jobId);
       return;
     }
-    emit(jobId, "verify-repo", "done", `Repository confirmed: ${repoMeta.htmlUrl ?? repoMeta.cloneUrl}`);
+    emit(jobId, "verify-repo", "done", `Repository confirmed: ${repoMeta?.htmlUrl ?? repoMeta?.cloneUrl}`);
   }
 
   // Step 2: Push generated code
