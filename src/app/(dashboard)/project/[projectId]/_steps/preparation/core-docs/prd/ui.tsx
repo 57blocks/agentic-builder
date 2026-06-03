@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check, ShieldCheck, Boxes } from "lucide-react";
+import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check, ShieldCheck, Boxes, AlertTriangle } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -153,6 +153,8 @@ export function PrdUI(props: StepUIProps) {
 
   const [editInput, setEditInput] = useState("");
   const [tool, setTool] = useState<"quality" | "subsystem" | null>(null);
+  const [qualityRan, setQualityRan] = useState(false);
+  const [subsystemRan, setSubsystemRan] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSavingDoc, setIsSavingDoc] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
@@ -205,6 +207,13 @@ export function PrdUI(props: StepUIProps) {
   // Clear ref when re-gen starts so we don't show stale content
   if (isThisRunning && !streamingContent) lastContentRef.current = "";
   const content = streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current;
+  // A large / multi-domain PRD: recommend running Validation + Subsystem Split
+  // before continuing (and gate Next Step until both have run).
+  const isLargePrd =
+    !!content &&
+    (content.split("\n").length >= 1500 ||
+      (content.match(/^##\s+\S/gm)?.length ?? 0) >= 8);
+  const prereqsMet = !isLargePrd || (qualityRan && subsystemRan);
   const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
   const error = step?.status === "failed" ? step.error : null;
   // Derive version count from step metadata (reactive via zustand)
@@ -518,6 +527,39 @@ export function PrdUI(props: StepUIProps) {
 
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
+      {!isManualEditing && isLargePrd && (
+        <div className="flex items-center gap-3 px-8 py-3 border-b border-amber-200 bg-amber-50 shrink-0">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span className="text-[13px] text-amber-800">
+            This PRD is large — we recommend running <b>PRD Validation</b> and{" "}
+            <b>Subsystem Split</b> before moving on to the next steps.
+          </span>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setTool("quality")}
+              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium border ${
+                qualityRan
+                  ? "border-green-300 text-green-700 bg-green-50"
+                  : "border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50"
+              }`}
+            >
+              <ShieldCheck size={15} /> {qualityRan ? "Validated ✓" : "Validate PRD"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("subsystem")}
+              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium border ${
+                subsystemRan
+                  ? "border-green-300 text-green-700 bg-green-50"
+                  : "border-violet-300 text-violet-700 bg-white hover:bg-violet-50"
+              }`}
+            >
+              <Boxes size={15} /> {subsystemRan ? "Split ✓" : "Split Subsystems"}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-auto px-8 py-8">
         <div className="w-full h-full">
           {showDiff ? (
@@ -598,12 +640,13 @@ export function PrdUI(props: StepUIProps) {
           <PrdToolDrawer
             open={tool === "quality"}
             onClose={() => setTool(null)}
-            title="PRD 质量校验"
+            title="PRD Validation"
             icon={<ShieldCheck size={16} className="text-indigo-600" />}
           >
             <PrdQualityReportPanel
               prd={stripChangeMarkers(content)}
               spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
+              onResult={() => setQualityRan(true)}
               onApplyFix={(instruction) => {
                 setEditInput(instruction);
                 setTool(null);
@@ -613,10 +656,13 @@ export function PrdUI(props: StepUIProps) {
           <PrdToolDrawer
             open={tool === "subsystem"}
             onClose={() => setTool(null)}
-            title="子系统分解(DDD 领域)"
+            title="Subsystem Split (DDD domains)"
             icon={<Boxes size={16} className="text-violet-600" />}
           >
-            <PrdSubsystemPanel prd={stripChangeMarkers(content)} />
+            <PrdSubsystemPanel
+              prd={stripChangeMarkers(content)}
+              onResult={() => setSubsystemRan(true)}
+            />
           </PrdToolDrawer>
         </>
       )}
@@ -650,32 +696,10 @@ export function PrdUI(props: StepUIProps) {
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning || confirmCooldown) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning || confirmCooldown}
         actions={<div className="flex items-center gap-3 shrink-0">
-          {content?.trim() && (
-            <button
-              type="button"
-              onClick={() => setTool("quality")}
-              title="PRD 质量校验(确定性 + AI 语义评审)"
-              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-indigo-200 text-indigo-700 text-sm font-medium hover:bg-indigo-50 shrink-0"
-            >
-              <ShieldCheck size={15} /> 校验
-            </button>
-          )}
-          {content?.trim() &&
-            ((content.split("\n").length >= 1500) ||
-              ((content.match(/^##\s+\S/gm)?.length ?? 0) >= 8)) && (
-              <button
-                type="button"
-                onClick={() => setTool("subsystem")}
-                title="按 DDD 业务域拆分大型 PRD"
-                className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-violet-200 text-violet-700 text-sm font-medium hover:bg-violet-50 shrink-0"
-              >
-                <Boxes size={15} /> 子系统
-              </button>
-            )}
           {error && !isThisRunning && (
             <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
           )}
-          <button disabled={isThisRunning || isSavingDoc || confirmCooldown} onClick={async () => {
+          <button title={!prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet} onClick={async () => {
           // Await memory capture BEFORE navigating so the fetch is never
           // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
@@ -703,7 +727,7 @@ export function PrdUI(props: StepUIProps) {
             }
           }
           if (nextStep) props.onNavigate(nextStep);
-        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : "Next Step"}{!isSavingDoc && !confirmCooldown && <ArrowRight size={16} color="white" />}</button></div>}
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : !prereqsMet ? "Run checks first" : "Next Step"}{!isSavingDoc && !confirmCooldown && prereqsMet && <ArrowRight size={16} color="white" />}</button></div>}
       />
       )}
     </div>
