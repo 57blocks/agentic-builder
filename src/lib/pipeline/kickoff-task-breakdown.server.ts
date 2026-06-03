@@ -20,6 +20,7 @@ import type { KickoffWorkItem } from "./types";
 import { stripTestingPhaseTasks } from "./strip-testing-tasks";
 import { inferTaskDependencies } from "./task-dep-inference";
 import { splitMultiPageFrontendTasks } from "./split-multipage-tasks";
+import { ensureFrontendFoundationTask } from "./frontend-foundation-task";
 
 function isKickoffWorkItem(x: unknown): x is KickoffWorkItem {
   if (!x || typeof x !== "object") return false;
@@ -350,7 +351,10 @@ async function maybeRunExpansion(opts: {
     opts.prd,
   );
   const merged = [...keptTasks, ...expansionNormalized];
-  const { tasks: withNewDeps } = inferTaskDependencies(merged);
+  // Idempotent: augments the existing Foundation task (if any) and wires any
+  // newly-expanded view/component tasks to read the shared tokens + UI barrel.
+  const withFoundation = ensureFrontendFoundationTask(merged);
+  const { tasks: withNewDeps } = inferTaskDependencies(withFoundation);
   const withSplit = splitMultiPageFrontendTasks(withNewDeps);
 
   console.info(
@@ -555,13 +559,20 @@ export async function buildTaskBreakdownFromDocuments(params: {
   const parsed = parseJsonArrayFromLlmOutput(result.content);
   const normalized = normalizeOriginalTaskBreakdown(parsed.tasks, params.prd);
 
+  // Guarantee a Frontend Foundation task (semantic design tokens + shared UI
+  // primitives + layout shell + router skeleton) so page agents reuse ONE
+  // design system instead of each re-deriving styling from DesignSpec.md (which
+  // causes cross-page colour drift and re-invented components). Runs before
+  // dependency inference so the inferrer wires every view/component task to it.
+  const withFoundation = ensureFrontendFoundationTask(normalized);
+
   // Skill-driven late-inserted tasks frequently land with `dependencies: []`.
   // Without a DAG edge they look ready-to-run to the coding orchestrator and
   // can start before the files they reference (models, API client, app shell)
   // are created. Infer missing edges from `files.modifies` and a small set of
   // foundation rules; the LLM's explicit deps are never overwritten.
   const { tasks: withDeps, trace: depTrace } =
-    inferTaskDependencies(normalized);
+    inferTaskDependencies(withFoundation);
   if (depTrace.added.length > 0) {
     console.info(
       `[task-breakdown] inferred ${depTrace.added.length} missing dependency edge(s):`,
