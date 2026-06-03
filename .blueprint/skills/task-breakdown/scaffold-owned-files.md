@@ -2,7 +2,7 @@
 id: scaffold-owned-files
 agent: task-breakdown
 version: v1
-description: When an auth scaffold (password-rbac / magic-link) is selected, the task list MUST NOT recreate scaffold-owned files, MUST start migrations at 200+, MUST use the generic PersonaShell + ProtectedRoute(requiredDomainRole), and MUST register every /admin/* route in the shipped admin-aliases.routes.ts (not in a parallel modules/admin/* tree).
+description: When an auth scaffold (password-rbac / magic-link) is selected, the task list MUST NOT recreate scaffold-owned files, MUST use the generic PersonaShell + ProtectedRoute(requiredDomainRole), and MUST register every /admin/* route in the shipped admin-aliases.routes.ts (not in a parallel modules/admin/* tree).
 priority: 85
 excludes: []
 trigger:
@@ -68,7 +68,6 @@ backend/src/api/modules/auth/auth.routes.ts
 backend/src/api/modules/auth/auth-password.controller.ts
 backend/src/api/modules/index.ts
 backend/src/api/modules/admin-aliases/admin-aliases.routes.ts
-backend/src/database/migrations/100-create-auth-users.ts
 backend/src/middlewares/requireAuth.ts
 backend/src/middlewares/requireRole.ts
 backend/src/models/User.ts
@@ -111,22 +110,18 @@ modifies:
   - backend/src/middlewares/requireAuth.ts
 ```
 
-## Hard rule 2 — Migration prefix MUST start at 200+
+## Hard rule 2 — Schema lives on the models, NOT in migrations
 
-The scaffold owns the `100-199` numeric prefix range for migration files
-under `backend/src/database/migrations/`. Project migrations MUST start at
-`200-` and number sequentially upward. Concretely:
+This project has NO migrations. The Sequelize models are the single source of
+truth — `syncModels()` runs `sequelize.sync()` on boot and CREATEs every table
+from the model definitions. So:
 
-- ❌ `001-create-users.ts` — collides with scaffold's `100-create-auth-users.ts`
-  (and runs first, breaking FK ordering).
-- ❌ `100-create-user-profile.ts` — same prefix as scaffold migration; depending
-  on lexical tiebreak Sequelize may run either; one will throw.
-- ✅ `200-create-family-profile.ts`, `201-create-courses.ts`,
-  `202-create-enrollments.ts`, …
-
-Numbering rationale: when migrations re-run on partial state (after a
-self-heal replan), Sequelize re-applies in filename order. Putting project
-DDL strictly AFTER the auth tables means every FK to `users(id)` is safe.
+- Do NOT plan a `backend/src/database/migrations/` directory or any migration
+  files. A task that "adds a column" just `modifies` the model under
+  `backend/src/models/`.
+- Declare secondary indexes (`indexes: [{ fields: ["..."] }]` in `init()`
+  options) and foreign keys (`references` + `onDelete` on the column) ON THE
+  MODEL — `sync()` only creates what the model declares.
 
 ## Hard rule 3 — Persona pages MUST use `PersonaShell`, not hand-rolled shells
 
@@ -208,9 +203,9 @@ opposite order silently 403s.
 `domainRole` (business persona). When the PRD mentions multiple personas
 (family / teacher / student / ...) the project SHOULD have at least ONE
 seed account per persona so E2E and manual QA can verify the persona
-gates. The scaffold already supports this — no migration / model / script
-changes needed. The task list MUST NOT create a new seed script or
-overwrite `seed-auth-users.ts`.
+gates. The scaffold already supports this — no model / script changes
+needed. The task list MUST NOT create a new seed script or overwrite
+`seed-auth-users.ts`.
 
 ## Self-check before emitting tasks
 
@@ -219,8 +214,9 @@ draft:
 
 1. Grep the candidate `files.creates` lists for any path in Hard rule 1's
    inventory. Every hit is a regression — convert to `modifies` or drop.
-2. Grep all migration filenames for prefix `[0-1]\d\d-`. Re-number every
-   match to start at `200-` (preserve relative ordering).
+2. Grep candidate `creates` for `database/migrations/` or any migration
+   file. There are no migrations (Hard rule 2) — drop every such file and
+   fold its schema onto the relevant Sequelize model.
 3. Grep candidate `creates` for `Shell.tsx` (case-insensitive). Every
    `<Persona>Shell.tsx` is a violation of Hard rule 3 — remove the file
    and ensure the wiring task uses `<PersonaShell persona="...">` instead.
@@ -234,6 +230,5 @@ draft:
 The downstream `coding` worker has NO knowledge of which files the
 scaffold already wrote. If a task `creates` a scaffold-owned file, the
 worker will overwrite it — every contract the scaffold guarantees is
-forfeit, and the deterministic self-heal lints (schema-drift,
-admin-route-coverage, migration-quality) will start firing for the wrong
-reasons.
+forfeit, and the deterministic self-heal lints (e.g. admin-route-coverage)
+will start firing for the wrong reasons.

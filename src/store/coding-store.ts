@@ -67,6 +67,9 @@ interface CodingState {
   e2eVerify: E2EVerifyState | null;
   /** Supervisor-level logs (phase verify, fix, install, etc.) */
   supervisorLogs: AgentLogEntry[];
+  /** Per-test TDD RED/GREEN results, tagged with taskId. Merged into the
+   *  task's real-time log view in the detail panel. */
+  tddLogs: AgentLogEntry[];
   /** Set when integration_verify_fix is waiting for a human to pick an action. */
   pendingHumanDecision: PendingHumanDecision | null;
   codingMode: CodingMode;
@@ -203,6 +206,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   e2eVerify: null,
   gapAnalysis: null,
   supervisorLogs: [],
+  tddLogs: [],
   pendingHumanDecision: null,
   codingMode: "normal",
 
@@ -223,6 +227,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         integrationVerify: null,
         e2eVerify: null,
         supervisorLogs: [],
+        tddLogs: [],
         pendingHumanDecision: null,
         codingMode: "normal",
       });
@@ -268,6 +273,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
     });
@@ -414,6 +420,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
     });
@@ -481,6 +488,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
     });
@@ -1436,6 +1444,44 @@ function handleCodingEvent(
               ? { ...t, fileActivities: [...(t.fileActivities ?? []), entry] }
               : t,
           ),
+        });
+      }
+      return;
+    }
+
+    // Per-test TDD RED/GREEN result — append to the task's real-time log.
+    if (repairEvent === "tdd_test_result") {
+      const taskId = repairTaskId;
+      const d = payload.data?.details as Record<string, unknown> | undefined;
+      if (taskId && d) {
+        const phase = d.phase === "green" ? "green" : "red";
+        const status = String(d.status ?? "");
+        const type = String(d.type ?? "test");
+        const reqs = Array.isArray(d.requirementIds)
+          ? (d.requirementIds as string[]).join(", ")
+          : "";
+        // "good" = the test did what this phase expects (RED → fails as
+        // expected; GREEN → passes). Drives the ✓/✗ icon and excerpt display.
+        const good =
+          phase === "green" ? status === "pass" : status === "expected_fail";
+        const icon = status === "skipped" ? "–" : good ? "✓" : "✗";
+        const label = [type, reqs].filter(Boolean).join(" ");
+        const message = `${icon} ${label} — ${status}`;
+        const failureExcerpt = d.failureExcerpt as string | undefined;
+        // Only attach the excerpt for genuinely-bad outcomes (collapsible).
+        const details =
+          !good && status !== "skipped" ? failureExcerpt : undefined;
+        set({
+          tddLogs: [
+            ...get().tddLogs,
+            {
+              timestamp: new Date().toISOString(),
+              type: phase === "green" ? "tdd_green" : "tdd_red",
+              taskId,
+              message,
+              details,
+            },
+          ],
         });
       }
       return;

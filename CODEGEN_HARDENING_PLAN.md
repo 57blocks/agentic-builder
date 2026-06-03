@@ -18,6 +18,8 @@
 - 第 6 节：**度量与回归** —— 验证下一次 run 真的把这些坑解决了。
 - 第 7 节：**Pipeline-stage failure modes** —— 来自 `52851b86` session 的复盘，专门处理"产物质量没问题，但 codegen pipeline 自己卡住"的失败模式（contract 撒 CRUD、修复 worker 无授权、单 gate 熔断、stagnation 兜底）。**优先级最高，先修这一节里的 16/17/18 项。**
 
+> 相关文档：[`docs/self-heal-rule-policy.md`](docs/self-heal-rule-policy.md) —— self-heal 规则的**准入闸**（新规则该不该加的决策过滤器）与**收编路线**（把现有 ~20 条规则按「能否被类型/运行时/scaffold 吸收」分类）。本计划负责"这条规则写到哪一层"，那篇负责"这条规则该不该存在、能不能收掉"。
+
 ---
 
 ## 1. Bug Inventory（上一轮全部人工修复）

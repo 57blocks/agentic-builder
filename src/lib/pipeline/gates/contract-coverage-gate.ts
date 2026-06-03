@@ -9,6 +9,9 @@ import type { KickoffWorkItem } from "@/lib/pipeline/types";
 export interface ContractEntryLike {
   method?: string;
   endpoint?: string;
+  /** Set by the baseline-endpoint injector for scaffold-provided routes
+   *  (auth, health). These are already implemented and do NOT need a task. */
+  scaffoldProvided?: boolean;
 }
 
 /**
@@ -85,6 +88,11 @@ export function runContractCoverageGate(
   const seenKeys = new Set<string>();
   for (const c of contracts) {
     if (!c.method || !c.endpoint) continue;
+    // Scaffold-provided endpoints (auth, health) are pre-implemented by the
+    // scaffold and do not need a task. Skip them in the coverage check so the
+    // repair loop doesn't waste LLM budget trying to add auth tasks to projects
+    // that intentionally have no auth (e.g. a Text Diff Tool using M scaffold).
+    if (c.scaffoldProvided) continue;
     const key = endpointKey(c.method, c.endpoint);
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);

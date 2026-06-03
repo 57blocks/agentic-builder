@@ -37,8 +37,7 @@ consumer app with no role differentiation.
 | `backend/src/models/User.ts` | Sequelize model — same as password-rbac but `passwordHash` is unused. |
 | `backend/src/models/Session.ts` | Sequelize model. |
 | `backend/src/models/MagicLinkToken.ts` | One-shot tokens with 15-minute TTL. |
-| `backend/src/models/index.ts` | **Overwrites** base — registers User + Session + MagicLinkToken. |
-| `backend/src/database/migrations/100-create-auth-magic.ts` | DDL for users + sessions + magic_link_tokens. |
+| `backend/src/models/index.ts` | **Overwrites** base — registers User + Session + MagicLinkToken. The three tables (incl. indexes + the `sessions.user_id → users.id` ON DELETE CASCADE FK) are declared on the models and built by `sequelize.sync()`. No migrations. |
 | `backend/src/services/emailService.ts` | SMTP delivery; falls back to pino logger in dev when SMTP_* missing. |
 | `backend/src/scripts/seed-auth-users.ts` | Pre-creates admin / operator / viewer rows (no password). |
 | `backend/src/utils/jwt.ts` | Sign / verify helpers. |
@@ -82,9 +81,10 @@ consumer app with no role differentiation.
 
 6. **`sessions` table has NO `token` column.** The raw JWT is verified
    per-request via `AUTH_JWT_SECRET`; persisting it turns every DB
-   backup into a session leak with no revocation benefit. Migration 100
-   drops the column on upgrade if it existed previously. The model and
-   controller must NOT pass `token` to `Session.create`.
+   backup into a session leak with no revocation benefit. The `Session`
+   model simply does not declare a `token` column, so `sync()` never
+   creates one. The model and controller must NOT pass `token` to
+   `Session.create`.
 
 7. **Persona vs RBAC are two ORTHOGONAL concepts.** `role` answers "what
    CRUD verbs can this user run". `domainRole` answers "which business

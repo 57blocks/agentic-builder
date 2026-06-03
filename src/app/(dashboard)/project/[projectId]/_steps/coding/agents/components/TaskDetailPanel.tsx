@@ -61,6 +61,8 @@ const LOG_TYPE_CONFIG: Record<
   task_verify:   { prefix: "[verify]",prefixColor: "text-sky-400",     textColor: "text-slate-300" },
   task_fix:      { prefix: "[fix]",   prefixColor: "text-amber-400",   textColor: "text-slate-300" },
   task_error:    { prefix: "[error]", prefixColor: "text-red-400",     textColor: "text-red-300" },
+  tdd_red:       { prefix: "[TDD-RED]",  prefixColor: "text-rose-400",    textColor: "text-slate-300" },
+  tdd_green:     { prefix: "[TDD-GREEN]",prefixColor: "text-emerald-400", textColor: "text-slate-300" },
 };
 
 function getStatusLabel(task: CodingTask | KickoffWorkItem): string {
@@ -103,6 +105,45 @@ function getDuration(task: CodingTask | KickoffWorkItem): string | null {
   return null;
 }
 
+/** One terminal log line. When the entry carries `details` (e.g. a TDD
+ *  failure excerpt), the line gets a "show output" toggle that reveals it. */
+function LogRow({ log, index }: { log: AgentLogEntry; index: number }) {
+  const [open, setOpen] = useState(false);
+  const cfg = LOG_TYPE_CONFIG[log.type] ?? LOG_TYPE_CONFIG.info;
+  const isDone =
+    log.type === "task_complete" && log.message.toLowerCase().includes("done");
+  const hasDetails = !!log.details;
+  return (
+    <div className="flex flex-col">
+      <div className="flex gap-2 items-start">
+        <span className="shrink-0 text-slate-600 w-5 text-right">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <span className={`shrink-0 w-20 ${cfg.prefixColor}`}>{cfg.prefix}</span>
+        <span className={`${cfg.textColor} flex-1`}>
+          {log.message}
+          {isDone && (
+            <span className="text-emerald-400 font-bold ml-1">DONE</span>
+          )}
+          {hasDetails && (
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="ml-2 text-[10px] text-slate-500 hover:text-slate-300 underline"
+            >
+              {open ? "hide output" : "show output"}
+            </button>
+          )}
+        </span>
+      </div>
+      {hasDetails && open && (
+        <pre className="ml-7 mt-1 mb-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-[#161b22] p-2 text-[10px] text-slate-400">
+          {log.details}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export function TaskDetailPanel({
   task,
   allAgentLogs,
@@ -120,7 +161,13 @@ export function TaskDetailPanel({
     : [];
 
   const filteredLogs = taskLogs.filter(
-    (l) => l.type === "task_complete" || l.type === "task_error" || l.type === "task_fix" || l.type === "task_verify",
+    (l) =>
+      l.type === "task_complete" ||
+      l.type === "task_error" ||
+      l.type === "task_fix" ||
+      l.type === "task_verify" ||
+      l.type === "tdd_red" ||
+      l.type === "tdd_green",
   );
 
   const displayedLogs = activeTab === "raw" ? taskLogs : filteredLogs;
@@ -427,30 +474,9 @@ export function TaskDetailPanel({
                   : "No logs yet..."}
               </span>
             ) : (
-              displayedLogs.map((log, i) => {
-                const cfg =
-                  LOG_TYPE_CONFIG[log.type] ?? LOG_TYPE_CONFIG.info;
-                const isDone =
-                  log.type === "task_complete" && log.message.toLowerCase().includes("done");
-                return (
-                  <div key={i} className="flex gap-2 items-start">
-                    <span className="shrink-0 text-slate-600 w-5 text-right">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span className={`shrink-0 w-13 ${cfg.prefixColor}`}>
-                      {cfg.prefix}
-                    </span>
-                    <span className={`${cfg.textColor} flex-1`}>
-                      {log.message}
-                      {isDone && (
-                        <span className="text-emerald-400 font-bold ml-1">
-                          DONE
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })
+              displayedLogs.map((log, i) => (
+                <LogRow key={i} log={log} index={i} />
+              ))
             )}
             <div ref={bottomRef} />
           </div>

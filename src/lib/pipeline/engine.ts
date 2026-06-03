@@ -9,6 +9,9 @@ import { extractPrdRequirementIndex } from "@/lib/requirements/extract-prd-spec"
 import { extractPrdSpec } from "@/lib/requirements/prd-spec-extractor";
 import {
   runPrdSpecGate,
+  runPrdIdGate,
+  summarizePrdIdGate,
+  backfillPrdIds,
   runQaCoverageGate,
   runTaskCoverageGate,
   runPhaseRequirementGate,
@@ -46,7 +49,8 @@ import {
   buildGitInitInstructions,
 } from "./code-output";
 import { runKickoffIntegrations } from "./kickoff-integrations";
-import { buildTaskBreakdownFromDocuments } from "./kickoff-task-breakdown.server";
+import { runSubsystemAwareTaskBreakdown } from "./subsystems/subsystem-aware-breakdown";
+import { writeSubsystemManifest } from "./subsystems/manifest-io";
 import {
   copyDesignReferencesToOutput,
   formatDesignReferencesPromptBlock,
@@ -554,6 +558,34 @@ export class PipelineEngine {
       run.currentStep = null;
       run.updatedAt = new Date().toISOString();
       return run;
+    }
+
+    // Strict PRD requirement-ID gate (blocking). Backfill already ran in
+    // attachPrdSpecGateToPrdStep; if pages/endpoints are STILL untagged the PRD
+    // is unusable for downstream coverage — halt before TRD/design/kickoff.
+    // (Deterministic backfill makes this pass for any well-formed PRD, so this
+    // is a safety net.) Disable the whole gate with BLUEPRINT_PRD_ID_GATE=0.
+    if (process.env.BLUEPRINT_PRD_ID_GATE !== "0") {
+      const idGate = run.steps.prd?.metadata?.prdIdGate as
+        | { passed?: boolean; untaggedPages?: string[]; untaggedEndpoints?: string[] }
+        | undefined;
+      if (idGate && idGate.passed === false) {
+        const err =
+          `PRD requirement-ID gate failed: ${(idGate.untaggedPages ?? []).length} page(s) and ` +
+          `${(idGate.untaggedEndpoints ?? []).length} endpoint(s) still untagged after backfill. ` +
+          `Add PAGE-/API- IDs to the PRD route table and §26 endpoints, or set BLUEPRINT_PRD_ID_GATE=0 to bypass.`;
+        run.steps.prd = { ...run.steps.prd!, status: "failed", error: err };
+        run.status = "failed";
+        run.currentStep = null;
+        run.updatedAt = new Date().toISOString();
+        this.emit({
+          type: "step_error",
+          runId: run.id,
+          stepId: "prd",
+          data: { error: err, status: "failed" },
+        });
+        return run;
+      }
     }
 
     // Full pipeline: extract structured spec before continuing
@@ -1264,17 +1296,7 @@ export class PipelineEngine {
         designReferenceEntries,
       );
 
-      const {
-        tasks: taskBreakdown,
-        costUsd: tbCost,
-        durationMs: tbDuration,
-        model: tbModel,
-        parseFailed: taskBreakdownParseFailed,
-        parseError: taskBreakdownParseError,
-        rawOutput: taskBreakdownRawOutput,
-        droppedFromTruncation: taskBreakdownDroppedFromTruncation,
-        skillsTrace: taskBreakdownSkillsTrace,
-      } = await buildTaskBreakdownFromDocuments({
+      const breakdownResult = await runSubsystemAwareTaskBreakdown({
         prd: prdBody,
         trd: trdBody || undefined,
         sysDesign: sysDesignBody || undefined,
@@ -1285,6 +1307,40 @@ export class PipelineEngine {
         tier,
         designReferencesBlock: designReferencesBlock || undefined,
       });
+      const {
+        tasks: taskBreakdown,
+        costUsd: tbCost,
+        durationMs: tbDuration,
+        model: tbModel,
+        parseFailed: taskBreakdownParseFailed,
+        parseError: taskBreakdownParseError,
+        rawOutput: taskBreakdownRawOutput,
+        droppedFromTruncation: taskBreakdownDroppedFromTruncation,
+        skillsTrace: taskBreakdownSkillsTrace,
+        scaffoldBlock: taskBreakdownScaffoldBlock,
+        skillsBlock: taskBreakdownSkillsBlock,
+        scaffoldTier: taskBreakdownScaffoldTier,
+      } = breakdownResult;
+
+      // Subsystem mode (only when the project qualified): persist the manifest
+      // so the coding phase can build foundation → per-domain, and surface it.
+      if (breakdownResult.subsystem) {
+        const sub = breakdownResult.subsystem;
+        try {
+          await writeSubsystemManifest(outputRoot, sub.manifest);
+        } catch (e) {
+          console.warn("[Engine] writeSubsystemManifest failed (ignored):", e instanceof Error ? e.message : e);
+        }
+        this.emit({
+          type: "step_stream",
+          runId: run.id,
+          stepId: "kickoff",
+          data: {
+            chunk: `\n[subsystem-split] ${sub.manifest.subsystems.length} domains: ${sub.manifest.subsystems.map((s) => s.id).join(", ")} · ${sub.foundationTaskIds.length} foundation task(s) · ${taskBreakdown.length} tasks total\n`,
+            chunkType: "content",
+          },
+        });
+      }
 
       const { markdown: integrationMd, metadata: integrationMeta } =
         await runKickoffIntegrations({
@@ -1354,6 +1410,9 @@ export class PipelineEngine {
             implGuide: implGuideBody || undefined,
             prdSpec,
             tier,
+            scaffoldBlock: taskBreakdownScaffoldBlock,
+            skillsBlock: taskBreakdownSkillsBlock,
+            scaffoldTier: taskBreakdownScaffoldTier,
             sessionId: run.sessionId,
             emitter: coverageRepairEmitter,
             attemptTracker: repairAttemptTracker,
@@ -1466,6 +1525,9 @@ export class PipelineEngine {
             implGuide: implGuideBody || undefined,
             prdSpec,
             tier,
+            scaffoldBlock: taskBreakdownScaffoldBlock,
+            skillsBlock: taskBreakdownSkillsBlock,
+            scaffoldTier: taskBreakdownScaffoldTier,
             uncoveredIds: taskCoverageGate.missingIds,
             sessionId: run.sessionId,
             emitter: coverageRepairEmitter,
@@ -1736,15 +1798,48 @@ export class PipelineEngine {
   private attachPrdSpecGateToPrdStep(run: PipelineRun): PipelineRun {
     const prd = run.steps.prd;
     if (!prd?.content || prd.status !== "completed") return run;
-    const gate = runPrdSpecGate(prd.content);
+
+    // Strict per-page / per-endpoint requirement-ID gate + deterministic
+    // backfill. Downstream (coverage gates, incremental rerun, per-domain
+    // breakdown) keys on requirement IDs, so we ensure every route row carries
+    // a PAGE-NNN and every endpoint heading an API-NNN. Backfill mutates the
+    // PRD content in place (idempotent). Disable with BLUEPRINT_PRD_ID_GATE=0.
+    let content = prd.content;
+    const idGateEnabled = process.env.BLUEPRINT_PRD_ID_GATE !== "0";
+    let idGate = runPrdIdGate(content);
+    let backfilled = false;
+    if (idGateEnabled && !idGate.passed) {
+      const bf = backfillPrdIds(content);
+      if (bf.addedPages + bf.addedEndpoints > 0) {
+        content = bf.prd;
+        backfilled = true;
+        idGate = runPrdIdGate(content);
+        console.log(
+          `[Engine] PRD-ID backfill: +${bf.addedPages} page id(s), +${bf.addedEndpoints} endpoint id(s). ${summarizePrdIdGate(idGate)}`,
+        );
+      }
+    }
+
+    const gate = runPrdSpecGate(content);
     const prdEvidence = [evidenceFromPrdSpecGate(gate)];
     const prdEvidenceReport = runEvidenceGate("prd", prdEvidence);
     run.steps.prd = {
       ...prd,
+      content,
       metadata: {
         ...prd.metadata,
         prdRequirementIndex: gate.index,
         prdSpecGate: { passed: gate.passed, warnings: gate.warnings },
+        prdIdGate: {
+          passed: idGate.passed,
+          backfilled,
+          totalPages: idGate.totalPages,
+          taggedPages: idGate.taggedPages,
+          totalEndpoints: idGate.totalEndpoints,
+          taggedEndpoints: idGate.taggedEndpoints,
+          untaggedPages: idGate.untaggedPages.slice(0, 20),
+          untaggedEndpoints: idGate.untaggedEndpoints.slice(0, 20),
+        },
         evidenceGate: {
           passed: prdEvidenceReport.passed,
           missingRequirements: prdEvidenceReport.missingRequirements,

@@ -78,18 +78,16 @@ import {
   formatRuntimeAuditTasksBlock,
   type RuntimeAuditFinding,
   runRuntimeSmokeGate,
+  prepareTestSchema,
+  seedTestSchema,
+  teardownTestSchema,
+  type PreparedTestSchema,
+  type SeedResult,
   runTscDiagnosticsAsTasks,
-  runMigrationCoverageRepair,
-  formatMigrationCoverageBlock,
-  runMigrationQualityRepair,
-  formatMigrationQualityBlock,
-  runSchemaDriftRepair,
-  formatSchemaDriftBlock,
   runAdminRouteCoverageRepair,
   formatAdminRouteCoverageBlock,
   repairContractCoverage,
   repairPageCoverage,
-  getUnresolvedMigrationGaps,
   generateMissingRouteStubs,
   formatMissingRouteStubBlock,
   type GenerateMissingRouteStubsResult,
@@ -4510,7 +4508,7 @@ async function phaseVerifyAndFix(
     "## Workflow (follow in order)",
     `1. Run: \`${installCmd}\`  — install all dependencies`,
     "2. ORM handling:",
-    "   - This generator standardises on Sequelize for SQL persistence. Do NOT introduce Prisma (`@prisma/client`, `prisma` CLI, or `prisma/schema.prisma`). If prior runs left Prisma artefacts behind, delete them and rewrite the persistence layer with Sequelize models in `backend/src/models/` and migrations in `backend/src/database/migrations/`.",
+    "   - This generator standardises on Sequelize for SQL persistence. Do NOT introduce Prisma (`@prisma/client`, `prisma` CLI, or `prisma/schema.prisma`). If prior runs left Prisma artefacts behind, delete them and rewrite the persistence layer with Sequelize models in `backend/src/models/` (schema comes from `syncModels()` → `sequelize.sync()`; there are no migrations — declare indexes/FKs on the model).",
     "   - If a legacy `prisma/schema.prisma` still exists from an older run, `npx prisma generate` may run automatically as a compatibility fallback — but the correct fix is to remove the Prisma schema and replace it with equivalent Sequelize definitions, not to keep it.",
     "3. Run: `npx tsc --noEmit --skipLibCheck --pretty false 2>&1`",
     "4. For each TypeScript error:",
@@ -5552,107 +5550,6 @@ async function integrationVerifyAndFix(
     );
   }
 
-  // ── Migration coverage → repair tasks ──────────────────────────────────
-  // Reads `.ralph/migration-coverage.json` written per-task by the
-  // worker hook and converts each "model touched without migration" gap
-  // into a deterministic repair-task descriptor for the verify-fix
-  // worker to execute alongside the contract-coverage repairs above.
-  let migrationCoverageResult: Awaited<
-    ReturnType<typeof runMigrationCoverageRepair>
-  > | null = null;
-  try {
-    migrationCoverageResult = await runMigrationCoverageRepair({
-      outputDir: state.outputDir,
-      emitter: getRepairEmitter(state.sessionId),
-      sessionId: state.sessionId,
-      // Cross-reference per-task gaps with actual migration files so the
-      // worker isn't asked to re-fix Stablecoin when 003-add-stablecoin*.ts
-      // already exists from a prior repair task.
-      filterByDisk: true,
-    });
-    if (migrationCoverageResult.pendingRepairTasks.length > 0) {
-      console.log(
-        `${label}: migration-coverage queued ${migrationCoverageResult.pendingRepairTasks.length} repair task(s) across ${migrationCoverageResult.tasksWithGaps} originating task(s).`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `${label}: migration-coverage repair skipped — ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // ── Migration QUALITY repair (idempotency + FK ordering) ───────────────
-  // Sibling of migration-coverage above: that pass asks "is there a
-  // migration for every model touched?", this pass asks "is every existing
-  // migration safe to re-run?". Replan / partial-state retry loops re-run
-  // migrations regularly, and bare `queryInterface.createTable / addColumn
-  // / addIndex / bulkInsert` throw on second invocation — aborting the
-  // whole pipeline with no recovery short of manual DB drop.
-  //
-  // Cross-file FK ordering (014 REFERENCES 015 → fails) is also caught.
-  // The `task-breakdown/migration-idempotency` skill (priority 78) is the
-  // upstream prevention; this lint is the deterministic backstop.
-  let migrationQualityResult: Awaited<
-    ReturnType<typeof runMigrationQualityRepair>
-  > | null = null;
-  try {
-    migrationQualityResult = await runMigrationQualityRepair({
-      outputDir: state.outputDir,
-      emitter: getRepairEmitter(state.sessionId),
-      sessionId: state.sessionId,
-    });
-    if (migrationQualityResult.pendingRepairTasks.length > 0) {
-      console.log(
-        `${label}: migration-quality queued ${migrationQualityResult.pendingRepairTasks.length} repair task(s) across ${migrationQualityResult.filesScanned} migration file(s).`,
-      );
-    }
-    if (migrationQualityResult.scanFailed) {
-      console.warn(
-        `${label}: migration-quality scan partial — ${migrationQualityResult.scanFailed}`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `${label}: migration-quality repair skipped — ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // ── Schema DRIFT repair (model column vs migration DDL) ────────────────
-  // Sibling of migration-coverage / migration-quality. Coverage answers
-  // "did the task write a migration when it touched a model?", quality
-  // answers "is every migration safe to re-run?", drift answers the
-  // narrower question: "for every `declare <field>:` on every model, does
-  // the migrations corpus mention the corresponding snake_case column?".
-  //
-  // This catches the F-04 class of bugs (login → 500 because
-  // `column "google_id" does not exist`) which slip past the per-task
-  // coverage check whenever a worker edits an EXISTING model and adds a
-  // new field without authoring an ALTER TABLE migration.
-  let schemaDriftResult: Awaited<
-    ReturnType<typeof runSchemaDriftRepair>
-  > | null = null;
-  try {
-    schemaDriftResult = await runSchemaDriftRepair({
-      outputDir: state.outputDir,
-      emitter: getRepairEmitter(state.sessionId),
-      sessionId: state.sessionId,
-    });
-    if (schemaDriftResult.pendingRepairTasks.length > 0) {
-      console.log(
-        `${label}: schema-drift queued ${schemaDriftResult.pendingRepairTasks.length} repair task(s) across ${schemaDriftResult.modelsScanned} model file(s).`,
-      );
-    }
-    if (schemaDriftResult.scanFailed) {
-      console.warn(
-        `${label}: schema-drift scan partial — ${schemaDriftResult.scanFailed}`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `${label}: schema-drift repair skipped — ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
   // ── Admin-route alias coverage (A-09) ────────────────────────────────────
   // Catches the F-09 outage class: `frontend/src/api/admin.ts` calls
   // `/admin/<resource>` that 404 because no backend module mounts a
@@ -6391,15 +6288,6 @@ async function integrationVerifyAndFix(
     ? formatRuntimeAuditBlock(runtimeAuditResult)
     : "";
 
-  const migrationCoverageBlock = migrationCoverageResult
-    ? formatMigrationCoverageBlock(migrationCoverageResult)
-    : "";
-  const migrationQualityBlock = migrationQualityResult
-    ? formatMigrationQualityBlock(migrationQualityResult)
-    : "";
-  const schemaDriftBlock = schemaDriftResult
-    ? formatSchemaDriftBlock(schemaDriftResult)
-    : "";
   const adminRouteCoverageBlock = adminRouteCoverageResult
     ? formatAdminRouteCoverageBlock(adminRouteCoverageResult)
     : "";
@@ -6413,9 +6301,6 @@ async function integrationVerifyAndFix(
     `Package manager: ${pm}`,
     prdBlock,
     coverageBlock,
-    migrationCoverageBlock,
-    migrationQualityBlock,
-    schemaDriftBlock,
     adminRouteCoverageBlock,
     runtimeAuditBlock,
     runtimeSmokeBlock,
@@ -6964,25 +6849,11 @@ async function integrationVerifyAndFix(
           );
           const autoGate = await runFinalScopedValidationGates();
           if (!autoGate.pass) {
-            // Priority 2: include migration gaps in the rejection so the
-            // model knows ALL the blockers, not just the tsc/build output.
-            const migGapsForRej = await getUnresolvedMigrationGaps(
-              state.outputDir,
-            ).catch(() => []);
             const rejParts = [
               "REJECTED: report_done(pass) is not allowed — system final validation still fails.",
               `Last filesystem mutation: ${lastMutationAt ?? "unknown"} (${lastMutationReason ?? "unknown"})`,
               autoGate.summary,
             ];
-            if (migGapsForRej.length > 0) {
-              rejParts.push(
-                `\n## Also: ${migGapsForRej.length} migration gap(s) still open`,
-                ...migGapsForRej
-                  .slice(0, 5)
-                  .map((g) => `- ${g.modelPath}`),
-                "Create the missing migration file(s) before re-running validation.",
-              );
-            }
             rejParts.push(
               "Fix all failing gate(s), then run run_validation_suite once. Do not create verification helper files.",
             );
@@ -7024,11 +6895,7 @@ async function integrationVerifyAndFix(
               `${label}: runtime audit re-run failed in report_done handler (continuing): ${e instanceof Error ? e.message : String(e)}`,
             );
           }
-          const freshMigGaps = await getUnresolvedMigrationGaps(
-            state.outputDir,
-          ).catch(() => []);
-
-          if (freshRuntimeErrors.length > 0 || freshMigGaps.length > 0) {
+          if (freshRuntimeErrors.length > 0) {
             const parts: string[] = [
               "REJECTED: report_done(pass) blocked — the following issues must be resolved first.",
             ];
@@ -7049,18 +6916,11 @@ async function integrationVerifyAndFix(
                 );
               }
             }
-            if (freshMigGaps.length > 0) {
-              parts.push(
-                `\n## Migration coverage: ${freshMigGaps.length} model(s) still missing a migration`,
-                ...freshMigGaps.slice(0, 5).map((g) => `- ${g.modelPath}`),
-                "Write the missing migration file(s) in backend/src/database/migrations/, then re-run validation.",
-              );
-            }
             parts.push(
               "\nFix the above, re-run run_validation_suite, then call report_done(pass) again.",
             );
             console.log(
-              `${label}: REJECTED report_done(pass) — ${freshRuntimeErrors.length} runtime error(s), ${freshMigGaps.length} migration gap(s).`,
+              `${label}: REJECTED report_done(pass) — ${freshRuntimeErrors.length} runtime error(s).`,
             );
             messages.push({
               role: "tool",
@@ -7078,7 +6938,7 @@ async function integrationVerifyAndFix(
             .join("\n\n");
           doneSignaled = true;
           console.log(
-            `${label}: report_done(pass) accepted — runtime audit clean, no migration gaps.`,
+            `${label}: report_done(pass) accepted — runtime audit clean.`,
           );
           messages.push({
             role: "tool",
@@ -7830,25 +7690,6 @@ async function integrationVerifyAndFix(
     },
   });
 
-  // ─── Pre-gate: migration coverage must be resolved ───────────────────
-  // Probing endpoints while Sequelize models lack matching migrations is
-  // a wasted round trip: the DB schema won't have the columns the model
-  // declares, so the handler throws on first `findAll`/`create`, the
-  // smoke gate reports the resulting 5xx, and the verify-fix worker
-  // chases the wrong fix (handler logic / null guards) instead of the
-  // real cause (missing migration). Cross-references the per-task gap
-  // report against the actual `backend/src/database/migrations/`
-  // directory so a gap recorded by an early task but resolved by a
-  // later repair task no longer blocks here.
-  const unresolvedMigrationGaps = await getUnresolvedMigrationGaps(
-    state.outputDir,
-  ).catch((err) => {
-    console.warn(
-      `[supervisor] migration-coverage pre-gate check threw: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return [];
-  });
-
   // ─── Pre-gate: runtime-integration-audit ERROR findings block smoke ───
   // Use the latest runtime audit result — if the model called report_done(pass)
   // at least once, the handler above already refreshed `runtimeAuditResult`.
@@ -7900,40 +7741,6 @@ async function integrationVerifyAndFix(
     });
   }
 
-  if (unresolvedMigrationGaps.length > 0) {
-    const top = unresolvedMigrationGaps
-      .slice(0, 6)
-      .map(
-        (g) =>
-          `- ${g.modelPath} (originating task: ${g.sourceTaskId})`,
-      );
-    finalStatus = "fail";
-    finalSummary = [
-      finalSummary,
-      "Migration coverage gate failed:",
-      `${unresolvedMigrationGaps.length} Sequelize model file(s) lack a corresponding migration. Runtime smoke gate skipped — probing would 5xx on schema mismatch. Fix migrations first:`,
-      top.join("\n"),
-      unresolvedMigrationGaps.length > 6
-        ? `…and ${unresolvedMigrationGaps.length - 6} more (see .ralph/migration-coverage.json).`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-      .slice(0, 4000);
-    getRepairEmitter(state.sessionId)({
-      stage: "integration-gate",
-      event: "migration_coverage_blocked_smoke",
-      details: {
-        unresolvedCount: unresolvedMigrationGaps.length,
-        sampleGaps: unresolvedMigrationGaps.slice(0, 6).map((g) => ({
-          modelPath: g.modelPath,
-          modelName: g.modelName,
-          sourceTaskId: g.sourceTaskId,
-        })),
-      },
-    });
-  }
-
   // ─── Runtime smoke gate (P0) ─────────────────────────────────────────
   // Boot the backend and prove every contract endpoint returns something
   // OTHER than 404. The whole goal is to pre-empt the "OAuth succeeds but
@@ -7943,18 +7750,43 @@ async function integrationVerifyAndFix(
   // pendingRepairTasks on the next loop.
   if (
     process.env.BLUEPRINT_DISABLE_RUNTIME_SMOKE !== "1" &&
-    unresolvedMigrationGaps.length === 0 &&
     runtimeAuditErrorFindings.length === 0
   ) {
+    // Tier-2 (real-data integration gate) is opt-in. When enabled, we stand up
+    // an isolated, migrated+seeded Postgres SCHEMA on the kickoff-provisioned
+    // DB and point the booted backend at it so endpoints can be asserted
+    // against real data (2xx + matching response shape), not just routability.
+    const dataGateEnabled = process.env.INTEGRATION_DATA_GATE === "1";
+    let prepared: PreparedTestSchema | null = null;
+    let seedResult: SeedResult | null = null;
     try {
+      if (dataGateEnabled) {
+        prepared = await prepareTestSchema(state.outputDir);
+        if (prepared) {
+          seedResult = await seedTestSchema(
+            state.outputDir,
+            prepared.testDatabaseUrl,
+          );
+        }
+      }
+
       const smoke = await runRuntimeSmokeGate({
         outputDir: state.outputDir,
         emitter: getRepairEmitter(state.sessionId),
         sessionId: state.sessionId,
+        // Only run data assertions if the schema is prepared AND migrations
+        // applied cleanly — otherwise Tier-2 would false-fail on a setup issue.
+        dataAssertions: Boolean(prepared) && !seedResult?.failure,
+        testDatabaseUrl: prepared?.testDatabaseUrl,
       });
-      if (!smoke.pass) {
+
+      // A migrate failure is a real (broken-migrations) finding even though it
+      // happens before boot — surface it alongside the gate failures.
+      const seedFailures = seedResult?.failure ? [seedResult.failure] : [];
+      const allFailures = [...seedFailures, ...smoke.failures];
+      if (!smoke.pass || seedFailures.length > 0) {
         finalStatus = "fail";
-        const top = smoke.failures
+        const top = allFailures
           .slice(0, 6)
           .map((f) => `- [${f.code}] ${f.target}: ${f.directive}`);
         finalSummary = [
@@ -7962,7 +7794,7 @@ async function integrationVerifyAndFix(
           "Runtime smoke gate failed:",
           smoke.bootFailed
             ? "Backend did not start — see .ralph/runtime-smoke.json `evidence` field."
-            : `${smoke.failures.length} endpoint failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
+            : `${allFailures.length} failure(s) (${smoke.probedEndpoints.length} probed). Top:\n${top.join("\n")}`,
         ]
           .filter(Boolean)
           .join("\n\n")
@@ -7980,6 +7812,11 @@ async function integrationVerifyAndFix(
           error: err instanceof Error ? err.message : String(err),
         },
       });
+    } finally {
+      // Always drop the isolated test schema, even on failure/throw.
+      if (prepared) {
+        await teardownTestSchema(prepared.appDatabaseUrl, prepared.schemaName);
+      }
     }
   }
   if (finalApiClientUniquenessHardFail) {
@@ -8061,7 +7898,6 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   tscErrors?: string[];
   contractCoverageGaps?: string[];
   routeAudit?: string[];
-  migrationGaps?: string[];
   runtimeAuditErrors?: string[];
 }> {
   const out: {
@@ -8144,35 +7980,6 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
       for (const m of routeAuditSnap.unregisteredModules ?? []) lines.push(`unregistered: ${m}`);
       for (const r of routeAuditSnap.unresolvedRegistrations ?? []) lines.push(`unresolved registration: ${r}`);
       if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
-    }
-  }
-
-  // Priority 3: Migration gaps — use `getUnresolvedMigrationGaps` which
-  // cross-references the artifact against actual disk state, so gaps for
-  // models that were deleted during replan don't appear as blockers.
-  try {
-    const liveMigGaps = await getUnresolvedMigrationGaps(outputDir);
-    if (liveMigGaps.length > 0) {
-      out.migrationGaps = liveMigGaps
-        .slice(0, 10)
-        .map((g) => `model ${g.modelPath} needs migration`);
-    }
-  } catch {
-    // Fallback to stale snapshot on error.
-    const migration = (await tryReadJson(".ralph/migration-coverage.json")) as {
-      tasks?: Record<string, { ok?: boolean; gaps?: Array<{ modelPath?: string; modelName?: string }> }>;
-    } | null;
-    if (migration?.tasks) {
-      const lines: string[] = [];
-      for (const entry of Object.values(migration.tasks)) {
-        if (!entry || entry.ok || !Array.isArray(entry.gaps)) continue;
-        for (const g of entry.gaps) {
-          lines.push(`model ${g.modelPath ?? "?"} needs migration ${g.modelName ?? "?"}`);
-          if (lines.length >= 10) break;
-        }
-        if (lines.length >= 10) break;
-      }
-      if (lines.length > 0) out.migrationGaps = lines;
     }
   }
 

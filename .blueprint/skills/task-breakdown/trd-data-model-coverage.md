@@ -27,7 +27,8 @@ where `PascalCaseName` is the table name converted:
 - `audit_logs` → `AuditLog.ts`
 - `ingestion_runs` → `IngestionRun.ts`
 
-All these typically belong to the Data Layer task (alongside migrations).
+All these typically belong to the Data Layer task (the Sequelize model
+definitions — there are no migrations; `syncModels()` builds the schema).
 
 ## Why this rule exists
 

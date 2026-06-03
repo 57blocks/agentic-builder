@@ -150,6 +150,87 @@ export interface WriteCodingSessionReportInput {
   };
 }
 
+/** Per-session file statistics derived from the generated file registry +
+ *  the files on disk under outputDir. Surfaced in the report. */
+export interface FileStats {
+  totalFiles: number;
+  frontendFiles: number;
+  backendFiles: number;
+  otherFiles: number;
+  testFiles: number;
+  /** HTTP endpoint registrations counted in backend route/controller files. */
+  apiEndpoints: number;
+  totalLines: number;
+  frontendLines: number;
+  backendLines: number;
+}
+
+const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx|mts|cts)$/i;
+/** `.get(` / `.post(` / … with a string-literal first arg → an endpoint
+ *  registration (router.get("/x"), app.post(`/y`)). Excludes calls without a
+ *  string path so e.g. `arr.map(...)` is never miscounted. */
+const ENDPOINT_RE = /\.(get|post|put|patch|delete|options|head)\s*\(\s*[`'"]/gi;
+
+function classifyFileArea(p: string): "frontend" | "backend" | "other" {
+  const norm = p.replace(/\\/g, "/").toLowerCase();
+  if (/(^|\/)frontend\//.test(norm)) return "frontend";
+  if (/(^|\/)backend\//.test(norm)) return "backend";
+  return "other";
+}
+
+/**
+ * Compute file statistics for the report. Frontend/backend split is by path
+ * (the actual project layout), not by the agent role that wrote the file.
+ * Line counts are read from disk under outputDir; files that aren't present
+ * (moved/deleted) are skipped for LOC but still counted in totals.
+ */
+async function computeFileStats(
+  fileRegistry: GeneratedFile[],
+  outputDir: string,
+): Promise<FileStats> {
+  // Dedupe by path — the registry can list the same file written repeatedly.
+  const uniquePaths = Array.from(new Set(fileRegistry.map((f) => f.path)));
+  const stats: FileStats = {
+    totalFiles: uniquePaths.length,
+    frontendFiles: 0,
+    backendFiles: 0,
+    otherFiles: 0,
+    testFiles: 0,
+    apiEndpoints: 0,
+    totalLines: 0,
+    frontendLines: 0,
+    backendLines: 0,
+  };
+
+  for (const rel of uniquePaths) {
+    const area = classifyFileArea(rel);
+    if (area === "frontend") stats.frontendFiles += 1;
+    else if (area === "backend") stats.backendFiles += 1;
+    else stats.otherFiles += 1;
+    if (TEST_FILE_RE.test(rel)) stats.testFiles += 1;
+
+    let content: string;
+    try {
+      content = await fs.readFile(path.join(outputDir, rel), "utf-8");
+    } catch {
+      continue; // not on disk → skip LOC + endpoint scan
+    }
+    const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
+    stats.totalLines += lineCount;
+    if (area === "frontend") stats.frontendLines += lineCount;
+    else if (area === "backend") stats.backendLines += lineCount;
+
+    // Endpoint count: backend route/controller/api files only, to avoid
+    // counting frontend API-client calls (axios .get/.post, etc.).
+    if (area === "backend" && /route|controller|api/i.test(rel)) {
+      const matches = content.match(ENDPOINT_RE);
+      if (matches) stats.apiEndpoints += matches.length;
+    }
+  }
+
+  return stats;
+}
+
 interface AggregatedModelUsage {
   model: string;
   calls: number;
@@ -1997,6 +2078,7 @@ function formatMarkdownReport(input: {
   stageUsage: StageUsageSummary[];
   taskResults: AuditTaskSummary[];
   fileRegistry: GeneratedFile[];
+  fileStats: FileStats;
   repairSummary: RepairEventSummary;
   runtimeReadiness: RuntimeReadinessSummary;
   migrationCoverage: MigrationCoverageSummary;
@@ -2072,6 +2154,24 @@ function formatMarkdownReport(input: {
     input.terminalSummary || "(no terminal summary captured)",
     "",
   ];
+
+  // ── File Statistics ─────────────────────────────────────────────────────
+  const fstat = input.fileStats;
+  lines.push("## File Statistics");
+  lines.push(
+    `- Total files generated: **${fstat.totalFiles}** ` +
+      `(frontend ${fstat.frontendFiles}, backend ${fstat.backendFiles}` +
+      (fstat.otherFiles ? `, other ${fstat.otherFiles}` : "") +
+      ")",
+  );
+  lines.push(`- Test files: **${fstat.testFiles}**`);
+  lines.push(`- Backend API endpoints: **${fstat.apiEndpoints}**`);
+  lines.push(
+    `- Total lines of code: **${fstat.totalLines.toLocaleString()}** ` +
+      `(frontend ${fstat.frontendLines.toLocaleString()}, ` +
+      `backend ${fstat.backendLines.toLocaleString()})`,
+  );
+  lines.push("");
 
   // ── Migration Coverage section ──────────────────────────────────────────
   // Detailed breakdown of `.ralph/migration-coverage.json`. Renders only
@@ -2908,6 +3008,8 @@ export async function writeCodingSessionReport(
     return "pass";
   };
 
+  const fileStats = await computeFileStats(input.fileRegistry, input.outputDir);
+
   const jsonPayload = {
     sessionId: input.sessionId,
     startedAt: input.startedAt,
@@ -2953,6 +3055,7 @@ export async function writeCodingSessionReport(
     },
     taskResults: input.taskResults,
     fileRegistryCount: input.fileRegistry.length,
+    fileStats,
     llmUsageEvents: usage,
     modelUsage,
     modelPerformance,
@@ -2981,6 +3084,7 @@ export async function writeCodingSessionReport(
     stageUsage,
     taskResults: input.taskResults,
     fileRegistry: input.fileRegistry,
+    fileStats,
     repairSummary,
     runtimeReadiness,
     migrationCoverage,

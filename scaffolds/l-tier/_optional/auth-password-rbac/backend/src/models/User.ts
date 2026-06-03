@@ -92,5 +92,9 @@ User.init(
     tableName: "users",
     timestamps: true,
     underscored: true,
+    // `email` uniqueness comes from the column's `unique: true`. These mirror
+    // the secondary indexes the old 100-create-auth-users migration created,
+    // so `sync()` reproduces them now that models are the source of truth.
+    indexes: [{ fields: ["role"] }, { fields: ["domain_role"] }],
   },
 );

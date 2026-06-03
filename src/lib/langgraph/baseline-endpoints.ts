@@ -34,6 +34,13 @@ export interface ApiContractEntry {
   prdJustification?: string;
   audience?: string;
   id?: string;
+  /**
+   * When true, this contract entry was injected by the baseline-endpoint
+   * backfill (not emitted by the LLM from PRD analysis). Scaffold-provided
+   * endpoints are already implemented by the scaffold and do NOT need a
+   * task to cover them — the contract-coverage gate skips them.
+   */
+  scaffoldProvided?: boolean;
 }
 
 export interface BaselineInjectionInput {
@@ -188,7 +195,7 @@ export function injectBaselineEndpoints(
       continue;
     }
     const { pathSuffix: _suffix, ...rest } = tpl;
-    augmented.push({ ...rest, endpoint });
+    augmented.push({ ...rest, endpoint, scaffoldProvided: true });
     existing.add(key);
     added.push(key);
   }

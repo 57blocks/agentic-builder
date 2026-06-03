@@ -8,6 +8,11 @@ import {
   computeRelativeImportPath,
 } from "../../route-audit-autofix";
 import { pathExistsUnderOutput } from "../shared/output-fs";
+import {
+  readActiveScope,
+  scopeKeySet,
+  endpointMatchKey,
+} from "@/lib/pipeline/subsystems/active-scope";
 
 export interface RouteRegistrationAudit {
   /** Human-readable lines suitable for feeding into the system prompt. */
@@ -266,6 +271,14 @@ export async function auditApiRouteRegistration(
       }
     } catch {
       // Ignore malformed contracts — earlier phases should have rejected them.
+    }
+    // Subsystem scope: when building one domain, only audit its (and its deps')
+    // contract endpoints — not-yet-built domains must not count as "missing".
+    const scopeKeys = scopeKeySet(await readActiveScope(outputDir));
+    if (scopeKeys) {
+      contracts = contracts.filter(
+        (c) => c.method && c.endpoint && scopeKeys.has(endpointMatchKey(c.method, c.endpoint)),
+      );
     }
 
     // Normalise implemented endpoints: method + full path = apiPrefix + mount + route.
@@ -679,6 +692,22 @@ export async function auditContractCompleteness(
       findings.push(`- ${w.expectedPath} (advisory)`);
       findings.push(`  note: ${w.reason}`);
     }
+  }
+
+  // Subsystem scope: inferred relationship endpoints span the GLOBAL data layer
+  // (all models exist from the foundation build), so cross-domain expectations
+  // would false-hard-fail a single domain's build. While a scope is active,
+  // downgrade them to warn-only — the final whole-system pass (no scope) still
+  // enforces them.
+  const scoped = (await readActiveScope(outputDir)) !== null;
+  if (scoped && hardMissing.length > 0) {
+    return {
+      inferredRelationships: relationships,
+      missingScopedEndpoints: [],
+      warnOnlyEndpoints: [...warnOnly, ...hardMissing],
+      findings,
+      warnOnly: true,
+    };
   }
 
   return {
