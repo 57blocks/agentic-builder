@@ -597,17 +597,23 @@ export async function buildTaskBreakdownFromDocuments(params: {
   const splitTasks = splitMultiPageFrontendTasks(withDeps);
 
   // L-tier self-heal: when too few tasks for the PRD size, expand overbroad ones.
-  const expandedTasks = await maybeExpandLTierTasks({
-    tier,
-    tasks: splitTasks,
-    prd: params.prd,
-    agent,
-    trd: params.trd,
-    sysDesign: params.sysDesign,
-    implGuide: params.implGuide,
-    prdSpecText,
-    sessionId: params.sessionId,
-  });
+  // Skip for INCREMENTAL/scoped breakdowns (per-domain subsystem passes, PRD-edit
+  // deltas): those legitimately produce few tasks for their narrow scope — the
+  // whole-system ">=20 tasks" heuristic would wrongly inflate each one (and add a
+  // redundant LLM call per pass).
+  const expandedTasks = params.incremental
+    ? splitTasks
+    : await maybeExpandLTierTasks({
+        tier,
+        tasks: splitTasks,
+        prd: params.prd,
+        agent,
+        trd: params.trd,
+        sysDesign: params.sysDesign,
+        implGuide: params.implGuide,
+        prdSpecText,
+        sessionId: params.sessionId,
+      });
 
   return {
     tasks: stripTestingPhaseTasks(expandedTasks),
