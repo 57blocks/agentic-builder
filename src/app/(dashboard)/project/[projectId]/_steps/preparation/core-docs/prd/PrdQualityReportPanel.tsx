@@ -64,11 +64,9 @@ export function PrdQualityReportPanel(props: {
     .sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
 
   return (
-    <div className="border border-[#e2e8f0] rounded-[6px] bg-white overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <ShieldCheck size={16} className="text-indigo-600" />
-          <span className="font-semibold text-slate-900 text-sm">PRD 质量校验</span>
           {report && (
             <span className="text-xs text-slate-500">
               得分 {report.score}/100 · {report.counts.blocker} blocker · {report.counts.warn} warn · {report.counts.info} info
