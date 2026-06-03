@@ -13,6 +13,7 @@ import type { ProjectTier } from "@/_config/pipeline-flow";
 import { savePrdVersion, loadPrdVersions } from "./snapshot";
 import type { PrdVersion } from "./snapshot";
 import { PrdQualityReportPanel } from "./PrdQualityReportPanel";
+import { PrdSubsystemSplitPanel } from "./PrdSubsystemSplitPanel";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
 // ─── PRD history (populated from persisted versions) ──────────────────────
@@ -591,12 +592,13 @@ export function PrdUI(props: StepUIProps) {
       </div>
 
       {!isManualEditing && content?.trim() && (
-        <div className="px-8 py-4 border-t border-slate-200 bg-white">
+        <div className="px-8 py-4 border-t border-slate-200 bg-white flex flex-col gap-4">
           <PrdQualityReportPanel
             prd={stripChangeMarkers(content)}
             spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
             onApplyFix={(instruction) => setEditInput(instruction)}
           />
+          <PrdSubsystemSplitPanel prd={stripChangeMarkers(content)} />
         </div>
       )}
 
