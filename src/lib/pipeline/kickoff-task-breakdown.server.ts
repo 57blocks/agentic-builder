@@ -7,12 +7,14 @@ import {
 } from "@/lib/agents/skills";
 import {
   normalizeProjectTier,
+  prdSignalsBackend,
   type ProjectTier,
 } from "@/lib/agents/shared/project-classifier";
 import { formatPrdSpecForContext } from "@/lib/requirements/prd-spec-extractor";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 import {
   listScaffoldTemplateRelativePaths,
+  resolveScaffoldTier,
   type ScaffoldTier,
 } from "@/lib/pipeline/scaffold-copy";
 import { buildTaskBreakdownScaffoldBlock } from "@/lib/pipeline/scaffold-spec";
@@ -498,9 +500,18 @@ export async function buildTaskBreakdownFromDocuments(params: {
    *  bypass hard rules like `scaffold-owned-files` and freely re-create
    *  canonical paths (User.ts, Session.ts, modules/admin/*). */
   skillsBlock: string;
+  /** The scaffold tier actually used (may differ from scope tier for
+   *  S-scope projects that need a backend — they reuse the M scaffold).
+   *  Forwarded to self-heal repair agents so they see the same prompt. */
+  scaffoldTier: ScaffoldTier;
 }> {
   const tier = normalizeProjectTier(params.tier ?? "M");
-  const scaffoldTier = tier as ScaffoldTier;
+  // Scope tier (S/M/L) drives task granularity; the SCAFFOLD it builds against
+  // is upgraded to M when an S-scope PRD needs a backend, so the agent sees the
+  // backend/ tree and produces backend tasks instead of frontend-only.
+  const needsBackend =
+    tier === "M" || tier === "L" || prdSignalsBackend(params.prd);
+  const scaffoldTier = resolveScaffoldTier(tier as ScaffoldTier, needsBackend);
   const templatePaths = await listScaffoldTemplateRelativePaths(scaffoldTier);
   const scaffoldBlock = buildTaskBreakdownScaffoldBlock(
     scaffoldTier,
@@ -535,7 +546,7 @@ export async function buildTaskBreakdownFromDocuments(params: {
     );
   }
 
-  const agent = new TaskBreakdownAgent(tier, scaffoldBlock, skillsBlock);
+  const agent = new TaskBreakdownAgent(tier, scaffoldBlock, skillsBlock, scaffoldTier);
 
   const prdSpecText = params.prdSpec
     ? formatPrdSpecForContext(params.prdSpec)
@@ -586,17 +597,23 @@ export async function buildTaskBreakdownFromDocuments(params: {
   const splitTasks = splitMultiPageFrontendTasks(withDeps);
 
   // L-tier self-heal: when too few tasks for the PRD size, expand overbroad ones.
-  const expandedTasks = await maybeExpandLTierTasks({
-    tier,
-    tasks: splitTasks,
-    prd: params.prd,
-    agent,
-    trd: params.trd,
-    sysDesign: params.sysDesign,
-    implGuide: params.implGuide,
-    prdSpecText,
-    sessionId: params.sessionId,
-  });
+  // Skip for INCREMENTAL/scoped breakdowns (per-domain subsystem passes, PRD-edit
+  // deltas): those legitimately produce few tasks for their narrow scope — the
+  // whole-system ">=20 tasks" heuristic would wrongly inflate each one (and add a
+  // redundant LLM call per pass).
+  const expandedTasks = params.incremental
+    ? splitTasks
+    : await maybeExpandLTierTasks({
+        tier,
+        tasks: splitTasks,
+        prd: params.prd,
+        agent,
+        trd: params.trd,
+        sysDesign: params.sysDesign,
+        implGuide: params.implGuide,
+        prdSpecText,
+        sessionId: params.sessionId,
+      });
 
   return {
     tasks: stripTestingPhaseTasks(expandedTasks),
@@ -618,5 +635,6 @@ export async function buildTaskBreakdownFromDocuments(params: {
     // honouring the canonical scaffold-owned-files contract.
     scaffoldBlock,
     skillsBlock,
+    scaffoldTier,
   };
 }

@@ -92,5 +92,8 @@ User.init(
     tableName: "users",
     timestamps: true,
     underscored: true,
+    // Mirrors the secondary indexes the old migration created (email
+    // uniqueness comes from the column's `unique: true`). No migrations.
+    indexes: [{ fields: ["role"] }, { fields: ["domain_role"] }],
   },
 );

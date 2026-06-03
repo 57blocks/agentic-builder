@@ -54,6 +54,8 @@ export interface TaskCoverageRepairInput {
   prdSpec?: PrdSpec | null;
   scaffoldBlock?: string;
   tier: ProjectTier;
+  scaffoldTier?: "S" | "M" | "L";
+  skillsBlock?: string;
   sessionId?: string;
   emitter: RepairEmitter;
   /** Cross-invocation attempt counter — see attempt-tracker.ts. When the
@@ -94,6 +96,7 @@ export async function repairTaskCoverage(
     prdSpecText,
     scaffoldBlock,
     tier,
+    scaffoldTier,
     sessionId,
     emitter,
     attemptTracker,
@@ -137,7 +140,7 @@ export async function repairTaskCoverage(
     await attemptTracker.noteStart(trackerScope);
   }
 
-  const agent = new TaskBreakdownAgent(tier, scaffoldBlock);
+  const agent = new TaskBreakdownAgent(tier, scaffoldBlock, undefined, scaffoldTier);
   const maxAttempts = clampPositiveInt(DEFAULT_MAX_ATTEMPTS, 1, 5);
   const batchSize = clampPositiveInt(DEFAULT_MAX_MISSING_PER_BATCH, 1, 50);
 

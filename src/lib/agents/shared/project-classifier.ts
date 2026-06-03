@@ -56,24 +56,53 @@ export function parseTierFromPrd(content?: string | null): ProjectTier | null {
 }
 
 /**
+ * Heuristic: does the PRD text indicate the project itself needs a backend
+ * (API/persistence/auth/server-side), as opposed to a purely client-side app?
+ *
+ * Tier (scope) and "needs a backend" (capability) are orthogonal: a small
+ * S-scope project can still require a backend. We therefore derive needsBackend
+ * from PRD content rather than hardcoding it from the tier letter. An explicit
+ * "no backend / client-side only / 纯前端" statement wins over positive signals.
+ */
+export function prdSignalsBackend(prd: string | null | undefined): boolean {
+  if (!prd) return false;
+  const noBackend =
+    /\bno (?:backend|back[- ]?end|server|database|api)\b|client[- ]?side only|frontend[- ]?only|front[- ]?end[- ]?only|single[- ]?page app(?:lication)?|static site|browser[- ]?only|无后端|纯前端|仅前端|无需后端|不需要后端/i;
+  if (noBackend.test(prd)) return false;
+  const backend =
+    /\bback[- ]?end\b|\bserver[- ]?side\b|\bapi endpoint|\brest api\b|\bgraphql\b|\bdatabase\b|\bpersist(?:ence|ed|s)?\b|\bcrud\b|\bauthenticat|\bsign[- ]?(?:in|up)\b|\blog[- ]?in\b|\buser account|\bsession(?:s)?\b|后端|服务端|数据库|持久化|鉴权|用户账号|账户体系|登录注册/i;
+  return backend.test(prd);
+}
+
+/**
  * Build a synthetic ProjectClassification from a PRD tier badge — no LLM call.
  * Used to short-circuit `classifyProject` and downstream re-classification when
  * the PRD already declares the tier. costUsd / durationMs are 0 to avoid
  * double-counting in run totals.
+ *
+ * needsBackend is NOT inferred from the tier letter: an S-scope PRD that asks
+ * for a backend gets needsBackend=true (and, per policy, needsDatabase too, so
+ * the M scaffold it reuses can boot).
  */
 export function extractClassificationFromPrd(
   prd: string | null | undefined,
 ): ProjectClassification | null {
   const tier = parseTierFromPrd(prd);
   if (!tier) return null;
+  const needsBackend = tier === "M" || tier === "L" || prdSignalsBackend(prd);
+  const sBackend = tier === "S" && needsBackend;
   return {
     tier,
     type: "app",
-    needsBackend: tier === "M" || tier === "L",
-    needsDatabase: tier === "L",
+    needsBackend,
+    // S+backend reuses the M scaffold, whose db layer expects a database — so
+    // provision one. L always has a DB.
+    needsDatabase: tier === "L" || sBackend,
     needsAuth: tier === "L",
     needsMultipleServices: tier === "L",
-    reasoning: `Extracted from PRD tier badge: tier ${tier}`,
+    reasoning: sBackend
+      ? `Extracted from PRD tier badge: tier ${tier}; PRD signals a backend → full-stack on the M scaffold`
+      : `Extracted from PRD tier badge: tier ${tier}`,
     costUsd: 0,
     durationMs: 0,
   };
@@ -327,7 +356,7 @@ async function runClassifierLLM(
       classification: {
         tier,
         type: parsed.type ?? "app",
-        needsBackend: parsed.needsBackend ?? tier !== "S",
+        needsBackend: parsed.needsBackend ?? (tier !== "S" || prdSignalsBackend(featureBrief)),
         needsDatabase: parsed.needsDatabase ?? tier === "L",
         needsAuth: parsed.needsAuth ?? tier === "L",
         needsMultipleServices: parsed.needsMultipleServices ?? tier === "L",

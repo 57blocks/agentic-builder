@@ -15,8 +15,8 @@
  *     so duplicate frontend call sites (e.g. one helper exported and
  *     consumed by N components) yield ONE repair task.
  *   - `formatAdminRouteCoverageBlock(result)` for inline embedding into
- *     the verify-fix worker's user message (mirrors
- *     `formatSchemaDriftBlock` / `formatMigrationQualityBlock`).
+ *     the verify-fix worker's user message (mirrors the other
+ *     `format*Block` helpers in this folder).
  */
 
 import fs from "fs/promises";

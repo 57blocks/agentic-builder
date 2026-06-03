@@ -11,6 +11,7 @@ import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
 import {
   copyScaffold,
   listScaffoldTemplateRelativePaths,
+  resolveScaffoldTier,
   type ScaffoldTier,
 } from "@/lib/pipeline/scaffold-copy";
 import {
@@ -35,7 +36,10 @@ import {
   upsertBackendPrivyAppIdMirror,
   resolvePrivyAppIdMirrorFromFilledResources,
 } from "@/lib/pipeline/generated-code-env";
-import { normalizeProjectTier } from "@/lib/agents/shared/project-classifier";
+import {
+  normalizeProjectTier,
+  prdSignalsBackend,
+} from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
 import { InfraAgent } from "@/lib/agents/infra/infra-agent";
 import { applyInfra } from "@/lib/pipeline/infra/apply";
@@ -774,11 +778,59 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds && retryFailedTaskIds.length > 0
       ? new Set(retryFailedTaskIds)
       : null;
-  const tasksToRun = retrySet
-    ? tasksAfterStrip.filter((t) => retrySet.has(t.id))
+  // In retry mode, expand the retry set to include any dependency tasks whose
+  // output files do not yet exist on disk. This prevents a scenario where a
+  // retry task (e.g. T-006 Integration) depends on pages created by T-003/T-004
+  // but those tasks were never completed — the worker would spin trying to find
+  // absent files. We include missing-dependency tasks silently so the retry
+  // remains targeted but self-healing.
+  let expandedRetrySet = retrySet;
+  if (retrySet) {
+    const expandedIds = new Set(retrySet);
+    const taskMap = new Map(tasksAfterStrip.map((t) => [t.id, t]));
+
+    const addMissingDeps = (taskId: string, visited = new Set<string>()) => {
+      if (visited.has(taskId)) return;
+      visited.add(taskId);
+      const task = taskMap.get(taskId);
+      if (!task) return;
+      for (const depId of task.dependencies ?? []) {
+        addMissingDeps(depId, visited);
+        const depTask = taskMap.get(depId);
+        if (!depTask) continue;
+        // Check if every "creates" file from the dep task exists on disk
+        const allCreatesExist = (depTask.files?.creates ?? []).every((f: string) => {
+          try {
+            require("fs").accessSync(path.join(outputRoot, f));
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!allCreatesExist) {
+          expandedIds.add(depId);
+        }
+      }
+    };
+
+    for (const id of retrySet) {
+      addMissingDeps(id);
+    }
+
+    if (expandedIds.size > retrySet.size) {
+      const added = [...expandedIds].filter((id) => !retrySet.has(id));
+      console.log(
+        `[CodingAPI] Retry mode: expanded retry set with missing-dependency tasks: ${added.join(", ")}`,
+      );
+      expandedRetrySet = expandedIds;
+    }
+  }
+
+  const tasksToRun = expandedRetrySet
+    ? tasksAfterStrip.filter((t) => expandedRetrySet!.has(t.id))
     : tasksAfterStrip;
-  const tasksSkipped = retrySet
-    ? tasksAfterStrip.filter((t) => !retrySet.has(t.id))
+  const tasksSkipped = expandedRetrySet
+    ? tasksAfterStrip.filter((t) => !expandedRetrySet!.has(t.id))
     : [];
 
   if (retrySet && tasksToRun.length === 0) {
@@ -852,6 +904,25 @@ export async function POST(request: NextRequest) {
 
   const tier = await resolveTier(projectTier, outputRoot);
 
+  // S-scope PRDs that need a backend reuse the M scaffold (s-tier is
+  // frontend-only). Scope tier (S/M/L) still drives task granularity and
+  // UI behaviour; only the scaffold directory is promoted here.
+  const scaffoldTier: ScaffoldTier = await (async (): Promise<ScaffoldTier> => {
+    if (tier !== "S") return tier;
+    try {
+      const prdPath = path.join(outputRoot, "PRD.md");
+      const prdContent = await fs.readFile(prdPath, "utf-8");
+      return resolveScaffoldTier(tier, prdSignalsBackend(prdContent));
+    } catch {
+      return tier;
+    }
+  })();
+  if (scaffoldTier !== tier) {
+    console.log(
+      `[CodingAPI] S-scope PRD signals backend → scaffold upgraded ${tier} → ${scaffoldTier}`,
+    );
+  }
+
   // Read user-provided resource requirements (API keys, OAuth secrets, etc.)
   // collected during the kickoff phase BEFORE the scaffold copy so the
   // optional-feature layer can use them as triggers (e.g. VITE_PRIVY_APP_ID
@@ -869,7 +940,7 @@ export async function POST(request: NextRequest) {
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
   try {
-    const result = await copyScaffold(tier, outputRoot, {
+    const result = await copyScaffold(scaffoldTier, outputRoot, {
       forceOverwrite: true,
       resourceRequirements,
       authDecision,
@@ -895,7 +966,8 @@ export async function POST(request: NextRequest) {
         path.join(outputRoot, ".blueprint", "scaffold-applied.json"),
         JSON.stringify(
           {
-            tier,
+            tier: scaffoldTier,
+            scopeTier: tier,
             generatedAt: new Date().toISOString(),
             appliedOptionalFeatures: appliedOptionalScaffolds,
           },
@@ -924,7 +996,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await writeScaffoldSpecFile(outputRoot, tier);
+    await writeScaffoldSpecFile(outputRoot, scaffoldTier);
   } catch (e) {
     console.warn(
       `[CodingAPI] writeScaffoldSpecFile warning: ${e instanceof Error ? e.message : String(e)}`,
@@ -945,7 +1017,7 @@ export async function POST(request: NextRequest) {
     if (kickoffInfraMeta && kickoffInfraMeta.services.length > 0) {
       const { spec, provisioned } = await buildInfraSpecFromKickoff(
         outputRoot,
-        tier as "S" | "M" | "L",
+        scaffoldTier,
         kickoffInfraMeta,
       );
       const applied = await applyInfra(

@@ -32,6 +32,12 @@ import { spawn, execFile, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import type { RepairEmitter } from "./events";
+import { runDataAssertions, type DataGateFailureCode } from "./integration-data-gate";
+import {
+  readActiveScope,
+  scopeKeySet,
+  filterEndpointsToScope,
+} from "@/lib/pipeline/subsystems/active-scope";
 
 const execFileP = promisify(execFile);
 
@@ -69,7 +75,9 @@ export type RuntimeSmokeFailureCode =
   | "health_probe_failed"
   | "endpoint_404"
   | "endpoint_5xx"
-  | "endpoint_unreachable";
+  | "endpoint_unreachable"
+  // Tier-2 (real-data integration gate) — see integration-data-gate.ts
+  | DataGateFailureCode;
 
 export interface RuntimeSmokeFailure {
   code: RuntimeSmokeFailureCode;
@@ -109,6 +117,18 @@ export interface RuntimeSmokeGateInput {
    * Override the boot-ready timeout in ms. Defaults to 30000.
    */
   bootTimeoutMs?: number;
+  /**
+   * Tier-2: when true, after the routability checks, run real-data assertions
+   * (register/login → probe endpoints for 2xx + matching response shape).
+   * Requires `testDatabaseUrl` to be a seeded, isolated schema.
+   */
+  dataAssertions?: boolean;
+  /**
+   * DATABASE_URL the booted backend must use (an isolated, migrated+seeded
+   * schema). When set, the backend boots with NODE_ENV=production so this URL
+   * wins over backend/.env, and AUTO_MIGRATE is disabled (already migrated).
+   */
+  testDatabaseUrl?: string;
 }
 
 const PERSIST_REL = path.join(".ralph", "runtime-smoke.json");
@@ -260,10 +280,20 @@ interface BootResult {
   bootError?: string;
 }
 
+/** Mirror the `options=-c search_path=...` from the test URL into PGOPTIONS as a backup. */
+function searchPathOptionFrom(databaseUrl: string): string {
+  try {
+    return new URL(databaseUrl).searchParams.get("options") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 async function bootBackend(
   cwd: string,
   bootTimeoutMs: number,
   port: number,
+  testDatabaseUrl?: string,
 ): Promise<BootResult> {
   // Best-effort: kill anything still bound to the port from a previous
   // (hung) boot. Otherwise `pnpm dev` hits EADDRINUSE immediately and the
@@ -274,10 +304,25 @@ async function bootBackend(
       `[runtime-smoke] released port ${port} from stale pid(s) ${killed.join(",")} before boot`,
     );
   }
+  // Tier-2: point the backend at the isolated, pre-migrated/seeded schema.
+  // NODE_ENV=production lets the injected DATABASE_URL win over backend/.env
+  // (the generated db.ts only `override`s .env in non-production). We leave
+  // AUTO_MIGRATE at its default — on-boot migration is idempotent (umzug skips
+  // already-applied migrations), so it's a no-op after seedTestSchema and a
+  // safety net when the project has no standalone `migrate` script.
+  const env: NodeJS.ProcessEnv = testDatabaseUrl
+    ? {
+        ...process.env,
+        PORT: String(port),
+        NODE_ENV: "production",
+        DATABASE_URL: testDatabaseUrl,
+        PGOPTIONS: searchPathOptionFrom(testDatabaseUrl),
+      }
+    : { ...process.env, PORT: String(port) };
   return new Promise((resolve) => {
     const child = spawn("pnpm", ["dev"], {
       cwd,
-      env: { ...process.env, PORT: String(port) },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
@@ -393,7 +438,12 @@ export async function runRuntimeSmokeGate(
   }
 
   const backendDir = path.join(outputDir, "backend");
-  const boot = await bootBackend(backendDir, bootTimeoutMs, port);
+  const boot = await bootBackend(
+    backendDir,
+    bootTimeoutMs,
+    port,
+    input.dataAssertions ? input.testDatabaseUrl : undefined,
+  );
   if (!boot.child) {
     result.bootFailed = true;
     result.failures.push({
@@ -446,6 +496,11 @@ export async function runRuntimeSmokeGate(
     endpoints = endpoints.filter(
       (e) => !isExemptEndpoint(e.method, e.endpoint),
     );
+    // Subsystem scope: when a build is scoped to one domain, only probe its
+    // (and its deps') endpoints — not the not-yet-built domains' (which would
+    // 404). No sidecar ⇒ whole-system mode (unchanged).
+    const scopeKeys = scopeKeySet(await readActiveScope(outputDir));
+    endpoints = filterEndpointsToScope(endpoints, scopeKeys);
     // Dedupe.
     const seen = new Set<string>();
     endpoints = endpoints.filter((e) => {
@@ -502,6 +557,41 @@ export async function runRuntimeSmokeGate(
           target,
           detail: `reachable (${r.status})`,
         });
+      }
+    }
+
+    // ── Tier 2: real-data assertions (opt-in) ──────────────────────────────
+    // Runs in the SAME boot. The backend is pointed at the seeded, isolated
+    // schema, so we can assert 2xx + matching response shape instead of just
+    // "not 404". Endpoints Tier-1 already failed are skipped to avoid noise.
+    if (input.dataAssertions && input.testDatabaseUrl) {
+      const tier1Failed = new Set(result.failures.map((f) => f.target));
+      try {
+        const data = await runDataAssertions({
+          outputDir,
+          baseUrl: `http://127.0.0.1:${port}`,
+          skipTargets: tier1Failed,
+        });
+        for (const f of data.failures) result.failures.push(f);
+        for (const s of data.successes) result.successes.push(s);
+        if (emitter) {
+          emitter({
+            stage: "integration-gate",
+            sessionId,
+            event: "runtime_data_assertions",
+            details: {
+              authEstablished: data.authEstablished,
+              failures: data.failures.length,
+              successes: data.successes.length,
+              skipped: data.skipped.length,
+            },
+          });
+        }
+      } catch (err) {
+        // Tier-2 must never break Tier-1 / the pipeline.
+        console.warn(
+          `[runtime-smoke] data assertions threw (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 

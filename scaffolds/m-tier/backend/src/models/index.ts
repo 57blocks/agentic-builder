@@ -44,13 +44,22 @@ import { sequelize } from "../db";
 // );
 
 export async function syncModels(): Promise<void> {
-  // Migrations under `src/database/migrations/` are the source of truth for
-  // schema changes. `sync({ alter: true })` re-runs DDL on every boot which
-  // re-triggers any latent issue in the model definitions (e.g. JSONB
-  // `defaultValue: {}` crashes Sequelize's SQL serializer with "Invalid value
-  // {}"). Default to `alter: false`; opt in only when the developer explicitly
-  // sets `DB_SYNC_ALTER=true` for a quick local schema sync without writing a
-  // migration.
-  const syncAlter = process.env.DB_SYNC_ALTER === "true";
-  await sequelize.sync({ alter: syncAlter });
+  // The Sequelize models are the SINGLE source of truth for the schema —
+  // there are no migrations. On a fresh database a bare `sync()` issues
+  // CREATE TABLE for every model (all columns + declared indexes included,
+  // so no model/schema drift is possible); on a restart against an existing
+  // schema it is a no-op, preserving data. Escape hatches for local model
+  // iteration (leave BOTH unset in CI / preview — the DB is provisioned fresh
+  // per run):
+  //   DB_SYNC_FORCE=true → DROP & recreate every table (clean rebuild)
+  //   DB_SYNC_ALTER=true → ALTER existing tables to match models. Use
+  //     sparingly: re-running DDL every boot can re-trigger latent model
+  //     issues (e.g. JSONB `defaultValue: {}` crashing Sequelize's serializer).
+  if (process.env.DB_SYNC_FORCE === "true") {
+    await sequelize.sync({ force: true });
+  } else if (process.env.DB_SYNC_ALTER === "true") {
+    await sequelize.sync({ alter: true });
+  } else {
+    await sequelize.sync();
+  }
 }

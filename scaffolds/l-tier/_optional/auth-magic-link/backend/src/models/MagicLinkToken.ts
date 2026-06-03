@@ -76,5 +76,8 @@ MagicLinkToken.init(
     tableName: "magic_link_tokens",
     timestamps: true,
     underscored: true,
+    // `token` uniqueness comes from the column's `unique: true`; this mirrors
+    // the migration's secondary index on expiry. No migrations.
+    indexes: [{ fields: ["expires_at"] }],
   },
 );
