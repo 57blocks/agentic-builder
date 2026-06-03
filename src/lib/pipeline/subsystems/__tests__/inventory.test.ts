@@ -53,6 +53,11 @@ describe("PRD inventory extraction", () => {
     expect(extractCollections("## 1. Intro\nnothing numbered here")).toEqual([]);
   });
 
+  it("tolerates a backfilled trailing id after the endpoint path (regression)", () => {
+    const eps = extractApiEndpoints("#### POST `/api/v1/auth/login` · API-002\n");
+    expect(eps).toContain("POST /api/v1/auth/login");
+  });
+
   it("extractPrdInventory aggregates all three", () => {
     const inv = extractPrdInventory(SAMPLE);
     expect(inv.routes.length).toBe(2);
