@@ -1240,7 +1240,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const scaffoldProtectedPaths = await listScaffoldTemplateRelativePaths(tier);
+  // Use scaffoldTier (not the scope tier) so the protected-paths list matches
+  // the scaffold we actually copied — otherwise S+backend would copy the M
+  // scaffold's backend files but fail to protect them from worker overwrites.
+  const scaffoldProtectedPaths =
+    await listScaffoldTemplateRelativePaths(scaffoldTier);
   // Distributed shared-schema files are written outside the scaffold
   // template walker, so merge them in explicitly. Workers must not
   // overwrite the canonical TRD-frozen schema.
