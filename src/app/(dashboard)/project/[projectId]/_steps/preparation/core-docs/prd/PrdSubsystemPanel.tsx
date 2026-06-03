@@ -28,7 +28,7 @@ function looksLarge(prd: string): { large: boolean; h2: number; lines: number } 
   return { large: lines >= 1500 || h2 >= 8, h2, lines };
 }
 
-export function PrdSubsystemPanel(props: { prd: string }) {
+export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<DecomposeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +45,7 @@ export function PrdSubsystemPanel(props: { prd: string }) {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setResp(j as DecomposeResponse);
+      props.onResult?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setLoading(false); }
@@ -55,19 +56,19 @@ export function PrdSubsystemPanel(props: { prd: string }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <span className="text-xs text-slate-500">{size.lines} 行 · {size.h2} 章节 —— 按业务域拆分,共享地基先行、分层构建</span>
+        <span className="text-xs text-slate-500">{size.lines} lines · {size.h2} sections — split by business domain, shared foundation first, layered build</span>
         <button onClick={run} disabled={loading || !props.prd?.trim()}
           className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[4px] bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
           {loading ? <Loader2 size={13} className="animate-spin" /> : <Boxes size={13} />}
-          {loading ? "分解中…" : "分解子系统"}
+          {loading ? "Decomposing…" : "Decompose Subsystems"}
         </button>
       </div>
 
       <div>
-        {error && <div className="text-xs text-red-600">分解失败:{error}</div>}
+        {error && <div className="text-xs text-red-600">Decompose failed: {error}</div>}
         {!resp && !error && (
           <div className="text-xs text-slate-500">
-            按 DDD 业务域(auth / enrollment / billing / approvals …)分解 PRD 的路由/端点/集合,产出领域 manifest + 依赖 DAG,写入 <code>.blueprint/subsystems.json</code>。不改 PRD、不跑 codegen。
+            Splits the PRD’s routes / endpoints / collections by DDD business domain (auth / enrollment / billing / approvals …) into a domain manifest + dependency DAG, saved to <code>.blueprint/subsystems.json</code>. Does not modify the PRD or run codegen.
           </div>
         )}
 
@@ -75,9 +76,9 @@ export function PrdSubsystemPanel(props: { prd: string }) {
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2 text-xs">
               {resp.ok
-                ? <span className="flex items-center gap-1 text-green-700"><CheckCircle2 size={13} /> 校验通过 · {resp.subsystems.length} 个域</span>
-                : <span className="flex items-center gap-1 text-red-600"><AlertTriangle size={13} /> 校验未过</span>}
-              {resp.manifestSaved && <span className="text-slate-400">已写入 <code>{resp.manifestPath}</code></span>}
+                ? <span className="flex items-center gap-1 text-green-700"><CheckCircle2 size={13} /> Validated · {resp.subsystems.length} domains</span>
+                : <span className="flex items-center gap-1 text-red-600"><AlertTriangle size={13} /> Validation failed</span>}
+              {resp.manifestSaved && <span className="text-slate-400">saved to <code>{resp.manifestPath}</code></span>}
               <span className="ml-auto text-slate-400">${resp.costUsd.toFixed(3)}{resp.didFallback ? " · ⚠ fallback" : ""}</span>
             </div>
 
@@ -87,7 +88,7 @@ export function PrdSubsystemPanel(props: { prd: string }) {
 
             {resp.buildLayers?.length > 0 && (
               <div className="text-[12px]">
-                <div className="flex items-center gap-1 text-slate-600 mb-1"><GitBranch size={12} /> 构建顺序(分层,层内并行):</div>
+                <div className="flex items-center gap-1 text-slate-600 mb-1"><GitBranch size={12} /> Build order (layers; parallel within a layer):</div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {resp.buildLayers.map((layer, i) => (
                     <React.Fragment key={i}>
@@ -108,22 +109,22 @@ export function PrdSubsystemPanel(props: { prd: string }) {
                     <span className="font-medium text-[13px] text-slate-800">{s.name}</span>
                     <code className="text-[10px] text-slate-400">{s.id}</code>
                     <span className="ml-auto text-[10px] text-slate-400">
-                      {s.endpoints} 端点 · {s.routes} 路由 · {s.collections} 集合
+                      {s.endpoints} endpoints · {s.routes} routes · {s.collections} collections
                     </span>
                   </div>
                   {s.description && <div className="text-[11px] text-slate-500 mt-0.5">{s.description}</div>}
                   {s.dependsOn.length > 0 && (
-                    <div className="text-[11px] text-violet-700 mt-0.5">依赖:{s.dependsOn.map(nameOf).join(", ")}</div>
+                    <div className="text-[11px] text-violet-700 mt-0.5">depends on: {s.dependsOn.map(nameOf).join(", ")}</div>
                   )}
                 </div>
               ))}
             </div>
 
             {resp.notes?.length > 0 && (
-              <div className="text-[11px] text-slate-500">{resp.notes.map((n, i) => <div key={i}>注:{n}</div>)}</div>
+              <div className="text-[11px] text-slate-500">{resp.notes.map((n, i) => <div key={i}>Note: {n}</div>)}</div>
             )}
             <div className="text-[11px] text-slate-500">
-              下一步:在 kickoff 用 subsystem 模式构建——先建共享地基,再按上面的分层顺序逐域生成。
+              Next: build in subsystem mode at kickoff — the shared foundation first, then each domain in the layer order above.
             </div>
           </div>
         )}

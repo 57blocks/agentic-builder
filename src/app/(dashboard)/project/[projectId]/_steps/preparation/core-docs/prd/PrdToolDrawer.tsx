@@ -42,7 +42,7 @@ export function PrdToolDrawer(props: {
           <button
             onClick={props.onClose}
             className="p-1 rounded hover:bg-slate-100 text-slate-500"
-            aria-label="关闭"
+            aria-label="Close"
           >
             <X size={16} />
           </button>

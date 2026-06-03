@@ -30,6 +30,8 @@ export function PrdQualityReportPanel(props: {
   spec?: PrdSpec | null;
   /** Pre-fills the edit bar with a fix instruction the user can review + submit. */
   onApplyFix: (instruction: string) => void;
+  /** Called once a report has been produced (used to unlock Next Step). */
+  onResult?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [includeAI, setIncludeAI] = useState(true);
@@ -52,6 +54,7 @@ export function PrdQualityReportPanel(props: {
         throw new Error(j.error || `HTTP ${res.status}`);
       }
       setReport((await res.json()) as QualityResponse);
+      props.onResult?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -69,14 +72,14 @@ export function PrdQualityReportPanel(props: {
         <div className="flex items-center gap-2">
           {report && (
             <span className="text-xs text-slate-500">
-              得分 {report.score}/100 · {report.counts.blocker} blocker · {report.counts.warn} warn · {report.counts.info} info
+              Score {report.score}/100 · {report.counts.blocker} blocker · {report.counts.warn} warn · {report.counts.info} info
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs text-slate-600 select-none cursor-pointer">
             <input type="checkbox" checked={includeAI} onChange={(e) => setIncludeAI(e.target.checked)} />
-            含 AI 语义评审
+            Include AI review
           </label>
           <button
             onClick={runCheck}
@@ -84,29 +87,29 @@ export function PrdQualityReportPanel(props: {
             className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[4px] bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-            {loading ? "校验中…" : "校验 PRD"}
+            {loading ? "Checking…" : "Validate PRD"}
           </button>
         </div>
       </div>
 
       <div className="px-4 py-3">
-        {error && <div className="text-xs text-red-600">校验失败:{error}</div>}
+        {error && <div className="text-xs text-red-600">Check failed: {error}</div>}
 
         {!report && !error && (
           <div className="text-xs text-slate-400 py-2">
-            点击「校验 PRD」检查业务流程、用户路径、页面与下游可建性。Layer 1 确定性检查 + 可选 AI 语义评审。
+            Click “Validate PRD” to check business flows, user paths, pages and downstream buildability — Layer 1 deterministic checks + optional AI semantic review.
           </div>
         )}
 
         {report?.layer2?.error && (
-          <div className="text-xs text-amber-600 mb-2">AI 评审跳过:{report.layer2.error}(仅显示确定性检查)</div>
+          <div className="text-xs text-amber-600 mb-2">AI review skipped: {report.layer2.error} (showing deterministic checks only)</div>
         )}
         {report?.layer2?.ran && report.layer2.summary && (
-          <div className="text-xs text-slate-600 mb-2 italic">AI 评审:{report.layer2.summary}</div>
+          <div className="text-xs text-slate-600 mb-2 italic">AI review: {report.layer2.summary}</div>
         )}
 
         {report && findings.length === 0 && (
-          <div className="text-xs text-green-600 py-2">未发现问题 — PRD 看起来可建。</div>
+          <div className="text-xs text-green-600 py-2">No issues found — the PRD looks buildable.</div>
         )}
 
         <div className="flex flex-col gap-2">
@@ -124,11 +127,11 @@ export function PrdQualityReportPanel(props: {
                 </div>
                 <div className="text-[13px] text-slate-800">{f.problem}</div>
                 {f.downstreamImpact && (
-                  <div className="text-[11px] text-slate-500 mt-1">下游影响:{f.downstreamImpact}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Downstream impact: {f.downstreamImpact}</div>
                 )}
                 {f.suggestedFix && (
                   <div className="flex items-start gap-2 mt-2">
-                    <div className="flex-1 text-[11px] text-slate-600">建议:{f.suggestedFix}</div>
+                    <div className="flex-1 text-[11px] text-slate-600">Suggestion: {f.suggestedFix}</div>
                     <button
                       onClick={() => {
                         props.onApplyFix(
@@ -141,9 +144,9 @@ export function PrdQualityReportPanel(props: {
                           ? "border-green-300 text-green-700 bg-green-50"
                           : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                       }`}
-                      title="把建议填入下方编辑框,确认后点输入框右侧提交即可应用"
+                      title="Fills the edit bar below — submit there to apply this change"
                     >
-                      <Wand2 size={11} /> {appliedId === f.id ? "✓ 已填入编辑框" : "应用此修改"}
+                      <Wand2 size={11} /> {appliedId === f.id ? "✓ Added to editor" : "Apply fix"}
                     </button>
                   </div>
                 )}
