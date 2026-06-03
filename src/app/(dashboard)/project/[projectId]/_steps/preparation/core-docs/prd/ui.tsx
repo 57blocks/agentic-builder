@@ -592,7 +592,7 @@ export function PrdUI(props: StepUIProps) {
       </div>
 
       {!isManualEditing && content?.trim() && (
-        <div className="px-8 py-4 border-t border-slate-200 bg-white flex flex-col gap-4">
+        <div className="px-8 py-4 border-t border-slate-200 bg-white flex flex-col gap-4 shrink-0 max-h-[45vh] overflow-y-auto">
           <PrdQualityReportPanel
             prd={stripChangeMarkers(content)}
             spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}

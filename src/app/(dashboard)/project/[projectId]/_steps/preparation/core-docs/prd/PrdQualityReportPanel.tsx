@@ -35,6 +35,7 @@ export function PrdQualityReportPanel(props: {
   const [includeAI, setIncludeAI] = useState(true);
   const [report, setReport] = useState<QualityResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [appliedId, setAppliedId] = useState<string | null>(null);
 
   async function runCheck() {
     if (loading) return;
@@ -131,14 +132,20 @@ export function PrdQualityReportPanel(props: {
                   <div className="flex items-start gap-2 mt-2">
                     <div className="flex-1 text-[11px] text-slate-600">建议:{f.suggestedFix}</div>
                     <button
-                      onClick={() =>
+                      onClick={() => {
                         props.onApplyFix(
                           `Per PRD quality review (${f.section}): ${f.suggestedFix}`,
-                        )
-                      }
-                      className="flex items-center gap-1 shrink-0 text-[11px] font-medium px-2 py-1 rounded-[4px] border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        );
+                        setAppliedId(f.id);
+                      }}
+                      className={`flex items-center gap-1 shrink-0 text-[11px] font-medium px-2 py-1 rounded-[4px] border ${
+                        appliedId === f.id
+                          ? "border-green-300 text-green-700 bg-green-50"
+                          : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                      }`}
+                      title="把建议填入下方编辑框,确认后点输入框右侧提交即可应用"
                     >
-                      <Wand2 size={11} /> 应用此修改
+                      <Wand2 size={11} /> {appliedId === f.id ? "✓ 已填入编辑框" : "应用此修改"}
                     </button>
                   </div>
                 )}
