@@ -108,17 +108,13 @@ export const SUB_STAGE_META: Record<SubStageId, SubStageMeta> = {
   pencil:       { label: "Pencil",           desc: "Wireframe generation" },
   mockup:       { label: "Mockup",           desc: "Visual mockup" },
   qa:           { label: "QA",               desc: "QA checklist" },
-  // verify is shared with coding sub-stage; label reused below
+  verify:       { label: "Verify",           desc: "Pre-kickoff verification" },
   // kickoff
   "env-setup":       { label: "Env Setup",       desc: "Scaffold project environment" },
   "summary":         { label: "Summary",         desc: "Kick-off summary" },
   "task-breakdown":  { label: "Task Breakdown",  desc: "Plan coding tasks" },
   // coding
-  architect:    { label: "Architect",        desc: "Architect agent" },
-  backend:      { label: "Backend",          desc: "Backend agent" },
-  frontend:     { label: "Frontend",         desc: "Frontend agent" },
-  test:         { label: "Tests",            desc: "Test agent" },
-  verify:       { label: "Verify",           desc: "Integration verify" },
+  agents:    { label: "Coding Agents", desc: "Multi-agent coding pipeline" },
   // preview
   serve:        { label: "Dev Server",       desc: "Start preview server" },
   e2e:          { label: "E2E",              desc: "End-to-end smoke test" },

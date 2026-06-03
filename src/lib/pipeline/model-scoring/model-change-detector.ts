@@ -49,8 +49,7 @@ export async function saveCurrentSnapshot(
     await fs.mkdir(path.dirname(file), { recursive: true });
     const snapshot: ModelConfigSnapshot = {
       capturedAt: new Date().toISOString(),
-      // MODEL_CONFIG is `as const`, so a shallow spread preserves shape.
-      config: { ...MODEL_CONFIG },
+      config: { ...MODEL_CONFIG } as Record<string, string | string[]>,
     };
     await fs.writeFile(file, JSON.stringify(snapshot, null, 2), "utf-8");
     return { path: file };

@@ -15,6 +15,19 @@ import {
 } from "@/lib/db/schema";
 import type { Project } from "@/types/project";
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+type ProjectRow = { id: string; slug: string; name: string; createdAt: Date | string };
+
+function toProject(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+  };
+}
+
 // ─── Projects CRUD ────────────────────────────────────────────────────────────
 
 export async function getProjects(): Promise<Project[]> {
@@ -28,7 +41,7 @@ export async function getProjects(): Promise<Project[]> {
     .from(projects)
     .orderBy(desc(projects.createdAt));
 
-  return rows as Project[];
+  return rows.map(toProject);
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
@@ -43,7 +56,7 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
     .where(eq(projects.slug, slug))
     .limit(1);
 
-  return (rows[0] as Project) ?? null;
+  return rows[0] ? toProject(rows[0]) : null;
 }
 
 export async function createProject(name: string, clientId?: string): Promise<Project> {
@@ -74,7 +87,7 @@ export async function createProject(name: string, clientId?: string): Promise<Pr
       createdAt: projects.createdAt,
     });
 
-  return rows[0] as Project;
+  return toProject(rows[0]);
 }
 
 export async function updateProjectName(projectId: string, name: string): Promise<void> {
@@ -180,13 +193,13 @@ export async function upsertStepSnapshot(
     .values({
       projectId,
       stepId,
-      snapshot: snapshot as Record<string, unknown>,
+      snapshot: snapshot as unknown as Record<string, unknown>,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [projectStepSnapshot.projectId, projectStepSnapshot.stepId],
       set: {
-        snapshot:  snapshot as Record<string, unknown>,
+        snapshot:  snapshot as unknown as Record<string, unknown>,
         updatedAt: sql`NOW()`,
       },
     });
@@ -272,13 +285,13 @@ export async function upsertSubStageSnapshot(
     .values({
       projectId,
       stepId: subStageId,
-      snapshot: snapshot as Record<string, unknown>,
+      snapshot: snapshot as unknown as Record<string, unknown>,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [projectStepSnapshot.projectId, projectStepSnapshot.stepId],
       set: {
-        snapshot:  snapshot as Record<string, unknown>,
+        snapshot:  snapshot as unknown as Record<string, unknown>,
         updatedAt: sql`NOW()`,
       },
     });

@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
             content: result.content,
             costUsd: result.costUsd,
             durationMs: result.durationMs,
-            tokens: result.usage.totalTokens,
+            tokens: result.usage.total_tokens,
             model: result.model,
             traceId: result.traceId,
           },
