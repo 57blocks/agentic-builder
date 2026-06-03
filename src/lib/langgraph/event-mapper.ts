@@ -18,7 +18,7 @@ export type ErrorCategory =
   | "graph_error"
   | "unknown";
 
-type EventMapperOptions = Record<string, never>;
+
 
 // ─── Internal tracker per worker subgraph instance ───
 
@@ -74,7 +74,7 @@ export class EventMapper {
   /** true once e2e_verify_start has been emitted */
   private e2eVerifyStartEmitted = false;
 
-  constructor(sessionId: string, _options: EventMapperOptions = {}) {
+  constructor(sessionId: string) {
     this.sessionId = sessionId;
   }
 
