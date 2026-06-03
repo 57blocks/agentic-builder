@@ -40,6 +40,34 @@ export function resolveBlueprintGeneratedDatabaseUrl(
   return v.length > 0 ? v : null;
 }
 
+function trimToNull(v?: string | null): string | null {
+  const t = (v ?? "").trim();
+  return t.length > 0 ? t : null;
+}
+
+/**
+ * DB URL precedence for the generated backend, in order:
+ *   1. explicit per-request override (the coding request body)
+ *   2. the per-project DB that kickoff provisioned (.blueprint/kickoff-infra.json)
+ *   3. global BLUEPRINT_GENERATED_DATABASE_URL fallback (.env.local)
+ *
+ * The per-project provisioned DB MUST outrank the global env fallback — a stale
+ * global value (e.g. a dead local placeholder) previously shadowed the real
+ * kickoff DB, so Start Coding wrote a dead URL into backend/.env and the
+ * runtime-smoke gate failed to authenticate (Postgres 28P01).
+ */
+export function resolveEffectiveDatabaseUrl(opts: {
+  requestOverride?: string | null;
+  infraUrl?: string | null;
+  envFallback?: string | null;
+}): string | null {
+  return (
+    trimToNull(opts.requestOverride) ??
+    trimToNull(opts.infraUrl) ??
+    trimToNull(opts.envFallback)
+  );
+}
+
 /** Same shape as resolveBlueprintGeneratedDatabaseUrl, but for Redis. */
 export function resolveBlueprintGeneratedRedisUrl(
   requestOverride?: string | null,
