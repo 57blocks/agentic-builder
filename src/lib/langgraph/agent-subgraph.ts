@@ -40,6 +40,10 @@ import type {
   CodingTask,
   TaskSubStep,
 } from "@/lib/pipeline/types";
+import {
+  parseTierFromPrd,
+  type ProjectTier,
+} from "@/lib/agents/shared/project-classifier";
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
 import {
   resolveCodingModelConfigValue,
@@ -78,7 +82,17 @@ const MAX_OUTPUT_TOKENS = (() => {
 })();
 const MAX_TASK_GENERATION_RETRIES = 2;
 const MAX_WORKER_TOOL_ITERATIONS = 10;
-const MAX_WORKER_TOOL_OUTPUT_CHARS = 12000;
+// Per-file injection caps for the starting "Relevant existing files" context.
+// OWNED = files the task creates/modifies (it must see them whole to edit them
+// correctly); REF = files it only reads for reference; discovered neighbours
+// keep the small legacy cap. The read_file tool's output cap is aligned to
+// OWNED so a file shown truncated in the starting context can always be
+// re-fetched in full via read_file — no "visible but unfetchable" gap.
+// (Files larger than OWNED still have a tail blind spot until read_file gains
+// offset/paginated reads.)
+const OWNED_FILE_INJECT_CAP = 16_000;
+const REF_FILE_INJECT_CAP = 8_000;
+const MAX_WORKER_TOOL_OUTPUT_CHARS = OWNED_FILE_INJECT_CAP;
 const WORKER_LLM_HEARTBEAT_MS = 10_000;
 // Raise the iteration ceiling so complex tasks have enough read rounds.
 // 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
@@ -2179,9 +2193,36 @@ async function buildRelevantFileContext(
     );
   }
 
-  // Read up to a bounded set to control context size.
-  // When rotation is active, reduce the file limit to leave room for session context.
-  const fileLimit = state.contextRotationNeeded ? 12 : 18;
+  // Larger projects carry more material, so scale how much file context we
+  // inject by the project tier (read from the PRD badge — same source as the
+  // coding API's resolveTier). L gets a bigger file count + byte budget; S the
+  // smallest. Rotation still reduces the count to leave room for session ctx.
+  let tier: ProjectTier = "M";
+  try {
+    const prdForTier = await fsRead("PRD.md", state.outputDir);
+    if (
+      !prdForTier.startsWith("FILE_NOT_FOUND") &&
+      !prdForTier.startsWith("REJECTED")
+    ) {
+      tier = parseTierFromPrd(prdForTier) ?? "M";
+    }
+  } catch {
+    /* default M */
+  }
+  const fileLimit =
+    tier === "L"
+      ? state.contextRotationNeeded
+        ? 18
+        : 28
+      : state.contextRotationNeeded
+        ? 12
+        : 18;
+  // Total byte budget across all injected files for this task. Owned files
+  // (creates/modifies) are injected near-whole; reference files get a smaller
+  // cap; discovered neighbours keep the legacy small cap. The budget caps the
+  // sum so a large fan of candidates can't blow up the prompt.
+  const totalBudget = tier === "L" ? 140_000 : tier === "S" ? 40_000 : 80_000;
+
   const registryByPath = new Map(
     state.fileRegistrySnapshot.map((file) => [
       file.path.replace(/\\/g, "/"),
@@ -2205,7 +2246,27 @@ async function buildRelevantFileContext(
     })
     .slice(0, fileLimit)
     .map(({ candidate }) => candidate);
+
+  // Classify each selected file by the role it plays in THIS task so we inject
+  // the right amount: files the task owns (creates/modifies) get the full
+  // OWNED cap (it edits them — a truncated view forces a re-read), files it
+  // declares as reads get the REF cap, everything else keeps the small cap.
+  const buckets = getTaskFilePlanBuckets(task.files);
+  const ownedHints = [...buckets.creates, ...buckets.modifies].map((f) =>
+    f.replace(/\\/g, "/"),
+  );
+  const readHints = buckets.reads.map((f) => f.replace(/\\/g, "/"));
+  const matchesAnyHint = (rel: string, hints: string[]): boolean =>
+    hints.some((h) => rel === h || matchesTaskPathHint(rel, h));
+  const capForFile = (rel: string): number => {
+    if (matchesAnyHint(rel, ownedHints)) return OWNED_FILE_INJECT_CAP;
+    if (matchesAnyHint(rel, readHints)) return REF_FILE_INJECT_CAP;
+    return rel.endsWith(".md") || rel.endsWith(".json") ? 1800 : 2200;
+  };
+
   const chunks: string[] = [];
+  let usedBudget = 0;
+  let droppedForBudget = 0;
   for (const rel of selected) {
     const content = await fsRead(rel, state.outputDir);
     if (
@@ -2214,11 +2275,24 @@ async function buildRelevantFileContext(
     ) {
       continue;
     }
-    const block =
-      rel.endsWith(".md") || rel.endsWith(".json")
-        ? content.slice(0, 1800)
-        : content.slice(0, 2200);
-    chunks.push(`### ${rel}\n\`\`\`\n${block}\n\`\`\``);
+    const remaining = totalBudget - usedBudget;
+    if (remaining < 400) {
+      droppedForBudget += 1;
+      continue;
+    }
+    const cap = Math.min(capForFile(rel), remaining);
+    const block = content.slice(0, cap);
+    usedBudget += block.length;
+    const truncated = block.length < content.length;
+    const header = truncated
+      ? `### ${rel} (truncated to ${block.length} chars — call read_file for the full file)`
+      : `### ${rel}`;
+    chunks.push(`${header}\n\`\`\`\n${block}\n\`\`\``);
+  }
+  if (droppedForBudget > 0) {
+    console.log(
+      `[worker-context] file-context budget (${totalBudget}B, tier ${tier}) exhausted — omitted ${droppedForBudget} lower-priority file(s); the agent can read_file them on demand.`,
+    );
   }
 
   const allChunks = [...contextPreamble, ...chunks];

@@ -1,54 +1,11 @@
 version: 1
 pipelines:
-  - id: market-data-ingestion
-    description: "CoinGecko current market cap ingestion and historical backfill"
-    schedule: { cron: "2,32 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
-    nodes:
-      - { id: collect-current, service: Ingestion Worker, function: collectMarketCaps }
-      - { id: backfill-history, service: Ingestion Worker, function: backfillMarketHistory, dependsOn: [collect-current] }
-
-  - id: market-volatility-ingestion
-    description: "CoinGecko 7-day and 30-day volatility/volume window ingestion"
+  - id: daily-admin-sync
+    description: "Deterministic daily synchronization and maintenance flow for admin-facing data"
     schedule: { cron: "7,37 * * * *" }
     failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
     nodes:
-      - { id: collect-7d, service: Ingestion Worker, function: collect7DayMarketWindow }
-      - { id: collect-30d, service: Ingestion Worker, function: collect30DayMarketWindow, dependsOn: [collect-7d] }
-
-  - id: onchain-ingestion
-    description: "Quotient holder concentration refresh"
-    schedule: { cron: "3,18,33,48 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
-    nodes:
-      - { id: collect-onchain, service: Ingestion Worker, function: collectHolderConcentration }
-
-  - id: sentiment-ingestion
-    description: "X and Jina/LLM sentiment refresh"
-    schedule: { cron: "8,23,38,53 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
-    nodes:
-      - { id: collect-x, service: Ingestion Worker, function: collectXSentiment }
-      - { id: collect-jina, service: Ingestion Worker, function: collectNewsText, dependsOn: [collect-x] }
-      - { id: classify-llm, service: Scoring Worker, function: classifySentiment, dependsOn: [collect-jina] }
-
-  - id: reserve-attestation-ingestion
-    description: "Weekly reserve attestation scrape, extract, and human review queueing"
-    schedule: { cron: "10 2 * * 1" }
-    failure: { strategy: retry-3, retries: 3, compensation: pause-queue }
-    nodes:
-      - { id: fetch-doc, service: Ingestion Worker, function: fetchReserveDocument }
-      - { id: extract-text, service: Ingestion Worker, function: extractReserveText, dependsOn: [fetch-doc] }
-      - { id: llm-extract, service: Ingestion Worker, function: extractStructuredReserveData, dependsOn: [extract-text] }
-      - { id: enqueue-review, service: Ingestion Worker, function: enqueueReserveReview, dependsOn: [llm-extract] }
-
-  - id: scoring-cycle
-    description: "Recompute composite scores and notify admins"
-    schedule: { cron: "0,5,10,15,20,25,30,35,40,45,50,55 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
-    nodes:
-      - { id: load-values, service: Scoring Worker, function: loadLatestVariables }
-      - { id: apply-exclusions, service: Scoring Worker, function: excludeStaleVariables, dependsOn: [load-values] }
-      - { id: compute-scores, service: Scoring Worker, function: computeCompositeScores, dependsOn: [apply-exclusions] }
-      - { id: persist-history, service: Scoring Worker, function: persistScoreHistory, dependsOn: [compute-scores] }
-      - { id: notify-admins, service: Notification Worker, function: sendScoringSummaryEmail, dependsOn: [persist-history] }
+      - { id: fetch-eventbrite, service: Integration Service, function: syncEventbriteFeeds }
+      - { id: sync-marketing, service: Integration Service, function: syncMarketingSystems, dependsOn: [fetch-eventbrite] }
+      - { id: refresh-reports, service: Report Service, function: rebuildAdminAggregates, dependsOn: [sync-marketing] }
+      - { id: publish-notifications, service: Notification Service, function: enqueueSyncNotifications, dependsOn: [refresh-reports] }
