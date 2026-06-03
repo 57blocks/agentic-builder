@@ -89,30 +89,38 @@ export async function runDomainScopedBreakdown(args: {
   costUsd += foundationFull.costUsd;
   const foundationTasks = foundationFull.tasks.filter(isFoundationTask);
 
-  // 2. Per-domain scoped passes, in topological order.
+  // 2. Per-domain scoped passes, in topological order. Domains in the SAME
+  //    layer are mutually independent (no dependsOn between them), so they run
+  //    CONCURRENTLY; `existingTasks` only needs to accumulate ACROSS layers
+  //    (a domain depends only on earlier-layer domains). This cuts wall-clock
+  //    from O(#domains) sequential calls to O(#layers) rounds.
   const byDomain = new Map<string, KickoffWorkItem[]>();
   const accumulated: KickoffWorkItem[] = [...foundationTasks];
 
   for (const layer of buildLayers) {
-    for (const domainId of layer) {
-      const reqs = domainRequirementIds.get(domainId) ?? [];
-      if (reqs.length === 0) {
-        byDomain.set(domainId, []);
-        continue;
-      }
-      const r = await breakdownFn({
-        ...docs,
-        tier,
-        sessionId,
-        incremental: {
-          existingTasks: accumulated.map(slim),
-          requirementsToCover: reqs,
-        },
-      });
-      costUsd += r.costUsd;
-      const tagged = r.tasks.map((t) => ({ ...t, subsystem: domainId }));
+    const existingTasks = accumulated.map(slim); // snapshot — stable for the whole layer
+    const layerResults = await Promise.all(
+      layer.map(async (domainId) => {
+        const reqs = domainRequirementIds.get(domainId) ?? [];
+        if (reqs.length === 0) return { domainId, tagged: [] as KickoffWorkItem[], costUsd: 0 };
+        const r = await breakdownFn({
+          ...docs,
+          tier,
+          sessionId,
+          incremental: { existingTasks, requirementsToCover: reqs },
+        });
+        return {
+          domainId,
+          tagged: r.tasks.map((t) => ({ ...t, subsystem: domainId })),
+          costUsd: r.costUsd,
+        };
+      }),
+    );
+    // Commit the layer's results after the whole layer completes.
+    for (const { domainId, tagged, costUsd: c } of layerResults) {
       byDomain.set(domainId, tagged);
       accumulated.push(...tagged);
+      costUsd += c;
     }
   }
 

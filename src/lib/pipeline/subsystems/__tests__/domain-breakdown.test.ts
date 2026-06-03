@@ -64,6 +64,32 @@ describe("runDomainScopedBreakdown", () => {
     expect(calls[2].incremental!.existingTasks.map((t) => t.id)).toContain("API-001-svc");
   });
 
+  it("same-layer domains run on the same existingTasks snapshot (don't see each other); later layers see both", async () => {
+    const calls: Record<string, string[]> = {};
+    const breakdownFn: BreakdownFn = vi.fn(async (input) => {
+      if (!input.incremental) return { tasks: [task("F", "Data Layer")], costUsd: 0 };
+      const dom = input.incremental.requirementsToCover[0];
+      calls[dom] = input.incremental.existingTasks.map((t) => t.id);
+      return { tasks: [task(`${dom}-t`, "Backend Services")], costUsd: 0 };
+    });
+    const manifest3: SubsystemManifest = {
+      version: 1,
+      subsystems: ["a", "b", "c"].map((id) => ({ id, name: id, ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: [], dependsOn: id === "c" ? ["a", "b"] : [], prdSections: [] })),
+    };
+    await runDomainScopedBreakdown({
+      docs: { prd: "P" },
+      manifest: manifest3,
+      domainRequirementIds: new Map([["a", ["RA"]], ["b", ["RB"]], ["c", ["RC"]]]),
+      buildLayers: [["a", "b"], ["c"]], // a,b same layer; c later
+      breakdownFn,
+    });
+    // a and b (same layer) both see only the foundation task, NOT each other
+    expect(calls["RA"]).toEqual(["F"]);
+    expect(calls["RB"]).toEqual(["F"]);
+    // c (later layer) sees foundation + a + b (tasks named by their req id in this fake)
+    expect(calls["RC"]).toEqual(["F", "RA-t", "RB-t"]);
+  });
+
   it("skips a domain with no requirement ids (no breakdown call)", async () => {
     const breakdownFn: BreakdownFn = vi.fn(async () => ({ tasks: [], costUsd: 0 }));
     const r = await runDomainScopedBreakdown({
