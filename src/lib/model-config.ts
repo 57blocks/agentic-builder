@@ -68,6 +68,10 @@ const OPENROUTER_MODEL_CONFIG = {
    *  Defaults to Claude Sonnet; override via env if a stronger model is
    *  preferred. */
   trdReviewer: "claude-sonnet-4",
+  /** PRD reviewer (Layer 2 quality gate) — INTENTIONALLY different from the PRD
+   *  writer (`prd` / `prdSpecExtract`) so it doesn't share the author's blind
+   *  spots. Cross-vendor (Claude) judge of PRD buildability/completeness. */
+  prdReviewer: "claude-sonnet-4",
   sysdesign: "gpt-4o",
   implguide: "gpt-4o",
   design: "openai/gpt-5.4",
@@ -157,6 +161,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   // Reviewer intentionally uses a non-DeepSeek model — cross-vendor review.
   // Falls back to DEEPSEEK_DIRECT_MODEL if `claude-sonnet-4` is unreachable.
   trdReviewer: "claude-sonnet-4",
+  // PRD reviewer — cross-vendor (non-DeepSeek) judge, like trdReviewer.
+  prdReviewer: "claude-sonnet-4",
   sysdesign: DEEPSEEK_DIRECT_MODEL,
   implguide: DEEPSEEK_DIRECT_MODEL,
   design: DEEPSEEK_DIRECT_MODEL,
