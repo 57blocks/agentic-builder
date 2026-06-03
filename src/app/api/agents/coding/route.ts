@@ -799,7 +799,10 @@ export async function POST(request: NextRequest) {
         const depTask = taskMap.get(depId);
         if (!depTask) continue;
         // Check if every "creates" file from the dep task exists on disk
-        const allCreatesExist = (depTask.files?.creates ?? []).every((f: string) => {
+        const depCreates = Array.isArray(depTask.files)
+          ? depTask.files
+          : depTask.files?.creates ?? [];
+        const allCreatesExist = depCreates.every((f: string) => {
           try {
             require("fs").accessSync(path.join(outputRoot, f));
             return true;
