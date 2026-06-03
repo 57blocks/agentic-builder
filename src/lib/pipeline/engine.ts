@@ -49,7 +49,8 @@ import {
   buildGitInitInstructions,
 } from "./code-output";
 import { runKickoffIntegrations } from "./kickoff-integrations";
-import { buildTaskBreakdownFromDocuments } from "./kickoff-task-breakdown.server";
+import { runSubsystemAwareTaskBreakdown } from "./subsystems/subsystem-aware-breakdown";
+import { writeSubsystemManifest } from "./subsystems/manifest-io";
 import {
   copyDesignReferencesToOutput,
   formatDesignReferencesPromptBlock,
@@ -1295,6 +1296,17 @@ export class PipelineEngine {
         designReferenceEntries,
       );
 
+      const breakdownResult = await runSubsystemAwareTaskBreakdown({
+        prd: prdBody,
+        trd: trdBody || undefined,
+        sysDesign: sysDesignBody || undefined,
+        implGuide: implGuideBody || undefined,
+        designSpec: designSpecBody || undefined,
+        prdSpec,
+        sessionId: run.sessionId,
+        tier,
+        designReferencesBlock: designReferencesBlock || undefined,
+      });
       const {
         tasks: taskBreakdown,
         costUsd: tbCost,
@@ -1308,17 +1320,27 @@ export class PipelineEngine {
         scaffoldBlock: taskBreakdownScaffoldBlock,
         skillsBlock: taskBreakdownSkillsBlock,
         scaffoldTier: taskBreakdownScaffoldTier,
-      } = await buildTaskBreakdownFromDocuments({
-        prd: prdBody,
-        trd: trdBody || undefined,
-        sysDesign: sysDesignBody || undefined,
-        implGuide: implGuideBody || undefined,
-        designSpec: designSpecBody || undefined,
-        prdSpec,
-        sessionId: run.sessionId,
-        tier,
-        designReferencesBlock: designReferencesBlock || undefined,
-      });
+      } = breakdownResult;
+
+      // Subsystem mode (only when the project qualified): persist the manifest
+      // so the coding phase can build foundation → per-domain, and surface it.
+      if (breakdownResult.subsystem) {
+        const sub = breakdownResult.subsystem;
+        try {
+          await writeSubsystemManifest(outputRoot, sub.manifest);
+        } catch (e) {
+          console.warn("[Engine] writeSubsystemManifest failed (ignored):", e instanceof Error ? e.message : e);
+        }
+        this.emit({
+          type: "step_stream",
+          runId: run.id,
+          stepId: "kickoff",
+          data: {
+            chunk: `\n[subsystem-split] ${sub.manifest.subsystems.length} domains: ${sub.manifest.subsystems.map((s) => s.id).join(", ")} · ${sub.foundationTaskIds.length} foundation task(s) · ${taskBreakdown.length} tasks total\n`,
+            chunkType: "content",
+          },
+        });
+      }
 
       const { markdown: integrationMd, metadata: integrationMeta } =
         await runKickoffIntegrations({

@@ -69,7 +69,7 @@ describe("runDomainScopedBreakdown", () => {
     const breakdownFn: BreakdownFn = vi.fn(async (input) => {
       if (!input.incremental) return { tasks: [task("F", "Data Layer")], costUsd: 0 };
       const dom = input.incremental.requirementsToCover[0];
-      calls[dom] = input.incremental.existingTasks.map((t) => t.id);
+      calls[dom] = input.incremental.existingTasks.map((t: { id: string }) => t.id);
       return { tasks: [task(`${dom}-t`, "Backend Services")], costUsd: 0 };
     });
     const manifest3: SubsystemManifest = {
