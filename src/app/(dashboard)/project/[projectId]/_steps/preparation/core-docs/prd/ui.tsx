@@ -12,6 +12,7 @@ import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
 import { savePrdVersion, loadPrdVersions } from "./snapshot";
 import type { PrdVersion } from "./snapshot";
+import { PrdSubsystemPanel } from "./PrdSubsystemPanel";
 
 // ─── PRD history (populated from persisted versions) ──────────────────────
 export interface PrdSnapshot { content: string; savedAt: Date; label: string; }
@@ -587,6 +588,12 @@ export function PrdUI(props: StepUIProps) {
           )}
         </div>
       </div>
+
+      {!isManualEditing && content?.trim() && (
+        <div className="px-8 py-4 border-t border-slate-200 bg-white">
+          <PrdSubsystemPanel prd={stripChangeMarkers(content)} />
+        </div>
+      )}
 
       {isManualEditing ? (
         <div className="flex items-center justify-end gap-3 px-8 py-4 border-t border-slate-200 bg-white">
