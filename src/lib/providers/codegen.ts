@@ -22,6 +22,10 @@ import {
   shouldForceOpenRouterForCodingMode,
 } from "@/lib/pipeline/coding-model-selection";
 import {
+  maybeDumpCodingContext,
+  type CodingContextDumpMeta,
+} from "@/lib/pipeline/coding-context-dump";
+import {
   isDeepSeekV4Provider,
   chatCompletionsDeepSeekV4,
   DEEPSEEK_V4_DEFAULT_BASE,
@@ -281,8 +285,16 @@ export async function invokeCodegenOrOpenRouter(
     codingMode?: CodingMode;
     tools?: OpenRouterToolDefinition[];
     tool_choice?: OpenRouterOptions["tool_choice"];
+    /** When set (and CODEGEN_CONTEXT_DUMP is enabled), dump this round's full
+     *  message context to <outputDir>/.ralph/context-dumps for later audit. */
+    contextDump?: CodingContextDumpMeta;
   },
 ): Promise<OpenRouterResponse> {
+  // Single chokepoint for every coding round — dump the full context here so
+  // one hook covers all worker loops/providers. No-op unless CODEGEN_CONTEXT_DUMP
+  // is set; best-effort, never throws.
+  await maybeDumpCodingContext(messages, options.contextDump);
+
   const key = options.openRouterVariant ?? "codeGen";
   const codingMode = options.codingMode ?? "normal";
   const reasoningOptions = buildCodegenReasoningOptions(key);

@@ -27,6 +27,7 @@ import {
   upsertRedisUrlEnv,
   resolveBlueprintGeneratedRedisUrl,
   resolveBlueprintGeneratedDatabaseUrl,
+  resolveEffectiveDatabaseUrl,
   upsertDatabaseUrlEnv,
   upsertJwtEnvVars,
   upsertBackendPortEnv,
@@ -798,7 +799,10 @@ export async function POST(request: NextRequest) {
         const depTask = taskMap.get(depId);
         if (!depTask) continue;
         // Check if every "creates" file from the dep task exists on disk
-        const allCreatesExist = (depTask.files?.creates ?? []).every((f: string) => {
+        const depCreates = Array.isArray(depTask.files)
+          ? depTask.files
+          : depTask.files?.creates ?? [];
+        const allCreatesExist = depCreates.every((f: string) => {
           try {
             require("fs").accessSync(path.join(outputRoot, f));
             return true;
@@ -1144,7 +1148,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const resolvedDbUrl = resolveBlueprintGeneratedDatabaseUrl(databaseUrlBody);
+  // DB precedence: explicit per-request override → the per-project DB that
+  // kickoff provisioned (.blueprint/kickoff-infra.json) → global
+  // BLUEPRINT_GENERATED_DATABASE_URL fallback. A stale global env must NOT
+  // shadow the real per-project DB — that previously wrote a dead URL into
+  // backend/.env and made the runtime-smoke gate fail with Postgres 28P01.
+  const dbInfraForResolve = await readKickoffInfraMetadata(process.cwd()).catch(
+    () => null,
+  );
+  const resolvedDbUrl = resolveEffectiveDatabaseUrl({
+    requestOverride: databaseUrlBody,
+    infraUrl: databaseUrlFrom(dbInfraForResolve),
+    envFallback: resolveBlueprintGeneratedDatabaseUrl(),
+  });
   if (resolvedDbUrl) {
     try {
       await fs.writeFile(
