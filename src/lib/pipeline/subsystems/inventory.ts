@@ -25,7 +25,9 @@ const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
  *  "#### POST `/a` & `/b`" → one per path. */
 export function extractApiEndpoints(prd: string): string[] {
   const out = new Set<string>();
-  const headingRe = /^#{2,4}\s+([A-Z/\s]+?)\s+(`[^`]+`(?:\s*&\s*`[^`]+`)*)\s*$/gm;
+  // Trailing content after the path group is allowed (e.g. a backfilled
+  // " · API-001" id), so don't anchor to end-of-line right after the path.
+  const headingRe = /^#{2,4}\s+([A-Z/\s]+?)\s+(`[^`]+`(?:\s*&\s*`[^`]+`)*).*$/gm;
   for (const m of prd.matchAll(headingRe)) {
     const methods = m[1]
       .split(/[/\s]+/)
