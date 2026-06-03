@@ -15,6 +15,7 @@
  */
 
 import { buildTaskBreakdownFromDocuments } from "../kickoff-task-breakdown.server";
+import { backfillPrdIds } from "../gates/prd-id-backfill";
 import { extractPrdInventory } from "./inventory";
 import { decomposePrdIntoSubsystems } from "./decompose";
 import { shouldSplitIntoSubsystems, MIN_ENDPOINTS_FOR_SPLIT } from "./split-decision";
@@ -74,10 +75,14 @@ export async function runSubsystemAwareTaskBreakdown(
     `[Subsystems] splitting into ${decomposed.manifest.subsystems.length} domain(s): ${decomposed.manifest.subsystems.map((s) => s.id).join(", ")}`,
   );
 
-  // Per-domain scoped breakdown. The breakdownFn wraps the real builder and
-  // captures the FIRST (foundation, full) result so we can return its rich
-  // metadata (scaffoldBlock / skillsBlock / model / …) unchanged downstream.
-  const { byDomain } = resolveDomainRequirementIds(params.prd, decomposed.manifest);
+  // Resolve each domain's requirement IDs. This needs PAGE-/API- ids ON the PRD.
+  // The engine gate backfills the PRD too, but its mutated content may not have
+  // reached here — so backfill (idempotent) ourselves and use the id-tagged PRD
+  // for the per-domain docs, guaranteeing the domains resolve their ids.
+  const filledPrd = backfillPrdIds(params.prd).prd;
+  const { byDomain } = resolveDomainRequirementIds(filledPrd, decomposed.manifest);
+  const totalResolved = [...byDomain.values()].reduce((n, ids) => n + ids.length, 0);
+  console.log(`[Subsystems] resolved ${totalResolved} requirement id(s) across ${byDomain.size} domain(s).`);
   let foundationFull: BreakdownResult | null = null;
   const breakdownFn: BreakdownFn = async (input) => {
     const r = await buildTaskBreakdownFromDocuments({
@@ -97,7 +102,7 @@ export async function runSubsystemAwareTaskBreakdown(
 
   const orch = await runDomainScopedBreakdown({
     docs: {
-      prd: params.prd,
+      prd: filledPrd,
       trd: params.trd,
       sysDesign: params.sysDesign,
       implGuide: params.implGuide,
