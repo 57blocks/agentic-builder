@@ -1182,6 +1182,13 @@ async function runCodegenWorkerLoop(
       // When forcing write, omit tools entirely so the model cannot call them.
       tools: forceWrite ? undefined : WORKER_TOOLS,
       tool_choice: forceWrite ? "none" : "auto",
+      contextDump: {
+        taskId: toolOptions?.taskId,
+        iteration: i,
+        sessionId,
+        label: workerLabel,
+        outputDir,
+      },
     }).finally(() => {
       clearInterval(heartbeat);
     });
@@ -1416,6 +1423,13 @@ async function runCodegenAgentSession(
       codingMode,
       tools: WORKER_TOOLS,
       tool_choice: "auto",
+      contextDump: {
+        taskId: toolOptions?.taskId ?? task.id,
+        iteration: i,
+        sessionId,
+        label: workerLabel,
+        outputDir,
+      },
     }).finally(() => {
       clearInterval(heartbeat);
     });
