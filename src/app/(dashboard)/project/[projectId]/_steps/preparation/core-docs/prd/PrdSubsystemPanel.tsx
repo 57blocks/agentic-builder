@@ -34,8 +34,6 @@ export function PrdSubsystemPanel(props: { prd: string }) {
   const [error, setError] = useState<string | null>(null);
   const size = useMemo(() => looksLarge(props.prd), [props.prd]);
 
-  if (!size.large) return null;
-
   async function run() {
     if (loading) return;
     setLoading(true); setError(null);
@@ -55,13 +53,9 @@ export function PrdSubsystemPanel(props: { prd: string }) {
   const nameOf = (id: string) => resp?.subsystems.find((s) => s.id === id)?.name ?? id;
 
   return (
-    <div className="border border-violet-200 rounded-[6px] bg-violet-50/40 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-violet-100">
-        <div className="flex items-center gap-2">
-          <Boxes size={16} className="text-violet-600" />
-          <span className="font-semibold text-slate-900 text-sm">子系统分解(DDD 领域)</span>
-          <span className="text-xs text-slate-500">大型 PRD（{size.lines} 行 · {size.h2} 章节）—— 按业务域拆分,共享地基先行、分层构建</span>
-        </div>
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <span className="text-xs text-slate-500">{size.lines} 行 · {size.h2} 章节 —— 按业务域拆分,共享地基先行、分层构建</span>
         <button onClick={run} disabled={loading || !props.prd?.trim()}
           className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[4px] bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
           {loading ? <Loader2 size={13} className="animate-spin" /> : <Boxes size={13} />}
@@ -69,7 +63,7 @@ export function PrdSubsystemPanel(props: { prd: string }) {
         </button>
       </div>
 
-      <div className="px-4 py-3">
+      <div>
         {error && <div className="text-xs text-red-600">分解失败:{error}</div>}
         {!resp && !error && (
           <div className="text-xs text-slate-500">

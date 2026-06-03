@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check } from "lucide-react";
+import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check, ShieldCheck, Boxes } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -14,6 +14,7 @@ import { savePrdVersion, loadPrdVersions } from "./snapshot";
 import type { PrdVersion } from "./snapshot";
 import { PrdQualityReportPanel } from "./PrdQualityReportPanel";
 import { PrdSubsystemPanel } from "./PrdSubsystemPanel";
+import { PrdToolDrawer } from "./PrdToolDrawer";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
 // ─── PRD history (populated from persisted versions) ──────────────────────
@@ -151,6 +152,7 @@ export function PrdUI(props: StepUIProps) {
   const nextStep = getNextStep("prd", tier);
 
   const [editInput, setEditInput] = useState("");
+  const [tool, setTool] = useState<"quality" | "subsystem" | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSavingDoc, setIsSavingDoc] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
@@ -592,14 +594,31 @@ export function PrdUI(props: StepUIProps) {
       </div>
 
       {!isManualEditing && content?.trim() && (
-        <div className="px-8 py-4 border-t border-slate-200 bg-white flex flex-col gap-4 shrink-0 max-h-[45vh] overflow-y-auto">
-          <PrdQualityReportPanel
-            prd={stripChangeMarkers(content)}
-            spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
-            onApplyFix={(instruction) => setEditInput(instruction)}
-          />
-          <PrdSubsystemPanel prd={stripChangeMarkers(content)} />
-        </div>
+        <>
+          <PrdToolDrawer
+            open={tool === "quality"}
+            onClose={() => setTool(null)}
+            title="PRD 质量校验"
+            icon={<ShieldCheck size={16} className="text-indigo-600" />}
+          >
+            <PrdQualityReportPanel
+              prd={stripChangeMarkers(content)}
+              spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
+              onApplyFix={(instruction) => {
+                setEditInput(instruction);
+                setTool(null);
+              }}
+            />
+          </PrdToolDrawer>
+          <PrdToolDrawer
+            open={tool === "subsystem"}
+            onClose={() => setTool(null)}
+            title="子系统分解(DDD 领域)"
+            icon={<Boxes size={16} className="text-violet-600" />}
+          >
+            <PrdSubsystemPanel prd={stripChangeMarkers(content)} />
+          </PrdToolDrawer>
+        </>
       )}
 
       {isManualEditing ? (
@@ -631,6 +650,28 @@ export function PrdUI(props: StepUIProps) {
         onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning || confirmCooldown) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
         placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning || confirmCooldown}
         actions={<div className="flex items-center gap-3 shrink-0">
+          {content?.trim() && (
+            <button
+              type="button"
+              onClick={() => setTool("quality")}
+              title="PRD 质量校验(确定性 + AI 语义评审)"
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-indigo-200 text-indigo-700 text-sm font-medium hover:bg-indigo-50 shrink-0"
+            >
+              <ShieldCheck size={15} /> 校验
+            </button>
+          )}
+          {content?.trim() &&
+            ((content.split("\n").length >= 1500) ||
+              ((content.match(/^##\s+\S/gm)?.length ?? 0) >= 8)) && (
+              <button
+                type="button"
+                onClick={() => setTool("subsystem")}
+                title="按 DDD 业务域拆分大型 PRD"
+                className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-violet-200 text-violet-700 text-sm font-medium hover:bg-violet-50 shrink-0"
+              >
+                <Boxes size={15} /> 子系统
+              </button>
+            )}
           {error && !isThisRunning && (
             <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
           )}
