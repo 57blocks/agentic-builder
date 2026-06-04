@@ -56,7 +56,7 @@ export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void })
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <span className="text-xs text-slate-500">{size.lines} lines · {size.h2} sections — split by business domain, shared foundation first, layered build</span>
+        <span className="text-xs text-slate-500">{size.lines} lines · {size.h2} sections</span>
         <button onClick={run} disabled={loading || !props.prd?.trim()}
           className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[4px] bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
           {loading ? <Loader2 size={13} className="animate-spin" /> : <Boxes size={13} />}
@@ -66,11 +66,6 @@ export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void })
 
       <div>
         {error && <div className="text-xs text-red-600">Decompose failed: {error}</div>}
-        {!resp && !error && (
-          <div className="text-xs text-slate-500">
-            Splits the PRD’s routes / endpoints / collections by DDD business domain (auth / enrollment / billing / approvals …) into a domain manifest + dependency DAG, saved to <code>.blueprint/subsystems.json</code>. Does not modify the PRD or run codegen.
-          </div>
-        )}
 
         {resp && (
           <div className="flex flex-col gap-3">
