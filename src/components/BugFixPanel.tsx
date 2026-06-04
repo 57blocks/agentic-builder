@@ -1006,7 +1006,8 @@ export default function BugFixPanel({ onNavigate }: { onNavigate?: (stepId: Step
     for (let i = 0; i < fixedBugs.length; i++) {
       const bug = fixedBugs[i];
       setE2eAllProgress({ current: i + 1, total: fixedBugs.length });
-      setRows((prev) => prev.map((r) => r.id === bug.id ? { ...r, e2eTesting: true, e2eVerification: undefined } : r));
+      setRows((prev) => prev.map((r) => r.id === bug.id ? { ...r, e2eTesting: true, e2eVerification: undefined, logs: [] } : r));
+      addLog(`[E2E ${i + 1}/${fixedBugs.length}] ${bug.title}`, "info");
       try {
         const res = await fetch("/api/agents/bug-fix-e2e", {
           method: "POST",
@@ -1025,15 +1026,27 @@ export default function BugFixPanel({ onNavigate }: { onNavigate?: (stepId: Step
           buf = parts.pop() ?? "";
           for (const part of parts) {
             if (!part.startsWith("data: ")) continue;
-            const msg = JSON.parse(part.slice(6)) as { type: string; result?: unknown };
-            if (msg.type === "done") {
+            const msg = JSON.parse(part.slice(6)) as { type: string; event?: E2eProgressEvent; result?: unknown; error?: string };
+            if (msg.type === "progress" && msg.event) {
+              const ev = msg.event;
+              if (ev.type === "start")            appendBugLog(bug.id, { kind: "info",  text: ev.message });
+              else if (ev.type === "tool_call")   appendBugLog(bug.id, { kind: "read",  text: `${ev.toolName}  ${JSON.stringify(ev.args).slice(0, 80)}` });
+              else if (ev.type === "tool_result") appendBugLog(bug.id, { kind: ev.ok ? "write" : "error", text: `${ev.toolName}: ${ev.text.slice(0, 200)}` });
+              else if (ev.type === "error")       appendBugLog(bug.id, { kind: "error", text: ev.message });
+              else if (ev.type === "verdict")     appendBugLog(bug.id, { kind: "done",  text: `Verdict: ${ev.verdict.verdict} (${Math.round(ev.verdict.confidence * 100)}%) — ${ev.verdict.reasoning}` });
+            } else if (msg.type === "done") {
+              appendBugLog(bug.id, { kind: "done", text: "E2E test complete." });
               setRows((prev) => prev.map((r) => r.id === bug.id
                 ? { ...r, e2eTesting: false, e2eVerification: msg.result as BugVerificationResult }
                 : r));
+            } else if (msg.type === "error") {
+              appendBugLog(bug.id, { kind: "error", text: `Fatal: ${msg.error ?? "unknown"}` });
             }
           }
         }
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        appendBugLog(bug.id, { kind: "error", text: err instanceof Error ? err.message : String(err) });
+      }
       finally {
         setRows((prev) => prev.map((r) => r.id === bug.id && r.e2eTesting ? { ...r, e2eTesting: false } : r));
       }
