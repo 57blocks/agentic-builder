@@ -24,6 +24,7 @@ export { createJsonlRepairSink } from "./jsonl-sink";
 export {
   runFeatureChecklistAudit,
 } from "./feature-checklist-audit";
+export { auditFrontendWiring } from "./wiring-audit";
 export type {
   AuditEntry,
   AuditTaskSummary,

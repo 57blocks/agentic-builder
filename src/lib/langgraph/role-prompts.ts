@@ -380,6 +380,7 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `- Every list/table/grid that shows backend data MUST fetch via the API client. No hardcoded arrays, no mock data, no \`useState([{ id: 1, ... }])\` placeholder initialization.`,
     `- Use \`useEffect\` + loading/error state for all data fetching. Read \`frontend/src/api/client.ts\` first to confirm method signatures.`,
     `- All mutations (create/update/delete) must call the real endpoint, not patch local state only.`,
+    `- **Interaction wiring (HARD RULE):** every interactive control you render (button, form, toggle, select, link) MUST have a non-empty handler that performs its declared effect — call the API client method, navigate via the router, and/or update state. NEVER ship an inert control: no \`onClick={() => {}}\`, no \`onClick={undefined}\`, no button without a handler, no form without an onSubmit that calls an endpoint. If the PRD Spec lists a \`CMP-*\` with an \`interaction → effect\`, that effect MUST be implemented end-to-end (trigger → handler → API/nav/state). A button that just sits there is an incomplete task.`,
     `- Wrap awaited calls driving loading state with a min-duration helper (~400 ms) so spinners stay visible long enough for E2E assertions.`,
     ``,
     NULL_SAFE_ARRAY_RULE,

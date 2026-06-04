@@ -65,6 +65,15 @@ export function pickPrdSpecEntriesForTask(
     "and `CMP-*` listed here MUST map to a matching view / component in the",
     "generated code (e.g. a route file, a React component, or wiring code).",
     "",
+    "**Each interactive component below is a WIRING OBLIGATION, not just a",
+    "visual element.** For every `CMP-*` you render you MUST implement a",
+    "non-empty handler that performs its `interaction → effect`: call the real",
+    "API client method, navigate, and/or update state as the effect describes.",
+    "A control that renders but does nothing (empty `onClick`, no submit",
+    "handler, dead nav) is INCOMPLETE and will fail the wiring audit. Read",
+    "`frontend/src/api/client.ts` and `frontend/src/router.tsx` to wire to the",
+    "real method/route.",
+    "",
   ];
   for (const { page, cmpFilter } of relevantPages) {
     lines.push(

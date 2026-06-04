@@ -76,6 +76,7 @@ import {
   registerRepairEmitter,
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
+  auditFrontendWiring,
   dispatchAuditRepair,
   AttemptTracker,
   escalateRepairCircuit,
@@ -1766,6 +1767,30 @@ export async function POST(request: NextRequest) {
             sessionId,
             emitter: repairEmitter,
           });
+
+          // Phase 3a — interaction-wiring audit. Flags dangling controls
+          // (empty handlers / interactive page with no handlers) so they get
+          // repaired alongside missing-requirement findings. These are
+          // `partial` verdicts: they drive a repair but never flip the audit's
+          // `passed` (not added to hardUncovered), so a false positive costs at
+          // most one bounded repair pass.
+          const wiringFindings = await auditFrontendWiring({
+            tasks: codingTasks,
+            taskResults: auditTaskResults,
+            prdSpec,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+          });
+          if (wiringFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = wiringFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
 
           if (finalAudit.uncovered.length > 0) {
             const dispatchResult = await dispatchAuditRepair({
