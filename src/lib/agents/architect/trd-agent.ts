@@ -13,6 +13,7 @@ import type { AuthDecision } from "./auth-decision-types";
 import type { SubsystemManifest } from "@/lib/pipeline/subsystems/types";
 import { TRD_GENERATION_CONTRACTS_PROMPT } from "./trd-generation-contracts";
 import { renderAuthoritativeAuthDecisionBlock } from "./trd-auth-block";
+import { renderScaffoldFoundationBlock } from "./trd-scaffold-block";
 
 const SYSTEM_PROMPT = `You are a senior Technical Architect Agent.
 
@@ -71,11 +72,18 @@ ${TRD_GENERATION_CONTRACTS_PROMPT}
 ### 3.1 Services
 | Service | Responsibility | Tech |
 |---------|---------------|------|
+(If a "Subsystem decomposition" block is provided in the context, §3.1 MUST list
+ONE service per business-domain from that block — using the domain name — and
+nothing else; each service's responsibility is scoped to what that domain owns.)
 ### 3.2 Data Models
-(Core tables/collections with key columns and notes.)
+(Core tables/collections with key columns and notes. When a subsystem
+decomposition is provided, group tables by their owning domain; shared/global
+tables belong to the foundation.)
 ### 3.3 API Specification Summary
 | Group | Base Path | Key Endpoints |
 |-------|-----------|---------------|
+(When a subsystem decomposition is provided, each Group MUST be a business-domain
+from it, and every endpoint must appear under the domain that owns it.)
 ### 3.4 File / Data Format
 (Open format spec if applicable; schema versioning strategy.)
 
@@ -459,10 +467,16 @@ export class TRDAgent extends BaseAgent {
      *  the user-selected (or PRD-decided-default) auth mode rather than the
      *  LLM's free-form guess from PRD text. */
     authDecision?: AuthDecision | null,
+    /** Business-domain decomposition (.blueprint/subsystems.json). When present,
+     *  the architect shapes §3 services/APIs around these domains instead of
+     *  inventing its own split. */
+    subsystemManifest?: SubsystemManifest | null,
   ) {
+    const scaffoldBlock = renderScaffoldFoundationBlock(tier);
     const domainBlock = renderAuthoritativeDomainBlock(prdSpec?.domain);
     const authBlock = renderAuthoritativeAuthDecisionBlock(authDecision);
-    const augmentedContext = [additionalContext, domainBlock, authBlock]
+    const subsystemBlock = renderSubsystemArchitectureBlock(subsystemManifest);
+    const augmentedContext = [additionalContext, scaffoldBlock, domainBlock, authBlock, subsystemBlock]
       .filter((s) => s && s.trim().length > 0)
       .join("\n\n");
     // Tier line is the very first thing the model sees in the user message —
@@ -544,6 +558,65 @@ export function renderAuthoritativeRulesBlock(
     if (r.type === "other" && r.formula) {
       lines.push(`    formula: ${yamlString(r.formula)}`);
     }
+  }
+  lines.push("```");
+  return lines.join("\n");
+}
+
+/** Cap on endpoints/routes listed per domain (avoid blowing the prompt). */
+const MAX_OWNED_PER_DOMAIN = 18;
+
+/**
+ * Render the business-domain (subsystem) decomposition from
+ * `.blueprint/subsystems.json` as an authoritative architecture block for the
+ * TRD prompt. When present, the architect MUST shape §3.1 Services and §3.3 API
+ * groups around these domains (one service boundary per domain, owning its own
+ * routes/endpoints/collections) and document cross-domain calls per `dependsOn`
+ * — instead of inventing an ad-hoc service split. Returns "" when there is no
+ * (or an empty) manifest, so non-subsystem projects keep the plain flow.
+ */
+export function renderSubsystemArchitectureBlock(
+  manifest: SubsystemManifest | undefined | null,
+): string {
+  const subsystems = manifest?.subsystems;
+  if (!subsystems || subsystems.length === 0) return "";
+
+  const cap = (xs: string[]): string => {
+    if (xs.length === 0) return "(none)";
+    if (xs.length <= MAX_OWNED_PER_DOMAIN) return xs.join(", ");
+    const shown = xs.slice(0, MAX_OWNED_PER_DOMAIN).join(", ");
+    return `${shown}, +${xs.length - MAX_OWNED_PER_DOMAIN} more (cover ALL of them)`;
+  };
+
+  const lines: string[] = [
+    "## Subsystem decomposition (AUTHORITATIVE architecture)",
+    "",
+    `This system was decomposed into ${subsystems.length} business-domain subsystems.`,
+    "This decomposition is AUTHORITATIVE — reflect it in the TRD, do NOT invent a",
+    "different service split:",
+    "- §3.1 Services → list ONE service boundary per domain below (use the domain",
+    "  name), with its responsibility scoped to what it owns.",
+    "- §3.3 API Specification Summary → group endpoints by their owning domain;",
+    "  every endpoint must live in exactly the domain that owns it here.",
+    "- §3.2 Data Models → group collections/tables by owning domain; shared/global",
+    "  tables belong to the foundation, not a domain.",
+    "- Cross-domain access MUST go through documented contracts following each",
+    "  domain's `depends on` — never reach into another domain's tables directly.",
+    "- Build order follows the dependency graph (a domain is built after the",
+    "  domains it depends on); the shared foundation is built first.",
+    "",
+    "```yaml",
+    "subsystems:",
+  ];
+  for (const s of subsystems) {
+    lines.push(`  - id: ${yamlSafe(s.id)}`);
+    lines.push(`    name: ${yamlString(s.name)}`);
+    if (s.description) lines.push(`    description: ${yamlString(s.description)}`);
+    lines.push(`    dependsOn: [${s.dependsOn.join(", ")}]`);
+    lines.push(`    ownedApiEndpoints: ${cap(s.ownedApiEndpoints)}`);
+    lines.push(`    ownedRoutes: ${cap(s.ownedRoutes)}`);
+    lines.push(`    ownedCollections: ${cap(s.ownedCollections)}`);
+    if (s.ownedModules.length > 0) lines.push(`    ownedModules: ${cap(s.ownedModules)}`);
   }
   lines.push("```");
   return lines.join("\n");
