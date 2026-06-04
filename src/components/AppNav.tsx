@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, LogOut, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
@@ -467,10 +467,10 @@ export default function AppNav() {
             <button
               type="button"
               onClick={() => void handleLogout()}
-              className="ml-auto text-[11px] text-slate-400 hover:text-slate-600 transition-colors"
+              className="ml-auto p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
               title="Sign out"
             >
-              Sign out
+              <LogOut size={14} />
             </button>
           )}
         </div>
