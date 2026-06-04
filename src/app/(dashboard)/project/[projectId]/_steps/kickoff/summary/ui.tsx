@@ -8,7 +8,7 @@ import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-ta
 import type { ResourceRequirement } from "@/lib/pipeline/resource-requirements";
 import type { SkillTraceRecord } from "@/lib/agents/skills";
 import type { StepUIProps } from "../../_shared/types";
-import { SkillsTracePanel } from "./SkillsTracePanel";
+import { SkillsTracePanel } from "../overview/SkillsTracePanel";
 import InfraSection, { type InfraMeta } from "@/components/kickoff/InfraSection";
 
 const PAGE_SIZE = 8;

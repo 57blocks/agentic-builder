@@ -167,6 +167,17 @@ export async function updateProjectName(
   return { forbidden: false };
 }
 
+/** Set a project's cover/thumbnail image path (`projects.cover_image_path`). */
+export async function updateProjectCover(
+  projectId: string,
+  coverImagePath: string,
+): Promise<void> {
+  await db
+    .update(projects)
+    .set({ coverImagePath })
+    .where(eq(projects.id, projectId));
+}
+
 /**
  * Delete a project. FK cascades on child tables (project_stage_state,
  * project_step_snapshot, memory rows with this projectId, etc.) handle
