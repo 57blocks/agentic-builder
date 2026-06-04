@@ -67,7 +67,7 @@ Add a `users` pgTable matching the SQL above.
 
 ### Credentials
 
-- **Client ID:** `120544553313-5hs7kf49ad64of83g04jns2u6kl5cfv7.apps.googleusercontent.com`
+- **Client ID:** `YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com`
 - **Client Secret:** stored in `GOOGLE_CLIENT_SECRET` env var (never hard-coded)
 - **App type:** Installed (desktop) — Google allows any `localhost` port for this type
 - **Redirect URI:** `http://localhost:3000/api/auth/callback/google`
@@ -199,7 +199,7 @@ The `AppNav` sidebar gets a logout button (inspect during implementation; add if
 
 ```env
 # Google OAuth (installed app)
-GOOGLE_CLIENT_ID=120544553313-5hs7kf49ad64of83g04jns2u6kl5cfv7.apps.googleusercontent.com
+GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=       # GOCSPX-... — set in .env.local only, never commit
 ```
 
