@@ -241,6 +241,9 @@ export default function AppNav() {
               // This prevents stale localStorage data (from the persist middleware)
               // from showing a different name than what /api/projects returns.
               const displayName = project.name;
+              const dirBasename = project.codeOutputDir
+                ? project.codeOutputDir.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? ""
+                : "";
               const stageMeta = isCurrentStageProject
                 ? STAGE_META[activeStage as StageId]
                 : null;
@@ -281,7 +284,7 @@ export default function AppNav() {
                     <Link
                       href={href}
                       className="flex items-center justify-center"
-                      title={displayName}
+                      title={dirBasename ? `${displayName}\n${project.codeOutputDir}` : displayName}
                     >
                       <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
                         <FileIcon />
@@ -295,8 +298,18 @@ export default function AppNav() {
                       <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
                         <FileIcon />
                       </span>
-                      <span className={`text-[13px] tracking-[-0.3px] truncate transition-colors font-medium ${isActive ? "text-slate-900" : "text-slate-700 group-hover:text-slate-900"}`}>
-                        {displayName}
+                      <span className="flex flex-col min-w-0">
+                        <span className={`text-[13px] tracking-[-0.3px] truncate transition-colors font-medium ${isActive ? "text-slate-900" : "text-slate-700 group-hover:text-slate-900"}`}>
+                          {displayName}
+                        </span>
+                        {dirBasename && (
+                          <span
+                            className="text-[11px] text-slate-400 truncate"
+                            title={project.codeOutputDir}
+                          >
+                            {dirBasename}
+                          </span>
+                        )}
                       </span>
                     </Link>
                   )}
