@@ -58,6 +58,13 @@ export interface AuditEntry {
   coveringTaskIds: string[];
   /** File:line-ish evidence strings for `implemented` verdicts. */
   evidence: string[];
+  /**
+   * What kind of gap this is, so the repair dispatcher can pick the right
+   * instructions. "coverage" (default/undefined) = the requirement may be
+   * missing entirely → backfill. "wiring" = the control EXISTS but its
+   * behaviour is dead/unwired → wire the existing control's handler.
+   */
+  category?: "coverage" | "wiring";
 }
 
 export interface FeatureChecklistAuditInput {

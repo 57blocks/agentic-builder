@@ -256,34 +256,74 @@ function buildRepairTask(
   const phase =
     role === "frontend" ? "Frontend" : "Backend Services";
 
-  const description = [
-    `The post-generation feature audit reported that these PRD requirement IDs are`,
-    `not implemented in the current codebase:`,
-    "",
-    ...entries.map((e) => {
-      const ev = e.evidence.length > 0 ? ` (evidence: ${e.evidence[0]})` : "";
-      return `- \`${e.id}\` — ${e.verdict}: ${e.reason}${ev}`;
-    }),
-    "",
-    `Your task is a TARGETED backfill. Read the project context and existing`,
-    `code before writing anything. For each uncovered id:`,
-    ``,
-    `  1. Locate the most appropriate existing file (controller, router,`,
-    `     view, service, model) and extend it in place where possible.`,
-    `  2. Only create new files when there is no plausible existing home.`,
-    `  3. Do NOT rewrite or delete code that already implements OTHER PRD`,
-    `     requirements — this is an additive backfill.`,
-    `  4. Do NOT modify scaffold files listed in scaffoldProtectedPaths.`,
-    ``,
-    `Use real endpoints / routes / types already present in the project.`,
-    `For frontend backfill, read \`frontend/src/api/client.ts\` and any`,
-    `backend route files to discover real endpoints before coding.`,
-  ].join("\n");
+  // Partition: wiring repairs (control exists but its behaviour is dead) need
+  // different instructions than coverage backfill (feature may be missing).
+  const wiringEntries = entries.filter((e) => e.category === "wiring");
+  const coverageEntries = entries.filter((e) => e.category !== "wiring");
+
+  const renderEntry = (e: AuditEntry): string => {
+    const ev = e.evidence.length > 0 ? ` (evidence: ${e.evidence[0]})` : "";
+    return `- \`${e.id}\` — ${e.verdict}: ${e.reason}${ev}`;
+  };
+
+  const sections: string[] = [];
+
+  if (coverageEntries.length > 0) {
+    sections.push(
+      `The post-generation feature audit reported that these PRD requirement IDs are`,
+      `not implemented in the current codebase:`,
+      "",
+      ...coverageEntries.map(renderEntry),
+      "",
+      `Your task is a TARGETED backfill. Read the project context and existing`,
+      `code before writing anything. For each uncovered id:`,
+      ``,
+      `  1. Locate the most appropriate existing file (controller, router,`,
+      `     view, service, model) and extend it in place where possible.`,
+      `  2. Only create new files when there is no plausible existing home.`,
+      `  3. Do NOT rewrite or delete code that already implements OTHER PRD`,
+      `     requirements — this is an additive backfill.`,
+      `  4. Do NOT modify scaffold files listed in scaffoldProtectedPaths.`,
+      ``,
+      `Use real endpoints / routes / types already present in the project.`,
+      `For frontend backfill, read \`frontend/src/api/client.ts\` and any`,
+      `backend route files to discover real endpoints before coding.`,
+    );
+  }
+
+  if (wiringEntries.length > 0) {
+    if (sections.length > 0) sections.push("", "---", "");
+    sections.push(
+      `INTERACTION WIRING REPAIR — these controls ALREADY EXIST in the`,
+      `generated UI but their behaviour is dead or missing (empty handler, no`,
+      `onClick/onSubmit, or no event handler at all). This is NOT a missing`,
+      `feature — do NOT recreate or rewrite the page.`,
+      "",
+      ...wiringEntries.map(renderEntry),
+      "",
+      `For each item:`,
+      ``,
+      `  1. Find the EXISTING rendered control on its page (by the component`,
+      `     name / id in the finding). Do not add a duplicate.`,
+      `  2. Implement a NON-EMPTY handler that performs the stated effect:`,
+      `     call the real API client method with the correct payload, navigate`,
+      `     via the router to the target route, and/or update state — exactly`,
+      `     as the "→ effect" in the finding describes.`,
+      `  3. Read \`frontend/src/api/client.ts\` for the real method signature`,
+      `     and \`frontend/src/router.tsx\` for the real route before wiring.`,
+      `  4. Add loading/error handling for any awaited call.`,
+      `  5. Make the minimal edit to the existing view/component file — do NOT`,
+      `     touch unrelated code or scaffold-protected files.`,
+    );
+  }
+
+  const description = sections.join("\n");
+  const onlyWiring = wiringEntries.length > 0 && coverageEntries.length === 0;
 
   return {
     id,
     phase,
-    title: `Backfill uncovered features (${role}): ${ids.slice(0, 4).join(", ")}${ids.length > 4 ? ` …+${ids.length - 4}` : ""}`,
+    title: `${onlyWiring ? "Wire dangling controls" : "Backfill uncovered features"} (${role}): ${ids.slice(0, 4).join(", ")}${ids.length > 4 ? ` …+${ids.length - 4}` : ""}`,
     description,
     estimatedHours: 4,
     executionKind: "ai_autonomous",

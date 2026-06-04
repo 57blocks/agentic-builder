@@ -85,6 +85,7 @@ export async function auditFrontendWiring(
         reason: `Interaction wiring incomplete — ${finding.message}`,
         coveringTaskIds: [task.id],
         evidence: [],
+        category: "wiring",
       });
     }
   }
