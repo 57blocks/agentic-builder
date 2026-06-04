@@ -72,6 +72,11 @@ const OPENROUTER_MODEL_CONFIG = {
    *  writer (`prd` / `prdSpecExtract`) so it doesn't share the author's blind
    *  spots. Cross-vendor (Claude) judge of PRD buildability/completeness. */
   prdReviewer: "claude-sonnet-4",
+  /** Feature-checklist audit L3 judge — reads the generated code behind a PRD id
+   *  that L1/L2 could only mark `partial`, and renders a functional verdict
+   *  (implemented | partial | missing) + gap category (coverage | wiring). Small,
+   *  high-volume, JSON-only task → a cheap-but-capable model. */
+  featureAuditJudge: "openai/gpt-5.4-mini",
   sysdesign: "gpt-4o",
   implguide: "gpt-4o",
   design: "openai/gpt-5.4",
@@ -163,6 +168,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   trdReviewer: "claude-sonnet-4",
   // PRD reviewer — cross-vendor (non-DeepSeek) judge, like trdReviewer.
   prdReviewer: "claude-sonnet-4",
+  // Feature-audit L3 judge — cheap code-reading judge; DeepSeek direct is fine.
+  featureAuditJudge: DEEPSEEK_DIRECT_MODEL,
   sysdesign: DEEPSEEK_DIRECT_MODEL,
   implguide: DEEPSEEK_DIRECT_MODEL,
   design: DEEPSEEK_DIRECT_MODEL,

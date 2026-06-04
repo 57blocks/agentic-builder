@@ -32,6 +32,15 @@ export type {
   FeatureChecklistAuditInput,
   FeatureChecklistAuditResult,
 } from "./feature-checklist-audit";
+export { judgeFeatureEntries, isL3Enabled } from "./feature-audit-judge";
+export type {
+  JudgeVerdict,
+  JudgeCategory,
+  JudgeFeatureEntry,
+  JudgeFeatureVerdict,
+  JudgeFeatureEntriesInput,
+  JudgeFeatureEntriesResult,
+} from "./feature-audit-judge";
 export { repairTaskCoverage } from "./task-coverage-repair";
 export type {
   TaskCoverageRepairInput,

@@ -6,10 +6,8 @@
  * compiles / builds. Neither of these proves that the actual generated code
  * implements the feature. This module closes that loop.
  *
- * The audit runs in three layers. Only L1 and L2 are implemented in this
- * first pass — they are cheap enough to always run and catch the most
- * common "declared but not implemented" class of failures. L3 (LLM judge)
- * is scoped in the types for future work.
+ * The audit runs in three layers. L1 and L2 are deterministic and always run;
+ * L3 is an LLM judge that only fires on L2's ambiguous `partial` bucket.
  *
  *   L1 — Structural evidence:
  *     Every requirement ID that at least one task claims to cover must have
@@ -21,11 +19,16 @@
  *     ID (e.g. `// AC-003`, `FR-DASH-12`, a PAGE-* / CMP-* mention, or the
  *     kebab/camel form of a PrdSpec page/component name). A hit is strong
  *     evidence that the developer addressed the id. No hit is a soft
- *     signal — L3 would disambiguate; for now we mark it as `partial`.
+ *     signal — L3 disambiguates it; without L3 it stays `partial`.
  *
- *   L3 — Judge agent:
- *     (Future) Run a cheap LLM that reads the relevant files and renders a
- *     verdict: implemented | partial | missing, with file:line evidence.
+ *   L3 — Judge agent (see feature-audit-judge.ts):
+ *     For every `partial` id, hand the covering tasks' actual code to a cheap
+ *     LLM and get a FUNCTIONAL verdict: implemented | partial | missing, plus a
+ *     gap category (coverage vs wiring — "control exists but its behaviour is
+ *     dead"). This is what tells "button placed but never wired" apart from
+ *     "implemented, just no `// FR-X` comment". Bounded cost (only runs when
+ *     there are partials), behind a kill switch (FEATURE_AUDIT_L3=0), and
+ *     degrades to the L2 verdict on any failure.
  */
 
 import fs from "fs/promises";
@@ -36,6 +39,12 @@ import type {
 } from "@/lib/requirements/prd-spec-types";
 import type { KickoffWorkItem } from "@/lib/pipeline/types";
 import type { RepairEmitter } from "./events";
+import {
+  judgeFeatureEntries,
+  type JudgeFeatureEntry,
+  type JudgeFeatureEntriesInput,
+  type JudgeFeatureEntriesResult,
+} from "./feature-audit-judge";
 
 export interface AuditTaskSummary {
   id: string;
@@ -51,8 +60,9 @@ export type AuditVerdict = "implemented" | "partial" | "missing";
 export interface AuditEntry {
   id: string;
   verdict: AuditVerdict;
-  /** Which layer reached this verdict: l1 (structural) or l2 (anchor). */
-  layer: "l1" | "l2";
+  /** Which layer reached this verdict: l1 (structural), l2 (anchor), or l3
+   *  (functional LLM judge — upgrades/confirms an l2 `partial`). */
+  layer: "l1" | "l2" | "l3";
   reason: string;
   /** Task ids that claimed to cover this id. */
   coveringTaskIds: string[];
@@ -75,6 +85,12 @@ export interface FeatureChecklistAuditInput {
   outputDir: string;
   sessionId?: string;
   emitter: RepairEmitter;
+  /** Test seam: inject the L3 judge so unit tests stay hermetic (no LLM). When
+   *  omitted, the real `judgeFeatureEntries` runs (itself a no-op when there are
+   *  no `partial` entries or when FEATURE_AUDIT_L3 is disabled). */
+  judgeImpl?: (
+    input: JudgeFeatureEntriesInput,
+  ) => Promise<JudgeFeatureEntriesResult>;
 }
 
 export interface FeatureChecklistAuditResult {
@@ -219,6 +235,21 @@ export async function runFeatureChecklistAudit(
     }
   }
 
+  // L3 — functional LLM judge over the ambiguous `partial` bucket. Reads the
+  // covering tasks' actual code and upgrades each `partial` to a real verdict
+  // (implemented / partial / missing) with a gap category (coverage | wiring).
+  // No-op when there are no partials or when disabled.
+  await runL3Judge({
+    entries,
+    idToTaskIds,
+    resultsById,
+    prdSpec,
+    taskById,
+    outputDir,
+    emitter,
+    judgeImpl: input.judgeImpl,
+  });
+
   const uncovered = entries.filter((e) => e.verdict !== "implemented");
   // IC-xx IDs are interactive-component specs (e.g. "click Login button →
   // navigate to login page"). They are extracted from PRD interaction tables
@@ -249,6 +280,95 @@ export async function runFeatureChecklistAudit(
   });
 
   return { passed: hardUncovered.length === 0, entries, uncovered, hardUncovered };
+}
+
+/**
+ * Run the L3 functional judge over the `partial` entries (mutates `entries` in
+ * place — upgrading each judged `partial` to the LLM's verdict + category) and
+ * emits a summary event. Skips wholly when there is nothing partial to judge or
+ * the judge did not run (disabled / no LLM).
+ */
+async function runL3Judge(args: {
+  entries: AuditEntry[];
+  idToTaskIds: Map<string, string[]>;
+  resultsById: Map<string, AuditTaskSummary>;
+  prdSpec: PrdSpec | null | undefined;
+  taskById: Map<string, KickoffWorkItem>;
+  outputDir: string;
+  emitter: RepairEmitter;
+  judgeImpl?: (
+    input: JudgeFeatureEntriesInput,
+  ) => Promise<JudgeFeatureEntriesResult>;
+}): Promise<void> {
+  const {
+    entries,
+    idToTaskIds,
+    resultsById,
+    prdSpec,
+    taskById,
+    outputDir,
+    emitter,
+    judgeImpl,
+  } = args;
+
+  // Only the L2 `partial` bucket is ambiguous enough to be worth an LLM call.
+  const partials = entries.filter(
+    (e) => e.verdict === "partial" && e.layer === "l2",
+  );
+  if (partials.length === 0) return;
+
+  const judgeEntries: JudgeFeatureEntry[] = partials.map((e) => {
+    const taskIds = idToTaskIds.get(e.id) ?? e.coveringTaskIds;
+    const candidateFiles = new Set<string>();
+    for (const tid of taskIds) {
+      const r = resultsById.get(tid);
+      for (const f of r?.generatedFiles ?? []) candidateFiles.add(f);
+    }
+    return {
+      id: e.id,
+      labels: getAliasesForId(e.id, prdSpec, taskById),
+      coveringTaskIds: taskIds,
+      candidateFiles: [...candidateFiles],
+    };
+  });
+
+  const judge = judgeImpl ?? judgeFeatureEntries;
+  const result = await judge({ entries: judgeEntries, outputDir });
+  if (!result.ran) return;
+
+  const byId = new Map(partials.map((e) => [e.id, e] as const));
+  let upgraded = 0;
+  let confirmedMissing = 0;
+  let confirmedPartial = 0;
+  for (const [id, v] of result.verdicts) {
+    const entry = byId.get(id);
+    if (!entry) continue;
+    entry.layer = "l3";
+    entry.verdict = v.verdict;
+    entry.reason = v.reason;
+    entry.category = v.category;
+    if (v.evidence.length > 0) entry.evidence = v.evidence;
+    if (v.verdict === "implemented") upgraded += 1;
+    else if (v.verdict === "missing") confirmedMissing += 1;
+    else confirmedPartial += 1;
+  }
+
+  emitter({
+    stage: "post-gen-audit",
+    event: "audit_l3_judged",
+    details: {
+      judged: judgeEntries.length,
+      verdicts: result.verdicts.size,
+      upgradedToImplemented: upgraded,
+      confirmedPartial,
+      confirmedMissing,
+      wiringGaps: [...result.verdicts.values()].filter(
+        (v) => v.category === "wiring",
+      ).length,
+      model: result.model,
+      costUsd: result.costUsd,
+    },
+  });
 }
 
 /**
@@ -513,6 +633,9 @@ async function writeUncoveredReport(
   );
   lines.push(
     `- \`implemented\` (layer l2): at least one file contains an anchor matching the id (or its alias from the PRD Spec).`,
+  );
+  lines.push(
+    `- layer \`l3\`: an LLM judge read the covering tasks' actual code and rendered a functional verdict for an id L2 could only mark \`partial\`. A \`partial\`/\`missing\` l3 entry with \`category: wiring\` means the control EXISTS but its behaviour is dead (empty handler / no onClick) — repair should wire it, not recreate it.`,
   );
 
   await fs.writeFile(file, lines.join("\n") + "\n", "utf-8");
