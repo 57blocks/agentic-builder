@@ -50,7 +50,7 @@ import {
 } from "./code-output";
 import { runKickoffIntegrations } from "./kickoff-integrations";
 import { runSubsystemAwareTaskBreakdown } from "./subsystems/subsystem-aware-breakdown";
-import { writeSubsystemManifest } from "./subsystems/manifest-io";
+import { writeSubsystemManifest, readSubsystemManifest } from "./subsystems/manifest-io";
 import {
   copyDesignReferencesToOutput,
   formatDesignReferencesPromptBlock,
@@ -1297,17 +1297,31 @@ export class PipelineEngine {
         designReferenceEntries,
       );
 
-      const breakdownResult = await runSubsystemAwareTaskBreakdown({
-        prd: prdBody,
-        trd: trdBody || undefined,
-        sysDesign: sysDesignBody || undefined,
-        implGuide: implGuideBody || undefined,
-        designSpec: designSpecBody || undefined,
-        prdSpec,
-        sessionId: run.sessionId,
-        tier,
-        designReferencesBlock: designReferencesBlock || undefined,
-      });
+      // Safety net: a manifest the PRD step already split & persisted to
+      // .blueprint/subsystems.json. Used ONLY if this run's live decompose
+      // fails the split gate, so a one-off LLM hiccup doesn't silently drop a
+      // qualified project back to whole-system mode.
+      let persistedManifest = null;
+      try {
+        persistedManifest = await readSubsystemManifest(outputRoot);
+      } catch {
+        /* no persisted manifest — fine, the live decompose drives the split */
+      }
+
+      const breakdownResult = await runSubsystemAwareTaskBreakdown(
+        {
+          prd: prdBody,
+          trd: trdBody || undefined,
+          sysDesign: sysDesignBody || undefined,
+          implGuide: implGuideBody || undefined,
+          designSpec: designSpecBody || undefined,
+          prdSpec,
+          sessionId: run.sessionId,
+          tier,
+          designReferencesBlock: designReferencesBlock || undefined,
+        },
+        { fallbackManifest: persistedManifest },
+      );
       const {
         tasks: taskBreakdown,
         costUsd: tbCost,

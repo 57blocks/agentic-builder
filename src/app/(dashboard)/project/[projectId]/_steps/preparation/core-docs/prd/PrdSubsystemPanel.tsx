@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { Boxes, Loader2, CheckCircle2, AlertTriangle, GitBranch, ChevronRight } from "lucide-react";
 import { savePrdReadiness } from "./snapshot";
+import { usePipelineStore } from "@/store/pipeline-store";
 
 interface SubsystemView {
   id: string; name: string; description: string;
@@ -38,6 +39,7 @@ export function PrdSubsystemPanel(props: {
   /** Hydrated prior result (from prd step metadata) to re-render on revisit. */
   initialResult?: DecomposeResponse | null;
 }) {
+  const codeOutputDir = usePipelineStore((s) => s.codeOutputDir);
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<DecomposeResponse | null>(props.initialResult ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,9 @@ export function PrdSubsystemPanel(props: {
     try {
       const res = await fetch("/api/agents/pipeline/prd-subsystem-decompose", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prd: props.prd }),
+        // Write the manifest to the SAME output root the kickoff will read,
+        // so the engine's fallback (.blueprint/subsystems.json) finds it.
+        body: JSON.stringify({ prd: props.prd, codeOutputDir: codeOutputDir || undefined }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
