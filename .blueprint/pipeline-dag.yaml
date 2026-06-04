@@ -1,11 +1,27 @@
 version: 1
 pipelines:
-  - id: daily-admin-sync
-    description: "Deterministic daily synchronization and maintenance flow for admin-facing data"
-    schedule: { cron: "7,37 * * * *" }
+  - id: eventbrite-sync
+    description: "Fetch, normalize, and persist Eventbrite feed data."
+    schedule: { cron: "3,18,33,48 * * * *" }
     failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
     nodes:
-      - { id: fetch-eventbrite, service: Integration Service, function: syncEventbriteFeeds }
-      - { id: sync-marketing, service: Integration Service, function: syncMarketingSystems, dependsOn: [fetch-eventbrite] }
-      - { id: refresh-reports, service: Report Service, function: rebuildAdminAggregates, dependsOn: [sync-marketing] }
-      - { id: publish-notifications, service: Notification Service, function: enqueueSyncNotifications, dependsOn: [refresh-reports] }
+      - { id: fetch, service: admin-operations, function: fetchEventbriteFeeds }
+      - { id: normalize, service: admin-operations, function: normalizeEventbriteFeeds, dependsOn: [fetch] }
+      - { id: persist, service: admin-operations, function: persistEventbriteFeeds, dependsOn: [normalize] }
+      - { id: notify, service: messaging-notifications, function: fanoutEventbriteNotifications, dependsOn: [persist] }
+
+  - id: marketing-sync
+    description: "Fetch and persist Mailchimp / Constant Contact sync state."
+    schedule: { cron: "8,23,38,53 * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: skip-cycle }
+    nodes:
+      - { id: fetch, service: admin-operations, function: fetchMarketingSyncs }
+      - { id: normalize, service: admin-operations, function: normalizeMarketingSyncs, dependsOn: [fetch] }
+      - { id: persist, service: admin-operations, function: persistMarketingSyncs, dependsOn: [normalize] }
+
+  - id: approval-stale-lock-cleanup
+    description: "Release stale approval locks and restore pending review visibility."
+    schedule: { cron: "*/5 * * * *" }
+    failure: { strategy: continue, retries: 0, compensation: log-only }
+    nodes:
+      - { id: release, service: approvals, function: releaseStaleApprovalLocks }

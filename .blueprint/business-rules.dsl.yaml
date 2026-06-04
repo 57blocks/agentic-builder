@@ -1,99 +1,95 @@
 version: 1
 rules:
-  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-1
-    name: "Enrollment deadline gating"
-    description: "Disable enrollment actions once the deadline has passed."
-    type: piecewise-linear
-    inputUnit: "days_remaining"
-    outputRange: [0, 100]
-    segments:
-      - { from: -365, to: 0, outputFrom: 0, outputTo: 0 }
-      - { from: 0, to: 365, outputFrom: 0, outputTo: 100 }
+    name: "Enrollment deadline gate"
+    description: "Disables enrollment actions once the deadline has passed."
+    type: decision-table
+    inputs:
+      - { name: enrollmentClosed, type: boolean }
+    output: { name: canEnroll, type: boolean }
+    cases:
+      - when: { enrollmentClosed: true }
+        then: false
+      - when: { }
+        then: true
 
-  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-2
-    name: "Class capacity gating"
-    description: "Model capacity pressure; full classes surface waitlist behavior."
+    name: "Class capacity gate"
+    description: "Routes full group classes into waitlist flow."
     type: decision-table
     inputs:
       - { name: enrolled, type: number }
       - { name: capacity, type: number }
     output: { name: enrollmentMode, type: string }
     cases:
-      - when: { enrolled: ">= capacity" }
+      - when: { enrolled_gte_capacity: true }
         then: "waitlist"
       - when: { }
         then: "direct"
 
-  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-3
-    name: "Policy version gating"
-    description: "Force re-sign when the current policy version changes."
+    name: "Policy version gate"
+    description: "Requires current policy signature before family actions."
     type: decision-table
     inputs:
-      - { name: signedVersion, type: string }
-      - { name: currentVersion, type: string }
-    output: { name: policyGate, type: string }
+      - { name: signedCurrentPolicy, type: boolean }
+    output: { name: canProceed, type: boolean }
     cases:
-      - when: { signedVersion: "!= currentVersion" }
-        then: "block"
+      - when: { signedCurrentPolicy: false }
+        then: false
       - when: { }
-        then: "allow"
+        then: true
 
-  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-4
-    name: "Refund window"
-    description: "Allow self-service refunds only within the configured 14-day window."
-    type: piecewise-linear
-    inputUnit: "days_since_payment"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 14, outputFrom: 100, outputTo: 100 }
-      - { from: 14, to: 365, outputFrom: 0, outputTo: 0 }
+    name: "Refund window gate"
+    description: "Allows refund requests only within the PRD refund window."
+    type: decision-table
+    inputs:
+      - { name: withinRefundWindow, type: boolean }
+    output: { name: canRequestRefund, type: boolean }
+    cases:
+      - when: { withinRefundWindow: false }
+        then: false
+      - when: { }
+        then: true
 
-  # PLACEHOLDER: thresholds inferred without authoritative source;
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
   # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-5
-    name: "Teacher availability overlap"
-    description: "Prevent overlapping availability slots for a single teacher."
+    name: "Teacher work-hour submission validation"
+    description: "Blocks submission until all records are confirmed and one month is selected."
+    type: decision-table
+    inputs:
+      - { name: allConfirmed, type: boolean }
+      - { name: oneMonthOnly, type: boolean }
+    output: { name: canSubmit, type: boolean }
+    cases:
+      - when: { allConfirmed: false }
+        then: false
+      - when: { oneMonthOnly: false }
+        then: false
+      - when: { }
+        then: true
+
+  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
+  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  - id: RULE-6
+    name: "Availability overlap gate"
+    description: "Rejects teacher availability slots that overlap existing slots."
     type: decision-table
     inputs:
       - { name: overlapsExistingSlot, type: boolean }
-    output: { name: slotAllowed, type: string }
+    output: { name: canSave, type: boolean }
     cases:
       - when: { overlapsExistingSlot: true }
-        then: "reject"
+        then: false
       - when: { }
-        then: "allow"
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RULE-6
-    name: "Room conflict blocking"
-    description: "Block course configuration when room/time/location conflicts exist."
-    type: decision-table
-    inputs:
-      - { name: roomConflict, type: boolean }
-    output: { name: saveAllowed, type: string }
-    cases:
-      - when: { roomConflict: true }
-        then: "reject"
-      - when: { }
-        then: "allow"
-
-  # PLACEHOLDER: thresholds inferred without authoritative source;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RULE-7
-    name: "Password minimum length"
-    description: "Require at least 6 characters for password changes and registration."
-    type: piecewise-linear
-    inputUnit: "characters"
-    outputRange: [0, 100]
-    segments:
-      - { from: 0, to: 6, outputFrom: 0, outputTo: 0 }
-      - { from: 6, to: 128, outputFrom: 100, outputTo: 100 }
+        then: true
