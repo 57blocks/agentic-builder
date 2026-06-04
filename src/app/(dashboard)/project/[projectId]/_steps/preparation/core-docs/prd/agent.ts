@@ -14,14 +14,16 @@ export const prdAgent: StepAgent = createPipelineSseAgent({
     codeOutputDir: ctx.codeOutputDir,
     sessionId: ctx.sessionId,
     pauseAfterPrd: true,
-    // Edit-only: re-run just the PRD step. Downstream is regenerated per-step
-    // (each step has its own Regenerate), and task-breakdown's Regenerate runs
-    // incrementally against the kickoff snapshot.
+    // Always forward the current PRD so the classifier honors its
+    // `**Project Tier: X**` badge — this is how a manual tier override (set in
+    // the PRD UI) survives a regenerate instead of being re-classified back.
+    ...(ctx.previousSteps.prd?.content
+      ? { existingPrd: ctx.previousSteps.prd.content }
+      : {}),
+    // Edit-only: re-run just the PRD step with an instruction. Downstream is
+    // regenerated per-step; task-breakdown's Regenerate runs incrementally.
     ...(ctx.editInstruction
-      ? {
-          prdEditInstruction: ctx.editInstruction,
-          existingPrd: ctx.previousSteps.prd?.content ?? "",
-        }
+      ? { prdEditInstruction: ctx.editInstruction }
       : {}),
     // Forward user-confirmed clarifications when present and we are not
     // in edit-only mode (edits bypass the intent gate).

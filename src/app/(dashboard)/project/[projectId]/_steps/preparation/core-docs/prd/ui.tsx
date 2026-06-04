@@ -185,6 +185,24 @@ const DOC_TABS: { id: DocTab; label: string }[] = [
   { id: "prd", label: "PRD" }, { id: "design", label: "Design Document" }, { id: "trd", label: "Technical Specs" }, { id: "qa", label: "QA Plan" },
 ];
 
+const TIER_FULL: Record<ProjectTier, string> = {
+  S: "Simple Frontend / single-page",
+  M: "Full-Stack Application",
+  L: "Enterprise / Complex Platform",
+};
+
+/** Replace (or insert) the `> **Project Tier: X**` badge line. The badge is
+ *  authoritative downstream (the classifier reads it), so a manual tier change
+ *  must rewrite it in the PRD content. */
+function setTierBadge(content: string, t: ProjectTier): string {
+  const line = `> **Project Tier: ${t}** — ${TIER_FULL[t]}`;
+  if (/\*\*Project Tier:\s*[SML]\*\*/i.test(content)) {
+    return content.replace(/^>?[ \t]*\*\*Project Tier:\s*[SML]\*\*.*$/im, line);
+  }
+  // No badge yet — insert right after the first H1 heading.
+  return content.replace(/^(#\s+.*)$/m, `$1\n\n${line}`);
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────
 export function PrdUI(props: StepUIProps) {
   // All state from step-store (single source of truth)
@@ -601,6 +619,52 @@ export function PrdUI(props: StepUIProps) {
 
   const handleTabChange = (tab: DocTab) => { if (tab !== "prd") props.onNavigate(tab); };
 
+  // ── Manual tier override ────────────────────────────────────────────
+  // Set S/M/L explicitly. Syncs the nav + step stores and the DB, and
+  // rewrites the PRD's `**Project Tier**` badge (authoritative downstream) so
+  // gating for TRD / SysDesign / DDD subsystem-split updates immediately.
+  const changeTier = (t: ProjectTier) => {
+    if (t === tier || isThisRunning) return;
+    useStepNavigationStore.getState().setTier(t);
+    useStepStore.getState().setTier(t);
+    if (props.projectSlug) {
+      fetch(`/api/projects/${props.projectSlug}/step-navigation`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: t }),
+      }).catch(() => {});
+    }
+    const cur = step?.content ?? "";
+    if (cur) {
+      const updated = setTierBadge(cur, t);
+      if (updated !== cur) {
+        setStepContent("prd", updated);
+        const codeOutputDir = useStepStore.getState().codeOutputDir;
+        fetch("/api/agents/save-doc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            docId: "prd",
+            content: stripChangeMarkers(updated),
+            codeOutputDir,
+          }),
+        }).catch(() => {});
+      }
+    }
+  };
+
+  // Regenerate the whole PRD at the currently selected tier (the classifier
+  // honors the badge we just wrote). Overwrites the current PRD.
+  const regenerateAtTier = () => {
+    if (isThisRunning || confirmCooldown) return;
+    const ok = window.confirm(
+      `按 ${tier} 级重新生成 PRD？当前 PRD 内容会被覆盖。`,
+    );
+    if (!ok) return;
+    setShowDiff(false);
+    void executeStep("prd");
+  };
+
   // ── Selection → edit target ─────────────────────────────────────────
   // When the user highlights text inside the rendered PRD, capture it as the
   // edit target. They then type WHAT to change in the input; the selection
@@ -712,14 +776,41 @@ export function PrdUI(props: StepUIProps) {
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="bg-indigo-50 text-indigo-600 text-[12px] font-normal px-2 py-[2px] rounded-[2px] font-['Space_Grotesk',sans-serif]">{isThisRunning ? "GENERATING…" : isDone ? "DRAFT V1.0" : "PENDING"}</span>
-                  {isDone && tier && (
-                    <span className={`text-[11px] font-semibold px-2 py-[2px] rounded-[2px] ${
-                      tier === "S" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                      tier === "M" ? "bg-blue-50 text-blue-700 border border-blue-200" :
-                                     "bg-orange-50 text-orange-700 border border-orange-200"
-                    }`}>
-                      {tier === "S" ? "S · Simple Frontend" : tier === "M" ? "M · Full-Stack App" : "L · Enterprise"}
-                    </span>
+                  {isDone && (
+                    <div
+                      className="flex items-center gap-1"
+                      title="项目分级。L 才会生成 TRD / 系统设计，并启用 DDD 子系统拆分。改了之后可点“重新生成”按该级别重写 PRD。"
+                    >
+                      <span className="text-[10px] text-slate-400 mr-0.5">TIER</span>
+                      {(["S", "M", "L"] as ProjectTier[]).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => changeTier(t)}
+                          disabled={isThisRunning}
+                          className={`text-[11px] font-semibold px-2 py-[2px] rounded-[3px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                            tier === t
+                              ? t === "S"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                                : t === "M"
+                                  ? "bg-blue-50 text-blue-700 border-blue-300"
+                                  : "bg-orange-50 text-orange-700 border-orange-300"
+                              : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50 hover:text-slate-600"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={regenerateAtTier}
+                        disabled={isThisRunning || confirmCooldown}
+                        className="ml-1 text-[11px] font-medium px-2 py-[2px] rounded-[3px] text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="按当前 TIER 重新生成整篇 PRD（覆盖当前内容）"
+                      >
+                        重新生成
+                      </button>
+                    </div>
                   )}
                   {isDone && <span className="text-[#94a3b8] text-[12px]">{step?.durationMs != null ? `Generated in ${(step.durationMs / 1000).toFixed(1)}s` : "Just now"}</span>}
                 </div>
