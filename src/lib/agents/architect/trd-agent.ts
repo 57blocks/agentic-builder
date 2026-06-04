@@ -10,6 +10,7 @@ import type {
 } from "@/lib/requirements/prd-spec-types";
 import type { ProjectTier } from "../shared/project-classifier";
 import type { AuthDecision } from "./auth-decision-types";
+import type { SubsystemManifest } from "@/lib/pipeline/subsystems/types";
 import { TRD_GENERATION_CONTRACTS_PROMPT } from "./trd-generation-contracts";
 import { renderAuthoritativeAuthDecisionBlock } from "./trd-auth-block";
 
@@ -459,9 +460,9 @@ export class TRDAgent extends BaseAgent {
      *  LLM's free-form guess from PRD text. */
     authDecision?: AuthDecision | null,
   ) {
-    const rulesBlock = renderAuthoritativeRulesBlock(prdSpec?.domain?.rules);
+    const domainBlock = renderAuthoritativeDomainBlock(prdSpec?.domain);
     const authBlock = renderAuthoritativeAuthDecisionBlock(authDecision);
-    const augmentedContext = [additionalContext, rulesBlock, authBlock]
+    const augmentedContext = [additionalContext, domainBlock, authBlock]
       .filter((s) => s && s.trim().length > 0)
       .join("\n\n");
     // Tier line is the very first thing the model sees in the user message —
@@ -546,6 +547,183 @@ export function renderAuthoritativeRulesBlock(
   }
   lines.push("```");
   return lines.join("\n");
+}
+
+/** Inline YAML object `{ k: v, ... }` for scalar-only records. */
+function yamlInline(
+  obj: Record<string, string | number | boolean | null>,
+): string {
+  const parts = Object.entries(obj).map(([k, v]) => {
+    if (v === null) return `${k}: null`;
+    if (typeof v === "number" || typeof v === "boolean") return `${k}: ${v}`;
+    return `${k}: ${yamlString(String(v))}`;
+  });
+  return `{ ${parts.join(", ")} }`;
+}
+
+const MAX_ENTITY_INSTANCES = 25;
+
+/**
+ * Render the FULL PRD-extracted domain spec (entities, variables, rules,
+ * dataSources, schedules, workflows, alerts) as an authoritative source block
+ * for the TRD prompt. Each block is tagged with the TRD section it feeds so the
+ * architect reflects the domain instead of inventing it. Returns "" when the
+ * domain is empty/undefined (prompt falls back to its plain PRD-driven flow).
+ */
+export function renderAuthoritativeDomainBlock(
+  domain: PrdDomainSpec | undefined | null,
+): string {
+  if (!domain) return "";
+  const count =
+    (domain.entities?.length ?? 0) +
+    (domain.variables?.length ?? 0) +
+    (domain.rules?.length ?? 0) +
+    (domain.dataSources?.length ?? 0) +
+    (domain.schedules?.length ?? 0) +
+    (domain.workflows?.length ?? 0) +
+    (domain.alerts?.length ?? 0);
+  if (count === 0) return "";
+
+  const out: string[] = [
+    "## PRD-provided domain spec (AUTHORITATIVE)",
+    "",
+    "These structured domain facts were extracted from the PRD. They are",
+    "AUTHORITATIVE — reflect each block in the noted TRD section. Do NOT invent,",
+    "rename, drop, or round any of them; copy ids / names / values verbatim.",
+    "",
+  ];
+
+  if (domain.entities?.length) {
+    out.push(
+      "```yaml",
+      "# entities → §3.2 Data Models: one table/collection per `type`; seed EVERY",
+      "#   instance as initial-data / fixtures.",
+      "entities:",
+    );
+    for (const e of domain.entities) {
+      out.push(`  - type: ${yamlString(e.type)}`);
+      const instances = e.instances ?? [];
+      out.push("    instances:");
+      for (const inst of instances.slice(0, MAX_ENTITY_INSTANCES)) {
+        out.push(`      - ${yamlInline(inst)}`);
+      }
+      if (instances.length > MAX_ENTITY_INSTANCES) {
+        out.push(
+          `      # … +${instances.length - MAX_ENTITY_INSTANCES} more (seed ALL of them)`,
+        );
+      }
+    }
+    out.push("```", "");
+  }
+
+  if (domain.variables?.length) {
+    out.push(
+      "```yaml",
+      "# variables → §3.2 model fields & §6 schema: define each with its unit/source.",
+      "variables:",
+    );
+    for (const v of domain.variables) {
+      out.push(
+        `  - ${yamlInline({
+          id: v.id,
+          name: v.name,
+          ...(v.unit ? { unit: v.unit } : {}),
+          ...(v.source ? { source: v.source } : {}),
+          ...(v.historyWindow ? { historyWindow: v.historyWindow } : {}),
+        })}`,
+      );
+    }
+    out.push("```", "");
+  }
+
+  if (domain.dataSources?.length) {
+    out.push(
+      "```yaml",
+      "# dataSources → §3 external adapters + §1 stack + §4 secrets: one adapter per",
+      "#   source honoring auth/rateLimit/freshness; declare its secrets in §4.",
+      "dataSources:",
+    );
+    for (const d of domain.dataSources) {
+      out.push(
+        `  - ${yamlInline({
+          id: d.id,
+          name: d.name,
+          kind: d.kind,
+          ...(d.baseUrl ? { baseUrl: d.baseUrl } : {}),
+          ...(d.auth ? { auth: d.auth } : {}),
+          ...(d.rateLimit ? { rateLimit: d.rateLimit } : {}),
+          ...(d.freshness ? { freshness: d.freshness } : {}),
+        })}`,
+      );
+    }
+    out.push("```", "");
+  }
+
+  if (domain.schedules?.length) {
+    out.push(
+      "```yaml",
+      "# schedules → §8 Workflow DAG: each is a periodic pipeline trigger.",
+      "schedules:",
+    );
+    for (const s of domain.schedules) {
+      out.push(
+        `  - ${yamlInline({
+          id: s.id,
+          description: s.description,
+          ...(s.cron ? { cron: s.cron } : {}),
+          ...(s.intervalHuman ? { intervalHuman: s.intervalHuman } : {}),
+          ...(s.pipelineId ? { pipelineId: s.pipelineId } : {}),
+        })}`,
+      );
+    }
+    out.push("```", "");
+  }
+
+  if (domain.workflows?.length) {
+    out.push(
+      "```yaml",
+      "# workflows → §3 Backend: implement each as an entity finite-state machine",
+      "#   (states/transitions/guards); write an audit-log row per transition when auditTrail.",
+      "workflows:",
+    );
+    for (const w of domain.workflows) {
+      out.push(`  - id: ${yamlSafe(w.id)}`);
+      out.push(`    entity: ${yamlString(w.entity)}`);
+      out.push(`    initial: ${yamlString(w.initial)}`);
+      out.push(`    states: [${w.states.join(", ")}]`);
+      out.push("    transitions:");
+      for (const t of w.transitions) {
+        out.push(`      - from: ${yamlString(t.from)}`);
+        out.push(`        to: ${yamlString(t.to)}`);
+        out.push(`        action: ${yamlString(t.action)}`);
+        if (t.requires?.length) out.push(`        requires: [${t.requires.join(", ")}]`);
+        if (t.guard) out.push(`        guard: ${yamlString(t.guard)}`);
+      }
+      if (w.auditTrail) out.push("    auditTrail: true");
+    }
+    out.push("```", "");
+  }
+
+  if (domain.alerts?.length) {
+    out.push(
+      "```yaml",
+      "# alerts → §3 notification service: trigger + severity + channels.",
+      "alerts:",
+    );
+    for (const a of domain.alerts) {
+      out.push(`  - id: ${yamlSafe(a.id)}`);
+      out.push(`    trigger: ${yamlString(a.trigger)}`);
+      if (a.severity) out.push(`    severity: ${a.severity}`);
+      if (a.channels?.length) out.push(`    channels: [${a.channels.join(", ")}]`);
+    }
+    out.push("```", "");
+  }
+
+  // rules → §7 Business Rules DSL (reuse the existing authoritative renderer).
+  const rulesBlock = renderAuthoritativeRulesBlock(domain.rules);
+  if (rulesBlock) out.push(rulesBlock, "");
+
+  return out.join("\n").trimEnd();
 }
 
 function yamlSafe(s: string): string {
