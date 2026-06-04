@@ -147,6 +147,31 @@ export async function fsWrite(
         )
       : null;
 
+  // Reject content that looks like a raw unified diff accidentally written as file content.
+  const looksLikeDiff =
+    /^@@\s+-\d/.test(content) ||
+    (content.includes("\n@@") && /\n[+-][^+\-]/.test(content));
+  if (looksLikeDiff) {
+    return `REJECTED: content appears to be a raw unified diff, not source code. Use apply_patch to modify existing files, or write the actual source code directly.`;
+  }
+
+  // Guard against accidentally overwriting a large existing file with a small snippet.
+  // If the existing file is more than 3x larger than the incoming content, the LLM
+  // likely forgot to read the file first and is writing only its additions.
+  try {
+    const existing = await fs.readFile(abs, "utf-8");
+    if (existing.length > 500 && content.length < existing.length / 3) {
+      return (
+        `REJECTED: content_loss_guard — the existing file (${existing.length} chars) is more than 3× ` +
+        `larger than the content you are trying to write (${content.length} chars). ` +
+        `You must read the file first with read_file, then write the COMPLETE merged file. ` +
+        `Do not write partial content to an existing file.`
+      );
+    }
+  } catch {
+    // File does not exist yet — no guard needed.
+  }
+
   let toWrite = content;
   let mergeKind: "none" | "merged" | "incoming" = "none";
 

@@ -41,6 +41,7 @@
     "@langchain/core": "^1.1.38",
     "@langchain/langgraph": "^1.2.9",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@playwright/mcp": "^0.0.75",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
@@ -67,6 +68,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
+    "tree-kill": "^1.2.2",
     "uuid": "^13.0.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"

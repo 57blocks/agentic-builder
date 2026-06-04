@@ -255,6 +255,8 @@ interface PipelineState {
     prdContent: string,
     options?: { force?: boolean },
   ) => Promise<{ matched: number; skipped: number } | null>;
+  /** Add cost from an out-of-pipeline operation (e.g. bug-fix session) to the total. */
+  addCostUsd: (cost: number) => void;
   reset: () => void;
   /** Called by the project page on mount — sets the slug used for DB sync. */
   setProjectSlugForSync: (slug: string) => void;
@@ -1915,6 +1917,10 @@ export const usePipelineStore = create<PipelineState>()(
           });
           return false;
         }
+      },
+
+      addCostUsd: (cost: number) => {
+        set({ totalCostUsd: get().totalCostUsd + cost });
       },
 
       reset: () => {

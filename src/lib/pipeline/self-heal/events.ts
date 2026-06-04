@@ -32,7 +32,10 @@ export type RepairStage =
   | "preflight-stub-generation"
   | "tdd-review"
   | "tdd-runtime"
-  | "tdd-test-writer";
+  | "tdd-test-writer"
+  | "preflight-task-contract-coverage"
+  | "preflight-task-contract-coverage"
+  | "bug-fix";
 
 export interface RepairEvent {
   timestamp: string;

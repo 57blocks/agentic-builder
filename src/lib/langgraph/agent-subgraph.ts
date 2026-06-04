@@ -1076,6 +1076,49 @@ async function executeWorkerTool(
         },
       });
     }
+
+    // Emit a human-readable worker_action event so the UI can show what the
+    // AI is actually doing, not just file I/O paths.
+    const actionEmitter = getRepairEmitter(options.sessionId);
+    let actionMsg: string | null = null;
+    switch (name) {
+      case "read_file":
+        actionMsg = `Reading ${String(args.path ?? "")}`;
+        break;
+      case "read_many_files":
+        actionMsg = `Reading ${Array.isArray(args.paths) ? (args.paths as string[]).length : 1} file(s)`;
+        break;
+      case "list_files":
+        actionMsg = `Listing ${String(args.path ?? ".")}`;
+        break;
+      case "grep":
+        actionMsg = `Searching "${String(args.pattern ?? "").slice(0, 60)}"`;
+        break;
+      case "write_file":
+        actionMsg = result.content.startsWith("REJECTED")
+          ? `Write rejected: ${String(args.path ?? "")}`
+          : `Writing ${String(args.path ?? "")}`;
+        break;
+      case "apply_patch":
+        actionMsg = result.content.startsWith("REJECTED")
+          ? `Patch rejected: ${String(args.path ?? "")}`
+          : `Patching ${String(args.path ?? "")}`;
+        break;
+      case "delete_file":
+        actionMsg = `Deleting ${String(args.path ?? "")}`;
+        break;
+      case "move_file":
+        actionMsg = `Moving ${String(args.from ?? "")} → ${String(args.to ?? "")}`;
+        break;
+    }
+    if (actionMsg) {
+      actionEmitter({
+        stage: "worker-codegen",
+        event: "worker_action",
+        taskId: options.taskId,
+        details: { message: actionMsg, tool: name, durationMs: Date.now() - startedAt },
+      });
+    }
   }
 
   return result;
@@ -1185,6 +1228,14 @@ async function runCodegenWorkerLoop(
       console.log(
         `[Worker] codegen still waiting... loop=${i + 1}/${MAX_WORKER_TOOL_ITERATIONS} waited=${waitedSec}s`,
       );
+      if (sessionId && toolOptions?.taskId) {
+        getRepairEmitter(sessionId)({
+          stage: "worker-codegen",
+          event: "worker_action",
+          taskId: toolOptions.taskId,
+          details: { message: `Thinking… (${waitedSec}s)`, tool: "llm" },
+        });
+      }
     }, WORKER_LLM_HEARTBEAT_MS);
     const response = await invokeCodegenOrOpenRouter(messages, {
       temperature: 0.3,

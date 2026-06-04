@@ -32,6 +32,7 @@ export type StepId =
   // preview
   | "serve"
   | "e2e"
+  | "bug-fix"
   // deploy
   | "deploy";
 
@@ -46,7 +47,7 @@ export type GroupId =
   | "summary"
   | "agents";
 
-export type StageId = "preparation" | "kickoff" | "coding" | "preview" | "deploy";
+export type StageId = "preparation" | "kickoff" | "coding" | "preview" | "deploy" | "bug-fix";
 
 // ── Flow Node ─────────────────────────────────────────────────────────────────
 export type UiKind = "doc-viewer" | "agent-log" | "chat" | "panel" | "custom";
@@ -286,6 +287,24 @@ export const PIPELINE_FLOW: FlowNode[] = [
       },
     ],
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUG FIX
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    id: "bug-fix",
+    label: "A",
+    level: 1,
+    dependsOn: ["deploy"],
+    children: [
+      {
+        id: "bug-fix",
+        label: "Bug Fix",
+        level: 2,
+        stepConfig: { uiKind: "custom" },
+      },
+    ],
+  },
 ];
 
 // ── Derived Helpers ───────────────────────────────────────────────────────────
@@ -471,6 +490,7 @@ export const STEP_LABELS: Record<StepId, string> = {
   agents: "Agents",
   serve: "Dev Server",
   e2e: "E2E",
+  "bug-fix": "Bug Fix",
   deploy: "Deploy",
 };
 
@@ -492,4 +512,5 @@ export const STAGE_LABELS: Record<StageId, { num: string; name: string }> = {
   coding:      { num: "03", name: "Coding" },
   preview:     { num: "04", name: "Preview" },
   deploy:      { num: "05", name: "Deploy" },
+  "bug-fix":   { num: "06", name: "QA" },
 };
