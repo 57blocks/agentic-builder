@@ -15,7 +15,12 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Unauthenticated → send to /login
+  // Unauthenticated API calls → 401 JSON (don't redirect, it breaks fetch consumers)
+  if (!payload && pathname.startsWith("/api/")) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  // Unauthenticated page requests → redirect to /login
   if (!payload) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
