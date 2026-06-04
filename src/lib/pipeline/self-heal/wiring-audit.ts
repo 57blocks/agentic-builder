@@ -41,6 +41,16 @@ export interface WiringAuditInput {
   prdSpec: PrdSpec | null | undefined;
   outputDir: string;
   emitter?: RepairEmitter;
+  /**
+   * True for a scoped, partial build — e.g. a subsystem/domain phase under
+   * the subsystem-split orchestrator (coding called with retryFailedTaskIds).
+   * The cross-route flow-navigation check is SKIPPED in this mode: routes
+   * owned by domains that haven't been built yet aren't registered in
+   * router.tsx, so a cross-domain navigation would false-positive as a dead
+   * end. Flow-nav runs only on the full/final build. The page-local handler
+   * check still runs (it's safe per-domain).
+   */
+  scopedBuild?: boolean;
 }
 
 /**
@@ -59,14 +69,18 @@ export async function auditFrontendWiring(
 
   // Parse the router once for the flow-navigation check (Phase 5). Empty when
   // the router is absent/unparseable, which disables flow checks (conservative).
+  // Also empty on a scoped/partial build, where not-yet-built domains' routes
+  // aren't registered yet — flow-nav would false-positive cross-domain links.
   let registeredRoutes: string[] = [];
-  for (const rel of ["frontend/src/router.tsx", "frontend/src/router.ts"]) {
-    try {
-      const src = await fs.readFile(path.join(input.outputDir, rel), "utf-8");
-      registeredRoutes = parseRegisteredRoutes(src);
-      if (registeredRoutes.length > 0) break;
-    } catch {
-      /* try next / leave empty */
+  if (!input.scopedBuild) {
+    for (const rel of ["frontend/src/router.tsx", "frontend/src/router.ts"]) {
+      try {
+        const src = await fs.readFile(path.join(input.outputDir, rel), "utf-8");
+        registeredRoutes = parseRegisteredRoutes(src);
+        if (registeredRoutes.length > 0) break;
+      } catch {
+        /* try next / leave empty */
+      }
     }
   }
 

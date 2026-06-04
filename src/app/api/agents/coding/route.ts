@@ -1780,6 +1780,10 @@ export async function POST(request: NextRequest) {
             prdSpec,
             outputDir: outputRoot,
             emitter: repairEmitter,
+            // Scoped/partial build (subsystem-split domain phase): skip the
+            // cross-route flow-nav check — not-yet-built domains' routes aren't
+            // registered yet. Flow-nav runs only on the full/final build.
+            scopedBuild: !!(retryFailedTaskIds && retryFailedTaskIds.length > 0),
           });
           if (wiringFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
