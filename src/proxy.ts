@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import { verifyToken, signToken, COOKIE_NAME } from "@/lib/auth";
 
 /** Routes that are always public (never redirected to /login) */
 const PUBLIC_PATHS = ["/login", "/api/auth"];
+
+/**
+ * Dev-only login bypass. NEVER active in production (NODE_ENV guard) and only
+ * when explicitly opted in via DEV_AUTH_BYPASS=1. Lets a developer reach the
+ * whole app without Google OAuth or a configured DB by auto-issuing a dev
+ * session. Do NOT set this env var in any deployed environment.
+ */
+const DEV_AUTH_BYPASS =
+  process.env.NODE_ENV !== "production" &&
+  process.env.DEV_AUTH_BYPASS === "1";
+
+const DEV_BYPASS_EMAIL = "dev@57blocks.com";
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -13,6 +25,22 @@ export async function proxy(req: NextRequest) {
 
   const token = req.cookies.get(COOKIE_NAME)?.value ?? null;
   const payload = token ? await verifyToken(token) : null;
+
+  // Dev-only auto-login: issue a session cookie and let the request through.
+  if (!payload && DEV_AUTH_BYPASS) {
+    const res = pathname.startsWith("/login")
+      ? NextResponse.redirect(new URL("/", req.url))
+      : NextResponse.next();
+    const devToken = await signToken(DEV_BYPASS_EMAIL);
+    res.cookies.set(COOKIE_NAME, devToken, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60,
+    });
+    return res;
+  }
 
   // Already authenticated → redirect away from /login
   if (pathname.startsWith("/login")) {

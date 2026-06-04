@@ -15,14 +15,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  const [user] = await db
-    .select({ email: users.email, name: users.name })
-    .from(users)
-    .where(eq(users.email, payload.sub))
-    .limit(1);
+  let name: string | null = null;
+  try {
+    const [user] = await db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.email, payload.sub))
+      .limit(1);
+    name = user?.name ?? null;
+  } catch {
+    // DB unavailable (e.g. dev without a configured DB, or the dev-auth
+    // bypass) — still return the authenticated email from the token so the
+    // app stays usable.
+  }
 
-  return NextResponse.json({
-    email: payload.sub,
-    name: user?.name ?? null,
-  });
+  return NextResponse.json({ email: payload.sub, name });
 }
