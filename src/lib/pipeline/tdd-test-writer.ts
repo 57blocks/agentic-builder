@@ -286,6 +286,8 @@ export async function runTddTestWriter(input: {
         "HARD REQUIREMENT — external-API client tests (paths under `services/externalApis/`) MUST mock `globalThis.fetch` (or use msw / nock). Live network access is not permitted; assume rate-limit / offline. Without a mock the file is rejected.",
         "HARD REQUIREMENT — frontend `frontend-service` tests that assert on a literal `/api/...` URL MUST either `vi.stubEnv(\"VITE_API_BASE_URL\", \"\")` before the assertion, or use `expect.stringContaining(\"/api/...\")`. Otherwise the assertion drifts when the env injects a base URL.",
         "Each test must import or reference the declared target route/service/API client/task-owned file, or assert against the declared endpoint string.",
+        "INTERACTION-FLOW — a `route-smoke` test MUST do more than assert the page renders. It MUST simulate the page's PRIMARY user interaction (click the main button / submit the form via @testing-library/react `fireEvent` or `userEvent`) and assert the resulting EFFECT: the API client method was called with the expected payload (spy/mock the client and assert `toHaveBeenCalledWith(...)`), OR navigation occurred (mock `useNavigate` / the router and assert it was called with the target route), OR the declared state/text rendered after the interaction. A `route-smoke` test that only asserts render — with no interaction → effect assertion — is INCOMPLETE.",
+        "For `frontend-service` tests, assert not just the URL but that the client method is called with the expected request payload / shape.",
         "Do not use skipped tests, todo tests, placeholder assertions, or mock-only tests.",
         "Prefer the test framework already present in the generated project.",
       ].join("\n"),

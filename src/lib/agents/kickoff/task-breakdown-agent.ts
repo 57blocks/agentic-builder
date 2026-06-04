@@ -357,7 +357,7 @@ This rule is **independent** of the External API split rule and the Background-j
 Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in each P0/P1 task:
 - Backend route/API tasks MUST include at least one \`api-contract\` test.
 - Frontend API client tasks MUST include at least one \`frontend-service\` test.
-- Page/route tasks MUST include at least one \`route-smoke\` test proving the route renders the real page and triggers real API hooks (not a placeholder).
+- Page/route tasks MUST include at least one \`route-smoke\` test that (a) proves the route renders the real page (not a placeholder) AND (b) simulates the page's PRIMARY interaction (click the main button / submit the form) and asserts its effect — the API client method called with the expected payload, navigation to the target route, or the declared state change. \`expectedGreen\` MUST name the interaction and its effect (e.g. "clicking Pay calls paymentsApi.create with the cart payload and navigates to /confirmation"). Author the interaction-flow assertion at priority **P1** (it should surface and drive repair, not hard-block the gate) unless it guards a critical auth/payment flow.
 - Runtime/dependency tasks MUST include at least one \`runtime-smoke\` test for local startup/fallback behavior.
 - Each test MUST state the exact test file path, command, expected RED failure, and expected GREEN result.
 
