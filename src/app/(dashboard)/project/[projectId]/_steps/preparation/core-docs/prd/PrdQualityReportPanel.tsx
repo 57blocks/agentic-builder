@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { ShieldCheck, Loader2, AlertTriangle, Info, AlertOctagon, Wand2 } from "lucide-react";
+import { savePrdReadiness } from "./snapshot";
 import type {
   PrdQualityFinding,
   PrdQualitySeverity,
@@ -32,10 +33,14 @@ export function PrdQualityReportPanel(props: {
   onApplyFix: (instruction: string) => void;
   /** Called once a report has been produced (used to unlock Next Step). */
   onResult?: () => void;
+  /** Persist Step-1 findings here so they survive reload (project-scoped DB). */
+  projectSlug?: string;
+  /** Hydrated prior report (from prd step metadata) to re-render on revisit. */
+  initialReport?: QualityResponse | null;
 }) {
   const [loading, setLoading] = useState(false);
   const [includeAI, setIncludeAI] = useState(true);
-  const [report, setReport] = useState<QualityResponse | null>(null);
+  const [report, setReport] = useState<QualityResponse | null>(props.initialReport ?? null);
   const [error, setError] = useState<string | null>(null);
   const [appliedId, setAppliedId] = useState<string | null>(null);
 
@@ -53,7 +58,15 @@ export function PrdQualityReportPanel(props: {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${res.status}`);
       }
-      setReport((await res.json()) as QualityResponse);
+      const j = (await res.json()) as QualityResponse;
+      setReport(j);
+      // Persist the findings so they survive reload / PRD edits / drawer close.
+      if (props.projectSlug) {
+        savePrdReadiness(props.projectSlug, {
+          qualityDone: true,
+          qualityResult: j,
+        }).catch(() => {});
+      }
       props.onResult?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
