@@ -6,7 +6,7 @@
  *   DATABASE_URL=postgresql://localhost:5432/agentic_builder
  */
 
-import { and, desc, eq, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   projectMembers,
@@ -48,12 +48,7 @@ export async function getProjects(userId: string): Promise<Project[]> {
         eq(projectMembers.userId, userId),
       ),
     )
-    .where(
-      or(
-        isNull(projects.ownerId),        // legacy projects visible to all
-        isNotNull(projectMembers.userId), // projects where this user is a member
-      ),
-    )
+    .where(isNotNull(projectMembers.userId))
     .orderBy(desc(projects.createdAt));
 
   return rows.map(toProject);
@@ -118,12 +113,24 @@ export async function createProject(name: string, clientId: string | undefined, 
  * placeholder so FK-constrained child tables (step_snapshot, step_navigation)
  * can write without error. Uses ON CONFLICT DO NOTHING so it is always safe
  * to call before any child-table write.
+ *
+ * When userId is provided the placeholder is also added to project_members so
+ * it appears in the owner's project list rather than being a globally-visible
+ * ownerless row.
  */
-export async function ensureProjectExists(id: string): Promise<void> {
-  await db
+export async function ensureProjectExists(id: string, userId?: string | null): Promise<void> {
+  const inserted = await db
     .insert(projects)
-    .values({ id, slug: id, name: "New Project" })
-    .onConflictDoNothing();
+    .values({ id, slug: id, name: "New Project", ownerId: userId ?? null })
+    .onConflictDoNothing()
+    .returning({ id: projects.id });
+
+  if (inserted.length > 0 && userId) {
+    await db
+      .insert(projectMembers)
+      .values({ projectId: id, userId, role: "owner" as ProjectMemberRole })
+      .onConflictDoNothing();
+  }
 }
 
 export async function updateProjectName(

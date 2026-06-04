@@ -22,6 +22,7 @@ import {
   ensureProjectExists,
   type StepSnapshot,
 } from "@/lib/project-store";
+import { resolveUserId } from "@/lib/session";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -60,7 +61,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    await ensureProjectExists(projectId);
+    const userId = await resolveUserId(req);
+    await ensureProjectExists(projectId, userId);
     await upsertStepSnapshot(projectId, body.stepId, body.snapshot);
     return NextResponse.json({ ok: true });
   } catch (err) {
