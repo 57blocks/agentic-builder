@@ -19,6 +19,7 @@ import {
   getAllStepSnapshots,
   upsertStepSnapshot,
   deleteStepSnapshot,
+  ensureProjectExists,
   type StepSnapshot,
 } from "@/lib/project-store";
 
@@ -59,6 +60,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
       );
     }
 
+    await ensureProjectExists(projectId);
     await upsertStepSnapshot(projectId, body.stepId, body.snapshot);
     return NextResponse.json({ ok: true });
   } catch (err) {

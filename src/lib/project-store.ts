@@ -112,6 +112,20 @@ export async function createProject(name: string, clientId: string | undefined, 
   return toProject(newProject);
 }
 
+/**
+ * Ensure a project row exists for the given id. If the row is absent (e.g.
+ * POST /api/projects failed silently on the client), inserts a minimal
+ * placeholder so FK-constrained child tables (step_snapshot, step_navigation)
+ * can write without error. Uses ON CONFLICT DO NOTHING so it is always safe
+ * to call before any child-table write.
+ */
+export async function ensureProjectExists(id: string): Promise<void> {
+  await db
+    .insert(projects)
+    .values({ id, slug: id, name: "New Project" })
+    .onConflictDoNothing();
+}
+
 export async function updateProjectName(
   projectId: string,
   name: string,

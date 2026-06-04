@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { projectStepNavigation } from "@/lib/db/schema";
+import { ensureProjectExists } from "@/lib/project-store";
 import { desc, eq } from "drizzle-orm";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
@@ -39,6 +40,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
     const activeStep = body.activeStep ?? "initial";
     const tier = body.tier ?? "M";
     const updatedAt = new Date();
+
+    await ensureProjectExists(projectId);
 
     // Compatibility path:
     // some environments may miss/lose a unique constraint for project_id,
