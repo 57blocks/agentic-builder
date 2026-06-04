@@ -28,6 +28,10 @@ import {
   runSubsystemPipeline,
   type FoundationBuildResult,
 } from "./foundation";
+import {
+  runCrossDomainIntegration,
+  type CrossDomainIntegrationResult,
+} from "./integrate";
 import { decomposePrdIntoSubsystems, type DecomposeResult } from "./decompose";
 
 export interface DevelopBySubsystemOptions {
@@ -55,6 +59,7 @@ export interface DevelopBySubsystemResult {
   plan?: SubsystemBuildPlan;
   foundation?: FoundationBuildResult;
   subsystems?: SubsystemRunResult[];
+  integration?: CrossDomainIntegrationResult;
   skipped?: string[];
 }
 
@@ -132,14 +137,29 @@ export async function developBySubsystem(
     if (s.status === "failed") errors.push(`subsystem ${s.subsystemId} failed: ${s.summary ?? ""}`);
   }
 
+  // P3.2 — cross-domain integration gate: only when everything else built, as a
+  // final whole-app check. Additive; never run on a broken build.
+  let integration: CrossDomainIntegrationResult | undefined;
+  if (allOk) {
+    integration = await runCrossDomainIntegration({
+      outputDir: codingContext.codeOutputDir ?? projectRoot,
+      sessionId: codingContext.runId,
+    });
+    if (integration.ran && !integration.ok) {
+      errors.push(`cross-domain integration failed: ${integration.reason ?? "see findings"}`);
+    }
+  }
+  const finalOk = allOk && (!integration || !integration.ran || integration.ok);
+
   return {
-    ok: allOk,
+    ok: finalOk,
     errors,
     manifest,
     validation,
     plan,
     foundation,
     subsystems,
+    integration,
     skipped: [...alreadyDone],
   };
 }

@@ -118,7 +118,7 @@ inventory→域(manifest)、以及 task-breakdown→按域 scoped 的任务。`p
 | PRD 质量 gate L1+L2 + Prepare PRD 两步 UI + 域展开明细 | ✅ 已建 |
 | DB-url 优先级修复(kickoff 真实库不被全局占位遮蔽) | ✅ 已建 |
 | **P3.1 冻结契约前置**(域开建前契约/共享类型必须完整冻结) | ✅ 已建(contract-precondition.ts + foundation/develop 接线) |
-| **P3.2 跨域整合 gate**(全应用 routing 闭合 + runtime + E2E,非 scoped) | ⛔ 待建 |
+| **P3.2 跨域整合 gate**(全应用 runtime smoke,非 scoped) | ✅ 已建(integrate.ts;E2E 待补) |
 | **P3.3 子系统模式下前端内聚**(共享 shell/tokens 纳入 foundation) | ⚠️ 部分(Foundation 任务已有,需确认进 foundation 阶段) |
 | **P3.4 阈值校准 + 编排可观测**(per-domain 状态/dump) | ⚠️ 部分 |
 | 远端统一(合并到 `vicky-debugger`)+ 旧分支清理 | ⛔ 待办 |
@@ -161,6 +161,7 @@ P3.5(统一基线)→ P3.1(契约前置,解锁可靠 build)→ P3.2(整合 gate)
 | 开关 | 作用 |
 |---|---|
 | `BLUEPRINT_SUBSYSTEM_BREAKDOWN=0` | 关闭子系统模式(强制单趟) |
+| `BLUEPRINT_SUBSYSTEM_INTEGRATE=0` | 关闭跨域整合 gate(P3.2) |
 | `INTEGRATION_DATA_GATE=1` | 开启 Tier-2 真实数据集成 gate(隔离 schema seed) |
 | `CODEGEN_CONTEXT_DUMP=1|all|<taskId>` | 每轮 coding 上下文落盘 `.ralph/context-dumps/` |
 | `BLUEPRINT_DISABLE_RUNTIME_SMOKE=1` | 关闭 runtime smoke gate |
