@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signToken, COOKIE_NAME } from "@/lib/auth";
+import { isAllowedEmail } from "@/lib/auth-google";
+import { upsertUser } from "@/lib/db/users.repo";
 
-// ─── Mock user store (replace with real DB lookup) ────────────────────────────
 const MOCK_USERS: Record<string, string> = {
-  "admin@agentic.ai": "agentic2024",
-  "demo@agentic.ai": "demo1234",
+  "admin@57blocks.com": "agentic2024",
+  "demo@57blocks.com": "demo1234",
 };
 
 export async function POST(req: NextRequest) {
@@ -21,7 +22,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const expected = MOCK_USERS[email.toLowerCase().trim()];
+    const normalizedEmail = email.toLowerCase().trim();
+
+    if (!isAllowedEmail(normalizedEmail)) {
+      return NextResponse.json(
+        { message: "Only @57blocks.com accounts are allowed." },
+        { status: 403 },
+      );
+    }
+
+    const expected = MOCK_USERS[normalizedEmail];
     if (!expected || expected !== password) {
       return NextResponse.json(
         { message: "Invalid email or password." },
@@ -29,15 +39,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const token = await signToken(email);
+    await upsertUser({
+      email: normalizedEmail,
+      name: normalizedEmail.split("@")[0],
+      picture: null,
+      google_id: null,
+    });
 
+    const token = await signToken(normalizedEmail);
     const res = NextResponse.json({ ok: true });
     res.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
+      maxAge: 7 * 24 * 60 * 60,
     });
     return res;
   } catch {
