@@ -458,6 +458,9 @@ export default function AppNav() {
               <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">
                 {currentUser?.name ?? currentUser?.email ?? "—"}
               </span>
+              <span className="text-xs text-slate-600 leading-3.75 truncate">
+                {currentUser?.email ?? ""}
+              </span>
             </div>
           )}
           {!collapsed && (
