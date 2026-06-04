@@ -4,6 +4,8 @@ import {
   parseStateCookie,
   buildStateCookieValue,
   decodeIdToken,
+  generatePkce,
+  generateState,
 } from "../auth-google";
 
 describe("isAllowedEmail", () => {
@@ -19,6 +21,9 @@ describe("isAllowedEmail", () => {
   it("rejects emails that merely contain the domain", () => {
     expect(isAllowedEmail("user@evil57blocks.com")).toBe(false);
     expect(isAllowedEmail("user@57blocks.com.evil.com")).toBe(false);
+  });
+  it("rejects email with no local part", () => {
+    expect(isAllowedEmail("@57blocks.com")).toBe(false);
   });
 });
 
@@ -82,5 +87,26 @@ describe("decodeIdToken", () => {
 
   it("returns null when payload is not valid JSON", () => {
     expect(decodeIdToken("header.notbase64json.sig")).toBeNull();
+  });
+  it("returns null when email_verified is explicitly false", () => {
+    expect(decodeIdToken(makeToken({ sub: "123", email: "user@57blocks.com", email_verified: false }))).toBeNull();
+  });
+});
+
+describe("generatePkce", () => {
+  it("returns base64url strings with correct S256 relationship", async () => {
+    const { code_verifier, code_challenge } = await generatePkce();
+    expect(code_verifier).toMatch(/^[A-Za-z0-9_-]+$/);
+    // Re-derive challenge from verifier and confirm they match
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code_verifier));
+    const expected = Buffer.from(digest).toString("base64url");
+    expect(code_challenge).toBe(expected);
+  });
+});
+
+describe("generateState", () => {
+  it("returns a non-empty hex string of 32 characters", () => {
+    const state = generateState();
+    expect(state).toMatch(/^[0-9a-f]{32}$/);
   });
 });

@@ -2,7 +2,8 @@ export const ALLOWED_DOMAIN = "@57blocks.com";
 export const OAUTH_STATE_COOKIE = "oauth_state";
 
 export function isAllowedEmail(email: string): boolean {
-  return email.toLowerCase().endsWith(ALLOWED_DOMAIN);
+  const lower = email.toLowerCase();
+  return lower.endsWith(ALLOWED_DOMAIN) && lower.indexOf("@") > 0;
 }
 
 export async function generatePkce(): Promise<{
@@ -26,6 +27,7 @@ export function generateState(): string {
   return Buffer.from(bytes).toString("hex");
 }
 
+/** Builds the oauth_state cookie value. Invariant: state and code_verifier must not contain ':' (generateState returns hex, generatePkce returns base64url — both are colon-free). */
 export function buildStateCookieValue(state: string, code_verifier: string): string {
   return `${state}:${code_verifier}`;
 }
@@ -50,6 +52,7 @@ export interface GoogleIdTokenPayload {
   email_verified?: boolean;
 }
 
+/** Decodes the payload segment of a Google id_token. Does NOT verify the RS256 signature or expiry — callers must obtain the token from a trusted source (e.g. Google's token endpoint over HTTPS). */
 export function decodeIdToken(idToken: string): GoogleIdTokenPayload | null {
   try {
     const parts = idToken.split(".");
@@ -58,6 +61,7 @@ export function decodeIdToken(idToken: string): GoogleIdTokenPayload | null {
       Buffer.from(parts[1], "base64url").toString("utf-8"),
     ) as Partial<GoogleIdTokenPayload>;
     if (!payload.email || !payload.sub) return null;
+    if (payload.email_verified === false) return null;
     return payload as GoogleIdTokenPayload;
   } catch {
     return null;
