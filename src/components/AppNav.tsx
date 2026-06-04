@@ -8,6 +8,7 @@ import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
+import { useStepStore } from "@/store/step-store";
 import type { Project } from "@/types/project";
 
 function FolderIcon() {
@@ -167,6 +168,9 @@ export default function AppNav() {
     setProjectSlugForSync(localProject.id);
     pipelineSetProjectSlugForSync(localProject.id);
     setProjectName("New Project");
+    // Set codeOutputDir immediately from the chosen folder so generated code goes
+    // to the right place even before createProject completes and the DB is queryable.
+    useStepStore.getState().setCodeOutputDir(folder);
     router.push(`/project/${localProject.id}`);
     // Try creating on the server in the background; replace local placeholder on success
     try {
