@@ -544,6 +544,7 @@ Identify ONLY the smallest set of Markdown sections whose body must change to sa
 
 Rules:
 - Touch as FEW sections as possible. If only one paragraph changes, patch the smallest enclosing section.
+- If the instruction quotes a SELECTED EXCERPT (a block marked "selected excerpt" / 【选中片段】), the user is pointing at one specific span. Locate the single section that contains that excerpt and confine the patch to it — change only what the instruction asks and leave the rest of that section's text intact.
 - Never output unrelated sections. Never echo the whole PRD.
 - If you would need to patch more than 4 distinct top-level sections, return an empty patches array and set "fullRewrite": true so the caller can fall back to a full regeneration.
 - The "summary" field is a single sentence describing what changed.

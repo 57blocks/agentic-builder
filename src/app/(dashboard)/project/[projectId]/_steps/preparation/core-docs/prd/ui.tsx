@@ -7,7 +7,13 @@ import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import StageInputBar from "@/components/StageInputBar";
-import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
+import {
+  stripChangeMarkers,
+  hasPrdDiffMarkers,
+  parsePrdDiffSegments,
+  resolvePrdDiff,
+  resolveAllPrdDiff,
+} from "@/lib/agents/pm/prd-patch";
 import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
 import { savePrdVersion, loadPrdVersions } from "./snapshot";
@@ -59,6 +65,52 @@ function diffLines(oldText: string, newText: string): DiffLine[] {
     else { result.push({ type: "removed", text: a[i] }); i++; }
   }
   return result;
+}
+
+// ─── Inline diff hunk (Cursor-style, per-section accept/reject) ──────────────
+function DiffRows({ oldBody, newBody }: { oldBody: string; newBody: string }) {
+  const diff = diffLines(oldBody, newBody);
+  const rows: React.ReactNode[] = [];
+  let idx = 0;
+  while (idx < diff.length) {
+    const cur = diff[idx];
+    const next = diff[idx + 1];
+    if (cur.type === "removed" && next?.type === "added") {
+      const wd = diffWords(cur.text, next.text);
+      rows.push(<div key={`r${idx}`} className="flex min-w-0 bg-[#ffebe9]"><span className="select-none shrink-0 w-7 text-center border-r text-red-500 bg-[#ffd7d5] border-[#ffb3af]">−</span><span className="flex-1 px-3 whitespace-pre-wrap break-words text-[#cf222e]"><InlineDiffLine tokens={wd.old} /></span></div>);
+      rows.push(<div key={`a${idx}`} className="flex min-w-0 bg-[#e6ffec]"><span className="select-none shrink-0 w-7 text-center border-r text-green-600 bg-[#ccffd8] border-[#b0efbc]">+</span><span className="flex-1 px-3 whitespace-pre-wrap break-words text-[#1a7f37]"><InlineDiffLine tokens={wd.new} /></span></div>);
+      idx += 2;
+    } else {
+      const isA = cur.type === "added";
+      const isR = cur.type === "removed";
+      rows.push(<div key={idx} className={["flex min-w-0", isA ? "bg-[#e6ffec]" : "", isR ? "bg-[#ffebe9]" : ""].join(" ")}><span className={["select-none shrink-0 w-7 text-center border-r", isA ? "text-green-600 bg-[#ccffd8] border-[#b0efbc]" : "", isR ? "text-red-500 bg-[#ffd7d5] border-[#ffb3af]" : "", !isA && !isR ? "text-slate-300 bg-[#f6f8fa] border-[#d0d7de]" : ""].join(" ")}>{isA ? "+" : isR ? "−" : " "}</span><span className={["flex-1 px-3 whitespace-pre-wrap break-words", isA ? "text-[#1a7f37]" : "", isR ? "text-[#cf222e]" : "", !isA && !isR ? "text-[#24292f]" : ""].join(" ")}>{cur.text || " "}</span></div>);
+      idx++;
+    }
+  }
+  return <>{rows}</>;
+}
+
+function PrdDiffHunk({ id, oldBody, newBody, onAccept, onReject }: {
+  id: string;
+  oldBody: string;
+  newBody: string;
+  onAccept: (id: string) => void;
+  onReject: (id: string) => void;
+}) {
+  return (
+    <div className="my-3 rounded-md border border-indigo-200 overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-50 border-b border-indigo-100">
+        <span className="text-[11px] font-semibold text-indigo-700">建议的修改</span>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => onReject(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">✗ 拒绝</button>
+          <button onClick={() => onAccept(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-green-700 bg-white border border-green-200 hover:bg-green-50 transition-colors">✓ 接受</button>
+        </div>
+      </div>
+      <div className="font-mono text-[12px] leading-5 bg-white">
+        <DiffRows oldBody={oldBody} newBody={newBody} />
+      </div>
+    </div>
+  );
 }
 
 // ─── DiffPanel ─────────────────────────────────────────────────────────────
@@ -151,6 +203,9 @@ export function PrdUI(props: StepUIProps) {
   const nextStep = getNextStep("prd", tier);
 
   const [editInput, setEditInput] = useState("");
+  // ── Selection-to-edit: text the user highlighted in the rendered PRD,
+  //    brought in as the target ("modify this part"). ───────────────────
+  const [selectionTarget, setSelectionTarget] = useState("");
   const [prepOpen, setPrepOpen] = useState(false);
   const [qualityRan, setQualityRan] = useState(false);
   const [subsystemRan, setSubsystemRan] = useState(false);
@@ -281,7 +336,10 @@ export function PrdUI(props: StepUIProps) {
       // Strip the patch-highlight markers before persisting to history so
       // the version diff stays clean.
       const finalContent = stripChangeMarkers(step?.content ?? "");
-      if (finalContent) {
+      // Skip persistence while a patch edit is awaiting inline accept/reject —
+      // the diff-marked content is a transient proposal, not the final PRD.
+      // persistPrd() finalises once the user resolves the last hunk.
+      if (finalContent && !hasPrdDiffMarkers(step?.content ?? "")) {
         const versionNum = prdHistoryRef.current.length + 1;
         const label = versionNum === 1 ? "Initial" : "Edited";
         prdHistoryRef.current = [...prdHistoryRef.current, { content: finalContent, savedAt: new Date(), label: `v${versionNum} · ${label}` }];
@@ -342,6 +400,9 @@ export function PrdUI(props: StepUIProps) {
     if (!wasRunningRef.current) {
       return;
     }
+    // Don't write to disk while a patch edit awaits inline accept/reject — the
+    // diff-marked content is transient. persistPrd() saves once resolved.
+    if (hasPrdDiffMarkers(step.content)) return;
     setIsSavingDoc(true);
     const codeOutputDir = useStepStore.getState().codeOutputDir;
     fetch("/api/agents/save-doc", {
@@ -540,6 +601,81 @@ export function PrdUI(props: StepUIProps) {
 
   const handleTabChange = (tab: DocTab) => { if (tab !== "prd") props.onNavigate(tab); };
 
+  // ── Selection → edit target ─────────────────────────────────────────
+  // When the user highlights text inside the rendered PRD, capture it as the
+  // edit target. They then type WHAT to change in the input; the selection
+  // tells the agent WHERE (which span/section) to confine the patch.
+  const handlePrdMouseUp = () => {
+    if (isManualEditing || isThisRunning) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const text = sel.toString().trim();
+    if (text.length < 3) return;
+    if (!sel.anchorNode || !contentRef.current?.contains(sel.anchorNode)) return;
+    setSelectionTarget(text);
+  };
+
+  // Compose the edit instruction sent to the agent. When a selection is
+  // present, demarcate it so the patch prompt anchors on that exact span.
+  const buildEditInstruction = (instruction: string, selection: string): string =>
+    selection
+      ? `【选中片段 / selected excerpt — modify ONLY this part, leave the rest of its section intact】\n"""\n${selection}\n"""\n\n【修改要求 / change requested】\n${instruction}`
+      : instruction;
+
+  const submitEdit = () => {
+    const instruction = editInput.trim();
+    if (!instruction || isThisRunning || confirmCooldown) return;
+    const full = buildEditInstruction(instruction, selectionTarget.trim());
+    setEditInput("");
+    setSelectionTarget("");
+    setShowDiff(false);
+    void executeStep("prd", full);
+  };
+
+  // ── Inline diff review: per-hunk accept/reject ──────────────────────
+  // Finalise once the last hunk is resolved: write to disk + push a version.
+  const persistResolvedPrd = (finalContent: string) => {
+    const versionNum = prdHistoryRef.current.length + 1;
+    prdHistoryRef.current = [
+      ...prdHistoryRef.current,
+      { content: finalContent, savedAt: new Date(), label: `v${versionNum} · Edited` },
+    ];
+    if (props.projectSlug) {
+      savePrdVersion(props.projectSlug, finalContent, "Edited").catch(() => {});
+    }
+    const codeOutputDir = useStepStore.getState().codeOutputDir;
+    fetch("/api/agents/save-doc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docId: "prd", content: finalContent, codeOutputDir }),
+    }).catch((err) => console.error("[PrdUI] Failed to save PRD.md", err));
+    // Keep tier badge in sync if the edit touched it.
+    const tierMatch = finalContent.match(/\*\*Project Tier:\s*([SML])\*\*/i);
+    if (tierMatch) {
+      const parsedTier = tierMatch[1].toUpperCase() as ProjectTier;
+      const stepStore = useStepStore.getState();
+      if (stepStore.tier !== parsedTier) stepStore.setTier(parsedTier);
+    }
+  };
+
+  const applyDiffResolution = (next: string) => {
+    setStepContent("prd", next);
+    // When no diff blocks remain, the proposal is fully resolved → finalise.
+    if (!hasPrdDiffMarkers(next)) {
+      persistResolvedPrd(stripChangeMarkers(next));
+    }
+  };
+  const onAcceptHunk = (id: string) =>
+    applyDiffResolution(resolvePrdDiff(step?.content ?? "", id, "accept"));
+  const onRejectHunk = (id: string) =>
+    applyDiffResolution(resolvePrdDiff(step?.content ?? "", id, "reject"));
+  const onAcceptAll = () =>
+    applyDiffResolution(resolveAllPrdDiff(step?.content ?? "", "accept"));
+  const onRejectAll = () =>
+    applyDiffResolution(resolveAllPrdDiff(step?.content ?? "", "reject"));
+
+  const pendingDiff = !isThisRunning && hasPrdDiffMarkers(content);
+
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
       {!isManualEditing && isLargePrd && (
@@ -606,7 +742,7 @@ export function PrdUI(props: StepUIProps) {
                 <button onClick={handleDownloadPdf} disabled={!isDone || isPrinting || isManualEditing} className="flex items-center justify-center p-1.5 rounded-md text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="Download PDF">{isPrinting ? <SpinnerIcon /> : <DownloadIcon />}</button>
               </div>
             </div>
-            <div className="p-8" ref={contentRef}>
+            <div className="p-8" ref={contentRef} onMouseUp={handlePrdMouseUp}>
               {isManualEditing ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between text-[12px] text-slate-500">
@@ -633,6 +769,24 @@ export function PrdUI(props: StepUIProps) {
               ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
               : isThisRunning && !content ? <div className="flex items-center gap-2 text-indigo-600 text-[13px]"><SpinnerIcon /> Generating PRD…</div>
+              : pendingDiff ? (
+                <div>
+                  {/* Inline-diff review bar — original doc stays visible; each
+                      change is reviewed in place (Cursor-style). */}
+                  <div className="sticky top-0 z-10 mb-3 flex items-center gap-3 px-3 py-2 bg-indigo-50/95 backdrop-blur border border-indigo-100 rounded-md">
+                    <span className="text-[12px] font-medium text-indigo-700">有待审阅的改动——逐处接受 ✓ / 拒绝 ✗，或：</span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <button onClick={onRejectAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">全部拒绝</button>
+                      <button onClick={onAcceptAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-white bg-green-600 hover:bg-green-500 transition-colors">全部接受</button>
+                    </div>
+                  </div>
+                  {parsePrdDiffSegments(content).map((seg, i) =>
+                    seg.type === "md"
+                      ? <MarkdownRenderer key={i} content={seg.text} variant="prd" skipMermaid={true} />
+                      : <PrdDiffHunk key={i} id={seg.id} oldBody={seg.oldBody} newBody={seg.newBody} onAccept={onAcceptHunk} onReject={onRejectHunk} />,
+                  )}
+                </div>
+              )
               : <MarkdownRenderer content={content} variant="prd" skipMermaid={true} />}
             <div ref={bottomRef} />
             </div>
@@ -690,15 +844,35 @@ export function PrdUI(props: StepUIProps) {
           </button>
         </div>
       ) : (
+      <div className="flex flex-col">
+        {selectionTarget && (
+          <div className="flex items-start gap-2 px-8 pt-3 pb-1 bg-white border-t border-slate-100">
+            <span className="shrink-0 mt-1 text-[11px] font-semibold text-indigo-600">针对这段修改</span>
+            <span
+              className="flex-1 min-w-0 text-[12px] text-slate-600 bg-indigo-50/60 border border-indigo-100 rounded px-2 py-1 line-clamp-2 break-words"
+              title={selectionTarget}
+            >
+              “{selectionTarget.length > 160 ? selectionTarget.slice(0, 160) + "…" : selectionTarget}”
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectionTarget("")}
+              className="shrink-0 mt-0.5 p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              title="清除引用"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
       <StageInputBar
         value={editInput} onChange={setEditInput}
-        onSubmit={() => { const instruction = editInput.trim(); if (!instruction || isThisRunning || confirmCooldown) return; setEditInput(""); setShowDiff(false); void executeStep("prd", instruction); }}
-        placeholder="Ask AgenticBuilder to edit this PRD…" disabled={isThisRunning || confirmCooldown}
+        onSubmit={submitEdit}
+        placeholder={selectionTarget ? "描述要对选中内容做的修改…" : "Ask AgenticBuilder to edit this PRD…"} disabled={isThisRunning || confirmCooldown}
         actions={<div className="flex items-center gap-3 shrink-0">
           {error && !isThisRunning && (
             <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
           )}
-          <button title={!prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet} onClick={async () => {
+          <button title={pendingDiff ? "先接受或拒绝待审阅的改动" : !prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet || pendingDiff} onClick={async () => {
           // Await memory capture BEFORE navigating so the fetch is never
           // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
@@ -728,6 +902,7 @@ export function PrdUI(props: StepUIProps) {
           if (nextStep) props.onNavigate(nextStep);
         }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : !prereqsMet ? "Run checks first" : "Next Step"}{!isSavingDoc && !confirmCooldown && prereqsMet && <ArrowRight size={16} color="white" />}</button></div>}
       />
+      </div>
       )}
     </div>
   );

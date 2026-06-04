@@ -87,6 +87,7 @@ import {
 import {
   applyPrdPatches,
   stripChangeMarkers,
+  wrapWholeDocDiff,
   type PrdPatch,
 } from "@/lib/agents/pm/prd-patch";
 import {
@@ -2142,12 +2143,14 @@ export class PipelineEngine {
       const parsed = parsePrdPatchResponse(patchResult.content);
       if (parsed && !parsed.fullRewrite && parsed.patches.length > 0) {
         const applied = applyPrdPatches(existingPrd, parsed.patches);
-        // Successful patch: at least one heading matched and the changed
-        // footprint is below the "may as well full-rewrite" threshold.
-        const overhalf =
-          applied.originalLineCount > 0 &&
-          applied.changedLineCount / applied.originalLineCount > 0.5;
-        if (applied.applied.length > 0 && !overhalf) {
+        // Prefer the patch whenever at least one heading matched. Patches are
+        // confined to the sections the agent declared, so even a large-
+        // footprint patch is "only the parts that needed changing" — far
+        // better for the incremental-edit UX than a full regenerate, which
+        // re-streams the whole PRD token-by-token and rewords every untouched
+        // section. Only genuinely un-appliable results (no heading matched /
+        // fullRewrite / parse failure) fall through to the full rewrite.
+        if (applied.applied.length > 0) {
           // Emit the final content as a single stream chunk so the UI's
           // streamingContent matches step.content when complete.
           this.emit({
@@ -2162,12 +2165,10 @@ export class PipelineEngine {
             content: applied.content,
           };
         }
-        // Fall through to full rewrite.
+        // Fall through to full rewrite (no declared heading matched the PRD).
         console.info(
-          "[engine] PRD patch did not apply cleanly (applied=%d, skipped=%d, overhalf=%s) — falling back",
-          applied.applied.length,
+          "[engine] PRD patch did not apply (applied=0, skipped=%d) — falling back",
           applied.skipped.length,
-          overhalf,
         );
       } else if (parsed?.fullRewrite) {
         console.info(
@@ -2176,20 +2177,27 @@ export class PipelineEngine {
       }
     }
 
-    // ── 2. Fall back to full streaming regenerate ──────────────────────
-    return pmAgent.generatePRDEditStreaming(
+    // ── 2. Fall back to full regenerate, presented as ONE reviewable diff ──
+    // Swallow token chunks so we never re-stream the whole PRD token-by-token;
+    // instead wrap the regenerated doc as a single whole-document diff hunk so
+    // the user reviews it (accept = take the rewrite, reject = keep original)
+    // with the same inline UX as section patches.
+    const full = await pmAgent.generatePRDEditStreaming(
       existingPrd,
       editInstruction,
-      (chunk, chunkType) => {
-        this.emit({
-          type: "step_stream",
-          runId: run.id,
-          stepId: "prd",
-          data: { chunk, chunkType },
-        });
-      },
+      () => {},
       run.sessionId,
     );
+    const newContent = full.content ?? "";
+    if (!newContent.trim()) return full;
+    const wrapped = wrapWholeDocDiff(existingPrd, newContent);
+    this.emit({
+      type: "step_stream",
+      runId: run.id,
+      stepId: "prd",
+      data: { chunk: wrapped, chunkType: "content" },
+    });
+    return { ...full, content: wrapped };
   }
 
   /**
