@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import { CheckCircle2, Circle, Lock } from "lucide-react";
 import { PrdQualityReportPanel } from "./PrdQualityReportPanel";
 import { PrdSubsystemPanel } from "./PrdSubsystemPanel";
-import { savePrdReadiness } from "./snapshot";
 import type { PrdReadiness } from "./snapshot";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
@@ -68,12 +67,12 @@ export function PrdReadinessPanel(props: {
         <PrdQualityReportPanel
           prd={props.prd}
           spec={props.spec ?? null}
+          projectSlug={props.projectSlug}
+          initialReport={(init?.qualityResult as never) ?? null}
           onApplyFix={props.onApplyFix}
           onResult={() => {
+            // The quality panel persists qualityDone + the full report itself.
             setQualityDone(true);
-            if (props.projectSlug) {
-              savePrdReadiness(props.projectSlug, { qualityDone: true }).catch(() => {});
-            }
             props.onQualityResult?.();
           }}
         />

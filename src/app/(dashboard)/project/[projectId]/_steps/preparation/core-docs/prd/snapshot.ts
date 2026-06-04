@@ -19,6 +19,8 @@ export interface PrdVersion {
 export interface PrdReadiness {
   qualityDone?: boolean;
   subsystemDone?: boolean;
+  /** Full Step-1 quality report payload, so the findings re-render verbatim. */
+  qualityResult?: unknown;
   /** Full Step-2 decompose response payload, so the panel re-renders verbatim. */
   subsystemResult?: unknown;
   savedAt?: string;
