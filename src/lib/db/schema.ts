@@ -24,6 +24,7 @@ export const projects = pgTable("projects", {
   // Public URL path to the captured preview screenshot used as the project's
   // cover/thumbnail (e.g. "/project-covers/<id>.jpg"). Null until captured.
   coverImagePath: text("cover_image_path"),
+  ownerId:        text("owner_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -144,6 +145,19 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── project_members ─────────────────────────────────────────────────────────
+
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    userId:    text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    role:      text("role").notNull(), // 'owner' | 'collaborator'
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.userId] })],
+);
+
 // ─── Inferred TypeScript types ───────────────────────────────────────────────
 
 export type Project                 = typeof projects.$inferSelect;
@@ -156,3 +170,6 @@ export type CodingSessionReport     = typeof codingSessionReports.$inferSelect;
 export type NewCodingSessionReport  = typeof codingSessionReports.$inferInsert;
 export type User    = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type ProjectMember    = typeof projectMembers.$inferSelect;
+export type NewProjectMember = typeof projectMembers.$inferInsert;
+export type ProjectMemberRole = "owner" | "collaborator";

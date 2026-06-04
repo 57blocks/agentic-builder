@@ -6,50 +6,54 @@
  *   DATABASE_URL=postgresql://localhost:5432/agentic_builder
  */
 
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
+  projectMembers,
   projects,
   projectStageState,
   projectStepSnapshot,
+  type ProjectMemberRole,
 } from "@/lib/db/schema";
 import type { Project } from "@/types/project";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-type ProjectRow = {
-  id: string;
-  slug: string;
-  name: string;
-  coverImagePath: string | null;
-  createdAt: Date | string;
-};
+type ProjectRow = { id: string; slug: string; name: string; createdAt: Date | string };
 
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
-    coverImagePath: row.coverImagePath ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
   };
 }
 
-/** Column set shared by every project SELECT so new fields stay in sync. */
-const projectColumns = {
-  id:             projects.id,
-  slug:           projects.slug,
-  name:           projects.name,
-  coverImagePath: projects.coverImagePath,
-  createdAt:      projects.createdAt,
-} as const;
-
 // ─── Projects CRUD ────────────────────────────────────────────────────────────
 
-export async function getProjects(): Promise<Project[]> {
+export async function getProjects(userId: string): Promise<Project[]> {
   const rows = await db
-    .select(projectColumns)
+    .select({
+      id:        projects.id,
+      slug:      projects.slug,
+      name:      projects.name,
+      createdAt: projects.createdAt,
+    })
     .from(projects)
+    .leftJoin(
+      projectMembers,
+      and(
+        eq(projectMembers.projectId, projects.id),
+        eq(projectMembers.userId, userId),
+      ),
+    )
+    .where(
+      or(
+        isNull(projects.ownerId),        // legacy projects visible to all
+        isNotNull(projectMembers.userId), // projects where this user is a member
+      ),
+    )
     .orderBy(desc(projects.createdAt));
 
   return rows.map(toProject);
@@ -57,7 +61,12 @@ export async function getProjects(): Promise<Project[]> {
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
   const rows = await db
-    .select(projectColumns)
+    .select({
+      id:        projects.id,
+      slug:      projects.slug,
+      name:      projects.name,
+      createdAt: projects.createdAt,
+    })
     .from(projects)
     .where(eq(projects.slug, slug))
     .limit(1);
@@ -65,7 +74,7 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
   return rows[0] ? toProject(rows[0]) : null;
 }
 
-export async function createProject(name: string, clientId?: string): Promise<Project> {
+export async function createProject(name: string, clientId: string | undefined, userId: string): Promise<Project> {
   const baseSlug =
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
     `project-${Date.now()}`;
@@ -83,35 +92,58 @@ export async function createProject(name: string, clientId?: string): Promise<Pr
   }
 
   const id = clientId ?? crypto.randomUUID();
-  const rows = await db
-    .insert(projects)
-    .values({ id, slug: finalSlug, name: name.trim() })
-    .returning(projectColumns);
 
-  return toProject(rows[0]);
+  const newProject = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(projects)
+      .values({ id, slug: finalSlug, name: name.trim(), ownerId: userId })
+      .returning({
+        id:        projects.id,
+        slug:      projects.slug,
+        name:      projects.name,
+        createdAt: projects.createdAt,
+      });
+    await tx
+      .insert(projectMembers)
+      .values({ projectId: id, userId, role: "owner" as ProjectMemberRole });
+    return row;
+  });
+
+  return toProject(newProject);
 }
 
-export async function updateProjectName(projectId: string, name: string): Promise<void> {
+export async function updateProjectName(
+  projectId: string,
+  name: string,
+  userId: string,
+): Promise<{ forbidden: boolean }> {
+  const [member] = await db
+    .select({ role: projectMembers.role })
+    .from(projectMembers)
+    .where(
+      and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.userId, userId),
+      ),
+    )
+    .limit(1);
+
+  if (!member) {
+    // Allow if legacy project (owner_id IS NULL)
+    const [project] = await db
+      .select({ ownerId: projects.ownerId })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!project || project.ownerId !== null) return { forbidden: true };
+  }
+
   await db
     .update(projects)
     .set({ name: name.trim() })
     .where(eq(projects.id, projectId));
-}
 
-/**
- * Set (or clear, with null) the cover-image path for a project.
- * Returns true when a matching project row was updated.
- */
-export async function updateProjectCover(
-  projectId: string,
-  coverImagePath: string | null,
-): Promise<boolean> {
-  const rows = await db
-    .update(projects)
-    .set({ coverImagePath })
-    .where(eq(projects.id, projectId))
-    .returning({ id: projects.id });
-  return rows.length > 0;
+  return { forbidden: false };
 }
 
 /**
@@ -119,15 +151,33 @@ export async function updateProjectCover(
  * project_step_snapshot, memory rows with this projectId, etc.) handle
  * cleanup, so a single DELETE on `projects` is sufficient.
  *
- * Returns true when a row was deleted, false when no project with that id
- * existed (idempotent caller behavior).
+ * Returns forbidden when the caller lacks delete permission, deleted=false
+ * when no project with that id existed (idempotent caller behavior).
  */
-export async function deleteProject(projectId: string): Promise<boolean> {
+export async function deleteProject(
+  projectId: string,
+  userId: string,
+): Promise<{ forbidden: boolean; deleted: boolean }> {
+  const [project] = await db
+    .select({ ownerId: projects.ownerId })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+
+  if (!project) return { forbidden: false, deleted: false };
+
+  // Legacy project (no owner): any authenticated user may delete
+  // Owned project: only the owner may delete
+  if (project.ownerId !== null && project.ownerId !== userId) {
+    return { forbidden: true, deleted: false };
+  }
+
   const rows = await db
     .delete(projects)
     .where(eq(projects.id, projectId))
     .returning({ id: projects.id });
-  return rows.length > 0;
+
+  return { forbidden: false, deleted: rows.length > 0 };
 }
 
 // ─── Stage State ──────────────────────────────────────────────────────────────

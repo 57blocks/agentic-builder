@@ -10,6 +10,7 @@ import {
   updateProjectName,
   type StageStateRow,
 } from "@/lib/project-store";
+import { resolveUserId } from "@/lib/session";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -26,15 +27,26 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
 export async function PUT(req: NextRequest, ctx: RouteContext) {
   try {
+    const userId = await resolveUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { projectId } = await ctx.params;
     const body = (await req.json()) as {
       stageState?: Partial<StageStateRow>;
     };
 
-    await Promise.all([
-      body.stageState ? upsertStageState(projectId, body.stageState) : Promise.resolve(),
-      body.stageState?.projectName ? updateProjectName(projectId, body.stageState.projectName) : Promise.resolve(),
-    ]);
+    if (body.stageState?.projectName) {
+      const result = await updateProjectName(projectId, body.stageState.projectName, userId);
+      if (result.forbidden) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
+    if (body.stageState) {
+      await upsertStageState(projectId, body.stageState);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

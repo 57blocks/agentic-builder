@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProjects, createProject } from "@/lib/project-store";
+import { resolveUserId } from "@/lib/session";
 
-/** GET /api/projects — list all projects */
-export async function GET() {
+/** GET /api/projects — list projects the current user is a member of */
+export async function GET(req: NextRequest) {
   try {
-    const projects = await getProjects();
+    const userId = await resolveUserId(req);
+    if (!userId) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const projects = await getProjects(userId);
     return NextResponse.json({ projects });
   } catch (err) {
     console.error("[api/projects] GET error:", err);
@@ -12,9 +17,14 @@ export async function GET() {
   }
 }
 
-/** POST /api/projects — create a new project */
+/** POST /api/projects — create a new project owned by the current user */
 export async function POST(req: NextRequest) {
   try {
+    const userId = await resolveUserId(req);
+    if (!userId) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
     const { name, id: clientId } = (await req.json()) as { name?: string; id?: string };
 
     if (!name || !name.trim()) {
@@ -24,7 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const project = await createProject(name, clientId);
+    const project = await createProject(name, clientId, userId);
     return NextResponse.json({ project }, { status: 201 });
   } catch (err) {
     console.error("[api/projects] POST error:", err);
