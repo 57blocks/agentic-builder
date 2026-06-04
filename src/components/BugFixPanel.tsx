@@ -474,6 +474,9 @@ function BugDetailPanel({ row, onClose, onUpdate, outputDir, onRun, running }: {
                 E2E: {VERDICT_BADGE[row.e2eVerification.verdict].label.replace("AI: ", "")} · {Math.round(row.e2eVerification.confidence * 100)}%
               </span>
             )}
+            {row.e2eVerification?.reasoning && (
+              <p className="w-full text-[11px] text-slate-400 leading-tight">{row.e2eVerification.reasoning}</p>
+            )}
           </div>
         )}
         {row.currentLog && row.status === "running" && (
@@ -1253,6 +1256,19 @@ export default function BugFixPanel({ onNavigate }: { onNavigate?: (stepId: Step
                                     className="text-amber-400 cursor-help"
                                   >
                                     <AlertCircle size={12} />
+                                  </span>
+                                )}
+                                {row.e2eTesting && (
+                                  <span title="Running E2E test…" className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
+                                    <Loader2 size={10} className="animate-spin" /> E2E
+                                  </span>
+                                )}
+                                {!row.e2eTesting && row.e2eVerification && (
+                                  <span
+                                    title={row.e2eVerification.reasoning || undefined}
+                                    className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full cursor-help ${VERDICT_BADGE[row.e2eVerification.verdict].cls}`}
+                                  >
+                                    E2E: {VERDICT_BADGE[row.e2eVerification.verdict].label.replace("AI: ", "")} · {Math.round(row.e2eVerification.confidence * 100)}%
                                   </span>
                                 )}
                               </div>
