@@ -117,7 +117,7 @@ inventory→域(manifest)、以及 task-breakdown→按域 scoped 的任务。`p
 | orchestrate(分配/分层)+ foundation + coding-runner + active-scope + progress-io + develop | ✅ 已建 |
 | PRD 质量 gate L1+L2 + Prepare PRD 两步 UI + 域展开明细 | ✅ 已建 |
 | DB-url 优先级修复(kickoff 真实库不被全局占位遮蔽) | ✅ 已建 |
-| **P3.1 冻结契约前置**(域开建前契约/共享类型必须完整冻结) | ⛔ 待建 |
+| **P3.1 冻结契约前置**(域开建前契约/共享类型必须完整冻结) | ✅ 已建(contract-precondition.ts + foundation/develop 接线) |
 | **P3.2 跨域整合 gate**(全应用 routing 闭合 + runtime + E2E,非 scoped) | ⛔ 待建 |
 | **P3.3 子系统模式下前端内聚**(共享 shell/tokens 纳入 foundation) | ⚠️ 部分(Foundation 任务已有,需确认进 foundation 阶段) |
 | **P3.4 阈值校准 + 编排可观测**(per-domain 状态/dump) | ⚠️ 部分 |
