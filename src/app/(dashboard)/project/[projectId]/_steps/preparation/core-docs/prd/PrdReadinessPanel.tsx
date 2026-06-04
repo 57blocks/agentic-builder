@@ -52,7 +52,7 @@ export function PrdReadinessPanel(props: {
       <section>
         <StepHeader n={1} title="Validate PRD" state={qualityDone ? "done" : "active"} />
         <p className="text-[11px] text-slate-500 mt-1 mb-2">
-          Check business flows, user paths, pages and downstream buildability. Fix blockers before splitting.
+          Check flows, pages and downstream buildability; fix blockers first.
         </p>
         <PrdQualityReportPanel
           prd={props.prd}
@@ -77,7 +77,7 @@ export function PrdReadinessPanel(props: {
         {qualityDone ? (
           <>
             <p className="text-[11px] text-slate-500 mt-1 mb-2">
-              Split the PRD into business-domain subsystems (shared foundation first, then layered build).
+              Split into business-domain subsystems (foundation first, then layered build).
             </p>
             <PrdSubsystemPanel
               prd={props.prd}

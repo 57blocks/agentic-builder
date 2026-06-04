@@ -95,12 +95,6 @@ export function PrdQualityReportPanel(props: {
       <div className="px-4 py-3">
         {error && <div className="text-xs text-red-600">Check failed: {error}</div>}
 
-        {!report && !error && (
-          <div className="text-xs text-slate-400 py-2">
-            Click “Validate PRD” to check business flows, user paths, pages and downstream buildability — Layer 1 deterministic checks + optional AI semantic review.
-          </div>
-        )}
-
         {report?.layer2?.error && (
           <div className="text-xs text-amber-600 mb-2">AI review skipped: {report.layer2.error} (showing deterministic checks only)</div>
         )}
