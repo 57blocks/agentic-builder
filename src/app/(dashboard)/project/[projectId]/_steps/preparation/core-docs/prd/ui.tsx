@@ -11,7 +11,7 @@ import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
 import { savePrdVersion, loadPrdVersions } from "./snapshot";
-import type { PrdVersion } from "./snapshot";
+import type { PrdVersion, PrdReadiness } from "./snapshot";
 import { PrdReadinessPanel } from "./PrdReadinessPanel";
 import { PrdToolDrawer } from "./PrdToolDrawer";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
@@ -194,6 +194,22 @@ export function PrdUI(props: StepUIProps) {
         label: v.label,
       }));
     }).catch(() => {/* ignore */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]);
+
+  // ── Restore persisted PRD-readiness (Validate / Split) on hydration ──
+  const readinessHydratedRef = useRef(false);
+  useEffect(() => {
+    if (!isHydrated || readinessHydratedRef.current) return;
+    const r = (useStepStore.getState().steps.prd?.metadata as
+      | { prdReadiness?: PrdReadiness }
+      | undefined)?.prdReadiness;
+    if (r) {
+      // Step 2 only unlocks after Step 1, so a persisted split implies both ran.
+      if (r.qualityDone || r.subsystemDone) setQualityRan(true);
+      if (r.subsystemDone) setSubsystemRan(true);
+    }
+    readinessHydratedRef.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHydrated]);
 
@@ -635,6 +651,11 @@ export function PrdUI(props: StepUIProps) {
           <PrdReadinessPanel
             prd={stripChangeMarkers(content)}
             spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
+            projectSlug={props.projectSlug}
+            initialReadiness={
+              (step?.metadata as { prdReadiness?: PrdReadiness } | undefined)
+                ?.prdReadiness ?? null
+            }
             onQualityResult={() => setQualityRan(true)}
             onSubsystemResult={() => setSubsystemRan(true)}
             onApplyFix={(instruction) => {

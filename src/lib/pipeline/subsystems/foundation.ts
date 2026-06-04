@@ -20,6 +20,11 @@
 import type { KickoffWorkItem } from "../types";
 import { readSessionCheckpoint } from "../session-checkpoint";
 import { writeActiveScope } from "./active-scope";
+import type { SubsystemManifest } from "./types";
+import {
+  assertContractCoversManifest,
+  type ContractPreconditionResult,
+} from "./contract-precondition";
 import {
   drainStream,
   verdictFromCheckpoint,
@@ -144,12 +149,33 @@ export async function runSubsystemPipeline(
   plan: SubsystemBuildPlan,
   ctx: SubsystemCodingContext,
   subsystemRunner: SubsystemCodingRunner,
-  opts?: { alreadyDone?: Set<string>; onStepDone?: (r: SubsystemRunResult) => Promise<void> | void },
-): Promise<{ foundation: FoundationBuildResult; subsystems: SubsystemRunResult[] }> {
+  opts?: {
+    alreadyDone?: Set<string>;
+    onStepDone?: (r: SubsystemRunResult) => Promise<void> | void;
+    /** When provided, the frozen-contract precondition (P3.1) is enforced after
+     *  the foundation build and before any domain build. */
+    manifest?: SubsystemManifest;
+  },
+): Promise<{
+  foundation: FoundationBuildResult;
+  subsystems: SubsystemRunResult[];
+  contractCheck?: ContractPreconditionResult;
+}> {
   const foundation = await runFoundationBuild(allTasks, plan, ctx);
   if (!foundation.ok) {
     return { foundation, subsystems: [] };
   }
+
+  // P3.1 — fail fast if the foundation didn't freeze a complete API contract:
+  // every domain's owned endpoints must be declared before domains build.
+  if (opts?.manifest) {
+    const projectRoot = ctx.projectRoot ?? process.cwd();
+    const contractCheck = await assertContractCoversManifest(projectRoot, opts.manifest);
+    if (!contractCheck.ok) {
+      return { foundation, subsystems: [], contractCheck };
+    }
+  }
+
   const subsystems = await runSubsystemBuilds(plan, subsystemRunner, {
     alreadyDone: opts?.alreadyDone,
     onStepDone: opts?.onStepDone,

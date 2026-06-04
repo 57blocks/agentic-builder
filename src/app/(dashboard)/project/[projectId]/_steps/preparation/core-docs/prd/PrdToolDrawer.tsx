@@ -29,7 +29,7 @@ export function PrdToolDrawer(props: {
       {/* panel */}
       <aside
         className={`fixed inset-y-0 right-0 z-50 flex h-full ${props.widthClass ?? "w-[560px] max-w-[92vw]"} flex-col bg-white shadow-2xl transition-transform duration-200 ease-out ${
-          props.open ? "translate-x-0" : "translate-x-full"
+          props.open ? "translate-x-0" : "translate-x-full pointer-events-none"
         }`}
         role="dialog"
         aria-hidden={!props.open}
@@ -47,7 +47,9 @@ export function PrdToolDrawer(props: {
             <X size={16} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">{props.open && props.children}</div>
+        {/* Children stay mounted while closed (drawer is just translated
+            off-screen) so in-progress results / step state survive open/close. */}
+        <div className="flex-1 overflow-y-auto p-4">{props.children}</div>
       </aside>
     </>
   );

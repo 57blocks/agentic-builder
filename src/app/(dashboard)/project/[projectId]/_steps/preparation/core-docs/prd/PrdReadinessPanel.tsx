@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { CheckCircle2, Circle, Lock } from "lucide-react";
 import { PrdQualityReportPanel } from "./PrdQualityReportPanel";
 import { PrdSubsystemPanel } from "./PrdSubsystemPanel";
+import { savePrdReadiness } from "./snapshot";
+import type { PrdReadiness } from "./snapshot";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
 /**
@@ -42,9 +44,18 @@ export function PrdReadinessPanel(props: {
   onApplyFix: (instruction: string) => void;
   onQualityResult?: () => void;
   onSubsystemResult?: () => void;
+  /** Persist results to this project (survives reload). */
+  projectSlug?: string;
+  /** Hydrated readiness state (from prd step metadata) to restore on revisit. */
+  initialReadiness?: PrdReadiness | null;
 }) {
-  const [qualityDone, setQualityDone] = useState(false);
-  const [subsystemDone, setSubsystemDone] = useState(false);
+  const init = props.initialReadiness ?? null;
+  // Step 2 only unlocks after Step 1, so a persisted subsystem result implies
+  // Step 1 was completed too.
+  const [qualityDone, setQualityDone] = useState(
+    Boolean(init?.qualityDone || init?.subsystemDone),
+  );
+  const [subsystemDone, setSubsystemDone] = useState(Boolean(init?.subsystemDone));
 
   return (
     <div className="flex flex-col gap-5">
@@ -60,6 +71,9 @@ export function PrdReadinessPanel(props: {
           onApplyFix={props.onApplyFix}
           onResult={() => {
             setQualityDone(true);
+            if (props.projectSlug) {
+              savePrdReadiness(props.projectSlug, { qualityDone: true }).catch(() => {});
+            }
             props.onQualityResult?.();
           }}
         />
@@ -81,6 +95,8 @@ export function PrdReadinessPanel(props: {
             </p>
             <PrdSubsystemPanel
               prd={props.prd}
+              projectSlug={props.projectSlug}
+              initialResult={(init?.subsystemResult as never) ?? null}
               onResult={() => {
                 setSubsystemDone(true);
                 props.onSubsystemResult?.();

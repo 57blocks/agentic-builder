@@ -28,6 +28,10 @@ import {
   runSubsystemPipeline,
   type FoundationBuildResult,
 } from "./foundation";
+import {
+  runCrossDomainIntegration,
+  type CrossDomainIntegrationResult,
+} from "./integrate";
 import { decomposePrdIntoSubsystems, type DecomposeResult } from "./decompose";
 
 export interface DevelopBySubsystemOptions {
@@ -55,6 +59,7 @@ export interface DevelopBySubsystemResult {
   plan?: SubsystemBuildPlan;
   foundation?: FoundationBuildResult;
   subsystems?: SubsystemRunResult[];
+  integration?: CrossDomainIntegrationResult;
   skipped?: string[];
 }
 
@@ -101,7 +106,7 @@ export async function developBySubsystem(
   // 6. Run foundation → layers, persisting each subsystem result.
   const runPipeline = opts.runPipeline ?? runSubsystemPipeline;
   const runner = makeHttpCodingRunner(codingContext);
-  const { foundation, subsystems } = await runPipeline(
+  const { foundation, subsystems, contractCheck } = await runPipeline(
     allTasks,
     plan,
     codingContext,
@@ -109,26 +114,52 @@ export async function developBySubsystem(
     {
       alreadyDone,
       onStepDone: (r) => recordSubsystemResult(projectRoot, r, now),
+      manifest, // P3.1 — enforce the frozen-contract precondition before domains
     },
   );
 
+  const contractOk = !contractCheck || contractCheck.ok;
   const allOk =
     foundation.ok &&
+    contractOk &&
     subsystems.every((s) => s.status === "completed" || s.status === "skipped");
   const errors: string[] = [];
   if (!foundation.ok) errors.push(`foundation failed: ${foundation.summary}`);
+  if (contractCheck && !contractCheck.ok) {
+    errors.push(
+      `frozen-contract precondition failed (${contractCheck.reason ?? "incomplete"})` +
+        (contractCheck.missing.length
+          ? ` — missing from API_CONTRACTS.json: ${contractCheck.missing.slice(0, 20).join(", ")}${contractCheck.missing.length > 20 ? " …" : ""}`
+          : ""),
+    );
+  }
   for (const s of subsystems) {
     if (s.status === "failed") errors.push(`subsystem ${s.subsystemId} failed: ${s.summary ?? ""}`);
   }
 
+  // P3.2 — cross-domain integration gate: only when everything else built, as a
+  // final whole-app check. Additive; never run on a broken build.
+  let integration: CrossDomainIntegrationResult | undefined;
+  if (allOk) {
+    integration = await runCrossDomainIntegration({
+      outputDir: codingContext.codeOutputDir ?? projectRoot,
+      sessionId: codingContext.runId,
+    });
+    if (integration.ran && !integration.ok) {
+      errors.push(`cross-domain integration failed: ${integration.reason ?? "see findings"}`);
+    }
+  }
+  const finalOk = allOk && (!integration || !integration.ran || integration.ok);
+
   return {
-    ok: allOk,
+    ok: finalOk,
     errors,
     manifest,
     validation,
     plan,
     foundation,
     subsystems,
+    integration,
     skipped: [...alreadyDone],
   };
 }

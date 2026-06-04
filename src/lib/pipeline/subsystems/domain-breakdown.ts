@@ -36,9 +36,24 @@ export const FOUNDATION_PHASES = new Set([
 /** Title hints for the shared frontend foundation task (phase "Frontend"). */
 const FOUNDATION_TITLE_RE = /foundation|design tokens|shared ui|app shell|layout shell|router skeleton/i;
 
+/** Shared frontend foundation FILES (P3.3): a task that creates any of these
+ *  owns the cross-cutting design system / shell / router every domain reuses,
+ *  so it belongs to the Phase-1 foundation regardless of its title/phase. More
+ *  robust than the title regex, which depends on the generated wording. */
+const FOUNDATION_FILE_RE =
+  /^frontend\/src\/(styles\/tokens\.css|router\.tsx|components\/(ui|layout)\/)/;
+
+function taskCreates(t: KickoffWorkItem): string[] {
+  if (!t.files) return [];
+  if (Array.isArray(t.files)) return t.files;
+  return t.files.creates ?? [];
+}
+
 export function isFoundationTask(t: KickoffWorkItem): boolean {
   if (FOUNDATION_PHASES.has(t.phase)) return true;
   if (t.phase === "Frontend" && FOUNDATION_TITLE_RE.test(t.title)) return true;
+  // Robust fallback: owns shared frontend-foundation files (tokens/ui/layout/router).
+  if (taskCreates(t).some((f) => FOUNDATION_FILE_RE.test(f))) return true;
   return false;
 }
 
