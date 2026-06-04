@@ -74,6 +74,7 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
       let resultCost = 0;
       let resultDuration = 0;
       let resultError: string | undefined;
+      let resultMeta: Record<string, unknown> | undefined;
 
       try {
         const resp = await fetch(apiEndpoint, {
@@ -142,6 +143,15 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
                 (data.content as string) || resultContent || streamedContent;
               resultCost = (data.costUsd as number) || resultCost;
               resultDuration = (data.durationMs as number) || resultDuration;
+              // Carry step metadata (e.g. PRD's extracted prdSpec/domain) so it
+              // is persisted and available to later steps (TRD reads
+              // prd.metadata.prdSpec). Without this the domain is dropped.
+              if (data.metadata && typeof data.metadata === "object") {
+                resultMeta = {
+                  ...resultMeta,
+                  ...(data.metadata as Record<string, unknown>),
+                };
+              }
               ctx.emitState({ isRunning: false, streamingContent: "", streamingThinking: "" });
               break;
             }
@@ -186,6 +196,7 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
         costUsd: resultCost,
         durationMs: resultDuration,
         timestamp: new Date().toISOString(),
+        ...(resultMeta ? { metadata: resultMeta } : {}),
       };
     },
 
