@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Boxes, Loader2, CheckCircle2, AlertTriangle, GitBranch } from "lucide-react";
+import { Boxes, Loader2, CheckCircle2, AlertTriangle, GitBranch, ChevronRight } from "lucide-react";
 
 interface SubsystemView {
   id: string; name: string; description: string;
   endpoints: number; routes: number; collections: number;
   modules: string[]; dependsOn: string[]; prdSections: string[];
+  ownedApiEndpoints: string[]; ownedRoutes: string[]; ownedCollections: string[];
 }
 interface DecomposeResponse {
   ok: boolean;
@@ -32,7 +33,14 @@ export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void })
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<DecomposeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const size = useMemo(() => looksLarge(props.prd), [props.prd]);
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   async function run() {
     if (loading) return;
@@ -98,21 +106,53 @@ export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void })
             )}
 
             <div className="flex flex-col gap-1.5">
-              {resp.subsystems.map((s) => (
-                <div key={s.id} className="border border-slate-200 rounded-[4px] px-3 py-2 bg-white">
-                  <div className="flex items-center gap-2">
+              {resp.subsystems.map((s) => {
+                const open = expanded.has(s.id);
+                return (
+                <div key={s.id} className="border border-slate-200 rounded-[4px] bg-white">
+                  <button
+                    type="button"
+                    onClick={() => toggle(s.id)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                  >
+                    <ChevronRight size={13} className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
                     <span className="font-medium text-[13px] text-slate-800">{s.name}</span>
                     <code className="text-[10px] text-slate-400">{s.id}</code>
                     <span className="ml-auto text-[10px] text-slate-400">
                       {s.endpoints} endpoints · {s.routes} routes · {s.collections} collections
                     </span>
-                  </div>
-                  {s.description && <div className="text-[11px] text-slate-500 mt-0.5">{s.description}</div>}
-                  {s.dependsOn.length > 0 && (
-                    <div className="text-[11px] text-violet-700 mt-0.5">depends on: {s.dependsOn.map(nameOf).join(", ")}</div>
+                  </button>
+                  {open && (
+                    <div className="px-3 pb-3 pt-1 border-t border-slate-100 flex flex-col gap-2 text-[11px]">
+                      {s.description && <div className="text-slate-600">{s.description}</div>}
+                      {s.dependsOn.length > 0 && (
+                        <div className="text-violet-700">depends on: {s.dependsOn.map(nameOf).join(", ")}</div>
+                      )}
+                      {s.prdSections.length > 0 && (
+                        <div><span className="text-slate-400">PRD sections:</span> {s.prdSections.join(", ")}</div>
+                      )}
+                      {s.ownedApiEndpoints.length > 0 && (
+                        <div>
+                          <span className="text-slate-400">Endpoints ({s.ownedApiEndpoints.length}):</span>
+                          <ul className="mt-0.5 ml-3 list-disc font-mono text-[10.5px] text-slate-600">
+                            {s.ownedApiEndpoints.map((e) => <li key={e}>{e}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {s.ownedRoutes.length > 0 && (
+                        <div><span className="text-slate-400">Routes:</span> <span className="font-mono text-[10.5px] text-slate-600">{s.ownedRoutes.join(" · ")}</span></div>
+                      )}
+                      {s.ownedCollections.length > 0 && (
+                        <div><span className="text-slate-400">Collections:</span> <span className="font-mono text-[10.5px] text-slate-600">{s.ownedCollections.join(", ")}</span></div>
+                      )}
+                      {s.modules.length > 0 && (
+                        <div><span className="text-slate-400">Modules:</span> <span className="font-mono text-[10.5px] text-slate-600">{s.modules.join(", ")}</span></div>
+                      )}
+                    </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {resp.notes?.length > 0 && (

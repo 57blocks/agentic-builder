@@ -64,6 +64,10 @@ export async function POST(req: NextRequest) {
       modules: s.ownedModules,
       dependsOn: s.dependsOn,
       prdSections: s.prdSections,
+      // Full ownership detail for the expandable domain view.
+      ownedApiEndpoints: s.ownedApiEndpoints,
+      ownedRoutes: s.ownedRoutes,
+      ownedCollections: s.ownedCollections,
     })),
   });
 }
