@@ -41,6 +41,7 @@ export default function LoginPage() {
     if (e === "domain") setOauthError("Only @57blocks.com accounts are allowed.");
     else if (e === "state") setOauthError("Authentication failed. Please try again.");
     else if (e === "oauth") setOauthError("Google sign-in failed. Please try again.");
+    else if (e === "server") setOauthError("Server error during sign-in. Please check the server logs.");
   }, []);
 
   async function handleSubmit(e: FormEvent) {

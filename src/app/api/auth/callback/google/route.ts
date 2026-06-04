@@ -91,12 +91,17 @@ export async function GET(req: NextRequest) {
   }
 
   // Persist user
-  await upsertUser({
-    email: googlePayload.email,
-    name: googlePayload.name ?? null,
-    picture: googlePayload.picture ?? null,
-    google_id: googlePayload.sub,
-  });
+  try {
+    await upsertUser({
+      email: googlePayload.email,
+      name: googlePayload.name ?? null,
+      picture: googlePayload.picture ?? null,
+      google_id: googlePayload.sub,
+    });
+  } catch (err) {
+    console.error("[auth/callback/google] upsertUser failed:", err);
+    return errorRedirect(req, "server");
+  }
 
   // Mint auth token
   const authToken = await signToken(googlePayload.email);
