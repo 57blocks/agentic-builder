@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
+import { useStepStore } from "@/store/step-store";
 
 function PlusIcon() {
   return (
@@ -33,13 +34,26 @@ export default function LandingPage() {
   async function handleNewProject() {
     resetStage();
     resetPipeline();
+
+    // Prompt user to select a directory first (mandatory)
+    let folder: string | null = null;
+    if (window.electronAPI?.selectFolder) {
+      folder = await window.electronAPI.selectFolder();
+    } else {
+      folder = prompt("Enter the absolute path for this project's code output directory:");
+    }
+    if (!folder || !folder.trim()) return; // user cancelled or gave empty input
+
     const localProject = addLocalProject("New Project");
     setProjectSlugForSync(localProject.id);
     pipelineSetProjectSlugForSync(localProject.id);
     setProjectName("New Project");
+    // Set codeOutputDir immediately so generated code goes to the right place
+    // even before createProject completes and the DB is queryable.
+    useStepStore.getState().setCodeOutputDir(folder);
     router.push(`/project/${localProject.id}`);
     try {
-      await createProject("New Project", localProject.id);
+      await createProject("New Project", folder, localProject.id);
     } catch (err) {
       console.error("[LandingPage] Server project creation failed:", err);
     }
