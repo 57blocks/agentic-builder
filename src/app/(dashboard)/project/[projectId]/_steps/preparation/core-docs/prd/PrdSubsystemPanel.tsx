@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { Boxes, Loader2, CheckCircle2, AlertTriangle, GitBranch, ChevronRight } from "lucide-react";
+import { savePrdReadiness } from "./snapshot";
 
 interface SubsystemView {
   id: string; name: string; description: string;
@@ -29,9 +30,16 @@ function looksLarge(prd: string): { large: boolean; h2: number; lines: number } 
   return { large: lines >= 1500 || h2 >= 8, h2, lines };
 }
 
-export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void }) {
+export function PrdSubsystemPanel(props: {
+  prd: string;
+  onResult?: () => void;
+  /** Persist Step-2 result here so it survives reload (project-scoped DB). */
+  projectSlug?: string;
+  /** Hydrated prior result (from prd step metadata) to re-render on revisit. */
+  initialResult?: DecomposeResponse | null;
+}) {
   const [loading, setLoading] = useState(false);
-  const [resp, setResp] = useState<DecomposeResponse | null>(null);
+  const [resp, setResp] = useState<DecomposeResponse | null>(props.initialResult ?? null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const size = useMemo(() => looksLarge(props.prd), [props.prd]);
@@ -53,6 +61,15 @@ export function PrdSubsystemPanel(props: { prd: string; onResult?: () => void })
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setResp(j as DecomposeResponse);
+      // Persist the split result to the project (survives reload; downstream
+      // also reads the .blueprint/subsystems.json the route just wrote).
+      if (props.projectSlug) {
+        savePrdReadiness(props.projectSlug, {
+          subsystemResult: j,
+          subsystemDone: true,
+          qualityDone: true,
+        }).catch(() => {});
+      }
       props.onResult?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
