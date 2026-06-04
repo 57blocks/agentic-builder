@@ -73,6 +73,17 @@ export default function AppNav() {
   const resetPipeline = usePipelineStore((s) => s.reset);
   const pipelineSetProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
 
+  const [currentUser, setCurrentUser] = useState<{ email: string; name: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { email: string; name: string | null } | null) => {
+        if (data) setCurrentUser(data);
+      })
+      .catch(() => {});
+  }, []);
+
   // Open menu (3-dot) — only one open at a time. Tracked by project id.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // Inline rename — id of the project currently being edited, and its draft value.
@@ -439,13 +450,17 @@ export default function AppNav() {
         <div className={`border-t border-slate-200 flex items-center ${collapsed ? "justify-center pt-4 px-0" : "gap-3 pt-4.25 pb-2 px-3"}`}>
           <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0 overflow-hidden">
             <div className="w-full h-full bg-linear-to-br from-slate-400 to-slate-500 flex items-center justify-center text-white text-sm font-bold">
-              A
+              {currentUser?.email?.[0]?.toUpperCase() ?? "?"}
             </div>
           </div>
           {!collapsed && (
             <div className="flex flex-col overflow-hidden">
-              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">57Blocks</span>
-              <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
+              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">
+                {currentUser?.name ?? currentUser?.email ?? "—"}
+              </span>
+              <span className="text-xs text-slate-600 leading-3.75 truncate">
+                {currentUser?.email ?? ""}
+              </span>
             </div>
           )}
           {!collapsed && (
