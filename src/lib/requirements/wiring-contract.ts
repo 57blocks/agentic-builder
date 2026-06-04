@@ -169,3 +169,104 @@ export function auditWiringInSource(
 
   return findings;
 }
+
+// ─── Flow-navigation coherence (Phase 5, safe slice) ────────────────────────
+//
+// The canonical "flow breaks in the middle" failure: a control's effect says it
+// navigates to a route, but that route doesn't exist in the router — so the
+// flow dead-ends. We check the PRD-declared nav target against the registered
+// routes. Pure + conservative: only concrete (param-free) targets are checked,
+// and nothing is flagged if the router couldn't be parsed.
+
+/** A path token immediately following a navigation verb in an effect string. */
+const NAV_TARGET_RE =
+  /(?:navigat\w*|redirect\w*|go(?:es)?\s+to|route\s+to|lands?\s+on|takes?\s+\w+\s+to|push\w*|send\w*\s+\w+\s+to)\s+(?:to\s+)?["'`]?(\/[A-Za-z0-9\-_/:]*)/gi;
+
+/** `path="..."` / `path: "..."` route declarations in a router source file. */
+const ROUTE_DECL_RE = /\bpath\s*[:=]\s*["'`]([^"'`]+)["'`]/g;
+
+/**
+ * Extract concrete navigation route targets named in an effect string, e.g.
+ * "navigates to /confirmation" → ["/confirmation"]. Ignores API paths
+ * (mentioned as call targets, not nav) by only capturing the token right after
+ * a navigation verb.
+ */
+export function extractNavRouteTargets(effect: string): string[] {
+  if (!effect) return [];
+  const out = new Set<string>();
+  for (const m of effect.matchAll(NAV_TARGET_RE)) {
+    const raw = m[1];
+    if (raw && raw !== "/api" && !raw.startsWith("/api/")) out.add(raw);
+  }
+  return [...out];
+}
+
+/** Parse registered route paths from a router source file. */
+export function parseRegisteredRoutes(routerSource: string): string[] {
+  if (!routerSource) return [];
+  const out = new Set<string>();
+  for (const m of routerSource.matchAll(ROUTE_DECL_RE)) {
+    if (m[1]) out.add(m[1]);
+  }
+  return [...out];
+}
+
+function normalizePath(p: string): string {
+  const trimmed = p.replace(/\/+$/, "");
+  return trimmed === "" ? "/" : trimmed;
+}
+
+/** Does `target` match a registered route, treating `:param` as a wildcard? */
+function routeIsRegistered(target: string, registered: string[]): boolean {
+  const t = normalizePath(target).split("/");
+  for (const r of registered) {
+    const rs = normalizePath(r).split("/");
+    if (rs.length !== t.length) continue;
+    let ok = true;
+    for (let i = 0; i < rs.length; i++) {
+      const seg = rs[i];
+      if (seg.startsWith(":") || seg === "*") continue; // wildcard
+      if (seg !== t[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+/**
+ * Flag obligations whose effect navigates to a concrete route that isn't
+ * registered in the router → the flow dead-ends. Conservative: skips targets
+ * that contain params (can't verify reliably) and returns nothing when the
+ * router has no parseable routes.
+ */
+export function auditFlowNavigation(
+  obligations: WiringObligation[],
+  registeredRoutes: string[],
+): WiringFinding[] {
+  if (registeredRoutes.length === 0 || obligations.length === 0) return [];
+  const findings: WiringFinding[] = [];
+  const flagged = new Set<string>();
+
+  for (const o of obligations) {
+    for (const target of extractNavRouteTargets(o.effect)) {
+      if (target.includes(":")) continue; // dynamic target — skip
+      if (routeIsRegistered(target, registeredRoutes)) continue;
+      const key = `${o.componentId}:${target}`;
+      if (flagged.has(key)) continue;
+      flagged.add(key);
+      findings.push({
+        id: o.componentId,
+        componentId: o.componentId,
+        message:
+          `\`${o.componentId}\` ${o.name} on ${o.pageId} is meant to navigate to \`${target}\` ` +
+          `(${o.interaction} → ${o.effect}), but \`${target}\` is not a registered route in ` +
+          `\`frontend/src/router.tsx\` — the flow dead-ends. Either wire navigation to the ` +
+          `correct existing route or register the missing route + its page.`,
+      });
+    }
+  }
+  return findings;
+}

@@ -23,6 +23,8 @@ import type { CodingTask } from "@/lib/pipeline/types";
 import {
   deriveWiringObligations,
   auditWiringInSource,
+  auditFlowNavigation,
+  parseRegisteredRoutes,
 } from "@/lib/requirements/wiring-contract";
 import type { AuditEntry, AuditTaskSummary } from "./feature-checklist-audit";
 import type { RepairEmitter } from "./events";
@@ -55,9 +57,46 @@ export async function auditFrontendWiring(
   const out: AuditEntry[] = [];
   const seen = new Set<string>();
 
+  // Parse the router once for the flow-navigation check (Phase 5). Empty when
+  // the router is absent/unparseable, which disables flow checks (conservative).
+  let registeredRoutes: string[] = [];
+  for (const rel of ["frontend/src/router.tsx", "frontend/src/router.ts"]) {
+    try {
+      const src = await fs.readFile(path.join(input.outputDir, rel), "utf-8");
+      registeredRoutes = parseRegisteredRoutes(src);
+      if (registeredRoutes.length > 0) break;
+    } catch {
+      /* try next / leave empty */
+    }
+  }
+
+  const pushFinding = (
+    finding: { id: string; componentId?: string; message: string },
+    taskId: string,
+    label: string,
+  ) => {
+    if (seen.has(finding.id)) return;
+    seen.add(finding.id);
+    out.push({
+      id: finding.id,
+      verdict: "partial",
+      layer: "l2",
+      reason: `${label} — ${finding.message}`,
+      coveringTaskIds: [taskId],
+      evidence: [],
+      category: "wiring",
+    });
+  };
+
   for (const task of input.tasks) {
     const obligations = deriveWiringObligations(task, input.prdSpec);
     if (obligations.length === 0) continue;
+
+    // Flow-navigation coherence (Phase 5): does each declared nav target
+    // resolve to a real route? Independent of the file scan below.
+    for (const finding of auditFlowNavigation(obligations, registeredRoutes)) {
+      pushFinding(finding, task.id, "Flow navigation broken");
+    }
 
     const tr = resultsById.get(task.id);
     const files = (tr?.generatedFiles ?? []).filter((f) =>
@@ -76,17 +115,7 @@ export async function auditFrontendWiring(
     if (!joined.trim()) continue;
 
     for (const finding of auditWiringInSource(joined, obligations)) {
-      if (seen.has(finding.id)) continue;
-      seen.add(finding.id);
-      out.push({
-        id: finding.id,
-        verdict: "partial",
-        layer: "l2",
-        reason: `Interaction wiring incomplete — ${finding.message}`,
-        coveringTaskIds: [task.id],
-        evidence: [],
-        category: "wiring",
-      });
+      pushFinding(finding, task.id, "Interaction wiring incomplete");
     }
   }
 

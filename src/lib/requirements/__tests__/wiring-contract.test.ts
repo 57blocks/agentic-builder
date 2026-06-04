@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   deriveWiringObligations,
   auditWiringInSource,
+  extractNavRouteTargets,
+  parseRegisteredRoutes,
+  auditFlowNavigation,
   type WiringObligation,
 } from "../wiring-contract";
 import type { PrdSpec } from "../prd-spec-types";
@@ -144,5 +147,67 @@ describe("auditWiringInSource", () => {
   it("returns empty for empty source or no obligations", () => {
     expect(auditWiringInSource("", OBLIGATIONS)).toEqual([]);
     expect(auditWiringInSource("<button onClick={()=>{}}/>", [])).toEqual([]);
+  });
+});
+
+describe("extractNavRouteTargets", () => {
+  it("extracts the route after a nav verb, ignoring API call paths", () => {
+    expect(
+      extractNavRouteTargets("Calls POST /payments and navigates to /confirmation"),
+    ).toEqual(["/confirmation"]);
+  });
+
+  it("handles 'redirect to' / 'go to'", () => {
+    expect(extractNavRouteTargets("redirects to /login")).toEqual(["/login"]);
+    expect(extractNavRouteTargets("goes to /dashboard")).toEqual(["/dashboard"]);
+  });
+
+  it("returns empty when there is no navigation intent", () => {
+    expect(extractNavRouteTargets("Calls POST /payments and shows a toast")).toEqual([]);
+  });
+});
+
+describe("parseRegisteredRoutes", () => {
+  it("parses path= and path: declarations", () => {
+    const src = `
+      <Route path="/cart" element={<CartPage/>} />
+      { path: "/confirmation", element: <Confirm/> }
+      { path: '/orders/:id' }
+    `;
+    expect(parseRegisteredRoutes(src).sort()).toEqual([
+      "/cart",
+      "/confirmation",
+      "/orders/:id",
+    ]);
+  });
+});
+
+describe("auditFlowNavigation", () => {
+  const navObligation: WiringObligation = {
+    ...OBLIGATIONS[0],
+    effect: "navigates to /confirmation",
+  };
+
+  it("flags a nav target that is not a registered route (flow dead-ends)", () => {
+    const findings = auditFlowNavigation([navObligation], ["/cart", "/checkout"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toMatch(/not a registered route/);
+  });
+
+  it("does NOT flag when the target route is registered", () => {
+    expect(
+      auditFlowNavigation([navObligation], ["/cart", "/confirmation"]),
+    ).toEqual([]);
+  });
+
+  it("matches registered routes with :param wildcards", () => {
+    const o: WiringObligation = { ...OBLIGATIONS[0], effect: "navigates to /orders/42" };
+    expect(auditFlowNavigation([o], ["/orders/:id"])).toEqual([]);
+  });
+
+  it("skips dynamic targets and returns nothing when no routes are parseable", () => {
+    const dyn: WiringObligation = { ...OBLIGATIONS[0], effect: "navigates to /orders/:id" };
+    expect(auditFlowNavigation([dyn], ["/cart"])).toEqual([]);
+    expect(auditFlowNavigation([navObligation], [])).toEqual([]);
   });
 });
