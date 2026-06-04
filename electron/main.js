@@ -298,6 +298,74 @@ ipcMain.handle("render-reference-url", (event, url) =>
   captureReferenceUrl(typeof url === "string" ? url.trim() : "", event.sender),
 );
 
+// ── Project cover capture ────────────────────────────────────────────────────
+// Lightweight viewport screenshot of a (typically localhost) preview URL, used
+// as a project's cover/thumbnail. Unlike captureReferenceUrl this never reveals
+// a window or runs the login flow — it expects a public/local page — and it
+// grabs a fixed-aspect hero shot (the visible viewport, not the full scroll
+// height) so it crops nicely into a card.
+const COVER_WIDTH = 1_280;
+const COVER_HEIGHT = 800; // 16:10 — matches the card aspect ratio
+
+async function captureCoverUrl(url) {
+  if (!isValidHttpUrl(url)) {
+    return { ok: false, error: "A valid http(s) URL is required" };
+  }
+
+  const win = new BrowserWindow({
+    show: false,
+    width: COVER_WIDTH,
+    height: COVER_HEIGHT,
+    title: "Capturing project cover · Agentic Builder",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      images: true,
+    },
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  const dbg = win.webContents.debugger;
+  let attached = false;
+  try {
+    await withTimeout(win.loadURL(url), RENDER_TIMEOUT_MS, "Render timed out after 20s");
+    // Give the generated app time to hydrate / fetch initial data.
+    await delay(POST_LOAD_DELAY_MS);
+
+    dbg.attach("1.3");
+    attached = true;
+    const data = await withTimeout(
+      dbg
+        .sendCommand("Page.captureScreenshot", {
+          format: "jpeg",
+          quality: 72,
+          captureBeyondViewport: false,
+          clip: { x: 0, y: 0, width: COVER_WIDTH, height: COVER_HEIGHT, scale: 1 },
+        })
+        .then((shot) => shot.data),
+      CAPTURE_TIMEOUT_MS,
+      "Screenshot capture timed out",
+    );
+
+    return { ok: true, screenshotDataUrl: `data:image/jpeg;base64,${data}` };
+  } catch (err) {
+    console.error("[capture-url] cover capture failed:", err);
+    return { ok: false, error: err instanceof Error ? err.message : "Capture failed" };
+  } finally {
+    try {
+      if (attached) dbg.detach();
+    } catch {
+      /* already detached */
+    }
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+ipcMain.handle("capture-url", (_event, url) =>
+  captureCoverUrl(typeof url === "string" ? url.trim() : ""),
+);
+
 // Manual fallback trigger from the renderer: force capture during interactive
 // login even if auto-detection hasn't flipped to "logged in".
 ipcMain.on("reference-url:capture-now", () => {

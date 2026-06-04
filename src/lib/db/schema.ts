@@ -21,6 +21,9 @@ export const projects = pgTable("projects", {
   id:        text("id").primaryKey(),
   slug:      text("slug").notNull().unique(),
   name:      text("name").notNull(),
+  // Public URL path to the captured preview screenshot used as the project's
+  // cover/thumbnail (e.g. "/project-covers/<id>.jpg"). Null until captured.
+  coverImagePath: text("cover_image_path"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -75,6 +75,9 @@ export default function AppNav() {
 
   // Open menu (3-dot) — only one open at a time. Tracked by project id.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Collapsible sidebar sections (only meaningful when the sidebar is expanded).
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [resourcesOpen, setResourcesOpen] = useState(true);
   // Inline rename — id of the project currently being edited, and its draft value.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -186,9 +189,14 @@ export default function AppNav() {
       >
         <ChevronLeft size={12} className={`text-slate-500 transition-transform duration-300 ${collapsed ? "rotate-180" : ""}`} />
       </button>
-      {/* Logo & Brand */}
+      {/* Logo & Brand — clicking returns to the home / project gallery */}
       <div className={`${collapsed ? "px-0 pt-[30px] pb-8 flex justify-center" : "px-6 pb-8 pt-[30px]"}`} style={noDragStyle}>
-        <div className={`flex ${collapsed ? "flex-col items-center" : "items-center gap-3"}`}>
+        <Link
+          href="/"
+          aria-label="Agentic Builder — back to home"
+          title="Back to home"
+          className={`flex rounded-lg transition-opacity hover:opacity-80 ${collapsed ? "flex-col items-center" : "items-center gap-3"}`}
+        >
           <div className="w-8 h-8 bg-slate-900 rounded-xs flex items-center justify-center shrink-0">
             <svg width="10.5" height="11.667" viewBox="0 0 12 14" fill="white" aria-hidden>
               <path d="M6 0L12 3.5V10.5L6 14L0 10.5V3.5L6 0Z" />
@@ -204,14 +212,27 @@ export default function AppNav() {
               </span>
             </div>
           )}
-        </div>
+        </Link>
       </div>
 
       {/* Navigation */}
       <nav className={`flex-1 min-h-0 overflow-y-auto ${collapsed ? "px-2" : "px-4"}`} style={noDragStyle}>
         <div className="mb-4">
-          {!collapsed && <h3 className="text-[12px] uppercase font-semibold text-slate-600 px-2 mb-3 tracking-wide">Projects</h3>}
-          
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => setProjectsOpen((v) => !v)}
+              className="w-full flex items-center justify-between text-[12px] uppercase font-semibold text-slate-600 px-2 mb-3 tracking-wide hover:text-slate-900 transition-colors"
+            >
+              <span>Projects</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${projectsOpen ? "" : "-rotate-90"}`}>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
+
+          {(collapsed || projectsOpen) && (
+          <>
           {loading && (
             <span className="px-3 py-2 text-[12px] text-slate-600 block">Loading…</span>
           )}
@@ -228,6 +249,7 @@ export default function AppNav() {
               // This prevents stale localStorage data (from the persist middleware)
               // from showing a different name than what /api/projects returns.
               const displayName = project.name;
+              const cover = project.coverImagePath;
               const stageMeta = isCurrentStageProject
                 ? STAGE_META[activeStage as StageId]
                 : null;
@@ -270,18 +292,36 @@ export default function AppNav() {
                       className="flex items-center justify-center"
                       title={displayName}
                     >
-                      <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
-                        <FileIcon />
-                      </span>
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          className="h-6 w-6 rounded object-cover border border-slate-200 shrink-0"
+                        />
+                      ) : (
+                        <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
+                          <FileIcon />
+                        </span>
+                      )}
                     </Link>
                   ) : (
                     <Link
                       href={href}
                       className="flex items-center gap-2 min-w-0 pr-6"
                     >
-                      <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
-                        <FileIcon />
-                      </span>
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          className="h-7 w-7 rounded object-cover border border-slate-200 shrink-0"
+                        />
+                      ) : (
+                        <span className={`transition-colors shrink-0 ${isActive ? "text-slate-600" : "text-slate-500 group-hover:text-slate-600"}`}>
+                          <FileIcon />
+                        </span>
+                      )}
                       <span className={`text-[13px] tracking-[-0.3px] truncate transition-colors font-medium ${isActive ? "text-slate-900" : "text-slate-700 group-hover:text-slate-900"}`}>
                         {displayName}
                       </span>
@@ -360,11 +400,27 @@ export default function AppNav() {
               );
             })}
           </div>
+          </>
+          )}
         </div>
       </nav>
 
-      {/* Secondary Nav Links */}
-      <div className={`${collapsed ? "px-0 flex flex-col items-center" : "px-6"} pb-4 flex flex-col gap-2`} style={noDragStyle}>
+      {/* Secondary Nav Links — global "Resources" group, separated from projects */}
+      <div className={`${collapsed ? "px-0 flex flex-col items-center" : "px-6"} pb-4 pt-3 mt-1 flex flex-col gap-2 border-t border-slate-100`} style={noDragStyle}>
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={() => setResourcesOpen((v) => !v)}
+            className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400 pb-0.5 hover:text-slate-600 transition-colors"
+          >
+            <span>Resources</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${resourcesOpen ? "" : "-rotate-90"}`}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
+        {(collapsed || resourcesOpen) && (
+        <>
         <Link
           href="/reports"
           className={`text-sm font-medium transition-colors ${
@@ -418,6 +474,8 @@ export default function AppNav() {
         >
           {collapsed ? <span className="text-[13px] font-bold">P</span> : "PRD Knowledge"}
         </Link>
+        </>
+        )}
       </div>
 
       {/* Bottom: New Project + User Profile */}

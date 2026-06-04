@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import Loading from "@/components/Loading";
 import type { ServerLogLine } from "@/components/preview/usePreviewServerLogs";
@@ -20,13 +21,53 @@ function formatTs(ts: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
 
+type CoverStatus = "idle" | "capturing" | "saved" | "error";
+
 export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string }) {
+  const params = useParams();
+  const projectId = typeof params?.projectId === "string" ? params.projectId : null;
+
   const [info, setInfo] = useState<ServerInfo>({ status: "stopped", port: null, url: null, logs: [] });
   const [loading, setLoading] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
+  const [coverStatus, setCoverStatus] = useState<CoverStatus>("idle");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  // Whether this project already has a cover — gates the one-shot auto-capture.
+  const hasCoverRef = useRef<boolean | null>(null);
+  // Guards against firing the auto-capture more than once per mount.
+  const autoCaptureTriedRef = useRef(false);
+
+  const isElectron = typeof window !== "undefined" && !!window.electronAPI?.captureUrl;
+
+  /** Capture the running preview and persist it as this project's cover. */
+  const captureCover = useCallback(async () => {
+    if (!projectId || !info.url || !window.electronAPI?.captureUrl) return;
+    setCoverStatus("capturing");
+    try {
+      const shot = await window.electronAPI.captureUrl(info.url);
+      if (!shot.ok || !shot.screenshotDataUrl) {
+        setCoverStatus("error");
+        return;
+      }
+      const resp = await fetch(`/api/projects/${projectId}/cover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl: shot.screenshotDataUrl }),
+      });
+      if (!resp.ok) {
+        setCoverStatus("error");
+        return;
+      }
+      hasCoverRef.current = true;
+      setCoverStatus("saved");
+      // Nudge the sidebar / home grid to re-fetch and show the new cover.
+      window.dispatchEvent(new Event("projects:refresh"));
+    } catch {
+      setCoverStatus("error");
+    }
+  }, [projectId, info.url]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -63,6 +104,35 @@ export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string 
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [info.logs]);
+
+  // Learn once whether this project already has a cover — only used to decide
+  // whether to auto-capture the first time the preview comes up.
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/projects");
+        const data = (await res.json()) as { projects?: { id: string; coverImagePath?: string | null }[] };
+        if (cancelled) return;
+        const me = data.projects?.find((p) => p.id === projectId);
+        hasCoverRef.current = !!me?.coverImagePath;
+      } catch {
+        hasCoverRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // First time the preview is up for a project with no cover yet, grab one
+  // automatically (after a short settle delay). Manual re-capture stays available.
+  useEffect(() => {
+    if (info.status !== "running" || !info.url || !isElectron) return;
+    if (autoCaptureTriedRef.current || hasCoverRef.current !== false) return;
+    autoCaptureTriedRef.current = true;
+    const t = setTimeout(() => { void captureCover(); }, 3_500);
+    return () => clearTimeout(t);
+  }, [info.status, info.url, isElectron, captureCover]);
 
   const handleAction = async (action: "start" | "stop" | "restart") => {
     setLoading(true);
@@ -179,6 +249,26 @@ export default function PreviewPanel({ codeOutputDir }: { codeOutputDir: string 
                 <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
               </svg>
               Reload
+            </button>
+          )}
+          {isRunning && isElectron && projectId && (
+            <button
+              onClick={() => void captureCover()}
+              disabled={coverStatus === "capturing"}
+              title="Capture the current preview as this project's cover image"
+              className="flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1.5 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-50"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              {coverStatus === "capturing"
+                ? "Capturing…"
+                : coverStatus === "saved"
+                  ? "Cover saved"
+                  : coverStatus === "error"
+                    ? "Retry cover"
+                    : "Set as cover"}
             </button>
           )}
           <button

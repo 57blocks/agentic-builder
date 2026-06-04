@@ -40,6 +40,14 @@ export function useProjects(): UseProjectsReturn {
     void refresh();
   }, [refresh]);
 
+  // Re-fetch when another part of the app signals project metadata changed
+  // (e.g. a cover screenshot was just captured in the preview panel).
+  useEffect(() => {
+    const onRefresh = () => void refresh();
+    window.addEventListener("projects:refresh", onRefresh);
+    return () => window.removeEventListener("projects:refresh", onRefresh);
+  }, [refresh]);
+
   const createProject = useCallback(
     async (name: string, localId?: string): Promise<Project> => {
       const res = await fetch("/api/projects", {

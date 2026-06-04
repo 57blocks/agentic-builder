@@ -17,27 +17,38 @@ import type { Project } from "@/types/project";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-type ProjectRow = { id: string; slug: string; name: string; createdAt: Date | string };
+type ProjectRow = {
+  id: string;
+  slug: string;
+  name: string;
+  coverImagePath: string | null;
+  createdAt: Date | string;
+};
 
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    coverImagePath: row.coverImagePath ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
   };
 }
+
+/** Column set shared by every project SELECT so new fields stay in sync. */
+const projectColumns = {
+  id:             projects.id,
+  slug:           projects.slug,
+  name:           projects.name,
+  coverImagePath: projects.coverImagePath,
+  createdAt:      projects.createdAt,
+} as const;
 
 // ─── Projects CRUD ────────────────────────────────────────────────────────────
 
 export async function getProjects(): Promise<Project[]> {
   const rows = await db
-    .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
-    })
+    .select(projectColumns)
     .from(projects)
     .orderBy(desc(projects.createdAt));
 
@@ -46,12 +57,7 @@ export async function getProjects(): Promise<Project[]> {
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
   const rows = await db
-    .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
-    })
+    .select(projectColumns)
     .from(projects)
     .where(eq(projects.slug, slug))
     .limit(1);
@@ -80,12 +86,7 @@ export async function createProject(name: string, clientId?: string): Promise<Pr
   const rows = await db
     .insert(projects)
     .values({ id, slug: finalSlug, name: name.trim() })
-    .returning({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
-    });
+    .returning(projectColumns);
 
   return toProject(rows[0]);
 }
@@ -95,6 +96,22 @@ export async function updateProjectName(projectId: string, name: string): Promis
     .update(projects)
     .set({ name: name.trim() })
     .where(eq(projects.id, projectId));
+}
+
+/**
+ * Set (or clear, with null) the cover-image path for a project.
+ * Returns true when a matching project row was updated.
+ */
+export async function updateProjectCover(
+  projectId: string,
+  coverImagePath: string | null,
+): Promise<boolean> {
+  const rows = await db
+    .update(projects)
+    .set({ coverImagePath })
+    .where(eq(projects.id, projectId))
+    .returning({ id: projects.id });
+  return rows.length > 0;
 }
 
 /**
