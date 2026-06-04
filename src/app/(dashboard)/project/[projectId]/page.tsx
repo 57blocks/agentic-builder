@@ -212,7 +212,12 @@ export default function ProjectPage() {
             <p className="text-sm">Loading project...</p>
           </div>
         ) : StepViewComponent && stepUIProps ? (
-          <StepViewComponent {...stepUIProps} />
+          // Key by projectId so switching projects fully remounts the step view.
+          // Without this, App Router reuses the same component instance across
+          // projects (same route, changed param), leaking component-local state
+          // — e.g. a large project's lastContentRef bled the "Prepare PRD"
+          // banner onto every other project.
+          <StepViewComponent key={projectId} {...stepUIProps} />
         ) : (
           <div className="flex items-center justify-center h-full text-[#94a3b8]">
             <p className="text-sm">Step &quot;{activeStep}&quot; not found in registry.</p>
