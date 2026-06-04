@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check, ShieldCheck, Boxes, AlertTriangle } from "lucide-react";
+import { ArrowRight, History, X, ChevronLeft, ChevronRight, Pencil, Check, ShieldCheck, AlertTriangle } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -12,8 +12,7 @@ import type { StepUIProps } from "../../../_shared/types";
 import type { ProjectTier } from "@/_config/pipeline-flow";
 import { savePrdVersion, loadPrdVersions } from "./snapshot";
 import type { PrdVersion } from "./snapshot";
-import { PrdQualityReportPanel } from "./PrdQualityReportPanel";
-import { PrdSubsystemPanel } from "./PrdSubsystemPanel";
+import { PrdReadinessPanel } from "./PrdReadinessPanel";
 import { PrdToolDrawer } from "./PrdToolDrawer";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
@@ -152,7 +151,7 @@ export function PrdUI(props: StepUIProps) {
   const nextStep = getNextStep("prd", tier);
 
   const [editInput, setEditInput] = useState("");
-  const [tool, setTool] = useState<"quality" | "subsystem" | null>(null);
+  const [prepOpen, setPrepOpen] = useState(false);
   const [qualityRan, setQualityRan] = useState(false);
   const [subsystemRan, setSubsystemRan] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -531,31 +530,22 @@ export function PrdUI(props: StepUIProps) {
         <div className="flex items-center gap-3 px-8 py-3 border-b border-amber-200 bg-amber-50 shrink-0">
           <AlertTriangle size={16} className="text-amber-600 shrink-0" />
           <span className="text-[13px] text-amber-800">
-            This PRD is large — we recommend running <b>PRD Validation</b> and{" "}
-            <b>Subsystem Split</b> before moving on to the next steps.
+            This PRD is large — run the 2-step <b>Prepare PRD</b> flow (validate, then split into subsystems) before moving on.
           </span>
           <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="text-[11px] text-slate-500">
+              {qualityRan ? "✓" : "○"} Validate · {subsystemRan ? "✓" : "○"} Split
+            </span>
             <button
               type="button"
-              onClick={() => setTool("quality")}
-              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium border ${
-                qualityRan
+              onClick={() => setPrepOpen(true)}
+              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-semibold border ${
+                qualityRan && subsystemRan
                   ? "border-green-300 text-green-700 bg-green-50"
-                  : "border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50"
+                  : "border-amber-400 text-white bg-amber-500 hover:bg-amber-600"
               }`}
             >
-              <ShieldCheck size={15} /> {qualityRan ? "Validated ✓" : "Validate PRD"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool("subsystem")}
-              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium border ${
-                subsystemRan
-                  ? "border-green-300 text-green-700 bg-green-50"
-                  : "border-violet-300 text-violet-700 bg-white hover:bg-violet-50"
-              }`}
-            >
-              <Boxes size={15} /> {subsystemRan ? "Split ✓" : "Split Subsystems"}
+              <ShieldCheck size={15} /> {qualityRan && subsystemRan ? "Prepared ✓" : "Prepare PRD"}
             </button>
           </div>
         </div>
@@ -636,35 +626,23 @@ export function PrdUI(props: StepUIProps) {
       </div>
 
       {!isManualEditing && content?.trim() && (
-        <>
-          <PrdToolDrawer
-            open={tool === "quality"}
-            onClose={() => setTool(null)}
-            title="PRD Validation"
-            icon={<ShieldCheck size={16} className="text-indigo-600" />}
-          >
-            <PrdQualityReportPanel
-              prd={stripChangeMarkers(content)}
-              spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
-              onResult={() => setQualityRan(true)}
-              onApplyFix={(instruction) => {
-                setEditInput(instruction);
-                setTool(null);
-              }}
-            />
-          </PrdToolDrawer>
-          <PrdToolDrawer
-            open={tool === "subsystem"}
-            onClose={() => setTool(null)}
-            title="Subsystem Split (DDD domains)"
-            icon={<Boxes size={16} className="text-violet-600" />}
-          >
-            <PrdSubsystemPanel
-              prd={stripChangeMarkers(content)}
-              onResult={() => setSubsystemRan(true)}
-            />
-          </PrdToolDrawer>
-        </>
+        <PrdToolDrawer
+          open={prepOpen}
+          onClose={() => setPrepOpen(false)}
+          title="Prepare PRD"
+          icon={<ShieldCheck size={16} className="text-indigo-600" />}
+        >
+          <PrdReadinessPanel
+            prd={stripChangeMarkers(content)}
+            spec={(step?.metadata as { prdSpec?: PrdSpec } | undefined)?.prdSpec ?? null}
+            onQualityResult={() => setQualityRan(true)}
+            onSubsystemResult={() => setSubsystemRan(true)}
+            onApplyFix={(instruction) => {
+              setEditInput(instruction);
+              setPrepOpen(false);
+            }}
+          />
+        </PrdToolDrawer>
       )}
 
       {isManualEditing ? (
