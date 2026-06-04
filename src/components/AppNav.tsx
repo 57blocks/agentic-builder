@@ -167,6 +167,11 @@ export default function AppNav() {
     }
   }
 
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
+
   const dragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "drag" };
   const noDragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "no-drag" };
   const collapsed = useSidebarStore((s) => s.collapsed);
@@ -442,6 +447,16 @@ export default function AppNav() {
               <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">57Blocks</span>
               <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
             </div>
+          )}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="ml-auto text-[11px] text-slate-400 hover:text-slate-600 transition-colors"
+              title="Sign out"
+            >
+              Sign out
+            </button>
           )}
         </div>
       </div>
