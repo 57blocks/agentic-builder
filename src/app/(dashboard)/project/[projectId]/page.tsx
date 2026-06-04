@@ -101,17 +101,6 @@ export default function ProjectPage() {
       // Clear step-store so stale data from the previous project does not
       // persist into the new project before DB snapshots are loaded.
       useStepStore.getState().reset();
-
-      // Load this project's directory from DB so generated code goes to the right place.
-      fetch(`/api/projects/${projectId}`)
-        .then((r) => r.ok ? r.json() : null)
-        .then((data: { project?: { codeOutputDir?: string } } | null) => {
-          // Empty string means legacy project — reset() already set the "generated-code" fallback
-          if (data?.project?.codeOutputDir) {
-            useStepStore.getState().setCodeOutputDir(data.project.codeOutputDir);
-          }
-        })
-        .catch((err) => console.error("[ProjectPage] failed to load codeOutputDir:", err));
     }
 
     // Hydrate the step-navigation store and stage store from DB
@@ -124,6 +113,16 @@ export default function ProjectPage() {
 
     fetchProjectNav(projectId)
       .then(async (nav) => {
+        // Load this project's codeOutputDir from DB before marking hydrated,
+        // so generated code always goes to the right directory from the first step.
+        const projectData = await fetch(`/api/projects/${projectId}`)
+          .then((r) => r.ok ? r.json() : null)
+          .catch(() => null) as { project?: { codeOutputDir?: string } } | null;
+        // Empty string means legacy project — reset() already set the "generated-code" fallback
+        if (projectData?.project?.codeOutputDir) {
+          useStepStore.getState().setCodeOutputDir(projectData.project.codeOutputDir);
+        }
+
         if (nav) {
           setActiveStep(nav.activeStep);
           activeStepRef.current = nav.activeStep;
