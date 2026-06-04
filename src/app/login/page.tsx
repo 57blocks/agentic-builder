@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 function LogoMark() {
@@ -33,6 +33,15 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const e = params.get("error");
+    if (e === "domain") setOauthError("Only @57blocks.com accounts are allowed.");
+    else if (e === "state") setOauthError("Authentication failed. Please try again.");
+    else if (e === "oauth") setOauthError("Google sign-in failed. Please try again.");
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -157,12 +166,37 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {/* OAuth error */}
+          {oauthError && (
+            <p className="text-[13px] text-[#ef4444] bg-[#fef2f2] border border-[#fecaca] rounded-lg px-3.5 py-2.5 mt-2">
+              {oauthError}
+            </p>
+          )}
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mt-2">
+            <div className="flex-1 h-px bg-[#e2e8f0]" />
+            <span className="text-[12px] text-[#94a3b8] select-none">or</span>
+            <div className="flex-1 h-px bg-[#e2e8f0]" />
+          </div>
+
+          {/* Google sign-in */}
+          <a
+            href="/api/auth/google"
+            className="flex items-center justify-center gap-2.5 h-11 w-full border border-[#e2e8f0] rounded-lg bg-white hover:bg-[#f8fafc] text-[14px] font-semibold text-[#374151] transition-colors shadow-sm"
+          >
+            <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>
+              <path fill="#EA4335" d="M24 9.5c3.14 0 5.95 1.08 8.17 2.86l6.08-6.08C34.46 3.19 29.53 1 24 1 14.82 1 7.07 6.7 3.91 14.72l7.06 5.49C12.64 14.06 17.88 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.1 24.5c0-1.64-.15-3.22-.42-4.74H24v8.97h12.42c-.54 2.9-2.17 5.36-4.62 7.01l7.05 5.48C43.07 37.26 46.1 31.32 46.1 24.5z"/>
+              <path fill="#FBBC05" d="M10.97 28.21A14.6 14.6 0 0 1 9.5 24c0-1.46.25-2.87.69-4.21L3.13 14.3A23.07 23.07 0 0 0 1 24c0 3.68.88 7.16 2.43 10.25l7.54-6.04z"/>
+              <path fill="#34A853" d="M24 47c5.52 0 10.15-1.83 13.53-4.96l-7.05-5.48C28.72 38.26 26.47 39 24 39c-6.1 0-11.32-4.54-13.17-10.65l-7.54 6.04C7.12 42.35 14.97 47 24 47z"/>
+            </svg>
+            Sign in with Google
+          </a>
+
           {/* Hint */}
           <p className="mt-6 text-center text-[12px] text-[#94a3b8]">
-            Demo:{" "}
-            <span className="font-mono text-[#475569]">admin@agentic.ai</span>
-            {" / "}
-            <span className="font-mono text-[#475569]">agentic2024</span>
+            Use your <span className="font-mono text-[#475569]">@57blocks.com</span> account
           </p>
         </div>
       </div>
