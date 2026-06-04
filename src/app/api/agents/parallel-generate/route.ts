@@ -13,6 +13,8 @@ import {
 import type { AgentResult } from "@/lib/agents";
 import { findDesignStylePreset } from "@/lib/pipeline/design-style-presets";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
+import { readSubsystemManifest } from "@/lib/pipeline/subsystems/manifest-io";
+import type { SubsystemManifest } from "@/lib/pipeline/subsystems/types";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 import { recallDesignContext } from "@/lib/memory/preparation-recall";
@@ -63,6 +65,7 @@ function buildAgentMap(
   authDecision?: AuthDecision | null,
   instruction?: string,
   referenceImages?: Array<{ dataUrl: string; pageHint?: string; label?: string }>,
+  subsystemManifest?: SubsystemManifest | null,
 ): Record<string, DocAgentFn> {
   const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
     .filter((s) => s && s.trim().length > 0)
@@ -77,6 +80,7 @@ function buildAgentMap(
         prdSpec ?? null,
         onChunk,
         authDecision ?? null,
+        subsystemManifest ?? null,
       ),
     sysdesign: (prd, trd, _sys, _ds, sid) =>
       new SysDesignAgent().generateSysDesign(
@@ -311,6 +315,13 @@ export async function POST(request: NextRequest) {
     if (collected.length > 0) referenceImages = collected;
   }
 
+  // Business-domain decomposition (if the PRD step already split subsystems).
+  // Injected into the TRD prompt so §3 services/APIs/data-models are shaped
+  // around the domains instead of an ad-hoc split. Absent → plain flow.
+  const subsystemManifest = await readSubsystemManifest(outputRoot).catch(
+    () => null,
+  );
+
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",
@@ -320,6 +331,7 @@ export async function POST(request: NextRequest) {
     authDecision,
     instruction,
     referenceImages,
+    subsystemManifest,
   );
 
   const encoder = new TextEncoder();
