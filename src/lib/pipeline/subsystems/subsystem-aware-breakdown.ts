@@ -18,6 +18,7 @@ import { buildTaskBreakdownFromDocuments } from "../kickoff-task-breakdown.serve
 import { backfillPrdIds } from "../gates/prd-id-backfill";
 import { extractPrdInventory } from "./inventory";
 import { decomposePrdIntoSubsystems } from "./decompose";
+import { validateSubsystemManifest } from "./validate";
 import { shouldSplitIntoSubsystems, MIN_ENDPOINTS_FOR_SPLIT } from "./split-decision";
 import { resolveDomainRequirementIds } from "./domain-requirements";
 import { runDomainScopedBreakdown, type BreakdownFn } from "./domain-breakdown";
@@ -47,6 +48,14 @@ export function isSubsystemSplitCandidate(prd: string, tier: string): boolean {
 
 export async function runSubsystemAwareTaskBreakdown(
   params: BreakdownParams,
+  opts?: {
+    /** A manifest already split & persisted by the PRD step
+     *  (.blueprint/subsystems.json). Used as a SAFETY NET only when this run's
+     *  live decompose fails the split gate (e.g. an LLM hiccup) — so a one-off
+     *  decompose failure doesn't silently drop a qualified project back to
+     *  whole-system mode after the user explicitly split in the UI. */
+    fallbackManifest?: SubsystemManifest | null;
+  },
 ): Promise<SubsystemAwareBreakdownResult> {
   const tier = params.tier ?? "M";
 
@@ -66,13 +75,50 @@ export async function runSubsystemAwareTaskBreakdown(
     manifest: decomposed.manifest,
     validation: decomposed.validation,
   });
-  if (!decision.split) {
+
+  // The manifest/layers we actually build from — the live decompose, or (when
+  // that fails the gate) the persisted PRD-step manifest as a safety net.
+  let manifest = decomposed.manifest;
+  let buildLayers = decomposed.validation.buildLayers;
+  let splitReasons = decision.reasons;
+  let usedFallbackManifest = false;
+  let willSplit = decision.split;
+
+  if (!willSplit && opts?.fallbackManifest) {
+    const fb = opts.fallbackManifest;
+    const fbValidation = validateSubsystemManifest(fb);
+    const fbDecision = shouldSplitIntoSubsystems({
+      tier: tier as "S" | "M" | "L",
+      inventory,
+      manifest: fb,
+      validation: fbValidation,
+    });
+    if (fbDecision.split) {
+      manifest = fb;
+      buildLayers = fbValidation.buildLayers;
+      splitReasons = [
+        `live decompose unusable (${decision.reasons.join("; ")}) — reused persisted PRD-step manifest`,
+        ...fbDecision.reasons,
+      ];
+      willSplit = true;
+      usedFallbackManifest = true;
+      console.log(
+        `[Subsystems] live decompose failed the gate; reusing persisted PRD-step manifest (${fb.subsystems.length} domains).`,
+      );
+    } else {
+      console.log(
+        `[Subsystems] persisted PRD-step manifest also fails the gate: ${fbDecision.reasons.join("; ")}`,
+      );
+    }
+  }
+
+  if (!willSplit) {
     console.log(`[Subsystems] not splitting: ${decision.reasons.join("; ")}`);
     return buildTaskBreakdownFromDocuments(params);
   }
 
   console.log(
-    `[Subsystems] splitting into ${decomposed.manifest.subsystems.length} domain(s): ${decomposed.manifest.subsystems.map((s) => s.id).join(", ")}`,
+    `[Subsystems] splitting into ${manifest.subsystems.length} domain(s)${usedFallbackManifest ? " [fallback manifest]" : ""}: ${manifest.subsystems.map((s) => s.id).join(", ")}`,
   );
 
   // Resolve each domain's requirement IDs. This needs PAGE-/API- ids ON the PRD.
@@ -80,7 +126,7 @@ export async function runSubsystemAwareTaskBreakdown(
   // reached here — so backfill (idempotent) ourselves and use the id-tagged PRD
   // for the per-domain docs, guaranteeing the domains resolve their ids.
   const filledPrd = backfillPrdIds(params.prd).prd;
-  const { byDomain } = resolveDomainRequirementIds(filledPrd, decomposed.manifest);
+  const { byDomain } = resolveDomainRequirementIds(filledPrd, manifest);
   const totalResolved = [...byDomain.values()].reduce((n, ids) => n + ids.length, 0);
   console.log(`[Subsystems] resolved ${totalResolved} requirement id(s) across ${byDomain.size} domain(s).`);
   let foundationFull: BreakdownResult | null = null;
@@ -108,9 +154,9 @@ export async function runSubsystemAwareTaskBreakdown(
       implGuide: params.implGuide,
       designSpec: params.designSpec,
     },
-    manifest: decomposed.manifest,
+    manifest,
     domainRequirementIds: byDomain,
-    buildLayers: decomposed.validation.buildLayers,
+    buildLayers,
     tier: tier as "S" | "M" | "L",
     sessionId: params.sessionId,
     breakdownFn,
@@ -125,11 +171,11 @@ export async function runSubsystemAwareTaskBreakdown(
     tasks: orch.allTasks,
     costUsd: envelope.costUsd + orch.costUsd + decomposed.costUsd,
     subsystem: {
-      manifest: decomposed.manifest,
-      buildLayers: decomposed.validation.buildLayers,
+      manifest,
+      buildLayers,
       foundationTaskIds: orch.foundationTasks.map((t) => t.id),
       domainRequirementIds: Object.fromEntries(byDomain),
-      splitReasons: decision.reasons,
+      splitReasons,
     },
   };
 }
