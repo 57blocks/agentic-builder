@@ -132,6 +132,18 @@ export const codingSessionReports = pgTable(
   ],
 );
 
+// ─── users ───────────────────────────────────────────────────────────────────
+
+export const users = pgTable("users", {
+  id:        text("id").primaryKey(),
+  email:     text("email").notNull().unique(),
+  name:      text("name"),
+  picture:   text("picture"),
+  googleId:  text("google_id").unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ─── Inferred TypeScript types ───────────────────────────────────────────────
 
 export type Project                 = typeof projects.$inferSelect;
@@ -142,3 +154,5 @@ export type ProjectStepNavigation   = typeof projectStepNavigation.$inferSelect;
 export type ProjectStepArtifact     = typeof projectStepArtifacts.$inferSelect;
 export type CodingSessionReport     = typeof codingSessionReports.$inferSelect;
 export type NewCodingSessionReport  = typeof codingSessionReports.$inferInsert;
+export type User    = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;

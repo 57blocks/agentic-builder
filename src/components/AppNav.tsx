@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, LogOut, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
@@ -72,6 +72,17 @@ export default function AppNav() {
   const activeStage = useStageStore((s) => s.activeStage);
   const resetPipeline = usePipelineStore((s) => s.reset);
   const pipelineSetProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
+
+  const [currentUser, setCurrentUser] = useState<{ email: string; name: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { email: string; name: string | null } | null) => {
+        if (data) setCurrentUser(data);
+      })
+      .catch(() => {});
+  }, []);
 
   // Open menu (3-dot) — only one open at a time. Tracked by project id.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -168,6 +179,11 @@ export default function AppNav() {
     } catch (err) {
       console.error("[AppNav] Server project creation failed (will retry on next action):", err);
     }
+  }
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
   }
 
   const dragStyle: React.CSSProperties & { WebkitAppRegion?: string } = { WebkitAppRegion: "drag" };
@@ -492,14 +508,28 @@ export default function AppNav() {
         <div className={`border-t border-slate-200 flex items-center ${collapsed ? "justify-center pt-4 px-0" : "gap-3 pt-4.25 pb-2 px-3"}`}>
           <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0 overflow-hidden">
             <div className="w-full h-full bg-linear-to-br from-slate-400 to-slate-500 flex items-center justify-center text-white text-sm font-bold">
-              A
+              {currentUser?.email?.[0]?.toUpperCase() ?? "?"}
             </div>
           </div>
           {!collapsed && (
             <div className="flex flex-col overflow-hidden">
-              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">57Blocks</span>
-              <span className="text-xs text-slate-600 leading-3.75 truncate">Senior Architect</span>
+              <span className="text-[12px] font-bold text-slate-900 leading-4 truncate">
+                {currentUser?.name ?? currentUser?.email ?? "—"}
+              </span>
+              <span className="text-xs text-slate-600 leading-3.75 truncate">
+                {currentUser?.email ?? ""}
+              </span>
             </div>
+          )}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="ml-auto p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              title="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
           )}
         </div>
       </div>

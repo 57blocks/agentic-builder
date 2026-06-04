@@ -10,6 +10,50 @@ export interface PrdVersion {
   label: string;
 }
 
+/**
+ * Persisted PRD-readiness state (the guided 2-step "Prepare PRD" flow).
+ * Downstream subsystem build reads `.blueprint/subsystems.json` (written by the
+ * decompose route); this is the project-scoped, reload-surviving copy that
+ * re-hydrates the UI (findings, manifest, per-step done status) on revisit.
+ */
+export interface PrdReadiness {
+  qualityDone?: boolean;
+  subsystemDone?: boolean;
+  /** Full Step-2 decompose response payload, so the panel re-renders verbatim. */
+  subsystemResult?: unknown;
+  savedAt?: string;
+}
+
+/**
+ * Merge-safe persistence of the prd step snapshot. Reads the CURRENT store
+ * metadata, shallow-merges `metaPatch`, and PUTs the full snapshot — so
+ * independent writers (version history vs. readiness) never clobber each other.
+ */
+async function persistPrdSnapshot(
+  projectSlug: string,
+  metaPatch: Record<string, unknown>,
+  content?: string,
+): Promise<void> {
+  const { useStepStore } = await import("@/store/step-store");
+  const store = useStepStore.getState();
+  const existingMeta =
+    (store.steps.prd?.metadata as Record<string, unknown> | undefined) ?? {};
+  const mergedMeta = { ...existingMeta, ...metaPatch };
+  const body = content ?? store.steps.prd?.content ?? "";
+
+  // Local store first (patchStepMeta merges; does not auto-save).
+  store.patchStepMeta("prd", metaPatch);
+
+  await fetch(`/api/projects/${projectSlug}/project-step-snapshot`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      stepId: "prd",
+      snapshot: { content: body, metadata: mergedMeta, status: "completed" },
+    }),
+  }).catch((err) => console.error("[prdSnapshot] save error:", err));
+}
+
 /** Add a new version entry, persist to store metadata + API immediately. */
 export async function savePrdVersion(
   projectSlug: string,
@@ -35,22 +79,25 @@ export async function savePrdVersion(
   };
   const newVersions = [...versions, entry];
 
-  // Update store metadata so subsequent saveStepSnapshot picks up versions
-  store.patchStepMeta("prd", { prdVersions: newVersions });
+  // Merge-safe: preserves prdReadiness (and any other metadata) on disk.
+  await persistPrdSnapshot(projectSlug, { prdVersions: newVersions }, content);
+}
 
-  // Persist immediately (patchStepMeta does not auto-save)
-  fetch(`/api/projects/${projectSlug}/project-step-snapshot`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      stepId: "prd",
-      snapshot: {
-        content,
-        metadata: { prdVersions: newVersions },
-        status: "completed",
-      },
-    }),
-  }).catch((err) => console.error("[prdSnapshot] version save error:", err));
+/** Persist (merge) the PRD-readiness state to step metadata + DB immediately. */
+export async function savePrdReadiness(
+  projectSlug: string,
+  patch: Partial<PrdReadiness>,
+): Promise<void> {
+  const { useStepStore } = await import("@/store/step-store");
+  const existing =
+    ((useStepStore.getState().steps.prd?.metadata as Record<string, unknown> | undefined)
+      ?.prdReadiness as PrdReadiness | undefined) ?? {};
+  const next: PrdReadiness = {
+    ...existing,
+    ...patch,
+    savedAt: new Date().toISOString(),
+  };
+  await persistPrdSnapshot(projectSlug, { prdReadiness: next });
 }
 
 /** Load version history from the step-store (populated from DB on hydration). */
