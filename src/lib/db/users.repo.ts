@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./client";
 import { users, type User } from "./schema";
 import { v4 as uuid } from "uuid";
@@ -31,4 +31,14 @@ export async function upsertUser(input: UpsertUserInput): Promise<User> {
     })
     .returning();
   return row;
+}
+
+/** Returns the DB user.id for a given email, or null if no such user exists. */
+export async function getUserIdByEmail(email: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email.toLowerCase()))
+    .limit(1);
+  return row?.id ?? null;
 }
