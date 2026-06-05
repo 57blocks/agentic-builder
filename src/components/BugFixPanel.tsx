@@ -8,6 +8,7 @@ import {
   FileCode, ChevronDown,
 } from "lucide-react";
 import { usePipelineStore } from "@/store/pipeline-store";
+import { useStepStore } from "@/store/step-store";
 import type { StepId } from "@/_config/pipeline-flow";
 import type { BugReport } from "@/lib/pipeline/bug-fix-session";
 import type { BugFixCheckpoint } from "@/lib/pipeline/bug-fix-checkpoint";
@@ -668,7 +669,7 @@ function BugDetailPanel({ row, onClose, onUpdate, outputDir, onRun, running }: {
 export default function BugFixPanel({ onNavigate }: { onNavigate?: (stepId: StepId) => void }) {
   const featureBrief  = usePipelineStore((s) => s.featureBrief);
   const steps         = usePipelineStore((s) => s.steps);
-  const codeOutputDir = usePipelineStore((s) => s.codeOutputDir);
+  const codeOutputDir = useStepStore((s) => s.codeOutputDir);
   const addCostUsd    = usePipelineStore((s) => s.addCostUsd);
 
   const [rows, setRows]             = useState<BugRow[]>([]);
