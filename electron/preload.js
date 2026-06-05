@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("electronAPI", {
   getPlatform: () => ipcRenderer.invoke("get-platform"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  selectFolder: () => ipcRenderer.invoke("select-folder"),
   renderReferenceUrl: (url) => ipcRenderer.invoke("render-reference-url", url),
   captureUrl: (url) => ipcRenderer.invoke("capture-url", url),
   confirmReferenceCapture: () => ipcRenderer.send("reference-url:capture-now"),

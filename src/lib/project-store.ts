@@ -19,13 +19,14 @@ import type { Project } from "@/types/project";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-type ProjectRow = { id: string; slug: string; name: string; createdAt: Date | string };
+type ProjectRow = { id: string; slug: string; name: string; codeOutputDir: string; createdAt: Date | string };
 
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    codeOutputDir: row.codeOutputDir,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
   };
 }
@@ -35,10 +36,11 @@ function toProject(row: ProjectRow): Project {
 export async function getProjects(userId: string): Promise<Project[]> {
   const rows = await db
     .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
     })
     .from(projects)
     .leftJoin(
@@ -57,10 +59,11 @@ export async function getProjects(userId: string): Promise<Project[]> {
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
   const rows = await db
     .select({
-      id:        projects.id,
-      slug:      projects.slug,
-      name:      projects.name,
-      createdAt: projects.createdAt,
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
     })
     .from(projects)
     .where(eq(projects.slug, slug))
@@ -69,7 +72,28 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
   return rows[0] ? toProject(rows[0]) : null;
 }
 
-export async function createProject(name: string, clientId: string | undefined, userId: string): Promise<Project> {
+export async function getProjectById(id: string): Promise<Project | null> {
+  const rows = await db
+    .select({
+      id:            projects.id,
+      slug:          projects.slug,
+      name:          projects.name,
+      codeOutputDir: projects.codeOutputDir,
+      createdAt:     projects.createdAt,
+    })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
+
+  return rows[0] ? toProject(rows[0]) : null;
+}
+
+export async function createProject(
+  name: string,
+  codeOutputDir: string,
+  clientId: string | undefined,
+  userId: string,
+): Promise<Project> {
   const baseSlug =
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
     `project-${Date.now()}`;
@@ -91,12 +115,13 @@ export async function createProject(name: string, clientId: string | undefined, 
   const newProject = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(projects)
-      .values({ id, slug: finalSlug, name: name.trim(), ownerId: userId })
+      .values({ id, slug: finalSlug, name: name.trim(), codeOutputDir, ownerId: userId })
       .returning({
-        id:        projects.id,
-        slug:      projects.slug,
-        name:      projects.name,
-        createdAt: projects.createdAt,
+        id:            projects.id,
+        slug:          projects.slug,
+        name:          projects.name,
+        codeOutputDir: projects.codeOutputDir,
+        createdAt:     projects.createdAt,
       });
     await tx
       .insert(projectMembers)
@@ -121,7 +146,7 @@ export async function createProject(name: string, clientId: string | undefined, 
 export async function ensureProjectExists(id: string, userId?: string | null): Promise<void> {
   const inserted = await db
     .insert(projects)
-    .values({ id, slug: id, name: "New Project", ownerId: userId ?? null })
+    .values({ id, slug: id, name: "New Project", codeOutputDir: "", ownerId: userId ?? null })
     .onConflictDoNothing()
     .returning({ id: projects.id });
 

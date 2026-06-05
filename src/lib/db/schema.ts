@@ -18,14 +18,15 @@ import {
 // ─── projects ────────────────────────────────────────────────────────────────
 
 export const projects = pgTable("projects", {
-  id:        text("id").primaryKey(),
-  slug:      text("slug").notNull().unique(),
-  name:      text("name").notNull(),
+  id:            text("id").primaryKey(),
+  slug:          text("slug").notNull().unique(),
+  name:          text("name").notNull(),
+  codeOutputDir: text("code_output_dir").notNull().default(""),
   // Public URL path to the captured preview screenshot used as the project's
   // cover/thumbnail (e.g. "/project-covers/<id>.jpg"). Null until captured.
   coverImagePath: text("cover_image_path"),
   ownerId:        text("owner_id").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ─── project_stage_state ─────────────────────────────────────────────────────

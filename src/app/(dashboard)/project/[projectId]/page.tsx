@@ -113,6 +113,15 @@ export default function ProjectPage() {
 
     fetchProjectNav(projectId)
       .then(async (nav) => {
+        // Load this project's codeOutputDir from DB before marking hydrated,
+        // so generated code always goes to the right directory from the first step.
+        const projectData = await fetch(`/api/projects/${projectId}`)
+          .then((r) => r.ok ? r.json() : null)
+          .catch(() => null) as { project?: { codeOutputDir?: string } } | null;
+        if (projectData?.project?.codeOutputDir) {
+          useStepStore.getState().setCodeOutputDir(projectData.project.codeOutputDir);
+        }
+
         if (nav) {
           setActiveStep(nav.activeStep);
           activeStepRef.current = nav.activeStep;
