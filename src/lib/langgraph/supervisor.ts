@@ -243,6 +243,7 @@ async function classifyTasks(state: SupervisorState) {
     backend: [],
     frontend: [],
     test: [],
+    fullstack: [],
   };
   for (const task of tasks) {
     const role = inferRole(task);
@@ -282,6 +283,7 @@ async function classifyTasks(state: SupervisorState) {
     architectTasks: byRole.architect,
     backendTasks: byRole.backend,
     frontendTasks: byRole.frontend,
+    fullstackTasks: byRole.fullstack,
     testTasks: byRole.test,
     projectContext,
   };
@@ -2978,6 +2980,7 @@ async function contractTaskCoverage(
     backend: [],
     frontend: [],
     test: [],
+    fullstack: [],
   };
   for (const task of allTasks) {
     const role = inferRole(task);
@@ -2993,6 +2996,7 @@ async function contractTaskCoverage(
     architectTasks: byRole.architect,
     backendTasks: byRole.backend,
     frontendTasks: byRole.frontend,
+    fullstackTasks: byRole.fullstack,
     testTasks: byRole.test,
   };
 }
@@ -3091,6 +3095,7 @@ async function pageTaskCoverage(
     backend: [],
     frontend: [],
     test: [],
+    fullstack: [],
   };
   for (const task of allTasks) {
     byRole[inferRole(task)].push(task);
@@ -3105,6 +3110,7 @@ async function pageTaskCoverage(
     architectTasks: byRole.architect,
     backendTasks: byRole.backend,
     frontendTasks: byRole.frontend,
+    fullstackTasks: byRole.fullstack,
     testTasks: byRole.test,
   };
 }
@@ -3360,7 +3366,12 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
  * fileRegistry now contains BE's real output; apiContracts contains real endpoints.
  */
 function dispatchFrontendWorkers(state: SupervisorState): Send[] {
-  if (state.frontendTasks.length === 0) {
+  // Gate must account for fullstack Feature tasks too: the FE phase runs (and
+  // fullstack workers dispatch) even when there are zero frontend-only tasks.
+  if (
+    state.frontendTasks.length === 0 &&
+    state.fullstackTasks.length === 0
+  ) {
     return [
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
@@ -3470,7 +3481,7 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     .filter(Boolean)
     .join("");
 
-  return feChunks.map(
+  const sends: Send[] = feChunks.map(
     (tasks, i) =>
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
@@ -3488,6 +3499,46 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
         prdSpec: state.prdSpec,
       }),
   );
+
+  // ── Vertical-slice (flag-gated) fullstack dispatch ──
+  // Feature slices are UI-driven AND own their endpoints, so they route
+  // through the SAME phase as frontend (after extract_real_contracts) and get
+  // the same real contracts + API reference context. Mirror the frontend Send
+  // shape exactly, only the role and task list differ. Empty by default
+  // (flag off ⇒ no Feature tasks ⇒ no fullstack Sends).
+  if (state.fullstackTasks.length > 0) {
+    const fsCount = workersForRole("fullstack", state.fullstackTasks.length);
+    const fsChunks = ENABLE_PARALLEL_CODING_WORKERS
+      ? chunkTasksByFileConflict(state.fullstackTasks, fsCount)
+      : chunkTasks(state.fullstackTasks, fsCount);
+    if (ENABLE_PARALLEL_CODING_WORKERS) {
+      console.log(
+        `[Supervisor] Fullstack dispatch (parallel): ${state.fullstackTasks.length} tasks → ${fsChunks.length} conflict-free chunk(s).`,
+      );
+    }
+    fsChunks.forEach((tasks, i) => {
+      sends.push(
+        new Send("fe_worker", {
+          role: "fullstack" as CodingAgentRole,
+          workerLabel:
+            fsChunks.length > 1 ? `Fullstack Dev #${i + 1}` : "Fullstack Dev",
+          tasks,
+          outputDir: state.outputDir,
+          projectContext: feContext,
+          codingMode: state.codingMode,
+          fileRegistrySnapshot: state.fileRegistry,
+          apiContractsSnapshot: feContracts,
+          scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+          currentTaskIndex: 0,
+          ralphConfig: state.ralphConfig,
+          sessionId: state.sessionId,
+          prdSpec: state.prdSpec,
+        }),
+      );
+    });
+  }
+
+  return sends;
 }
 
 /**

@@ -130,7 +130,12 @@ export interface KickoffWorkItem {
 
 // ─── Multi-Agent Coding Session ───
 
-export type CodingAgentRole = "architect" | "frontend" | "backend" | "test";
+export type CodingAgentRole =
+  | "architect"
+  | "frontend"
+  | "backend"
+  | "test"
+  | "fullstack";
 
 export type CodingTaskStatus =
   | "pending"

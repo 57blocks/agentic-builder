@@ -128,6 +128,17 @@ export const SupervisorStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => [],
   }),
+  /**
+   * Vertical "Feature" slice tasks owned end-to-end by a fullstack worker
+   * (page + handlers + owned endpoints). Only populated under the
+   * BLUEPRINT_VERTICAL_SLICE flag; empty by default so flag-off behavior is
+   * unchanged. Dispatched through the same FE phase as frontendTasks so they
+   * receive real (BE-extracted) contracts.
+   */
+  fullstackTasks: Annotation<CodingTask[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
   testTasks: Annotation<CodingTask[]>({
     reducer: (_prev, next) => next,
     default: () => [],

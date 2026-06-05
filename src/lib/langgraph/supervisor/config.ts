@@ -39,7 +39,7 @@ export function workersForRole(role: CodingAgentRole, count: number): number {
   if (
     ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC &&
     !ENABLE_PARALLEL_CODING_WORKERS &&
-    (role === "backend" || role === "frontend")
+    (role === "backend" || role === "frontend" || role === "fullstack")
   ) {
     return 1;
   }

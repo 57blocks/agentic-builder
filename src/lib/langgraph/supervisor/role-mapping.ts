@@ -18,6 +18,7 @@ export const PHASE_TO_ROLE: Record<string, CodingAgentRole> = {
   "Backend Services": "backend",
   Integration: "backend",
   Frontend: "frontend",
+  Feature: "fullstack",
   Testing: "test",
 };
 

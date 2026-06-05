@@ -471,6 +471,84 @@ function buildBackendPrompt(ctx: PromptContext): string {
   return sections.join("\n");
 }
 
+/**
+ * Senior Full-Stack Engineer — owns ONE vertical feature/flow end-to-end:
+ * the page(s) + their interaction handlers wired to the real API client + the
+ * backend endpoint(s) the flow OWNS + shared scaffold utils/models. Composes
+ * the SAME frontend and backend rule constants used by buildFrontendPrompt /
+ * buildBackendPrompt (no rule text is duplicated — the constants are reused).
+ * Only reachable under the BLUEPRINT_VERTICAL_SLICE "Feature" phase.
+ */
+function buildFullstackPrompt(ctx: PromptContext): string {
+  const backendConditional: string[] = [];
+  if (hasAuthScaffold(ctx)) backendConditional.push(AUTH_IDENTITY_RULE);
+  if (hasBackgroundJobs(ctx)) backendConditional.push(BACKGROUND_JOBS_RULE);
+  if (hasAggregationPipeline(ctx)) backendConditional.push(EMPTY_RESULTS_RULE);
+  if (hasLlmBundle(ctx)) backendConditional.push(LLM_CLIENT_RULE);
+
+  const sections: string[] = [
+    `You are a Senior Full-Stack Engineer Agent.`,
+    `You OWN ONE feature/flow END-TO-END: the page(s) + every interactive control wired to the real API client (non-empty handlers that perform their effect) + the backend endpoint(s) this flow OWNS (implement them here, in this same task) + navigation/state. You read shared scaffold utils, shared types/contracts, and shared Sequelize models — but you NEVER leave a control inert and NEVER stop at the UI boundary expecting "another worker" to build the endpoint. There is no other worker for this flow: the whole chain (click → handler → API client → endpoint → model → effect) is yours.`,
+    ``,
+    `Implement BOTH layers in this one task:`,
+    `- Frontend: page view(s) under \`frontend/src/views/\`, handlers, and API-client calls.`,
+    `- Backend: the route/service/validation for the endpoint(s) this flow owns, under \`backend/src/api/modules/...\`, registered via the registrar pattern.`,
+    `- Wire them together so the rendered control actually calls the endpoint you implemented and applies the declared effect.`,
+    ``,
+    `═══ FRONTEND RULES (your UI + wiring half) ═══`,
+    `**Project-specific conventions (always read the Project Convention Card in context first):**`,
+    `- Page views → \`frontend/src/views/\` (flat, e.g. \`LoginPage.tsx\`). NEVER use \`src/pages/\` — this is Vite+React Router, not Next.js.`,
+    `- Route registration → \`frontend/src/router.tsx\`, import from \`./views/...\`.`,
+    `- API client → ONE canonical file at \`frontend/src/api/client.ts\`. Never create a parallel HTTP wrapper.`,
+    `- **API paths: the client base URL already includes \`/api\`. Pass paths WITHOUT that prefix** — use \`"/users/me"\` not \`"/api/users/me"\`. Read the client file before coding if unsure.`,
+    ``,
+    `**Data & API rules:**`,
+    `- Every list/table/grid that shows backend data MUST fetch via the API client. No hardcoded arrays, no mock data.`,
+    `- All mutations (create/update/delete) must call the real endpoint, not patch local state only.`,
+    `- **Interaction wiring (HARD RULE):** every interactive control you render MUST have a non-empty handler that performs its declared effect — call the API client method, navigate via the router, and/or update state. NEVER ship an inert control. Because you ALSO own the endpoint, wire the handler to the exact endpoint you implement in the backend half of this task.`,
+    ``,
+    NULL_SAFE_ARRAY_RULE,
+    ``,
+    HOOK_RETURN_TYPE_RULE,
+    ``,
+    hasAuthScaffold(ctx) ? FRONTEND_OAUTH_RULE : FRONTEND_EMAIL_AUTH_RULE,
+    ``,
+    FRONTEND_IMPORT_RULES,
+    TESTID_CONTRACT_RULES,
+    ``,
+    `═══ BACKEND RULES (your endpoint half) ═══`,
+    `**Project-specific conventions (always read the Project Convention Card in context first):**`,
+    `- Framework: read \`package.json\` + \`app.ts\` first and stick to whatever is already there (Koa/Express/Fastify).`,
+    `- Route registrar pattern: \`export function registerXxxRoutes(apiRouter: Router): void\` — call \`apiRouter.<verb>(...)\` directly so the route audit can detect bindings. ONE registrar per domain.`,
+    `- Middleware canonical path: \`backend/src/middlewares/\` (with the **s**).`,
+    `- Skeleton files: replace any \`throw new Error("Not implemented")\` stub with a full implementation. Leave no stubs.`,
+    ``,
+    `**Sequelize consistency (for every create/update flow):**`,
+    `- Use the SHARED Sequelize models (foundation) — do NOT redefine them. Read the model, own the endpoint+UI+wiring for your flow.`,
+    `- Keep these aligned: request DTO ↔ validation schema ↔ service payload ↔ ORM model required fields.`,
+    ``,
+    SEQUELIZE_JSONB_DEFAULT_RULE,
+    ``,
+    SYNC_VS_MIGRATIONS_RULE,
+    ``,
+    BACKEND_OPERATIONAL_INVARIANTS_RULE,
+    ``,
+    ...(backendConditional.length > 0
+      ? [backendConditional.join("\n\n"), ``]
+      : []),
+    API_ROUTES_MANIFEST_RULE,
+    ``,
+    WORKER_READONLY_TOOLS_GUIDE,
+    ``,
+    `You may write a brief plan (≤10 lines) before outputting files.`,
+    `For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\``,
+    ``,
+    `When done: ${RALPH_COMPLETE_TOKEN}`,
+    `On failure: <promise>TASK_FAILED: <reason></promise>`,
+  ];
+  return sections.join("\n");
+}
+
 function buildTestPrompt(): string {
   return [
     `You are a Senior QA / Test Engineer Agent.`,
@@ -513,6 +591,8 @@ export function buildRolePrompt(
       return buildBackendPrompt(context);
     case "test":
       return buildTestPrompt();
+    case "fullstack":
+      return buildFullstackPrompt(context);
   }
 }
 

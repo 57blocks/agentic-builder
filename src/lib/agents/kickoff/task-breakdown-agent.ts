@@ -150,7 +150,17 @@ Use **coarse-grained** tasks unless the PRD forces more splits. Typical **phase*
 **Good for M / L:**
 - one contracts/client task, one app-shell/layout task, backend tasks split by resource domain when 4+ resource types exist, then **one task per PRD page** like "Implement Private Enrollment page", "Implement Group Enrollment page", "Implement Lecture/Camp Enrollment page";
 - when a multi-API pipeline exists, split it into 3 tasks like "Build external API clients for {services}", "Implement {pipeline-name} orchestration", "Add {pipeline-name} HTTP routes + SSE streaming".
+${flatStackScaffoldCanonicalBlock()}`;
+}
 
+/**
+ * "Scaffold utilities are CANONICAL" block, shared by both the horizontal
+ * (`flatStackPhaseGuide`) and vertical (`verticalSlicePhaseGuide`) guides so the
+ * canonical-path rules are stated identically. Extracted verbatim from the
+ * original inline block — the flag-off output stays byte-for-byte unchanged.
+ */
+function flatStackScaffoldCanonicalBlock(): string {
+  return `
 ## Tier M / L — scaffold utilities are CANONICAL (do not re-plan)
 The scaffold already provides the following files. NEVER plan a task whose subSteps create or "redesign" these — feature tasks must \`reads\` / \`modifies\` them only.
 - \`frontend/src/api/client.ts\` — the ONLY HTTP client. Never plan \`frontend/src/utils/apiClient.ts\`, \`frontend/src/utils/api.ts\`, \`frontend/src/lib/http.ts\`, or any other parallel HTTP wrapper.
@@ -186,6 +196,89 @@ The L-tier scaffold ships these files. NEVER plan a task whose subSteps recreate
 - **Background job task** = ONE task that delivers ALL of: (a) the worker file under \`backend/src/workers/<feature>Worker.ts\`, (b) the worker registration line in \`backend/src/workers/index.ts\`, (c) the public enqueue + status endpoint in \`backend/src/api/modules/<feature>/\`, (d) the SSE / polling consumer in \`frontend/src\`, (e) the structured \`logger.info({ ... }, "<event>")\` lines at start / external-call / success / fail / complete, (f) the \`inproc:*\` runId pass-through in the response. Do NOT split (a)-(f) across tasks — they are tightly coupled.
 - **Auth / rate limiting**: protect mutating routes by composing \`createRateLimit(...)\` with the auth middleware in the module's routes file; do NOT wrap them in a new top-level middleware.
 `;
+}
+
+/**
+ * Vertical-slice phase guide (flag-gated by BLUEPRINT_VERTICAL_SLICE=1, M/L
+ * tiers only). Re-cuts the breakdown from horizontal layer/page fragments into
+ * vertical feature/flow slices owned end-to-end by one fullstack worker, on top
+ * of a shared Foundation. Used INSTEAD of `flatStackPhaseGuide()` when the flag
+ * is on; the horizontal guide stays the default. See
+ * docs/vertical-slice-breakdown-design.md §3-§5.
+ */
+function verticalSlicePhaseGuide(): string {
+  return `
+
+## Tier M / L — VERTICAL FEATURE SLICES (flag: BLUEPRINT_VERTICAL_SLICE)
+Cut the breakdown into **vertical feature slices**, NOT horizontal layer/page
+fragments. The OLD "one task per page" and "never combine FE+BE in one task"
+rules are **OVERRIDDEN** here: a feature slice deliberately spans both layers.
+
+### Phase 1 — Foundation (build FIRST, shared, NOT per-feature)
+These are shared and built before any Feature slice. Use the existing phase
+labels so they map to the architect/backend roles:
+- **Scaffolding / Data Layer / Infrastructure** (phase → architect): app shell /
+  layout / router skeleton, design tokens + shared UI primitives, the base API
+  client, DB bootstrap, and the **shared Sequelize models** (ONE canonical model
+  per entity — features READ these, they do NOT redefine them).
+- **Shared API contracts / types** (early): align API contracts + shared types so
+  every slice wires to the same signatures. These are foundation, not per-slice,
+  so two slices cannot define conflicting models or contracts.
+
+### Phase 2 — one \`Feature\` task per USER FLOW
+After Foundation, emit ONE task with phase **\`Feature\`** per user flow. A flow =
+- a **page** (or ≤ 3 closely-related views) for that capability, PLUS
+- ALL its interactive controls wired to the real API client — non-empty handlers
+  that actually perform their effect (call the endpoint / navigate / update
+  state); NEVER an inert control, PLUS
+- the backend **endpoint(s) that flow OWNS** — implement them IN THIS SAME TASK
+  (route + service + validation under \`backend/src/api/modules/...\`), PLUS
+- the resulting navigation / state effect.
+
+A \`Feature\` task's \`files.creates\` MAY span BOTH \`frontend/src/...\` AND
+\`backend/src/api/modules/...\` — this is the entire point of the vertical cut. Do
+NOT split a flow back into a page-only task and an endpoint-only task.
+
+CRUD on one resource exercised by one page = ONE Feature slice (page + its
+endpoints + wiring), not three layer-split tasks.
+
+### Granularity cap (budget gate)
+A Feature slice must fit one coherent generation:
+- soft cap: ≤ ~6 OWNED endpoints **and** ≤ 3 views per slice.
+- If a flow exceeds the cap, **sub-split along SUB-FLOWS** (e.g. "checkout:
+  payment step" vs "checkout: confirmation step"), where each sub-flow is STILL a
+  complete chain (its own page + handlers + owned endpoints). NEVER sub-split back
+  into page-only / endpoint-only fragments.
+
+### Shared-endpoint arbitration
+If two flows hit the same endpoint, the FIRST/owning slice implements it; the
+other slice CONSUMES it via the frozen contract (does not re-implement).
+
+### Embedded TDD (still required)
+Every \`Feature\` task MUST embed a \`tddPlan\` with at least one
+**route-smoke / interaction** test that asserts the WHOLE chain inside the
+slice: render the route, simulate the page's PRIMARY interaction (click/submit),
+and assert the click → API call (with the expected payload) → effect
+(navigation / state change). \`expectedGreen\` must name the interaction and its
+effect. The slice owns the endpoint, so this test can assert the real call.
+Do NOT emit standalone phase "Testing" tasks.
+${flatStackScaffoldCanonicalBlock()}`;
+}
+
+/**
+ * Pure selector for the phase guide. Extracted so the flag-gating logic is
+ * unit-testable without constructing the whole agent. Returns the vertical
+ * Feature guide when the flag is on AND the tier is M/L; otherwise the
+ * horizontal flat-stack guide (the default). Returns "" for non-M/L tiers.
+ */
+export function selectPhaseGuide(
+  scaffoldTier: "S" | "M" | "L",
+  verticalSliceFlag: boolean,
+): string {
+  if (scaffoldTier !== "M" && scaffoldTier !== "L") return "";
+  return verticalSliceFlag
+    ? verticalSlicePhaseGuide()
+    : flatStackPhaseGuide();
 }
 
 /**
@@ -274,10 +367,13 @@ function buildSystemPrompt(
 ): string {
   const effectiveScaffoldTier = scaffoldTier ?? (tier as "S" | "M" | "L");
   const tierStyle = TIER_CODING_STYLE[tier];
-  const phaseGuide =
-    effectiveScaffoldTier === "M" || effectiveScaffoldTier === "L"
-      ? flatStackPhaseGuide()
-      : "";
+  // Vertical-slice "Feature" guide is flag-gated (M/L only); otherwise the
+  // horizontal flat-stack guide is the default. selectPhaseGuide is a pure
+  // selector so the gating is unit-testable.
+  const phaseGuide = selectPhaseGuide(
+    effectiveScaffoldTier,
+    process.env.BLUEPRINT_VERTICAL_SLICE === "1",
+  );
   const lAddendum = effectiveScaffoldTier === "L" ? lTierAddendum() : "";
   const scaffoldSection =
     scaffoldBlock && scaffoldBlock.trim().length > 0
