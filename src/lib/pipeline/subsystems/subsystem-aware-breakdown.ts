@@ -14,6 +14,8 @@
  * Disable entirely with BLUEPRINT_SUBSYSTEM_BREAKDOWN=0.
  */
 
+import fs from "fs";
+import path from "path";
 import { buildTaskBreakdownFromDocuments } from "../kickoff-task-breakdown.server";
 import { backfillPrdIds } from "../gates/prd-id-backfill";
 import { extractPrdInventory } from "./inventory";
@@ -39,6 +41,21 @@ export type SubsystemAwareBreakdownResult = BreakdownResult & {
   subsystem?: SubsystemBreakdownExtra;
 };
 
+/** TEMP diagnostic — dump the subsystem gate decision so we can see at runtime
+ *  why a regenerate did (or didn't) split. Safe/no-throw; remove once resolved. */
+function dumpSubsystemDecision(info: Record<string, unknown>): void {
+  try {
+    const dir = path.join(process.cwd(), "generated-code", ".blueprint");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "subsystem-decision.json"),
+      JSON.stringify({ at: new Date().toISOString(), ...info }, null, 2),
+    );
+  } catch {
+    /* diagnostic only */
+  }
+}
+
 /** Cheap, no-LLM gate: is this even a candidate for subsystem mode? */
 export function isSubsystemSplitCandidate(prd: string, tier: string): boolean {
   if (process.env.BLUEPRINT_SUBSYSTEM_BREAKDOWN === "0") return false;
@@ -61,6 +78,16 @@ export async function runSubsystemAwareTaskBreakdown(
 
   // Gate 1 — cheap precheck. Non-candidates take the unchanged default path.
   if (!isSubsystemSplitCandidate(params.prd, tier)) {
+    dumpSubsystemDecision({
+      stage: "gate1",
+      tier,
+      envDisabled: process.env.BLUEPRINT_SUBSYSTEM_BREAKDOWN === "0",
+      endpoints: extractPrdInventory(params.prd).apiEndpoints.length,
+      minEndpoints: MIN_ENDPOINTS_FOR_SPLIT,
+      candidate: false,
+      prdLen: params.prd?.length ?? 0,
+      result: "whole-system (gate1 failed)",
+    });
     return buildTaskBreakdownFromDocuments(params);
   }
 
@@ -111,6 +138,24 @@ export async function runSubsystemAwareTaskBreakdown(
       );
     }
   }
+
+  dumpSubsystemDecision({
+    stage: "gate2",
+    tier,
+    endpoints: inventory.apiEndpoints.length,
+    decomposeDidFallback: decomposed.didFallback,
+    decomposeValidationOk: decomposed.validation.ok,
+    decomposeDomains: decomposed.manifest.subsystems.length,
+    decomposeErrors: decomposed.validation.errors?.slice(0, 6) ?? [],
+    liveDecisionSplit: decision.split,
+    liveDecisionReasons: decision.reasons,
+    hadFallbackManifest: !!opts?.fallbackManifest,
+    usedFallbackManifest,
+    willSplit,
+    result: willSplit
+      ? `split into ${manifest.subsystems.length} domains${usedFallbackManifest ? " (fallback)" : ""}`
+      : "whole-system (gate2 said no)",
+  });
 
   if (!willSplit) {
     console.log(`[Subsystems] not splitting: ${decision.reasons.join("; ")}`);

@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
     sessionId,
     stitchProjectId,
     stitchScreenId,
+    forceFull,
   } = body as {
     featureBrief: string;
     codeOutputDir?: string;
@@ -47,6 +48,10 @@ export async function POST(request: NextRequest) {
     /** Stable client-generated id that links memory records from the
      *  originating pipeline run + this kickoff into one logical session. */
     sessionId?: string;
+    /** Force a FULL re-breakdown (skip incremental diff). Set by the explicit
+     *  "Regenerate" button — the user wants a fresh whole/subsystem breakdown,
+     *  not an incremental no-op when only a section body changed. */
+    forceFull?: boolean;
     /** Stitch screen identifiers — when present, the kickoff fetches the
      *  exported HTML and writes it to StitchDesign.html in the output root
      *  so coding workers can read it as a UI design reference. */
@@ -179,7 +184,7 @@ export async function POST(request: NextRequest) {
         // ID set was identical; the section-diff check fixes that.
         let useIncremental = false;
         try {
-          const prevSnapshot = await readKickoffSnapshot(outputRoot);
+          const prevSnapshot = forceFull ? null : await readKickoffSnapshot(outputRoot);
           if (prevSnapshot) {
             const canonicalNewPrd = stripChangeMarkers(prd);
             const newIdx = extractPrdRequirementIndex(canonicalNewPrd);

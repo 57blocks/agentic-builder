@@ -153,6 +153,20 @@ const OPENROUTER_MODEL_CONFIG = {
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
   ] as string[],
+
+  // ── Agentic Build channel (no-scaffold, milestone/acceptance-driven) ────────
+
+  /** Extracts a structured BuildPlan (milestones + acceptance commands) from a
+   *  markdown spec. Structured-JSON task → a capable, instruction-following model. */
+  agenticBuildPlan: "openai/gpt-5.4",
+  /** The autonomous milestone agent (bash/read/write/list tool loop). Needs
+   *  strong tool-use / function-calling; mirrors the verify+fix chain. */
+  agenticBuildCoder: [
+    "openai/gpt-5.3-codex",
+    "claude-sonnet-4",
+    "deepseek/deepseek-v4-pro",
+    "qwen/qwen3.6-plus",
+  ] as string[],
 } as const;
 
 export const DEEPSEEK_MODEL_CONFIG = {
@@ -187,6 +201,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   codeFix: DEEPSEEK_CODEFX_CHAIN,
   phaseVerifyFix: DEEPSEEK_VERIFYFX_CHAIN,
   e2eGen: DEEPSEEK_DIRECT_CHAIN,
+  agenticBuildPlan: DEEPSEEK_DIRECT_MODEL,
+  agenticBuildCoder: DEEPSEEK_CODEGEN_CHAIN,
 } as const satisfies Record<
   keyof typeof OPENROUTER_MODEL_CONFIG,
   string | readonly string[]

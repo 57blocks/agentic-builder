@@ -76,3 +76,6 @@ CLAUDE.md
 
 # runtime-captured project cover screenshots (user data, regenerated on demand)
 public/project-covers/
+
+# agentic-build channel: generated project workspaces (user output, not source)
+agentic-builds/

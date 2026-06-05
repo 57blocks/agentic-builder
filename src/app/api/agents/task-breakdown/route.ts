@@ -13,6 +13,7 @@ import {
   runDomainScopedBreakdown,
   type BreakdownFn,
 } from "@/lib/pipeline/subsystems/domain-breakdown";
+import { hasPlanSignals } from "@/lib/agentic-build";
 
 // Subsystem mode fans out into decompose + foundation + one breakdown per
 // domain (many LLM calls), so allow a long request.
@@ -52,6 +53,19 @@ export async function POST(request: NextRequest) {
       { error: "PRD content is required for task breakdown" },
       { status: 400 },
     );
+  }
+
+  // Goal-mode short-circuit: if the PRD conservatively looks like a runnable
+  // milestone+acceptance plan, skip task decomposition entirely. The coding
+  // stage detects the persisted build plan and runs the agentic acceptance
+  // loop instead. Detection is a cheap regex, so ordinary PRDs are untouched.
+  if (hasPlanSignals(prd).detected) {
+    return Response.json({
+      ok: true,
+      goalMode: true,
+      taskBreakdown: [],
+      costUsd: 0,
+    });
   }
 
   const resolvedTier = normalizeProjectTier(

@@ -120,6 +120,9 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
           design: steps.design?.content ?? "",
           pencil: steps.pencil?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
+          // Explicit Regenerate = fresh FULL breakdown (subsystem-aware), never
+          // an incremental no-op when only a section body differs.
+          forceFull: true,
         }),
       });
       if (!resp.ok) throw new Error(`Kickoff returned HTTP ${resp.status}`);

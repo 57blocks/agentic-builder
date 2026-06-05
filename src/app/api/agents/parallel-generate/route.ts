@@ -322,6 +322,29 @@ export async function POST(request: NextRequest) {
     () => null,
   );
 
+  // TEMP diagnostic — confirm at runtime whether the TRD got the manifest.
+  try {
+    const fsmod = await import("fs");
+    const pathmod = await import("path");
+    const dir = pathmod.join(outputRoot, ".blueprint");
+    fsmod.mkdirSync(dir, { recursive: true });
+    fsmod.writeFileSync(
+      pathmod.join(dir, "trd-manifest-debug.json"),
+      JSON.stringify(
+        {
+          at: new Date().toISOString(),
+          outputRoot,
+          manifestFound: !!subsystemManifest,
+          domains: subsystemManifest?.subsystems?.length ?? 0,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* diagnostic only */
+  }
+
   const agentMap = buildAgentMap(
     tierConstraint,
     designDirectionPrompt ?? stylePreset?.designSpecPrompt ?? "",

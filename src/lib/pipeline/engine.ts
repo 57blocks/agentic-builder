@@ -49,6 +49,7 @@ import {
   buildGitInitInstructions,
 } from "./code-output";
 import { runKickoffIntegrations } from "./kickoff-integrations";
+import { maybeExtractAndPersistPlan } from "@/lib/agentic-build";
 import { runSubsystemAwareTaskBreakdown } from "./subsystems/subsystem-aware-breakdown";
 import { writeSubsystemManifest, readSubsystemManifest } from "./subsystems/manifest-io";
 import { stampDomainMdPaths, writeDomainFiles } from "./subsystems/domain-files";
@@ -1270,6 +1271,71 @@ export class PipelineEngine {
             e instanceof Error ? e.message : e,
           );
         }
+      }
+
+      // ── Goal-mode short-circuit (conservative) ──────────────────────────
+      // If the PRD carries a runnable milestone+acceptance plan, extract +
+      // persist `.blueprint/build-plan.json` and SKIP the task breakdown
+      // entirely (no LLM decomposition, no coverage/phase gates). The coding
+      // stage detects the plan and runs the agentic acceptance loop instead.
+      // Detection is a cheap regex inside the gate, so ordinary PRDs are
+      // untouched and incur zero extra cost.
+      try {
+        const goalGate = await maybeExtractAndPersistPlan({
+          projectRoot: outputRoot,
+          specMarkdown: prdBody,
+        });
+        if (goalGate.persisted) {
+          const milestones = goalGate.milestones ?? 0;
+          console.log(
+            `[Engine] Goal mode: build plan extracted (${milestones} milestone(s)) — skipping task breakdown.`,
+          );
+          const summary = [
+            "## Project kick-off (goal mode)",
+            "",
+            `A runnable build plan was detected and extracted: **${milestones}** milestone(s).`,
+            "",
+            "Task breakdown and scaffold are skipped — the coding stage runs the single-agent acceptance-command loop against this plan.",
+            "",
+            `### Output\n\n**${written.length}** file(s) → \`${outputRoot}\``,
+          ].join("\n");
+          const stepResult = this.buildStepResult("kickoff", "completed", {
+            content: summary,
+            model: "goal-mode",
+            costUsd: 0,
+            durationMs: 0,
+            tokenUsage: {
+              promptTokens: 0,
+              completionTokens: 0,
+              totalTokens: 0,
+            },
+            metadata: {
+              runId: run.id,
+              outputRoot,
+              written,
+              errors,
+              fileCount: written.length,
+              taskBreakdown: [],
+              taskBreakdownConfirmed: true,
+              goalMode: true,
+              goalModeMilestones: milestones,
+            },
+          });
+          run.steps.kickoff = stepResult;
+          run.updatedAt = new Date().toISOString();
+          this.emit({
+            type: "step_complete",
+            runId: run.id,
+            stepId: "kickoff",
+            data: stepResult,
+          });
+          return run;
+        }
+      } catch (e) {
+        console.warn(
+          "[Engine] Goal-mode plan gate failed (ignored, falling back to normal breakdown):",
+          e instanceof Error ? e.message : e,
+        );
       }
 
       // Mirror user-uploaded design references into the output tree so coding

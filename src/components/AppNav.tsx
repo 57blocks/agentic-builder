@@ -512,6 +512,26 @@ export default function AppNav() {
         >
           {collapsed ? <span className="text-[13px] font-bold">P</span> : "PRD Knowledge"}
         </Link>
+        <Link
+          href="/agentic-build"
+          className={`flex items-center text-sm font-medium transition-colors ${
+            pathname === "/agentic-build"
+              ? "text-slate-900"
+              : "text-slate-500 hover:text-slate-900"
+          } ${collapsed ? "w-8 h-8 justify-center rounded-lg hover:bg-slate-100" : "gap-1.5"}`}
+          title={collapsed ? "Agentic Build" : undefined}
+        >
+          {collapsed ? (
+            <span className="text-[13px] font-bold">A</span>
+          ) : (
+            <>
+              <span>Agentic Build</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full leading-none">
+                Beta
+              </span>
+            </>
+          )}
+        </Link>
         </>
         )}
       </div>

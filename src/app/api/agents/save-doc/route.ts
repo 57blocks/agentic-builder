@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import path from "path";
 import fs from "fs/promises";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
+import { maybeExtractAndPersistPlan } from "@/lib/agentic-build";
 
 const DOC_FILENAME: Record<string, string> = {
   prd: "PRD.md",
@@ -39,7 +40,29 @@ export async function POST(request: NextRequest) {
   try {
     await fs.mkdir(outputRoot, { recursive: true });
     await fs.writeFile(filePath, content, "utf-8");
-    return Response.json({ ok: true, filename });
+
+    // Goal-mode gate: when a PRD is saved, conservatively detect whether it
+    // carries a runnable milestone+acceptance plan and, if so, extract +
+    // persist `.blueprint/build-plan.json`. This arms goal mode at the coding
+    // stage. Best-effort: detection is a cheap regex, so ordinary PRDs incur
+    // zero LLM cost, and any failure never blocks the save.
+    let planPersisted = false;
+    if (docId === "prd") {
+      try {
+        const gate = await maybeExtractAndPersistPlan({
+          projectRoot: outputRoot,
+          specMarkdown: content,
+        });
+        planPersisted = gate.persisted;
+        console.log(`[SaveDoc] PRD plan gate: ${gate.reason}`);
+      } catch (e) {
+        console.warn(
+          `[SaveDoc] plan gate failed (ignored): ${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
+
+    return Response.json({ ok: true, filename, planPersisted });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Write failed";
     return Response.json({ error: msg }, { status: 500 });

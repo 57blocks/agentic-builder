@@ -118,6 +118,12 @@ import {
   type CodingMode,
 } from "@/lib/pipeline/coding-mode";
 import { pruneDriftedTddTests } from "@/lib/pipeline/tdd-drift-cleanup";
+import {
+  loadGoalModePlan,
+  maybeExtractAndPersistPlan,
+  runGoalModeCoding,
+  type PersistedBuildPlan,
+} from "@/lib/agentic-build";
 
 const execFileAsync = promisify(execFile);
 
@@ -708,6 +714,144 @@ async function resolveTier(
   return "M";
 }
 
+/**
+ * Goal-mode coding handler. Runs a single autonomous agent against the
+ * persisted build plan's milestones + acceptance commands (no task breakdown,
+ * no scaffold). Reuses the coding SSE envelope (session_start/complete/error)
+ * so the existing coding UI shows the run; milestone detail streams as custom
+ * `goal_*` events. Writes a coding-session report so the dashboard sees the
+ * pass/fail result like any other session.
+ */
+function runGoalModeCodingResponse(args: {
+  request: NextRequest;
+  outputRoot: string;
+  plan: PersistedBuildPlan;
+  projectId: string | null;
+}): Response {
+  const { request, outputRoot, plan, projectId } = args;
+  const sessionId = uuidv4();
+  const mapper = new EventMapper(sessionId);
+  const encoder = new TextEncoder();
+  const startedAt = new Date().toISOString();
+
+  // Surface milestones as pseudo-tasks so the existing coding UI renders a list.
+  const pseudoTasks: CodingTask[] = plan.milestones.map((m, i) => ({
+    id: m.id || `M${i}`,
+    phase: "goal",
+    title: m.title || m.id || `Milestone ${i}`,
+    description: m.instructions ?? "",
+    estimatedHours: 0,
+    executionKind: "ai_autonomous",
+    dependencies: [],
+    coversRequirementIds: [],
+    assignedAgentId: null,
+    codingStatus: "pending",
+  }));
+
+  let clientAborted = false;
+  request.signal.addEventListener("abort", () => {
+    clientAborted = true;
+  });
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: unknown) => {
+        if (clientAborted) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          );
+        } catch {
+          clientAborted = true;
+        }
+      };
+
+      send(mapper.buildSessionStart(pseudoTasks));
+      console.log(
+        `[CodingAPI] Goal mode: session ${sessionId} running ${plan.milestones.length} milestone(s) at ${outputRoot}`,
+      );
+
+      let outcome: "passed" | "failed" = "failed";
+      let milestoneResults: AuditTaskSummary[] = [];
+      let terminalSummary = "";
+      let fatalError = "";
+      try {
+        const result = await runGoalModeCoding({
+          outputRoot,
+          plan,
+          send: (e) => send(e),
+        });
+        outcome = result.outcome;
+        milestoneResults = result.milestones.map((m) => ({
+          id: m.id,
+          title: m.title,
+          coversRequirementIds: [],
+          generatedFiles: m.filesTouched,
+          status:
+            m.outcome === "passed"
+              ? ("completed" as const)
+              : m.outcome === "skipped"
+                ? ("completed_with_warnings" as const)
+                : ("failed" as const),
+        }));
+        if (outcome === "passed") {
+          terminalSummary = `Goal mode passed: ${result.milestones.length} milestone(s) green.`;
+          send(mapper.buildSessionComplete());
+        } else {
+          terminalSummary = `Goal mode failed at milestone ${result.failedAt ?? "?"}.`;
+          fatalError = terminalSummary;
+          send(mapper.buildSessionError(terminalSummary, "graph_error"));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        terminalSummary = message;
+        fatalError = message;
+        send(
+          mapper.buildSessionError(
+            message,
+            clientAborted ? "client_disconnect" : "graph_error",
+          ),
+        );
+      } finally {
+        try {
+          await writeCodingSessionReport({
+            sessionId,
+            projectId,
+            outputDir: outputRoot,
+            startedAt,
+            endedAt: new Date().toISOString(),
+            status: clientAborted
+              ? "aborted"
+              : outcome === "passed"
+                ? "pass"
+                : "fail",
+            terminalSummary:
+              terminalSummary || "Goal-mode coding session ended.",
+            finalAudit: null,
+            taskResults: milestoneResults,
+            fileRegistry: [],
+            fatalError,
+          });
+        } catch (reportErr) {
+          console.warn(
+            `[CodingAPI] Goal-mode report write failed (ignored):`,
+            reportErr instanceof Error ? reportErr.message : reportErr,
+          );
+        }
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const {
@@ -845,6 +989,50 @@ export async function POST(request: NextRequest) {
   }
 
   const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
+
+  // ── Goal-mode routing (conservative) ───────────────────────────────────
+  // If preparation persisted a runnable build plan (milestones + usable
+  // acceptance commands at `.blueprint/build-plan.json`), run the single-agent
+  // acceptance loop instead of the scaffolded sharded pipeline — no task
+  // breakdown, no scaffold, no install. The plan file is the authoritative
+  // switch; we branch BEFORE any scaffold/cleanup work so goal mode starts
+  // from a clean, agent-owned workspace.
+  await fs.mkdir(outputRoot, { recursive: true });
+  if (prdBody && prdBody.trim().length > 0) {
+    await fs
+      .writeFile(path.join(outputRoot, "PRD.md"), prdBody, "utf-8")
+      .catch(() => undefined);
+  }
+  let goalPlan = await loadGoalModePlan(outputRoot);
+  if (!goalPlan) {
+    // Lazy fallback: the PRD carries plan signals but preparation didn't
+    // pre-extract (e.g. PRD was saved before this feature shipped). At most one
+    // extraction LLM call; conservative detection means ordinary PRDs skip it.
+    const prdForDetect =
+      prdBody && prdBody.trim().length > 0
+        ? prdBody
+        : await fs
+            .readFile(path.join(outputRoot, "PRD.md"), "utf-8")
+            .catch(() => "");
+    if (prdForDetect.trim()) {
+      const gate = await maybeExtractAndPersistPlan({
+        projectRoot: outputRoot,
+        specMarkdown: prdForDetect,
+      });
+      if (gate.persisted) goalPlan = await loadGoalModePlan(outputRoot);
+    }
+  }
+  if (goalPlan) {
+    console.log(
+      `[CodingAPI] Goal mode armed — routing to agentic acceptance loop (${goalPlan.milestones.length} milestone(s)).`,
+    );
+    return runGoalModeCodingResponse({
+      request,
+      outputRoot,
+      plan: goalPlan,
+      projectId: projectId ?? null,
+    });
+  }
 
   // Pencil exports live under frontend/public/design; cleanup removes `frontend/`. Stash PNGs
   // so they survive scaffold refresh (markdown stays at repo root via KEEP_MD).
