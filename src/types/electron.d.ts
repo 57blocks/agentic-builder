@@ -11,6 +11,7 @@ export interface CoverCaptureResult {
 export interface ElectronAPI {
   getPlatform: () => Promise<string>;
   getAppVersion: () => Promise<string>;
+  selectFolder: () => Promise<string | null>;
   /** Render a reference URL in a hidden window; returns a full-page screenshot + extracted CSS tokens. */
   renderReferenceUrl: (url: string) => Promise<ReferenceCaptureResult>;
   /** Capture a viewport screenshot of a (local) URL for use as a project cover. */

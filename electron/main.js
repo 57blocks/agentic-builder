@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -61,6 +61,15 @@ app.on("window-all-closed", () => {
 
 ipcMain.handle("get-platform", () => process.platform);
 ipcMain.handle("get-app-version", () => app.getVersion());
+
+ipcMain.handle("select-folder", async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+    title: "Select project directory",
+    buttonLabel: "Select Folder",
+  });
+  return canceled ? null : filePaths[0];
+});
 
 // ── Reference-URL render capture ───────────────────────────────────────────
 // Render an arbitrary URL in a hidden, sandboxed window so client-side-rendered

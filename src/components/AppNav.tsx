@@ -8,6 +8,7 @@ import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
+import { useStepStore } from "@/store/step-store";
 import type { Project } from "@/types/project";
 
 function FolderIcon() {
@@ -167,15 +168,23 @@ export default function AppNav() {
   async function handleNewProject() {
     resetStage();
     resetPipeline();
-    // Create local project immediately for instant UI feedback
+
+    let folder: string | null = null;
+    if (window.electronAPI?.selectFolder) {
+      folder = await window.electronAPI.selectFolder();
+    } else {
+      folder = prompt("Enter the absolute path for this project's code output directory:");
+    }
+    if (!folder || !folder.trim()) return;
+
     const localProject = addLocalProject("New Project");
     setProjectSlugForSync(localProject.id);
     pipelineSetProjectSlugForSync(localProject.id);
     setProjectName("New Project");
+    useStepStore.getState().setCodeOutputDir(folder);
     router.push(`/project/${localProject.id}`);
-    // Try creating on the server in the background; replace local placeholder on success
     try {
-      await createProject("New Project", localProject.id);
+      await createProject("New Project", folder, localProject.id);
     } catch (err) {
       console.error("[AppNav] Server project creation failed (will retry on next action):", err);
     }
@@ -265,6 +274,9 @@ export default function AppNav() {
               // This prevents stale localStorage data (from the persist middleware)
               // from showing a different name than what /api/projects returns.
               const displayName = project.name;
+              const dirBasename = project.codeOutputDir
+                ? project.codeOutputDir.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? ""
+                : "";
               const cover = project.coverImagePath;
               const stageMeta = isCurrentStageProject
                 ? STAGE_META[activeStage as StageId]
@@ -306,7 +318,7 @@ export default function AppNav() {
                     <Link
                       href={href}
                       className="flex items-center justify-center"
-                      title={displayName}
+                      title={dirBasename ? `${displayName}\n${project.codeOutputDir}` : displayName}
                     >
                       {cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -338,8 +350,18 @@ export default function AppNav() {
                           <FileIcon />
                         </span>
                       )}
-                      <span className={`text-[13px] tracking-[-0.3px] truncate transition-colors font-medium ${isActive ? "text-slate-900" : "text-slate-700 group-hover:text-slate-900"}`}>
-                        {displayName}
+                      <span className="flex flex-col min-w-0">
+                        <span className={`text-[13px] tracking-[-0.3px] truncate transition-colors font-medium ${isActive ? "text-slate-900" : "text-slate-700 group-hover:text-slate-900"}`}>
+                          {displayName}
+                        </span>
+                        {dirBasename && (
+                          <span
+                            className="text-[11px] text-slate-400 truncate"
+                            title={project.codeOutputDir}
+                          >
+                            {dirBasename}
+                          </span>
+                        )}
                       </span>
                     </Link>
                   )}
