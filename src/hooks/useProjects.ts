@@ -6,6 +6,7 @@ import { type Project } from "@/types/project";
 interface UseProjectsReturn {
   projects: Project[];
   loading: boolean;
+  error: boolean;
   /** Create a new project by name. Pass localId to replace a placeholder. */
   createProject: (name: string, localId?: string) => Promise<Project>;
   /**
@@ -23,14 +24,20 @@ interface UseProjectsReturn {
 export function useProjects(): UseProjectsReturn {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const refresh = useCallback(async () => {
+    setError(false);
     try {
       const res = await fetch("/api/projects");
+      if (!res.ok) {
+        setError(true);
+        return;
+      }
       const data = (await res.json()) as { projects: Project[] };
       setProjects(data.projects ?? []);
     } catch {
-      // silently ignore network errors; keep stale data
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -184,6 +191,7 @@ export function useProjects(): UseProjectsReturn {
   return {
     projects,
     loading,
+    error,
     createProject,
     addLocalProject,
     renameProject,

@@ -69,7 +69,7 @@ function ProjectCard({ project }: { project: Project }) {
 
 export default function LandingPage() {
   const router = useRouter();
-  const { projects, loading, addLocalProject, createProject } = useProjects();
+  const { projects, loading, error, addLocalProject, createProject } = useProjects();
   const resetStage = useStageStore((s) => s.resetStage);
   const setProjectSlugForSync = useStageStore((s) => s.setProjectSlugForSync);
   const setProjectName = useStageStore((s) => s.setProjectName);
@@ -93,8 +93,8 @@ export default function LandingPage() {
 
   const hasProjects = projects.length > 0;
 
-  // Empty state — the original welcome hero.
-  if (!loading && !hasProjects) {
+  // Empty state — only show Welcome when the fetch definitely succeeded with no projects.
+  if (!loading && !error && !hasProjects) {
     return (
       <div
         className="flex flex-col items-center justify-center flex-1 h-full bg-[#f8f9ff] p-8"
