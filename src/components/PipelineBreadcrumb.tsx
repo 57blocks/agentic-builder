@@ -85,7 +85,7 @@ function CascadingMenu({
   // trigger a deploy) never produce a snapshot of their own — they always
   // start from an idle state. Treat them as navigable even when their
   // snapshot is empty so the user can always click in.
-  const SNAPSHOTLESS_STEPS = new Set(["intent", "initial", "deploy", "serve"]);
+  const SNAPSHOTLESS_STEPS = new Set(["intent", "initial", "deploy", "serve", "bug-fix"]);
   const noSnapshot = (id: string) => stepStates[id] == null && !SNAPSHOTLESS_STEPS.has(id);
 
   const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";

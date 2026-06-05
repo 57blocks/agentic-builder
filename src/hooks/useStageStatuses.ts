@@ -77,5 +77,5 @@ export function useStageStatuses(): Record<StageId, StageStatus> {
   // without inventing fake status transitions here.
   const deploy: StageStatus = "idle";
 
-  return { preparation, kickoff, coding, preview, deploy };
+  return { preparation, kickoff, coding, preview, deploy, "bug-fix": "idle" as StageStatus };
 }

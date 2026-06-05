@@ -72,6 +72,10 @@ import { ServeUI } from "./preview/server/serve/ui";
 import { e2eAgent } from "./preview/testing/e2e/agent";
 import { E2eUI } from "./preview/testing/e2e/ui";
 
+import { bugFixAgent } from "./preview/testing/bug-fix/agent";
+import { BugFixUI } from "./preview/testing/bug-fix/ui";
+import { bugFixSnapshot } from "./preview/testing/bug-fix/snapshot";
+
 import { deployAgent } from "./preview/deployment/deploy/agent";
 import { DeployUI } from "./preview/deployment/deploy/ui";
 
@@ -103,7 +107,8 @@ export const STEP_REGISTRY: Record<StepId, StepEntry> = {
   // Coding
   agents: { component: AgentsUI, agent: agentsAgent, snapshot: createStepDataSnapshot("agents") },
   // Preview
-  serve: { component: ServeUI, agent: serveAgent, snapshot: createStepDataSnapshot("serve") },
-  e2e:   { component: E2eUI,   agent: e2eAgent,   snapshot: createStepDataSnapshot("e2e") },
+  serve: { component: ServeUI,    agent: serveAgent,    snapshot: createStepDataSnapshot("serve") },
+  e2e:   { component: E2eUI,      agent: e2eAgent,      snapshot: createStepDataSnapshot("e2e") },
+  "bug-fix": { component: BugFixUI, agent: bugFixAgent, snapshot: bugFixSnapshot },
   deploy:  { component: DeployUI,  agent: deployAgent,  snapshot: createStepDataSnapshot("deploy") },
 };
