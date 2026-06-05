@@ -21,6 +21,9 @@ import type { PrdVersion, PrdReadiness } from "./snapshot";
 import { PrdReadinessPanel } from "./PrdReadinessPanel";
 import { PrdToolDrawer } from "./PrdToolDrawer";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
+// Pure, client-safe detector (type-only deps) — used to recognise goal-mode
+// plans so they can skip the large-PRD Prepare flow.
+import { hasPlanSignals } from "@/lib/agentic-build/plan-detection";
 
 // ─── PRD history (populated from persisted versions) ──────────────────────
 export interface PrdSnapshot { content: string; savedAt: Date; label: string; }
@@ -365,7 +368,10 @@ export function PrdUI(props: StepUIProps) {
     !!content &&
     (content.split("\n").length >= 1500 ||
       (content.match(/^##\s+\S/gm)?.length ?? 0) >= 8);
-  const prereqsMet = !isLargePrd || (qualityRan && subsystemRan);
+  // Goal-mode plan (milestones + acceptance commands): coding routes to the
+  // single-agent acceptance loop and skips task breakdown / subsystem split,
+  // so the large-PRD "Prepare PRD" (Validate + Split) prerequisite is moot.
+  const isGoalModePlan = !!content && hasPlanSignals(content).detected;
   const isDone = step?.status === "completed" && Boolean(step?.content?.trim());
   const error = step?.status === "failed" ? step.error : null;
   // Derive version count from step metadata (reactive via zustand)
@@ -847,11 +853,19 @@ export function PrdUI(props: StepUIProps) {
           <SpinnerIcon /> Fixing…
         </div>
       )}
-      {!isManualEditing && isLargePrd && (
+      {!isManualEditing && isGoalModePlan && (
+        <div className="flex items-center gap-3 px-8 py-3 border-b border-indigo-200 bg-indigo-50 shrink-0">
+          <ShieldCheck size={16} className="text-indigo-600 shrink-0" />
+          <span className="text-[13px] text-indigo-800">
+            Goal-mode plan detected (milestones + acceptance commands) — coding runs the agentic acceptance loop. <b>Prepare PRD</b> (validate / split) is not required.
+          </span>
+        </div>
+      )}
+      {!isManualEditing && isLargePrd && !isGoalModePlan && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-amber-200 bg-amber-50 shrink-0">
           <AlertTriangle size={16} className="text-amber-600 shrink-0" />
           <span className="text-[13px] text-amber-800">
-            This PRD is large — run the 2-step <b>Prepare PRD</b> flow (validate, then split into subsystems) before moving on.
+            This PRD is large — running the 2-step <b>Prepare PRD</b> flow (validate, then split into subsystems) is recommended, but optional. You can proceed without it.
           </span>
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-[11px] text-slate-500">
@@ -1065,7 +1079,7 @@ export function PrdUI(props: StepUIProps) {
           {error && !isThisRunning && (
             <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
           )}
-          <button title={pendingDiff ? "Accept or reject pending changes first" :!prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet || pendingDiff} onClick={async () => {
+          <button title={pendingDiff ? "Accept or reject pending changes first" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || pendingDiff} onClick={async () => {
           // Await memory capture BEFORE navigating so the fetch is never
           // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
@@ -1093,7 +1107,7 @@ export function PrdUI(props: StepUIProps) {
             }
           }
           if (nextStep) props.onNavigate(nextStep);
-        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : !prereqsMet ? "Run checks first" : "Next Step"}{!isSavingDoc && !confirmCooldown && prereqsMet && <ArrowRight size={16} color="white" />}</button></div>}
+        }} className="flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-10 px-4 shrink-0 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100">{isSavingDoc ? "Saving PRD…" : confirmCooldown ? "Reviewing…" : "Next Step"}{!isSavingDoc && !confirmCooldown && <ArrowRight size={16} color="white" />}</button></div>}
       />
       </div>
       )}
