@@ -77,9 +77,9 @@ export default function LoginPage() {
     <div
       className="w-full min-h-screen flex items-center justify-center px-4 relative overflow-hidden"
       style={{
-        background:
-          "linear-gradient(135deg, rgb(248, 249, 255) 0%, rgb(245, 243, 255) 100%)",
-      }}
+        background: "linear-gradient(135deg, rgb(248, 249, 255) 0%, rgb(245, 243, 255) 100%)",
+        WebkitAppRegion: "no-drag",
+      } as React.CSSProperties}
     >
       {/* Background blurs */}
       <div className="pointer-events-none absolute right-[-80px] top-[-160px] w-[480px] h-[480px] rounded-full bg-[#dbeafe] blur-[60px] opacity-40" />
