@@ -100,10 +100,10 @@ function PrdDiffHunk({ id, oldBody, newBody, onAccept, onReject }: {
   return (
     <div className="my-3 rounded-md border border-indigo-200 overflow-hidden shadow-sm">
       <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-50 border-b border-indigo-100">
-        <span className="text-[11px] font-semibold text-indigo-700">建议的修改</span>
+        <span className="text-[11px] font-semibold text-indigo-700">Suggested Changes</span>
         <div className="flex items-center gap-1.5">
-          <button onClick={() => onReject(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">✗ 拒绝</button>
-          <button onClick={() => onAccept(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-green-700 bg-white border border-green-200 hover:bg-green-50 transition-colors">✓ 接受</button>
+          <button onClick={() => onReject(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">✗ Reject</button>
+          <button onClick={() => onAccept(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-green-700 bg-white border border-green-200 hover:bg-green-50 transition-colors">✓ Accept</button>
         </div>
       </div>
       <div className="font-mono text-[12px] leading-5 bg-white">
@@ -658,7 +658,7 @@ export function PrdUI(props: StepUIProps) {
   const regenerateAtTier = () => {
     if (isThisRunning || confirmCooldown) return;
     const ok = window.confirm(
-      `按 ${tier} 级重新生成 PRD？当前 PRD 内容会被覆盖。`,
+      `Regenerate PRD at tier ${tier}? Current PRD content will be overwritten.`,
     );
     if (!ok) return;
     setShowDiff(false);
@@ -683,7 +683,7 @@ export function PrdUI(props: StepUIProps) {
   // present, demarcate it so the patch prompt anchors on that exact span.
   const buildEditInstruction = (instruction: string, selection: string): string =>
     selection
-      ? `【选中片段 / selected excerpt — modify ONLY this part, leave the rest of its section intact】\n"""\n${selection}\n"""\n\n【修改要求 / change requested】\n${instruction}`
+      ? `【selected excerpt — modify ONLY this part, leave the rest of its section intact】\n"""\n${selection}\n"""\n\n【change requested】\n${instruction}`
       : instruction;
 
   const submitEdit = () => {
@@ -779,7 +779,7 @@ export function PrdUI(props: StepUIProps) {
                   {isDone && (
                     <div
                       className="flex items-center gap-1"
-                      title="项目分级。L 才会生成 TRD / 系统设计，并启用 DDD 子系统拆分。改了之后可点“重新生成”按该级别重写 PRD。"
+                      title="Project tier. Tier L generates TRD / system design and enables DDD subsystem split. Change tier then click Regenerate to rewrite the PRD at that level."
                     >
                       <span className="text-[10px] text-slate-400 mr-0.5">TIER</span>
                       {(["S", "M", "L"] as ProjectTier[]).map((t) => (
@@ -806,9 +806,9 @@ export function PrdUI(props: StepUIProps) {
                         onClick={regenerateAtTier}
                         disabled={isThisRunning || confirmCooldown}
                         className="ml-1 text-[11px] font-medium px-2 py-[2px] rounded-[3px] text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="按当前 TIER 重新生成整篇 PRD（覆盖当前内容）"
+                        title="Regenerate the full PRD at the current tier (overwrites current content)"
                       >
-                        重新生成
+                        Regenerate
                       </button>
                     </div>
                   )}
@@ -865,10 +865,10 @@ export function PrdUI(props: StepUIProps) {
                   {/* Inline-diff review bar — original doc stays visible; each
                       change is reviewed in place (Cursor-style). */}
                   <div className="sticky top-0 z-10 mb-3 flex items-center gap-3 px-3 py-2 bg-indigo-50/95 backdrop-blur border border-indigo-100 rounded-md">
-                    <span className="text-[12px] font-medium text-indigo-700">有待审阅的改动——逐处接受 ✓ / 拒绝 ✗，或：</span>
+                    <span className="text-[12px] font-medium text-indigo-700">Pending changes — accept ✓ / reject ✗ each, or:</span>
                     <div className="ml-auto flex items-center gap-2">
-                      <button onClick={onRejectAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">全部拒绝</button>
-                      <button onClick={onAcceptAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-white bg-green-600 hover:bg-green-500 transition-colors">全部接受</button>
+                      <button onClick={onRejectAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">Reject All</button>
+                      <button onClick={onAcceptAll} className="text-[12px] font-medium px-2.5 py-1 rounded text-white bg-green-600 hover:bg-green-500 transition-colors">Accept All</button>
                     </div>
                   </div>
                   {parsePrdDiffSegments(content).map((seg, i) =>
@@ -938,7 +938,7 @@ export function PrdUI(props: StepUIProps) {
       <div className="flex flex-col">
         {selectionTarget && (
           <div className="flex items-start gap-2 px-8 pt-3 pb-1 bg-white border-t border-slate-100">
-            <span className="shrink-0 mt-1 text-[11px] font-semibold text-indigo-600">针对这段修改</span>
+            <span className="shrink-0 mt-1 text-[11px] font-semibold text-indigo-600">Editing selection</span>
             <span
               className="flex-1 min-w-0 text-[12px] text-slate-600 bg-indigo-50/60 border border-indigo-100 rounded px-2 py-1 line-clamp-2 break-words"
               title={selectionTarget}
@@ -949,7 +949,7 @@ export function PrdUI(props: StepUIProps) {
               type="button"
               onClick={() => setSelectionTarget("")}
               className="shrink-0 mt-0.5 p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              title="清除引用"
+              title="Clear selection"
             >
               <X size={13} />
             </button>
@@ -958,12 +958,12 @@ export function PrdUI(props: StepUIProps) {
       <StageInputBar
         value={editInput} onChange={setEditInput}
         onSubmit={submitEdit}
-        placeholder={selectionTarget ? "描述要对选中内容做的修改…" : "Ask AgenticBuilder to edit this PRD…"} disabled={isThisRunning || confirmCooldown}
+        placeholder={selectionTarget ? "Describe the changes to make to the selected text…" : "Ask AgenticBuilder to edit this PRD…"} disabled={isThisRunning || confirmCooldown}
         actions={<div className="flex items-center gap-3 shrink-0">
           {error && !isThisRunning && (
             <span className="text-[12px] text-red-600 max-w-[220px] truncate" title={error}>{error}</span>
           )}
-          <button title={pendingDiff ? "先接受或拒绝待审阅的改动" : !prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet || pendingDiff} onClick={async () => {
+          <button title={pendingDiff ? "Accept or reject pending changes first" :!prereqsMet ? "Run PRD Validation and Subsystem Split first (large PRD)" : undefined} disabled={isThisRunning || isSavingDoc || confirmCooldown || !prereqsMet || pendingDiff} onClick={async () => {
           // Await memory capture BEFORE navigating so the fetch is never
           // interrupted by handleStepChange's store reset + snapshot reload.
           const finalContent = stripChangeMarkers(step?.content ?? "");
