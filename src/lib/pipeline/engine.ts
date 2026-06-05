@@ -51,6 +51,7 @@ import {
 import { runKickoffIntegrations } from "./kickoff-integrations";
 import { runSubsystemAwareTaskBreakdown } from "./subsystems/subsystem-aware-breakdown";
 import { writeSubsystemManifest, readSubsystemManifest } from "./subsystems/manifest-io";
+import { stampDomainMdPaths, writeDomainFiles } from "./subsystems/domain-files";
 import {
   copyDesignReferencesToOutput,
   formatDesignReferencesPromptBlock,
@@ -1342,9 +1343,25 @@ export class PipelineEngine {
       if (breakdownResult.subsystem) {
         const sub = breakdownResult.subsystem;
         try {
-          await writeSubsystemManifest(outputRoot, sub.manifest);
+          // Stamp domainMdFile paths before persisting so subsystems.json is complete.
+          const stampedManifest = stampDomainMdPaths(sub.manifest);
+          await writeSubsystemManifest(outputRoot, stampedManifest);
+          console.log(
+            `[Engine] manifest saved with domainMdFile paths,` +
+            ` domains=[${stampedManifest.subsystems.map((s) => s.id).join(", ")}]`,
+          );
+          // Write domain-{id}.md files non-fatally; prdBody is always set at this point.
+          if (prdBody) {
+            const ok = await writeDomainFiles(
+              outputRoot,
+              stampedManifest.subsystems,
+              sub.buildLayers,
+              prdBody,
+            );
+            console.log(`[Engine] writeDomainFiles completed, allOk=${ok}`);
+          }
         } catch (e) {
-          console.warn("[Engine] writeSubsystemManifest failed (ignored):", e instanceof Error ? e.message : e);
+          console.warn("[Engine] writeSubsystemManifest / writeDomainFiles failed (ignored):", e instanceof Error ? e.message : e);
         }
         this.emit({
           type: "step_stream",

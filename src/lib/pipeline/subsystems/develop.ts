@@ -18,6 +18,7 @@ import {
 } from "./validate";
 import { planSubsystemBuilds, type SubsystemBuildPlan, type SubsystemRunResult } from "./orchestrate";
 import { writeSubsystemManifest, readSubsystemManifest } from "./manifest-io";
+import { stampDomainMdPaths, writeDomainFiles } from "./domain-files";
 import {
   readSubsystemProgress,
   completedSubsystemIds,
@@ -90,8 +91,30 @@ export async function developBySubsystem(
     return { ok: false, errors: ["manifest failed validation:", ...validation.errors], manifest, validation };
   }
 
-  // 3. Persist the manifest.
-  await writeSubsystemManifest(projectRoot, manifest);
+  // 3. Persist the manifest (with domainMdFile paths stamped).
+  const stampedManifest = stampDomainMdPaths(manifest);
+  manifest = stampedManifest;
+  await writeSubsystemManifest(projectRoot, stampedManifest);
+  console.log(
+    `[DevelopBySubsystem] manifest saved with domainMdFile paths,` +
+    ` domains=[${stampedManifest.subsystems.map((s) => s.id).join(", ")}]`,
+  );
+  // Write domain-{id}.md files when PRD is available (non-fatal).
+  if (opts.prd) {
+    // buildLayers comes from validation (computed just above).
+    const ok = await writeDomainFiles(
+      projectRoot,
+      stampedManifest.subsystems,
+      validation.buildLayers,
+      opts.prd,
+    );
+    console.log(`[DevelopBySubsystem] writeDomainFiles completed, allOk=${ok}`);
+  } else {
+    console.log(
+      `[DevelopBySubsystem] No PRD provided — skipping domain file write` +
+      ` (files should already exist from a prior decompose run)`,
+    );
+  }
 
   // 4. Plan.
   const plan = planSubsystemBuilds(manifest, allTasks);

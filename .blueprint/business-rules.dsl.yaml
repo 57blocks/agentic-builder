@@ -1,10 +1,11 @@
 version: 1
 rules:
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
+  # PLACEHOLDER: thresholds are authoritative from PRD text for some rules,
+  # but any operational TTL or edge timing that is not explicitly numeric in PRD
+  # must remain clearly marked in implementation comments.
   - id: RULE-1
     name: "Enrollment deadline gate"
-    description: "Disables enrollment actions once the deadline has passed."
+    description: "Blocks new enrollments after the course enrollment deadline."
     type: decision-table
     inputs:
       - { name: enrollmentClosed, type: boolean }
@@ -12,84 +13,192 @@ rules:
     cases:
       - when: { enrollmentClosed: true }
         then: false
-      - when: { }
+      - when: { enrollmentClosed: false }
         then: true
 
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-2
-    name: "Class capacity gate"
+    name: "Group class capacity gate"
     description: "Routes full group classes into waitlist flow."
     type: decision-table
     inputs:
-      - { name: enrolled, type: number }
-      - { name: capacity, type: number }
+      - { name: classFull, type: boolean }
     output: { name: enrollmentMode, type: string }
     cases:
-      - when: { enrolled_gte_capacity: true }
+      - when: { classFull: true }
         then: "waitlist"
-      - when: { }
-        then: "direct"
+      - when: { classFull: false }
+        then: "direct_pay"
 
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-3
     name: "Policy version gate"
-    description: "Requires current policy signature before family actions."
+    description: "Requires signature of the current policy version before family actions continue."
     type: decision-table
     inputs:
-      - { name: signedCurrentPolicy, type: boolean }
-    output: { name: canProceed, type: boolean }
+      - { name: policySigned, type: boolean }
+      - { name: currentVersion, type: string }
+    output: { name: requiresBlock, type: boolean }
     cases:
-      - when: { signedCurrentPolicy: false }
-        then: false
-      - when: { }
+      - when: { policySigned: false }
         then: true
+      - when: { policySigned: true }
+        then: false
 
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
   - id: RULE-4
+    name: "Lesson credit expiry"
+    description: "Expires remaining private lesson credits when the expiry date is reached."
+    type: decision-table
+    inputs:
+      - { name: expired, type: boolean }
+      - { name: remainingCreditsPositive, type: boolean }
+    output: { name: shouldExpire, type: boolean }
+    cases:
+      - when: { expired: true, remainingCreditsPositive: true }
+        then: true
+      - when: { expired: false }
+        then: false
+
+  - id: RULE-5
     name: "Refund window gate"
-    description: "Allows refund requests only within the PRD refund window."
+    description: "Allows refunds only within 14 calendar days of bill creation/purchase, per PRD."
     type: decision-table
     inputs:
       - { name: withinRefundWindow, type: boolean }
+      - { name: billStatusPaid, type: boolean }
     output: { name: canRequestRefund, type: boolean }
     cases:
-      - when: { withinRefundWindow: false }
-        then: false
-      - when: { }
+      - when: { withinRefundWindow: true, billStatusPaid: true }
         then: true
+      - when: { }
+        then: false
 
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RULE-5
-    name: "Teacher work-hour submission validation"
-    description: "Blocks submission until all records are confirmed and one month is selected."
+  - id: RULE-6
+    name: "Teacher work-hour submission gate"
+    description: "Requires all records confirmed and scoped to one month before submission."
     type: decision-table
     inputs:
       - { name: allConfirmed, type: boolean }
-      - { name: oneMonthOnly, type: boolean }
+      - { name: singleMonth, type: boolean }
     output: { name: canSubmit, type: boolean }
     cases:
-      - when: { allConfirmed: false }
-        then: false
-      - when: { oneMonthOnly: false }
-        then: false
-      - when: { }
+      - when: { allConfirmed: true, singleMonth: true }
         then: true
+      - when: { }
+        then: false
 
-  # PLACEHOLDER: thresholds inferred from PRD rules without an authoritative boundary block;
-  # downstream codegen MUST preserve this comment and emit a TODO in code.
-  - id: RULE-6
-    name: "Availability overlap gate"
-    description: "Rejects teacher availability slots that overlap existing slots."
+  - id: RULE-7
+    name: "Password strength gate"
+    description: "Requires minimum length and matching confirmation."
     type: decision-table
     inputs:
-      - { name: overlapsExistingSlot, type: boolean }
+      - { name: lengthOk, type: boolean }
+      - { name: matchOk, type: boolean }
     output: { name: canSave, type: boolean }
     cases:
-      - when: { overlapsExistingSlot: true }
-        then: false
-      - when: { }
+      - when: { lengthOk: true, matchOk: true }
         then: true
+      - when: { }
+        then: false
+
+  - id: RULE-8
+    name: "Email uniqueness gate"
+    description: "Prevents multiple active accounts from sharing the same email."
+    type: decision-table
+    inputs:
+      - { name: emailExists, type: boolean }
+    output: { name: canCreate, type: boolean }
+    cases:
+      - when: { emailExists: false }
+        then: true
+      - when: { emailExists: true }
+        then: false
+
+  - id: RULE-9
+    name: "Room conflict gate"
+    description: "Blocks class scheduling when room and time overlap."
+    type: decision-table
+    inputs:
+      - { name: roomConflict, type: boolean }
+    output: { name: canSaveSchedule, type: boolean }
+    cases:
+      - when: { roomConflict: false }
+        then: true
+      - when: { roomConflict: true }
+        then: false
+
+  - id: RULE-10
+    name: "Teacher availability overlap gate"
+    description: "Blocks overlapping availability slots for the same teacher."
+    type: decision-table
+    inputs:
+      - { name: slotOverlap, type: boolean }
+    output: { name: canSaveSlot, type: boolean }
+    cases:
+      - when: { slotOverlap: false }
+        then: true
+      - when: { slotOverlap: true }
+        then: false
+
+  - id: RULE-11
+    name: "Group lesson teacher cardinality"
+    description: "Ensures each group lesson has exactly one primary teacher."
+    type: decision-table
+    inputs:
+      - { name: teacherCountIsOne, type: boolean }
+    output: { name: valid, type: boolean }
+    cases:
+      - when: { teacherCountIsOne: true }
+        then: true
+      - when: { teacherCountIsOne: false }
+        then: false
+
+  - id: RULE-12
+    name: "Delete account confirmation"
+    description: "Requires DELETE confirmation text before deletion proceeds."
+    type: decision-table
+    inputs:
+      - { name: confirmTextMatches, type: boolean }
+    output: { name: canDelete, type: boolean }
+    cases:
+      - when: { confirmTextMatches: true }
+        then: true
+      - when: { confirmTextMatches: false }
+        then: false
+
+  - id: RULE-13
+    name: "Approval workflow node limit"
+    description: "Limits approval workflows to three nodes."
+    type: decision-table
+    inputs:
+      - { name: nodeCountWithinLimit, type: boolean }
+    output: { name: valid, type: boolean }
+    cases:
+      - when: { nodeCountWithinLimit: true }
+        then: true
+      - when: { nodeCountWithinLimit: false }
+        then: false
+
+  - id: RULE-14
+    name: "Cart expiration gate"
+    description: "Disables expired cart items from checkout."
+    type: decision-table
+    inputs:
+      - { name: expired, type: boolean }
+    output: { name: selectable, type: boolean }
+    cases:
+      - when: { expired: false }
+        then: true
+      - when: { expired: true }
+        then: false
+
+  - id: RULE-15
+    name: "Stripe payment policy gate"
+    description: "Requires current policy signature before starting payment."
+    type: decision-table
+    inputs:
+      - { name: policySigned, type: boolean }
+    output: { name: canPay, type: boolean }
+    cases:
+      - when: { policySigned: true }
+        then: true
+      - when: { policySigned: false }
+        then: false

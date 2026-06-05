@@ -1354,6 +1354,57 @@ export async function POST(request: NextRequest) {
   // generous safety cap here purely to protect against runaway docs.
   const DOC_HARD_CAP = 60_000;
   const prdDoc = await readDoc("PRD.md");
+
+  // ── Domain-scoped PRD ─────────────────────────────────────────────────────
+  // When all tasks in this coding batch belong to the same subsystem (set by
+  // the subsystem-aware orchestrator), load that domain's focused spec file
+  // (domain-{id}.md) and use it in place of the full PRD.md.  This keeps
+  // the agent context small and relevant — the full PRD can be thousands of
+  // lines, whereas the domain file only covers the sections that subsystem owns.
+  const taskSubsystems = [
+    ...new Set(tasksAfterStrip.map((t) => t.subsystem).filter(Boolean)),
+  ] as string[];
+
+  let domainPrdDoc: string | null = null;
+  let activeDomainId: string | null = null;
+
+  if (taskSubsystems.length === 1) {
+    activeDomainId = taskSubsystems[0];
+    const domainMdPath = path.join(outputRoot, `domain-${activeDomainId}.md`);
+    try {
+      const raw = await fs.readFile(domainMdPath, "utf-8");
+      domainPrdDoc = raw.trim() || null;
+      if (domainPrdDoc) {
+        console.log(
+          `[CodingAPI] 🎯 Domain PRD loaded: domain-${activeDomainId}.md` +
+          ` (${domainPrdDoc.length} chars) — replacing full PRD.md (${prdDoc?.length ?? 0} chars)`,
+        );
+      } else {
+        console.log(
+          `[CodingAPI] ⚠️  domain-${activeDomainId}.md is empty — falling back to full PRD.md`,
+        );
+      }
+    } catch {
+      console.log(
+        `[CodingAPI] ⚠️  domain-${activeDomainId}.md not found at ${domainMdPath}` +
+        ` — falling back to full PRD.md`,
+      );
+    }
+  } else if (taskSubsystems.length > 1) {
+    console.log(
+      `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
+      ` (${taskSubsystems.join(", ")}) — using full PRD.md`,
+    );
+  } else {
+    console.log(
+      `[CodingAPI] 📄 No subsystem tag on tasks — using full PRD.md (whole-system mode)`,
+    );
+  }
+
+  // Use domain-scoped PRD when available; fall back to the full PRD otherwise.
+  const effectivePrdDoc = domainPrdDoc ?? prdDoc;
+  // ─────────────────────────────────────────────────────────────────────────
+
   const trdDoc = await readDoc("TRD.md", DOC_HARD_CAP);
   const sysDesignDoc = await readDoc("SystemDesign.md", DOC_HARD_CAP);
   const implGuideDoc = await readDoc("ImplementationGuide.md", DOC_HARD_CAP);
@@ -1399,7 +1450,7 @@ export async function POST(request: NextRequest) {
       : "";
 
   const baseContextParts: string[] = [];
-  if (prdDoc) baseContextParts.push(`## PRD\n\n${prdDoc}`);
+  if (effectivePrdDoc) baseContextParts.push(`## PRD\n\n${effectivePrdDoc}`);
   if (trdDoc) baseContextParts.push(`## TRD\n\n${trdDoc}`);
   if (sysDesignDoc)
     baseContextParts.push(`## System Design\n\n${sysDesignDoc}`);
@@ -1448,7 +1499,7 @@ export async function POST(request: NextRequest) {
 
   const preparedE2e = await prepareE2eArtifacts({
     outputRoot,
-    prdDoc,
+    prdDoc: effectivePrdDoc,
     tasks: tasksAfterStrip,
   });
 
