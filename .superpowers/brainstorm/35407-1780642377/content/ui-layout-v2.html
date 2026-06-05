@@ -1,0 +1,140 @@
+<h2>UI 组件设计 v2</h2>
+<p class="subtitle">补充 Generate based on screenshots 按钮 + 资产落地时序</p>
+
+<div class="mockup">
+  <div class="mockup-header">完整页面布局（方案 B）</div>
+  <div class="mockup-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+    <!-- TOP: Unified input zone -->
+    <div style="background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;padding:12px;">
+      <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">参考来源 — 可随时追加</div>
+      <div style="display:flex;gap:10px;align-items:stretch;">
+        <div style="flex:1;border:1.5px dashed #374151;border-radius:6px;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:70px;">
+          <div style="font-size:22px;">🖼</div>
+          <div style="font-size:11px;color:#9ca3af;">拖入图片 / 点击上传</div>
+          <div style="font-size:9px;color:#4b5563;">上传后立即落盘 + 触发 Vision 匹配</div>
+        </div>
+        <div style="flex:1.2;display:flex;flex-direction:column;gap:6px;">
+          <textarea style="flex:1;background:#111827;border:1px solid #374151;border-radius:6px;color:#d1d5db;font-size:11px;padding:8px;resize:none;font-family:monospace;min-height:58px;" placeholder="粘贴 URL，每行一个&#10;https://app.example.com/dashboard&#10;https://app.example.com/login"></textarea>
+          <button style="background:#3b82f6;border:none;border-radius:4px;color:white;font-size:10px;padding:4px 10px;cursor:pointer;align-self:flex-end;">抓取截图 → 落盘 + 匹配</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROUTE CARDS GRID -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">路由映射 <span style="color:#374151;font-size:9px;font-style:normal;text-transform:none;">· 3/5 已匹配</span></div>
+        <div style="font-size:9px;color:#4b5563;">拖拽图片到卡片可手动覆盖</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+
+        <!-- Matched via URL -->
+        <div style="background:#1a1d27;border:1.5px solid #10b981;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#1f2937,#111827);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">🖥</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:white;">URL</div>
+            <div style="position:absolute;top:5px;right:5px;background:#134e4a;border:1px solid #0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:#5eead4;">CSS ✓</div>
+            <div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);border-radius:3px;padding:1px 5px;font-size:8px;color:#10b981;">high</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#10b981;font-weight:600;">/dashboard</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">app.example.com/dashboard</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">替换</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Matched via upload -->
+        <div style="background:#1a1d27;border:1.5px solid #10b981;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#1e3a5f,#0f1f3d);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">📱</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#1e3a5f;border:1px solid #3b82f6;border-radius:3px;padding:1px 5px;font-size:8px;color:#93c5fd;">上传</div>
+            <div style="position:absolute;top:5px;right:5px;background:#292524;border:1px solid #57534e;border-radius:3px;padding:1px 5px;font-size:8px;color:#78716c;">CSS —</div>
+            <div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);border-radius:3px;padding:1px 5px;font-size:8px;color:#10b981;">medium</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#10b981;font-weight:600;">/login</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;">login-screenshot.png</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">替换</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual -->
+        <div style="background:#1a1d27;border:1.5px solid #8b5cf6;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#2e1065,#1e0a4f);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">👤</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#3b0764;border:1px solid #7c3aed;border-radius:3px;padding:1px 5px;font-size:8px;color:#c4b5fd;">手动</div>
+            <div style="position:absolute;top:5px;right:5px;background:#134e4a;border:1px solid #0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:#5eead4;">CSS ✓</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#8b5cf6;font-weight:600;">/settings</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">app.example.com/settings</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">替换</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty with URL input -->
+        <div style="background:#1a1d27;border:1.5px dashed #374151;border-radius:8px;overflow:hidden;">
+          <div style="width:100%;height:72px;background:#111827;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;">
+            <div style="font-size:18px;color:#374151;">+</div>
+            <div style="font-size:9px;color:#4b5563;">拖入图片 或 输入 URL</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#6b7280;font-weight:600;">/profile</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <input style="flex:1;background:#111827;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 6px;" placeholder="输入 URL 抓取…" />
+              <button style="background:#374151;border:none;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 6px;">↵</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty -->
+        <div style="background:#1a1d27;border:1.5px dashed #2a2d3a;border-radius:8px;overflow:hidden;opacity:0.5;">
+          <div style="width:100%;height:72px;background:#111827;display:flex;align-items:center;justify-content:center;">
+            <div style="font-size:9px;color:#374151;">待匹配</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#4b5563;font-weight:600;">/analytics</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <input style="flex:1;background:#111827;border:1px solid #2a2d3a;border-radius:3px;color:#4b5563;font-size:9px;padding:2px 6px;" placeholder="输入 URL 抓取…" />
+              <button style="background:#1f2937;border:none;border-radius:3px;color:#374151;font-size:9px;padding:2px 6px;">↵</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- GENERATE BUTTON AREA -->
+    <div style="border-top:1px solid #1f2937;padding-top:12px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:10px;color:#6b7280;">
+        <span style="color:#10b981;font-weight:600;">3</span> / 5 路由已匹配 &nbsp;·&nbsp;
+        <span style="color:#5eead4;">2</span> 条含 CSS token
+      </div>
+      <button style="background:#6366f1;border:none;border-radius:6px;color:white;font-size:12px;font-weight:600;padding:8px 20px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+        ✨ Generate based on screenshots
+      </button>
+    </div>
+    <div style="font-size:9px;color:#4b5563;text-align:right;margin-top:-8px;">
+      点击后：将所有已匹配资产确认落盘 → 设置 useUploadedDesignReferences=true → 运行 design agent
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #1f2937;">
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#10b981;"></div><span style="font-size:9px;color:#6b7280;">auto-match</span></div>
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#8b5cf6;"></div><span style="font-size:9px;color:#6b7280;">手动指定</span></div>
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#374151;"></div><span style="font-size:9px;color:#6b7280;">未匹配</span></div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:#5eead4;">CSS ✓ = URL 来源含 token</div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:#78716c;">CSS — = 上传图片无 token</div>
+    </div>
+  </div>
+</div>
