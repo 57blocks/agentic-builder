@@ -339,7 +339,7 @@ export function PrdSubsystemPanel(props: {
                 {/* Domain cards — 2-column grid */}
                 <div className="grid grid-cols-2 gap-2 p-2">
                   {group.subsystems.map((s) => (
-                    <DomainCard key={s.id} s={s} all={resp!.subsystems} />
+                    <DomainCard key={s.id} s={s} all={resp?.subsystems ?? []} />
                   ))}
                 </div>
               </div>
