@@ -20,6 +20,7 @@ export const CODING_ROLE_STRIPE: Record<CodingAgentRole, string> = {
   architect: "bg-amber-500",
   backend: "bg-blue-600",
   frontend: "bg-violet-600",
+  fullstack: "bg-teal-600",
   test: "bg-emerald-600",
 };
 

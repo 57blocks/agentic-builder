@@ -300,6 +300,12 @@ const ROLE_CARD_META: Record<
     badgeText: "text-violet-700",
     stripe: "bg-violet-600",
   },
+  fullstack: {
+    label: "Fullstack",
+    badgeBg: "bg-teal-100",
+    badgeText: "text-teal-700",
+    stripe: "bg-teal-600",
+  },
   test: {
     label: "Test",
     badgeBg: "bg-emerald-100",
