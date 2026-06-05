@@ -299,6 +299,10 @@ export function stripChangeMarkers(content: string): string {
   out = out.replace(PRD_DIFF_RE, (_whole, _id, _oldBody, newBody) =>
     String(newBody).trim(),
   );
+  // Strip any orphan PRD-DIFF markers left after the regex resolved complete
+  // blocks (happens when nested diffs cause the lazy regex to match the wrong
+  // SEP/END boundary, leaving dangling markers in the remaining text).
+  out = out.replace(/<!--PRD-DIFF:[^>]*-->/g, "");
   // Legacy highlight wrapper.
   out = out
     .replace(/\n?<div class="prd-changed-section">\s*\n/g, "\n")

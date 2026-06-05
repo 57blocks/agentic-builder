@@ -40,7 +40,8 @@ function StepHeader(props: {
 export function PrdReadinessPanel(props: {
   prd: string;
   spec?: PrdSpec | null;
-  onApplyFix: (instruction: string) => void;
+  /** Directly triggers a PRD fix without pre-filling the edit bar. */
+  onDirectFix: (instruction: string) => Promise<void>;
   onQualityResult?: () => void;
   onSubsystemResult?: () => void;
   /** Persist results to this project (survives reload). */
@@ -69,7 +70,7 @@ export function PrdReadinessPanel(props: {
           spec={props.spec ?? null}
           projectSlug={props.projectSlug}
           initialReport={(init?.qualityResult as never) ?? null}
-          onApplyFix={props.onApplyFix}
+          onDirectFix={props.onDirectFix}
           onResult={() => {
             // The quality panel persists qualityDone + the full report itself.
             setQualityDone(true);

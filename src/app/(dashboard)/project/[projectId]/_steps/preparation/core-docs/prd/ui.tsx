@@ -90,6 +90,58 @@ function DiffRows({ oldBody, newBody }: { oldBody: string; newBody: string }) {
   return <>{rows}</>;
 }
 
+/** Strip any stray PRD-DIFF HTML-comment markers so they don't render as text. */
+const DIFF_MARKER_RE = /<!--PRD-DIFF:[^>]*-->/g;
+function stripDiffMarkers(text: string) { return text.replace(DIFF_MARKER_RE, ""); }
+
+// ─── Markdown-aware diff view (groups consecutive diff lines, renders as MD) ──
+function MarkdownDiffView({ oldBody, newBody }: { oldBody: string; newBody: string }) {
+  // Scrub any residual diff markers before diffing so they never appear as text
+  const diff = diffLines(stripDiffMarkers(oldBody), stripDiffMarkers(newBody));
+  type Group = { type: "equal" | "added" | "removed"; lines: string[] };
+  const groups: Group[] = [];
+  for (const d of diff) {
+    const last = groups[groups.length - 1];
+    if (last && last.type === d.type) {
+      last.lines.push(d.text);
+    } else {
+      groups.push({ type: d.type, lines: [d.text] });
+    }
+  }
+  return (
+    <div>
+      {groups.map((g, idx) => {
+        const text = g.lines.join("\n");
+        if (g.type === "removed") {
+          return (
+            <div key={idx} className="border-l-4 border-red-400 bg-red-50/70 px-4 py-2">
+              <div className="text-[10px] font-mono text-red-500 mb-1 select-none">− removed</div>
+              <div className="text-red-900/80 [&_h1]:text-red-800 [&_h2]:text-red-800 [&_h3]:text-red-800 [&_strong]:text-red-800">
+                <MarkdownRenderer content={text} variant="prd" skipMermaid={true} />
+              </div>
+            </div>
+          );
+        }
+        if (g.type === "added") {
+          return (
+            <div key={idx} className="border-l-4 border-green-400 bg-green-50/70 px-4 py-2">
+              <div className="text-[10px] font-mono text-green-600 mb-1 select-none">+ added</div>
+              <div className="text-green-900/80 [&_h1]:text-green-800 [&_h2]:text-green-800 [&_h3]:text-green-800 [&_strong]:text-green-800">
+                <MarkdownRenderer content={text} variant="prd" skipMermaid={true} />
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div key={idx} className="px-4 py-1">
+            <MarkdownRenderer content={text} variant="prd" skipMermaid={true} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PrdDiffHunk({ id, oldBody, newBody, onAccept, onReject }: {
   id: string;
   oldBody: string;
@@ -106,8 +158,8 @@ function PrdDiffHunk({ id, oldBody, newBody, onAccept, onReject }: {
           <button onClick={() => onAccept(id)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded text-green-700 bg-white border border-green-200 hover:bg-green-50 transition-colors">✓ Accept</button>
         </div>
       </div>
-      <div className="font-mono text-[12px] leading-5 bg-white">
-        <DiffRows oldBody={oldBody} newBody={newBody} />
+      <div className="bg-white">
+        <MarkdownDiffView oldBody={oldBody} newBody={newBody} />
       </div>
     </div>
   );
@@ -245,6 +297,15 @@ export function PrdUI(props: StepUIProps) {
   const [confirmCooldown, setConfirmCooldown] = useState(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // ── Fix mode: direct fix from quality panel (no edit-bar pre-fill) ───
+  const [isFixMode, setIsFixMode] = useState(false);
+  const isFixModeRef = useRef(false);
+  isFixModeRef.current = isFixMode;
+  // Captures PRD content at the moment a fix starts so it stays visible
+  // while the new generation streams in the background.
+  const preFixContentRef = useRef("");
+  // Resolves/rejects the Promise returned by directFix() on completion.
+  const fixResolveRef = useRef<{ resolve: () => void; reject: (e: Error) => void } | null>(null);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -290,11 +351,14 @@ export function PrdUI(props: StepUIProps) {
   // Keep a stable content ref to bridge the gap between streamingContent cleared
   // (step_complete SSE) and step.content updated (agent return).
   const lastContentRef = useRef("");
-  if (streamingContent) lastContentRef.current = streamingContent;
+  if (streamingContent && !isFixModeRef.current) lastContentRef.current = streamingContent;
   if (step?.content && !isThisRunning) lastContentRef.current = step.content;
-  // Clear ref when re-gen starts so we don't show stale content
-  if (isThisRunning && !streamingContent) lastContentRef.current = "";
-  const content = streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current;
+  // Clear ref when re-gen starts, but NOT in fix mode (we want old content to stay)
+  if (isThisRunning && !streamingContent && !isFixModeRef.current) lastContentRef.current = "";
+  // In fix mode: show captured pre-fix content so the page doesn't blank out
+  const content = (isFixModeRef.current && isThisRunning)
+    ? preFixContentRef.current
+    : (streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current);
   // A large / multi-domain PRD: recommend running Validation + Subsystem Split
   // before continuing (and gate Next Step until both have run).
   const isLargePrd =
@@ -341,9 +405,24 @@ export function PrdUI(props: StepUIProps) {
   const wasRunningRef = useRef(false);
   if (isThisRunning) wasRunningRef.current = true;
 
-  // Auto-scroll to bottom during SSE streaming
+  // Detect fix completion and resolve/reject the directFix() Promise.
   useEffect(() => {
-    if (isThisRunning && content) {
+    if (!isThisRunning && fixResolveRef.current) {
+      if (step?.status === "failed") {
+        fixResolveRef.current.reject(new Error(step.error ?? "Fix failed"));
+      } else {
+        fixResolveRef.current.resolve();
+      }
+      fixResolveRef.current = null;
+      setIsFixMode(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isThisRunning]);
+
+  // Auto-scroll to bottom during SSE streaming, but not while fixing
+  // (the page should stay at the user's current scroll position during a fix)
+  useEffect(() => {
+    if (isThisRunning && content && !isFixModeRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [content, isThisRunning]);
@@ -686,6 +765,20 @@ export function PrdUI(props: StepUIProps) {
       ? `【selected excerpt — modify ONLY this part, leave the rest of its section intact】\n"""\n${selection}\n"""\n\n【change requested】\n${instruction}`
       : instruction;
 
+  // Directly triggers a PRD fix without pre-filling the edit bar.
+  // Returns a Promise that resolves when the fix generation completes.
+  const directFix = (instruction: string): Promise<void> => {
+    // Strip pending diff markers so they don't render as raw text while the fix runs
+    preFixContentRef.current = stripChangeMarkers(step?.content ?? lastContentRef.current ?? "");
+    setIsFixMode(true);
+    setPrepOpen(false);
+    const full = buildEditInstruction(instruction, "");
+    return new Promise<void>((resolve, reject) => {
+      fixResolveRef.current = { resolve, reject };
+      void executeStep("prd", full);
+    });
+  };
+
   const submitEdit = () => {
     const instruction = editInput.trim();
     if (!instruction || isThisRunning || confirmCooldown) return;
@@ -722,7 +815,13 @@ export function PrdUI(props: StepUIProps) {
     }
   };
 
-  const applyDiffResolution = (next: string) => {
+  const applyDiffResolution = (resolved: string) => {
+    // When no complete diff blocks remain, any leftover <!--PRD-DIFF:...--> markers
+    // are orphans (from nested-diff edge cases where the lazy regex matched the wrong
+    // SEP/END boundary). Strip them so they don't render as visible text.
+    const next = hasPrdDiffMarkers(resolved)
+      ? resolved
+      : resolved.replace(/<!--PRD-DIFF:[^>]*-->/g, "");
     setStepContent("prd", next);
     // When no diff blocks remain, the proposal is fully resolved → finalise.
     if (!hasPrdDiffMarkers(next)) {
@@ -742,6 +841,12 @@ export function PrdUI(props: StepUIProps) {
 
   return (
     <div className="flex flex-1 flex-col h-full overflow-hidden">
+      {/* Floating "Fixing…" toast — visible while directFix() runs */}
+      {isFixMode && isThisRunning && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full shadow-lg text-[13px] font-medium pointer-events-none select-none">
+          <SpinnerIcon /> Fixing…
+        </div>
+      )}
       {!isManualEditing && isLargePrd && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-amber-200 bg-amber-50 shrink-0">
           <AlertTriangle size={16} className="text-amber-600 shrink-0" />
@@ -859,7 +964,7 @@ export function PrdUI(props: StepUIProps) {
                 </div>
               ) : error ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-red-500"><span className="text-[13px]">{error}</span></div>
               : !content && !isThisRunning ? <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#94a3b8]"><span className="text-[13px]">Waiting for pipeline to start…</span></div>
-              : isThisRunning && !content ? <div className="flex items-center gap-2 text-indigo-600 text-[13px]"><SpinnerIcon /> Generating PRD…</div>
+              : isThisRunning && !content && !isFixMode ? <div className="flex items-center gap-2 text-indigo-600 text-[13px]"><SpinnerIcon /> Generating PRD…</div>
               : pendingDiff ? (
                 <div>
                   {/* Inline-diff review bar — original doc stays visible; each
@@ -873,7 +978,7 @@ export function PrdUI(props: StepUIProps) {
                   </div>
                   {parsePrdDiffSegments(content).map((seg, i) =>
                     seg.type === "md"
-                      ? <MarkdownRenderer key={i} content={seg.text} variant="prd" skipMermaid={true} />
+                      ? <MarkdownRenderer key={i} content={stripDiffMarkers(seg.text)} variant="prd" skipMermaid={true} />
                       : <PrdDiffHunk key={i} id={seg.id} oldBody={seg.oldBody} newBody={seg.newBody} onAccept={onAcceptHunk} onReject={onRejectHunk} />,
                   )}
                 </div>
@@ -903,10 +1008,7 @@ export function PrdUI(props: StepUIProps) {
             }
             onQualityResult={() => setQualityRan(true)}
             onSubsystemResult={() => setSubsystemRan(true)}
-            onApplyFix={(instruction) => {
-              setEditInput(instruction);
-              setPrepOpen(false);
-            }}
+            onDirectFix={directFix}
           />
         </PrdToolDrawer>
       )}
