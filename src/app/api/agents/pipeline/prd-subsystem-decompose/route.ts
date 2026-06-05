@@ -29,13 +29,16 @@ function extractPrdSections(prd: string, sectionRefs: string[]): string {
     let startLevel = 0;
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(/^(#{1,6})\s+(.*)/);
-      if (m && m[2].includes(anchor)) {
+      if (m && new RegExp(`(?:^|\\s|§)${anchor.replace(/\./g, "\\.")}(?:\\s|$|\\.|:)`).test(m[2])) {
         startLine = i;
         startLevel = m[1].length;
         break;
       }
     }
-    if (startLine === -1) continue;
+    if (startLine === -1) {
+      console.warn(`[Subsystems] PRD section ref "${ref}" (anchor: "${anchor}") not found in document`);
+      continue;
+    }
 
     const extracted: string[] = [lines[startLine]];
     for (let i = startLine + 1; i < lines.length; i++) {
@@ -99,9 +102,17 @@ async function writeDomainFiles(
   const layerOf = (id: string): number =>
     buildLayers.findIndex((layer) => layer.includes(id));
 
-  let allOk = true;
-  await fs.mkdir(outRoot, { recursive: true });
+  try {
+    await fs.mkdir(outRoot, { recursive: true });
+  } catch (err) {
+    console.error(
+      `[Subsystems] Failed to create output directory ${outRoot}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
 
+  let allOk = true;
   for (const s of subsystems) {
     const prdContent = extractPrdSections(prd, s.prdSections);
     const content = buildDomainMd(s, subsystems, layerOf(s.id), prdContent);
