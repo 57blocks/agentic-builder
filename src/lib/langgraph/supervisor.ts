@@ -3286,7 +3286,7 @@ function extractExports(source: string): string[] {
  * Phase 1 dispatch: only Backend and Test Workers.
  * Frontend waits for BE to complete so it can see BE's real output.
  */
-function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
+export function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
   const sends: Send[] = [];
 
   const beCount = workersForRole("backend", state.backendTasks.length);
@@ -3338,6 +3338,47 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
     );
   }
 
+  // ── Vertical-slice (flag-gated) fullstack dispatch ──
+  // Feature slices own their endpoints AND their UI end-to-end. We dispatch
+  // them in the BACKEND phase (not the FE phase) so the endpoints they write
+  // are visible to `extract_real_contracts` (which runs AFTER be_worker) and
+  // are covered by be_phase_verify + integration_verify that same cycle. Their
+  // frontend files are still picked up later by the directory-scan frontend
+  // normalizations and fe_phase_verify (both scan frontend/ regardless of which
+  // worker wrote a file). Empty by default (flag off ⇒ no Feature tasks ⇒ no
+  // fullstack Sends ⇒ byte-identical dispatch).
+  if (state.fullstackTasks.length > 0) {
+    const fsCount = workersForRole("fullstack", state.fullstackTasks.length);
+    const fsChunks = ENABLE_PARALLEL_CODING_WORKERS
+      ? chunkTasksByFileConflict(state.fullstackTasks, fsCount)
+      : chunkTasks(state.fullstackTasks, fsCount);
+    if (ENABLE_PARALLEL_CODING_WORKERS) {
+      console.log(
+        `[Supervisor] Fullstack dispatch (parallel, BE phase): ${state.fullstackTasks.length} tasks → ${fsChunks.length} conflict-free chunk(s).`,
+      );
+    }
+    fsChunks.forEach((tasks, i) => {
+      sends.push(
+        new Send("be_worker", {
+          role: "fullstack" as CodingAgentRole,
+          workerLabel:
+            fsChunks.length > 1 ? `Fullstack Dev #${i + 1}` : "Fullstack Dev",
+          tasks,
+          outputDir: state.outputDir,
+          projectContext: state.projectContext,
+          codingMode: state.codingMode,
+          fileRegistrySnapshot: state.fileRegistry,
+          apiContractsSnapshot: state.apiContracts,
+          scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+          currentTaskIndex: 0,
+          ralphConfig: state.ralphConfig,
+          sessionId: state.sessionId,
+          prdSpec: state.prdSpec,
+        }),
+      );
+    });
+  }
+
   if (sends.length === 0) {
     sends.push(
       new Send("be_worker", {
@@ -3365,13 +3406,11 @@ function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
  * Phase 2 dispatch: Frontend Workers run after BE completes.
  * fileRegistry now contains BE's real output; apiContracts contains real endpoints.
  */
-function dispatchFrontendWorkers(state: SupervisorState): Send[] {
-  // Gate must account for fullstack Feature tasks too: the FE phase runs (and
-  // fullstack workers dispatch) even when there are zero frontend-only tasks.
-  if (
-    state.frontendTasks.length === 0 &&
-    state.fullstackTasks.length === 0
-  ) {
+export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
+  // Fullstack Feature tasks are dispatched in the BACKEND phase (see
+  // dispatchBackendAndTestWorkers) so their endpoints are contract-extracted
+  // and backend-verified. This gate stays frontend-only.
+  if (state.frontendTasks.length === 0) {
     return [
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
@@ -3500,44 +3539,6 @@ function dispatchFrontendWorkers(state: SupervisorState): Send[] {
       }),
   );
 
-  // ── Vertical-slice (flag-gated) fullstack dispatch ──
-  // Feature slices are UI-driven AND own their endpoints, so they route
-  // through the SAME phase as frontend (after extract_real_contracts) and get
-  // the same real contracts + API reference context. Mirror the frontend Send
-  // shape exactly, only the role and task list differ. Empty by default
-  // (flag off ⇒ no Feature tasks ⇒ no fullstack Sends).
-  if (state.fullstackTasks.length > 0) {
-    const fsCount = workersForRole("fullstack", state.fullstackTasks.length);
-    const fsChunks = ENABLE_PARALLEL_CODING_WORKERS
-      ? chunkTasksByFileConflict(state.fullstackTasks, fsCount)
-      : chunkTasks(state.fullstackTasks, fsCount);
-    if (ENABLE_PARALLEL_CODING_WORKERS) {
-      console.log(
-        `[Supervisor] Fullstack dispatch (parallel): ${state.fullstackTasks.length} tasks → ${fsChunks.length} conflict-free chunk(s).`,
-      );
-    }
-    fsChunks.forEach((tasks, i) => {
-      sends.push(
-        new Send("fe_worker", {
-          role: "fullstack" as CodingAgentRole,
-          workerLabel:
-            fsChunks.length > 1 ? `Fullstack Dev #${i + 1}` : "Fullstack Dev",
-          tasks,
-          outputDir: state.outputDir,
-          projectContext: feContext,
-          codingMode: state.codingMode,
-          fileRegistrySnapshot: state.fileRegistry,
-          apiContractsSnapshot: feContracts,
-          scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
-          currentTaskIndex: 0,
-          ralphConfig: state.ralphConfig,
-          sessionId: state.sessionId,
-          prdSpec: state.prdSpec,
-        }),
-      );
-    });
-  }
-
   return sends;
 }
 
@@ -3649,7 +3650,10 @@ async function verifyManifestAgainstSource(
   state: SupervisorState,
 ): Promise<{ verified: ApiContract[]; dropped: ApiContract[] }> {
   const beFiles = state.fileRegistry.filter(
-    (f) => f.role === "backend" && /\.(ts|js)$/.test(f.path),
+    (f) =>
+      (f.role === "backend" ||
+        (f.role === "fullstack" && f.path.startsWith("backend/"))) &&
+      /\.(ts|js)$/.test(f.path),
   );
   const haystackParts: string[] = [];
   for (const f of beFiles) {
@@ -3715,20 +3719,25 @@ async function extractRealContracts(
 
   // 2. Legacy: LLM + regex extraction.
   // Collect backend route/controller files and shared type files
-  const beFiles = state.fileRegistry.filter(
-    (f) =>
-      f.role === "backend" &&
-      (f.path.includes("route") ||
-        f.path.includes("controller") ||
-        f.path.includes("handler") ||
-        f.path.includes("api")) &&
-      /\.(ts|js)$/.test(f.path),
-  );
+  // Fullstack workers span backend/ AND frontend/; only their backend/ files
+  // are routes. Constrain fullstack inclusion to backend/ so a fullstack
+  // frontend api-client file (frontend/src/api/...) isn't mistaken for a route.
+  const isBackendRouteFile = (f: (typeof state.fileRegistry)[number]) =>
+    (f.role === "backend" ||
+      (f.role === "fullstack" && f.path.startsWith("backend/"))) &&
+    (f.path.includes("route") ||
+      f.path.includes("controller") ||
+      f.path.includes("handler") ||
+      f.path.includes("api")) &&
+    /\.(ts|js)$/.test(f.path);
+  const beFiles = state.fileRegistry.filter(isBackendRouteFile);
 
   const typeFiles = state.fileRegistry
     .filter(
       (f) =>
-        (f.role === "architect" || f.role === "backend") &&
+        (f.role === "architect" ||
+          f.role === "backend" ||
+          (f.role === "fullstack" && f.path.startsWith("backend/"))) &&
         (f.path.includes("type") ||
           f.path.includes("interface") ||
           f.path.includes("schema") ||

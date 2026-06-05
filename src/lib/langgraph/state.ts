@@ -132,8 +132,10 @@ export const SupervisorStateAnnotation = Annotation.Root({
    * Vertical "Feature" slice tasks owned end-to-end by a fullstack worker
    * (page + handlers + owned endpoints). Only populated under the
    * BLUEPRINT_VERTICAL_SLICE flag; empty by default so flag-off behavior is
-   * unchanged. Dispatched through the same FE phase as frontendTasks so they
-   * receive real (BE-extracted) contracts.
+   * unchanged. Dispatched in the BACKEND phase (alongside backendTasks) so the
+   * endpoints they own are contract-extracted and backend-/integration-verified
+   * that same cycle; their frontend files are still covered by the
+   * directory-scan frontend normalizations and fe_phase_verify.
    */
   fullstackTasks: Annotation<CodingTask[]>({
     reducer: (_prev, next) => next,
