@@ -40,6 +40,9 @@ export interface Subsystem {
   dependsOn: string[];
   /** PRD section anchors that scope this subsystem's spec, e.g. "§10.4", "§15.3". */
   prdSections: string[];
+  /** Relative path to the generated domain spec markdown file, e.g. "domain-auth-accounts.md".
+   *  Populated by the decompose route after the file is written. */
+  domainMdFile?: string;
 }
 
 export interface SubsystemManifest {

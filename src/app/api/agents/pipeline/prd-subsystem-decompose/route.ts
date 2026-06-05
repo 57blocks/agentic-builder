@@ -155,14 +155,23 @@ export async function POST(req: NextRequest) {
   let domainFilesSaved = false;
   if (result.validation.ok && result.manifest.subsystems.length > 0) {
     const outRoot = resolveCodeOutputRoot(process.cwd(), body.codeOutputDir ?? undefined);
+
+    // Stamp each subsystem with its domain md filename BEFORE writing the manifest
+    // so that subsystems.json records where each domain's spec file lives.
+    const subsystemsWithMdPaths = result.manifest.subsystems.map((s) => ({
+      ...s,
+      domainMdFile: `domain-${s.id}.md`,
+    }));
+
     await writeSubsystemManifest(outRoot, {
       ...result.manifest,
+      subsystems: subsystemsWithMdPaths,
       generatedAt: new Date().toISOString(),
     });
     manifestSaved = true;
     domainFilesSaved = await writeDomainFiles(
       outRoot,
-      result.manifest.subsystems,
+      subsystemsWithMdPaths,
       result.validation.buildLayers,
       prd,
     );
