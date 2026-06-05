@@ -26,6 +26,9 @@ function scheduleNavSync(get: () => StepNavigationState) {
           intentEnrichedBrief: s.intentEnrichedBrief,
         },
       }),
+    }).then(() => {
+      // Notify AppNav sidebar to reflect the updated project name
+      window.dispatchEvent(new Event("projects:refresh"));
     }).catch((err) => console.error("[step-nav-store] sync error:", err));
   }, 600);
 }

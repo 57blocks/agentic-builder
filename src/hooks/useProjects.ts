@@ -85,6 +85,8 @@ export function useProjects(): UseProjectsReturn {
         }
         return [data.project, ...prev];
       });
+      // Notify other useProjects instances (e.g. AppNav sidebar) to re-fetch
+      window.dispatchEvent(new Event("projects:refresh"));
       return data.project;
     },
     [],
