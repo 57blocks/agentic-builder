@@ -90,6 +90,7 @@ import {
   applyPrdPatches,
   stripChangeMarkers,
   wrapWholeDocDiff,
+  looksDegenerate,
   type PrdPatch,
 } from "@/lib/agents/pm/prd-patch";
 import {
@@ -2263,9 +2264,17 @@ export class PipelineEngine {
           };
         }
         // Fall through to full rewrite (no declared heading matched the PRD).
+        // Log the ACTUAL headings the agent tried + a sample of the PRD's real
+        // headings, so a mismatch is self-diagnosing instead of opaque.
+        const prdHeadings = existingPrd
+          .split("\n")
+          .filter((l) => /^#{1,6}\s+\S/.test(l))
+          .slice(0, 12);
         console.info(
-          "[engine] PRD patch did not apply (applied=0, skipped=%d) — falling back",
+          "[engine] PRD patch did not apply (applied=0, skipped=%d) — falling back.\n  tried headings: %s\n  sample PRD headings: %s",
           applied.skipped.length,
+          JSON.stringify(applied.skipped.map((s) => `${s.heading} [${s.reason}]`)),
+          JSON.stringify(prdHeadings),
         );
       } else if (parsed?.fullRewrite) {
         console.info(
@@ -2275,6 +2284,42 @@ export class PipelineEngine {
     }
 
     // ── 2. Fall back to full regenerate, presented as ONE reviewable diff ──
+
+    // Guard A — do NOT full-regenerate a very large PRD. Asking a model to
+    // re-emit a 60KB+ document is the prime trigger for repetition collapse
+    // (it loops "output the full PRD" forever and corrupts the doc). Keep the
+    // original untouched and let the user retry a narrower, locatable edit.
+    const LARGE_PRD_CHARS = 60_000;
+    const keepOriginal = (base: AgentResult | null): AgentResult => {
+      // Reset the UI back to the clean original (no stray diff markers).
+      this.emit({
+        type: "step_stream",
+        runId: run.id,
+        stepId: "prd",
+        data: { chunk: existingPrd, chunkType: "content" },
+      });
+      return {
+        content: existingPrd,
+        model: base?.model ?? "skipped:prd-edit",
+        costUsd: base?.costUsd ?? 0,
+        durationMs: base?.durationMs ?? 0,
+        usage:
+          base?.usage ?? {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+          },
+      };
+    };
+
+    if (existingPrd.length > LARGE_PRD_CHARS) {
+      console.warn(
+        "[engine] PRD too large (%d chars) for a safe full regenerate after a patch miss — keeping the original unchanged. The targeted edit could not be located; ask the user to point at a specific section.",
+        existingPrd.length,
+      );
+      return keepOriginal(patchResult);
+    }
+
     // Swallow token chunks so we never re-stream the whole PRD token-by-token;
     // instead wrap the regenerated doc as a single whole-document diff hunk so
     // the user reviews it (accept = take the rewrite, reject = keep original)
@@ -2286,7 +2331,16 @@ export class PipelineEngine {
       run.sessionId,
     );
     const newContent = full.content ?? "";
-    if (!newContent.trim()) return full;
+
+    // Guard B — reject empty or degenerate (repetition-collapse) output. We
+    // must NEVER persist looping filler like "I'll output the full PRD…".
+    if (!newContent.trim() || looksDegenerate(newContent)) {
+      console.warn(
+        "[engine] PRD regenerate produced empty/degenerate output — discarding it and keeping the original PRD unchanged.",
+      );
+      return keepOriginal(full);
+    }
+
     const wrapped = wrapWholeDocDiff(existingPrd, newContent);
     this.emit({
       type: "step_stream",
