@@ -6,6 +6,7 @@ import {
   addDesignReference,
   updateDesignReference,
   readManifest,
+  autoMatchReferencesToPages,
 } from "../pipeline/design-references";
 
 let tmpDir: string;
@@ -89,5 +90,28 @@ describe("updateDesignReference — new fields", () => {
     });
     expect(u2?.matchedBy).toBe("manual");
     expect(u2?.matchConfidence).toBeUndefined();
+  });
+});
+
+describe("autoMatchReferencesToPages — manual skip", () => {
+  it("excludes manual entries from match candidates even with force=true", async () => {
+    const r = await addDesignReference(tmpDir, {
+      fileName: "manual.png", mime: "image/png", bytes: fakePng,
+      source: "upload", matchedBy: "manual", pageHint: "PAGE-001",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    // Should return empty — the only entry is manual and gets filtered out
+    // (no OPENROUTER_API_KEY needed because the function exits early when imageEntries is empty)
+    const results = await autoMatchReferencesToPages(
+      tmpDir,
+      [{ id: "PAGE-001", name: "Dashboard" }],
+      { force: true },
+    );
+
+    const manualEntry = results.find((res) => res.referenceId === r.entry.id);
+    expect(manualEntry).toBeUndefined();
+    expect(results).toHaveLength(0);
   });
 });

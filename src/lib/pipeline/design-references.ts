@@ -647,16 +647,17 @@ export async function autoMatchReferencesToPages(
 ): Promise<AutoMatchResult[]> {
   if (candidates.length === 0) return [];
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
-
   const entries = await readManifest(projectRoot);
   const imageEntries = entries.filter(
     (e) =>
       e.kind === "image" &&
+      e.matchedBy !== "manual" &&
       (options?.force || !e.pageHint.trim()),
   );
   if (imageEntries.length === 0) return [];
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
 
   const minConf = options?.minConfidence ?? "medium";
   const confRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
