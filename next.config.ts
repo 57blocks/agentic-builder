@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: process.env.ELECTRON === "true",
   },
+  experimental: {
+    // Default dev-server proxy body limit is 10MB; raise it so multi-image
+    // uploads (up to 6MB × N files) don't get truncated mid-multipart,
+    // which causes "Failed to parse body as FormData" errors.
+    proxyClientMaxBodySize: "100mb",
+  },
   // Per-instance distDir lets two `next dev` processes run from the
   // same project directory in parallel. Next.js 16's dev-server lock
   // lives at `<distDir>/lock`, so giving project B a different dist dir

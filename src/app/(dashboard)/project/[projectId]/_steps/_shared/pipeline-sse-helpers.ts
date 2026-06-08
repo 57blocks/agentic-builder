@@ -9,6 +9,7 @@
 
 import type { StepAgent, StepAgentContext, SseEvent, StepAgentState, StepResultData } from "./types";
 import type { StepId } from "@/_config/pipeline-flow";
+import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 
 // ── Generic SSE stream reader ─────────────────────────────────────────────────
 
@@ -239,10 +240,15 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
       let resultMeta: Record<string, unknown> | undefined;
 
       try {
+        const rawPayload = buildPayload(ctx);
+        const payload =
+          typeof rawPayload.prdContent === "string"
+            ? { ...rawPayload, prdContent: stripChangeMarkers(rawPayload.prdContent) }
+            : rawPayload;
         const resp = await fetch("/api/agents/parallel-generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload(ctx)),
+          body: JSON.stringify(payload),
           signal: ctx.abortSignal,
         });
 

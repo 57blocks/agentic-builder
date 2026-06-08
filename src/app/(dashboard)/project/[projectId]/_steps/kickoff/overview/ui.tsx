@@ -218,6 +218,8 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   const isCompleted = summaryResult?.status === "completed";
   const metadata = summaryResult?.metadata;
   const tasks = parseKickoffTaskBreakdownFromMetadata(metadata);
+  console.log("[kickoff:ui] metadata", metadata);
+  console.log("[kickoff:ui] parsed tasks count:", tasks.length, tasks);
   const skillsTrace = (metadata as Record<string, unknown> | undefined)?.[
     "taskBreakdownSkillsTrace"
   ] as SkillTraceRecord | undefined;
@@ -325,6 +327,9 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               const costUsd = kickoffMeta?.costUsd ?? 0;
               const durationMs = kickoffMeta?.durationMs ?? 0;
               const kickoffMetadata = kickoffMeta?.metadata ?? {};
+              console.log("[kickoff:done] kickoffMeta", kickoffMeta);
+              console.log("[kickoff:done] kickoffMetadata", kickoffMetadata);
+              console.log("[kickoff:done] taskBreakdown raw", (kickoffMetadata as Record<string, unknown>)?.taskBreakdown);
               const now = new Date().toISOString();
               setStepResult("summary", { stepId: "summary", status: "completed", content: kickoffContent, costUsd, durationMs, metadata: kickoffMetadata, timestamp: now });
               setStepResult("task-breakdown", { stepId: "task-breakdown", status: "completed", content: kickoffContent, costUsd: 0, durationMs: 0, metadata: kickoffMetadata, timestamp: now });

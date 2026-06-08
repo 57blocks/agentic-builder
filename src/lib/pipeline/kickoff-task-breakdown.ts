@@ -5,8 +5,11 @@ export function parseKickoffTaskBreakdownFromMetadata(
 ): KickoffWorkItem[] {
   if (!metadata) return [];
   const tb = metadata.taskBreakdown;
+  console.log("[parseKickoffTaskBreakdown] taskBreakdown field type:", Array.isArray(tb) ? "array" : typeof tb, "length:", Array.isArray(tb) ? tb.length : "n/a");
   if (!Array.isArray(tb)) return [];
-  return tb.filter(isKickoffWorkItem);
+  const result = tb.filter(isKickoffWorkItem);
+  console.log("[parseKickoffTaskBreakdown] valid items:", result.length, "/ total:", tb.length);
+  return result;
 }
 
 export function isKickoffTaskBreakdownConfirmed(
