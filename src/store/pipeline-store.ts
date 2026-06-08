@@ -1774,11 +1774,12 @@ export const usePipelineStore = create<PipelineState>()(
             return null;
           }
           if (Array.isArray(data.references)) {
-            set({ designReferences: data.references, designReferencesLoading: "idle" });
+            set({ designReferences: data.references, designReferencesLoading: "idle", designReferencesError: null });
           } else {
-            set({ designReferencesLoading: "idle" });
+            set({ designReferencesLoading: "idle", designReferencesError: null });
           }
           return {
+            // API guarantees referenceId on 200 OK; "" is a safe fallback if the shape changes.
             referenceId: data.referenceId ?? "",
             pageHint: data.pageHint ?? null,
           };
