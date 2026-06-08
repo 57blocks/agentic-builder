@@ -10,7 +10,7 @@ import { getNextStep } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
-import PageScreenshotsPanel from "@/components/PageScreenshotsPanel";
+import { RouteReferenceGrid } from "@/components/RouteReferenceGrid";
 import type { StepUIProps } from "../../../_shared/types";
 import { DocDiffView } from "../../../_shared/DocDiffView";
 import {
@@ -628,6 +628,7 @@ export function DesignUI(props: StepUIProps) {
   const [urlInput, setUrlInput] = useState("");
   const [urlFetching, setUrlFetching] = useState(false);
   const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
+  const [isMatching, setIsMatching] = useState(false);
   // `html` is set by the non-Electron fallback fetch; `screenshotDataUrl` +
   // `tokensText` are set by the Electron render-capture path.
   const [urlFetchedPages, setUrlFetchedPages] = useState<Array<{
@@ -913,6 +914,107 @@ export function DesignUI(props: StepUIProps) {
     });
   }, []);
 
+  const handleUploadToGrid = useCallback(
+    async (files: File[]) => {
+      const result = await usePipelineStore
+        .getState()
+        .uploadDesignReferences(
+          files,
+          files.map(() => ""),
+          files.map(() => ""),
+        );
+      if (result && prdContent) {
+        setIsMatching(true);
+        await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        setIsMatching(false);
+      }
+    },
+    [prdContent],
+  );
+
+  const handleFetchUrlsToGrid = useCallback(
+    async (urls: string[]) => {
+      setIsMatching(true);
+      await Promise.all(
+        urls.map(async (url) => {
+          let screenshotDataUrl: string | undefined;
+          let cssToken: Record<string, string> | undefined;
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const result = await (window as any).electronAPI.renderReferenceUrl(url);
+              screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
+              cssToken = result?.cssTokens ?? result?.cssToken;
+            } catch {
+              // no screenshot available in Electron
+            }
+          }
+
+          if (!screenshotDataUrl) return; // Non-Electron: skip — no screenshot available
+
+          await usePipelineStore
+            .getState()
+            .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
+        }),
+      );
+      if (prdContent) {
+        await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+      }
+      setIsMatching(false);
+    },
+    [prdContent],
+  );
+
+  const handleFetchRouteUrl = useCallback(
+    async (url: string, pageHint: string) => {
+      let screenshotDataUrl: string | undefined;
+      let cssToken: Record<string, string> | undefined;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (window as any).electronAPI.renderReferenceUrl(url);
+          screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
+          cssToken = result?.cssTokens ?? result?.cssToken;
+        } catch {
+          // no screenshot
+        }
+      }
+
+      if (!screenshotDataUrl) return;
+
+      await usePipelineStore
+        .getState()
+        .fetchUrlDesignReference(url, screenshotDataUrl, cssToken, pageHint);
+    },
+    [],
+  );
+
+  const handleDropToRoute = useCallback(
+    async (referenceId: string, pageHint: string) => {
+      const currentRefs = usePipelineStore.getState().designReferences;
+      const existingOwner = currentRefs.find(
+        (r) => r.pageHint === pageHint && r.id !== referenceId,
+      );
+      if (existingOwner) {
+        await usePipelineStore
+          .getState()
+          .updateDesignReferenceMeta(existingOwner.id, { pageHint: "" });
+      }
+      await usePipelineStore
+        .getState()
+        .updateDesignReferenceMeta(referenceId, {
+          pageHint,
+          matchedBy: "manual",
+          matchConfidence: null,
+        });
+    },
+    [],
+  );
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const handleGenerateDesignDoc = async () => {
@@ -956,27 +1058,12 @@ export function DesignUI(props: StepUIProps) {
         useUploadedDesignReferences: false,
       });
     } else {
-      // Page restoration mode: persist all URL screenshots to disk so they are
-      // available to both the design agent and downstream coding agents.
-      for (const page of urlFetchedPages) {
-        if (!page.screenshotDataUrl) continue;
-        try {
-          const res = await fetch(page.screenshotDataUrl);
-          const blob = await res.blob();
-          const ext = blob.type === "image/png" ? "png" : "jpg";
-          const file = new File([blob], `url-capture.${ext}`, { type: blob.type || "image/jpeg" });
-          await uploadDesignReferences([file], [page.url], [""]);
-        } catch (e) {
-          console.warn("[design] Failed to persist URL screenshot to disk:", e);
-        }
-      }
-      const htmlParts: string[] = [];
-      urlFetchedPages.forEach((p) => htmlParts.push(urlReferencePrompt(p)));
+      // Page restoration mode: assets are already on disk (persisted immediately on upload/fetch).
       setDesignContext({
         designStyleId: null,
         styleReferenceImageBase64: null,
         styleReferenceImages: undefined,
-        designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
+        designDirectionPrompt: null,
         useUploadedDesignReferences: true,
       });
     }
@@ -1417,7 +1504,18 @@ export function DesignUI(props: StepUIProps) {
 
                   {/* ── Page Restoration mode ── */}
                   {referenceMode === "restoration" && prdContent.trim() && (
-                    <PageScreenshotsPanel prdContent={prdContent} />
+                    <RouteReferenceGrid
+                      prdContent={prdContent}
+                      references={designReferences}
+                      isMatching={isMatching}
+                      onUpload={handleUploadToGrid}
+                      onFetchUrls={handleFetchUrlsToGrid}
+                      onFetchRouteUrl={handleFetchRouteUrl}
+                      onRemove={async (id) => {
+                        await usePipelineStore.getState().deleteDesignReference(id);
+                      }}
+                      onDropToRoute={handleDropToRoute}
+                    />
                   )}
 
                   {/* Optional URL reference */}
@@ -1565,9 +1663,9 @@ export function DesignUI(props: StepUIProps) {
                   onClick={handleGenerateDesignDoc}
                   disabled={
                     (designSourceMode === "ai" && !selectedStyleId) ||
-                    (designSourceMode === "custom" && referenceMode === "style" && styleRefImages.filter((r) => r.dataUrl).length === 0 && urlFetchedPages.length === 0) ||
-                    (designSourceMode === "custom" && referenceMode === "restoration" && designReferences.filter((r) => r.kind === "image").length === 0 && urlFetchedPages.length === 0) ||
-                    urlFetching ||
+                    (designSourceMode === "custom" && referenceMode === "style" && styleRefImages.filter((r) => r.dataUrl).length === 0) ||
+                    (designSourceMode === "custom" && referenceMode === "restoration" && designReferences.filter((r) => r.kind === "image").length === 0) ||
+                    isMatching ||
                     isDesignRunning
                   }
                   className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[14px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
