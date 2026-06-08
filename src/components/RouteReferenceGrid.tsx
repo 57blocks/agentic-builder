@@ -50,15 +50,16 @@ function RouteCard({
     ? `/api/agents/pipeline/design-references/${reference.id}/file`
     : null;
 
-  const borderColor = reference
+  // Border + background per state
+  const cardClass = reference
     ? reference.matchedBy === "manual"
-      ? "border-purple-500"
-      : "border-green-500"
+      ? "border-violet-400 bg-violet-50"
+      : "border-emerald-400 bg-emerald-50"
     : isMatchingThis
-    ? "border-amber-500"
+    ? "border-amber-400 bg-amber-50"
     : isDragOver
-    ? "border-indigo-400"
-    : "border-slate-700 border-dashed";
+    ? "border-indigo-400 bg-indigo-50"
+    : "border-slate-200 border-dashed bg-white";
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -82,17 +83,17 @@ function RouteCard({
 
   return (
     <div
-      className={`relative flex flex-col rounded-lg border-2 overflow-hidden bg-slate-900 transition-colors ${borderColor}`}
+      className={`relative flex flex-col rounded-xl border-2 overflow-hidden transition-colors ${cardClass}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {/* Thumbnail area */}
-      <div className="relative h-28 bg-slate-800 flex items-center justify-center shrink-0">
+      <div className="relative h-28 bg-slate-100 flex items-center justify-center shrink-0">
         {isMatchingThis && !reference ? (
           <div className="flex flex-col items-center gap-2">
-            <RefreshCw size={20} className="text-amber-400 animate-spin" />
-            <span className="text-[10px] text-amber-400">Matching…</span>
+            <RefreshCw size={18} className="text-amber-500 animate-spin" />
+            <span className="text-[10px] text-amber-600">Matching…</span>
           </div>
         ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -106,32 +107,32 @@ function RouteCard({
             }}
           />
         ) : (
-          <Image size={24} className="text-slate-600" />
+          <Image size={22} className="text-slate-300" />
         )}
 
-        {/* Badges */}
+        {/* Badges — only shown on matched cards */}
         {reference && (
           <>
             <span
-              className={`absolute top-1.5 left-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded ${
+              className={`absolute top-1.5 left-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-md ${
                 reference.source === "url"
-                  ? "bg-teal-700 text-teal-100"
-                  : "bg-blue-800 text-blue-200"
+                  ? "bg-teal-100 text-teal-700"
+                  : "bg-blue-100 text-blue-700"
               }`}
             >
               {reference.source === "url" ? "URL" : "Upload"}
             </span>
             <span
-              className={`absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded border ${
+              className={`absolute top-1.5 right-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-md border ${
                 reference.cssToken
-                  ? "bg-teal-900 border-teal-600 text-teal-300"
-                  : "bg-slate-800 border-slate-600 text-slate-500"
+                  ? "bg-teal-50 border-teal-200 text-teal-700"
+                  : "bg-slate-100 border-slate-200 text-slate-400"
               }`}
             >
               {reference.cssToken ? "CSS ✓" : "CSS —"}
             </span>
             {reference.matchedBy === "auto" && reference.matchConfidence && (
-              <span className="absolute bottom-1.5 right-1.5 text-[9px] bg-black/60 text-green-400 px-1.5 py-0.5 rounded">
+              <span className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 text-emerald-600 font-medium px-1.5 py-0.5 rounded-md shadow-sm">
                 {reference.matchConfidence}
               </span>
             )}
@@ -140,16 +141,16 @@ function RouteCard({
       </div>
 
       {/* Card body */}
-      <div className="p-2 flex flex-col gap-1.5">
+      <div className="p-2.5 flex flex-col gap-1.5">
         <div
           className={`text-[11px] font-semibold truncate ${
             reference
               ? reference.matchedBy === "manual"
-                ? "text-purple-400"
-                : "text-green-400"
+                ? "text-violet-700"
+                : "text-emerald-700"
               : isMatchingThis
-              ? "text-amber-400"
-              : "text-slate-400"
+              ? "text-amber-600"
+              : "text-slate-500"
           }`}
         >
           {route.name}
@@ -157,19 +158,19 @@ function RouteCard({
 
         {reference ? (
           <>
-            <div className="text-[9px] text-slate-500 truncate">
+            <div className="text-[9px] text-slate-400 truncate">
               {reference.label || reference.fileName}
             </div>
             <div className="flex gap-1">
               <button
                 onClick={() => onRemove(reference.id)}
-                className="flex-1 text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 rounded py-0.5 transition-colors"
+                className="flex-1 text-[9px] bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 rounded-md py-0.5 transition-colors"
               >
                 Replace
               </button>
               <button
                 onClick={() => onRemove(reference.id)}
-                className="text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 rounded py-0.5 px-1.5 transition-colors"
+                className="text-[9px] bg-white hover:bg-slate-50 border border-slate-200 text-slate-400 rounded-md py-0.5 px-1.5 transition-colors"
                 title="Remove"
               >
                 <X size={10} />
@@ -183,12 +184,12 @@ function RouteCard({
               value={routeUrl}
               onChange={(e) => setRouteUrl(e.target.value)}
               placeholder="Enter URL to fetch screenshot…"
-              className="flex-1 text-[9px] bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-slate-300 placeholder-slate-600 outline-none focus:border-slate-500"
+              className="flex-1 text-[9px] bg-white border border-slate-200 rounded-md px-1.5 py-1 text-slate-600 placeholder-slate-400 outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200"
             />
             <button
               type="submit"
               disabled={!routeUrl.trim()}
-              className="text-[9px] bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-300 rounded px-1.5 transition-colors"
+              className="text-[9px] bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-600 rounded-md px-1.5 transition-colors"
             >
               ↵
             </button>
@@ -253,15 +254,15 @@ export function RouteReferenceGrid({
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {/* Top input zone */}
       <div className="flex gap-3">
         {/* Image drop zone */}
         <div
-          className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-1.5 p-4 cursor-pointer transition-colors min-h-[80px] ${
+          className={`flex-1 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 p-5 cursor-pointer transition-colors min-h-[88px] ${
             isDraggingOver
-              ? "border-indigo-400 bg-indigo-950/30"
-              : "border-slate-700 hover:border-slate-500"
+              ? "border-indigo-400 bg-indigo-50"
+              : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-white"
           }`}
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
@@ -271,9 +272,11 @@ export function RouteReferenceGrid({
           onDragLeave={() => setIsDraggingOver(false)}
           onDrop={handleFileDrop}
         >
-          <Image size={20} className="text-slate-500" />
-          <span className="text-[11px] text-slate-400">Drop images here or click to upload</span>
-          <span className="text-[9px] text-slate-600">PNG · JPG · WebP · GIF · ≤6 MB</span>
+          <Image size={20} className={isDraggingOver ? "text-indigo-400" : "text-slate-400"} />
+          <span className="text-[11px] text-slate-500 font-medium">
+            Drop images here or click to upload
+          </span>
+          <span className="text-[10px] text-slate-400">PNG · JPG · WebP · GIF · ≤6 MB</span>
           <input
             ref={fileInputRef}
             type="file"
@@ -293,12 +296,12 @@ export function RouteReferenceGrid({
               "Paste URLs, one per line\nhttps://app.example.com/dashboard\nhttps://app.example.com/login"
             }
             rows={3}
-            className="flex-1 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-slate-300 placeholder-slate-600 p-2 resize-none font-mono outline-none focus:border-slate-500"
+            className="flex-1 bg-white border border-slate-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 p-2.5 resize-none font-mono outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100 leading-relaxed"
           />
           <button
             onClick={handleFetchUrls}
             disabled={!urlInput.trim()}
-            className="self-end text-[10px] bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded px-3 py-1 transition-colors"
+            className="self-end text-[11px] font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 transition-colors"
           >
             Fetch Screenshots →
           </button>
@@ -308,15 +311,15 @@ export function RouteReferenceGrid({
       {/* Route card grid */}
       {routes.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Route Mapping{" "}
-              <span className="text-slate-600 normal-case tracking-normal">
+              <span className="text-slate-400 normal-case tracking-normal font-normal">
                 · {matchedCount} / {routes.length} matched
                 {cssTokenCount > 0 && ` · ${cssTokenCount} with CSS token`}
               </span>
             </span>
-            <span className="text-[9px] text-slate-600">Drag an image onto a card to override</span>
+            <span className="text-[10px] text-slate-400">Drag an image onto a card to override</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {routes.map((route) => {
