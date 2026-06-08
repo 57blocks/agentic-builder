@@ -925,8 +925,11 @@ export function DesignUI(props: StepUIProps) {
         );
       if (result && prdContent) {
         setIsMatching(true);
-        await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
-        setIsMatching(false);
+        try {
+          await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        } finally {
+          setIsMatching(false);
+        }
       }
     },
     [prdContent],
@@ -935,34 +938,37 @@ export function DesignUI(props: StepUIProps) {
   const handleFetchUrlsToGrid = useCallback(
     async (urls: string[]) => {
       setIsMatching(true);
-      await Promise.all(
-        urls.map(async (url) => {
-          let screenshotDataUrl: string | undefined;
-          let cssToken: Record<string, string> | undefined;
+      try {
+        await Promise.allSettled(
+          urls.map(async (url) => {
+            let screenshotDataUrl: string | undefined;
+            let cssToken: Record<string, string> | undefined;
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const result = await (window as any).electronAPI.renderReferenceUrl(url);
-              screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
-              cssToken = result?.cssTokens ?? result?.cssToken;
-            } catch {
-              // no screenshot available in Electron
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const result = await (window as any).electronAPI.renderReferenceUrl(url);
+                screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
+                cssToken = result?.cssTokens ?? result?.cssToken;
+              } catch {
+                // no screenshot available in Electron
+              }
             }
-          }
 
-          if (!screenshotDataUrl) return; // Non-Electron: skip — no screenshot available
+            if (!screenshotDataUrl) return; // Non-Electron: skip — no screenshot available
 
-          await usePipelineStore
-            .getState()
-            .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
-        }),
-      );
-      if (prdContent) {
-        await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+            await usePipelineStore
+              .getState()
+              .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
+          }),
+        );
+        if (prdContent) {
+          await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        }
+      } finally {
+        setIsMatching(false);
       }
-      setIsMatching(false);
     },
     [prdContent],
   );
