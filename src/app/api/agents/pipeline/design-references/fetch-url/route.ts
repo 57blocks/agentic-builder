@@ -54,6 +54,8 @@ export async function POST(request: NextRequest) {
 
   const mime = dataUrlMatch[1]!;
   const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+  // Node.js Buffer.from() is permissive with base64 — malformed input produces garbage bytes
+  // rather than throwing. Corrupted files will be rejected by the Vision LLM downstream.
   const buffer = Buffer.from(dataUrlMatch[2]!, "base64");
   const fileName = `url-capture.${ext}`;
   const isManual = typeof pageHint === "string" && pageHint.trim().length > 0;
