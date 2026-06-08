@@ -233,14 +233,13 @@ export const PIPELINE_FLOW: FlowNode[] = [
     label: "Coding",
     level: 1,
     dependsOn: ["kickoff"],
+    
     children: [
       {
         id: "agents",
         label: "Agents",
         level: 2,
-        stepConfig: {
-          uiKind: "panel",
-        },
+      
       },
     ],
   },

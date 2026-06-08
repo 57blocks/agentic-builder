@@ -210,9 +210,21 @@ export interface RunSubsystemsOptions {
 }
 
 /**
- * Execute the plan layer-by-layer; within a layer, subsystems run concurrently.
- * Each subsystem is coded via the injected `runCoding`. Failures stop dependent
- * layers (by default) since later layers build on earlier ones.
+ * Execute the plan layer-by-layer. Each subsystem is coded via the injected
+ * `runCoding`. Failures stop dependent layers (by default) since later layers
+ * build on earlier ones.
+ *
+ * Within a layer, subsystems run SEQUENTIALLY (one `runCoding` at a time), not
+ * concurrently. The coding route shares process-global, file-backed state across
+ * calls — the active-subsystem-scope sidecar
+ * (`.blueprint/active-subsystem-scope.json`), the session checkpoint
+ * (`.blueprint/last-coding-session.json`), and the single `codeOutputDir`.
+ * Building a layer's members concurrently would let those clobber each other:
+ * e.g. domain B's `writeActiveScope` overwrites the sidecar that domain A's gates
+ * read moments later, so A is validated against B's endpoint scope. Layers were
+ * originally a parallelism affordance; we keep their dependency ORDER but run the
+ * members in series for safety. (Re-introducing intra-layer parallelism requires
+ * isolating the scope/checkpoint per coding request.)
  */
 export async function runSubsystemBuilds(
   plan: SubsystemBuildPlan,
@@ -222,39 +234,43 @@ export async function runSubsystemBuilds(
   const done = new Set(opts?.alreadyDone ?? []);
   const stopOnFailure = opts?.stopOnFailure ?? true;
   const results: SubsystemRunResult[] = [];
-  let aborted = false;
+
+  const recordResult = async (r: SubsystemRunResult): Promise<void> => {
+    results.push(r);
+    if (opts?.onStepDone) await opts.onStepDone(r);
+    if (r.status === "completed") done.add(r.subsystemId);
+  };
 
   for (const layer of plan.layers) {
-    if (aborted) break;
-    const layerResults = await Promise.all(
-      layer.map(async (step): Promise<SubsystemRunResult> => {
-        if (done.has(step.subsystemId)) {
-          return { subsystemId: step.subsystemId, layer: step.layer, status: "skipped" };
-        }
-        try {
-          const r = await runCoding(step);
-          return {
-            subsystemId: step.subsystemId,
-            layer: step.layer,
-            status: r.ok ? "completed" : "failed",
-            summary: r.summary,
-          };
-        } catch (err) {
-          return {
-            subsystemId: step.subsystemId,
-            layer: step.layer,
-            status: "failed",
-            summary: err instanceof Error ? err.message : String(err),
-          };
-        }
-      }),
-    );
-    for (const r of layerResults) {
-      results.push(r);
-      if (opts?.onStepDone) await opts.onStepDone(r);
-      if (r.status === "completed") done.add(r.subsystemId);
+    let layerFailed = false;
+    // Sequential within the layer — see the function doc for why.
+    for (const step of layer) {
+      if (done.has(step.subsystemId)) {
+        await recordResult({ subsystemId: step.subsystemId, layer: step.layer, status: "skipped" });
+        continue;
+      }
+      let result: SubsystemRunResult;
+      try {
+        const r = await runCoding(step);
+        result = {
+          subsystemId: step.subsystemId,
+          layer: step.layer,
+          status: r.ok ? "completed" : "failed",
+          summary: r.summary,
+        };
+      } catch (err) {
+        result = {
+          subsystemId: step.subsystemId,
+          layer: step.layer,
+          status: "failed",
+          summary: err instanceof Error ? err.message : String(err),
+        };
+      }
+      await recordResult(result);
+      if (result.status === "failed") layerFailed = true;
     }
-    if (stopOnFailure && layerResults.some((r) => r.status === "failed")) aborted = true;
+    // A dependent layer cannot safely build on a broken dependency — stop here.
+    if (stopOnFailure && layerFailed) break;
   }
 
   return results;
