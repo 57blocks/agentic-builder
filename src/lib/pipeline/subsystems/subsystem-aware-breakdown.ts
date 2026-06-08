@@ -76,23 +76,76 @@ export async function runSubsystemAwareTaskBreakdown(
 ): Promise<SubsystemAwareBreakdownResult> {
   const tier = params.tier ?? "M";
 
-  // Gate 1 — cheap precheck. Non-candidates take the unchanged default path.
-  if (!isSubsystemSplitCandidate(params.prd, tier)) {
+  // Gate 1 — cheap precheck. Non-candidates take the unchanged default path,
+  // UNLESS the user already persisted a subsystem manifest from the PRD step
+  // (they explicitly split the project). In that case we skip to Gate 2 so the
+  // manifest is evaluated as a fallback rather than silently discarded.
+  const gate1Candidate = isSubsystemSplitCandidate(params.prd, tier);
+  if (!gate1Candidate) {
+    const endpointCount = extractPrdInventory(params.prd).apiEndpoints.length;
     dumpSubsystemDecision({
       stage: "gate1",
       tier,
       envDisabled: process.env.BLUEPRINT_SUBSYSTEM_BREAKDOWN === "0",
-      endpoints: extractPrdInventory(params.prd).apiEndpoints.length,
+      endpoints: endpointCount,
       minEndpoints: MIN_ENDPOINTS_FOR_SPLIT,
       candidate: false,
+      hasFallbackManifest: !!opts?.fallbackManifest,
       prdLen: params.prd?.length ?? 0,
-      result: "whole-system (gate1 failed)",
+      result: opts?.fallbackManifest
+        ? "gate1 failed but has persisted manifest — falling through to gate2 fallback check"
+        : "whole-system (gate1 failed)",
     });
-    return buildTaskBreakdownFromDocuments(params);
+    if (!opts?.fallbackManifest) {
+      return buildTaskBreakdownFromDocuments(params);
+    }
+    // User explicitly split the PRD — jump straight to the fallback check below.
+    console.log(
+      `[Subsystems] Gate 1 failed (${endpointCount} endpoints < ${MIN_ENDPOINTS_FOR_SPLIT}) but persisted manifest found — evaluating fallback.`,
+    );
+  }
+
+  const inventory = extractPrdInventory(params.prd);
+
+  // When Gate 1 was skipped (user has a persisted manifest), go straight to
+  // evaluating the fallback — skip the decompose LLM call entirely.
+  if (!gate1Candidate && opts?.fallbackManifest) {
+    const fb = opts.fallbackManifest;
+    const fbValidation = validateSubsystemManifest(fb);
+    const fbDecision = shouldSplitIntoSubsystems({
+      tier: tier as "S" | "M" | "L",
+      inventory,
+      manifest: fb,
+      validation: fbValidation,
+    });
+    dumpSubsystemDecision({
+      stage: "gate1-fallback",
+      tier,
+      endpoints: inventory.apiEndpoints.length,
+      fallbackDomains: fb.subsystems.length,
+      fallbackDecisionSplit: fbDecision.split,
+      fallbackDecisionReasons: fbDecision.reasons,
+      result: fbDecision.split
+        ? `split using persisted manifest (${fb.subsystems.length} domains)`
+        : `whole-system (fallback manifest also fails: ${fbDecision.reasons.join("; ")})`,
+    });
+    if (!fbDecision.split) {
+      console.log(`[Subsystems] persisted manifest also fails the gate: ${fbDecision.reasons.join("; ")}`);
+      return buildTaskBreakdownFromDocuments(params);
+    }
+    console.log(
+      `[Subsystems] Gate 1 bypassed — using persisted PRD-step manifest (${fb.subsystems.length} domains).`,
+    );
+    // Fast-path: use fallback manifest directly, skip decompose.
+    const manifest = fb;
+    const buildLayers = fbValidation.buildLayers;
+    const splitReasons = ["gate1 bypassed — persisted PRD-step manifest accepted", ...fbDecision.reasons];
+    return runDomainBreakdownWithManifest({
+      params, inventory, manifest, buildLayers, splitReasons, usedFallbackManifest: true,
+    });
   }
 
   // Gate 2 — decompose (the only added LLM cost, and only for genuine candidates).
-  const inventory = extractPrdInventory(params.prd);
   const decomposed = await decomposePrdIntoSubsystems(params.prd, {
     tier: tier as "S" | "M" | "L",
   });
@@ -166,6 +219,37 @@ export async function runSubsystemAwareTaskBreakdown(
     `[Subsystems] splitting into ${manifest.subsystems.length} domain(s)${usedFallbackManifest ? " [fallback manifest]" : ""}: ${manifest.subsystems.map((s) => s.id).join(", ")}`,
   );
 
+  return runDomainBreakdownWithManifest({
+    params, inventory, manifest, buildLayers, splitReasons,
+    usedFallbackManifest, extraCostUsd: decomposed.costUsd,
+  });
+}
+
+// ── Shared domain breakdown helper ──────────────────────────────────────────
+
+async function runDomainBreakdownWithManifest({
+  params,
+  inventory,
+  manifest,
+  buildLayers,
+  splitReasons,
+  usedFallbackManifest,
+  extraCostUsd = 0,
+}: {
+  params: BreakdownParams;
+  inventory: ReturnType<typeof extractPrdInventory>;
+  manifest: SubsystemManifest;
+  buildLayers: string[][];
+  splitReasons: string[];
+  usedFallbackManifest: boolean;
+  extraCostUsd?: number;
+}): Promise<SubsystemAwareBreakdownResult> {
+  void inventory; // used for logging context elsewhere; kept for symmetry
+
+  console.log(
+    `[Subsystems] splitting into ${manifest.subsystems.length} domain(s)${usedFallbackManifest ? " [persisted manifest]" : ""}: ${manifest.subsystems.map((s) => s.id).join(", ")}`,
+  );
+
   // Resolve each domain's requirement IDs. This needs PAGE-/API- ids ON the PRD.
   // The engine gate backfills the PRD too, but its mutated content may not have
   // reached here — so backfill (idempotent) ourselves and use the id-tagged PRD
@@ -174,6 +258,7 @@ export async function runSubsystemAwareTaskBreakdown(
   const { byDomain } = resolveDomainRequirementIds(filledPrd, manifest);
   const totalResolved = [...byDomain.values()].reduce((n, ids) => n + ids.length, 0);
   console.log(`[Subsystems] resolved ${totalResolved} requirement id(s) across ${byDomain.size} domain(s).`);
+
   let foundationFull: BreakdownResult | null = null;
   const breakdownFn: BreakdownFn = async (input) => {
     const r = await buildTaskBreakdownFromDocuments({
@@ -202,7 +287,7 @@ export async function runSubsystemAwareTaskBreakdown(
     manifest,
     domainRequirementIds: byDomain,
     buildLayers,
-    tier: tier as "S" | "M" | "L",
+    tier: (params.tier ?? "M") as "S" | "M" | "L",
     sessionId: params.sessionId,
     breakdownFn,
   });
@@ -214,7 +299,7 @@ export async function runSubsystemAwareTaskBreakdown(
   return {
     ...envelope,
     tasks: orch.allTasks,
-    costUsd: envelope.costUsd + orch.costUsd + decomposed.costUsd,
+    costUsd: envelope.costUsd + orch.costUsd + extraCostUsd,
     subsystem: {
       manifest,
       buildLayers,

@@ -206,9 +206,13 @@ export async function POST(request: NextRequest) {
             e instanceof Error ? e.message : e,
           );
         }
+        console.log("[KickoffAPI] executeKickoffOnly starting, useIncremental=", useIncremental);
         const result = useIncremental
           ? await engine.executeIncrementalKickoffOnly(run, outputRoot)
           : await engine.executeKickoffOnly(run, outputRoot);
+
+        console.log("[KickoffAPI] executeKickoffOnly finished, run.status=", result.status,
+          "kickoff.status=", result.steps.kickoff?.status);
 
         // Auto-save pipeline snapshot for debug reuse
         try {
@@ -230,20 +234,31 @@ export async function POST(request: NextRequest) {
           /* non-critical: skip if write fails */
         }
 
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "done", run: result })}\n\n`,
-          ),
-        );
+        let donePayload: string;
+        try {
+          donePayload = JSON.stringify({ type: "done", run: result });
+        } catch (serErr) {
+          console.error("[KickoffAPI] JSON.stringify(result) failed:", serErr);
+          throw serErr;
+        }
+        console.log("[KickoffAPI] enqueueing done event, payload length=", donePayload.length);
+        controller.enqueue(encoder.encode(`data: ${donePayload}\n\n`));
+        console.log("[KickoffAPI] done event enqueued");
       } catch (error) {
         const msg =
           error instanceof Error ? error.message : "Kick-off failed";
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", error: msg })}\n\n`,
-          ),
-        );
+        console.error("[KickoffAPI] CAUGHT ERROR in main try block:", msg, error);
+        try {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "error", error: msg })}\n\n`,
+            ),
+          );
+        } catch (enqErr) {
+          console.error("[KickoffAPI] Failed to enqueue error event:", enqErr);
+        }
       } finally {
+        console.log("[KickoffAPI] closing controller");
         controller.close();
       }
     },

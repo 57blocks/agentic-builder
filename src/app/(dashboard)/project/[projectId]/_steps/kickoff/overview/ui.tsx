@@ -316,12 +316,23 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           if (!line.startsWith("data: ")) continue;
           try {
             const event = JSON.parse(line.slice(6));
+            console.log("[kickoff:sse]", event.type, event);
             if (event.type === "step_stream") {
               const chunk = event.data?.chunk ?? event.chunk ?? "";
               kickoffContent += chunk;
               useStepStore.setState((s) => ({ streamingContent: s.streamingContent + chunk }));
             } else if (event.type === "step_complete") {
               kickoffContent = event.data?.content ?? kickoffContent;
+            } else if (event.type === "step_error") {
+              const errMsg = event.data?.error ?? "Kickoff step failed";
+              console.error("[kickoff:step_error]", errMsg, event);
+              setError(errMsg);
+              useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
+            } else if (event.type === "error") {
+              const errMsg = event.error ?? "Kickoff failed";
+              console.error("[kickoff:error]", errMsg, event);
+              setError(errMsg);
+              useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
             } else if (event.type === "done") {
               const kickoffMeta = event.run?.steps?.kickoff;
               const costUsd = kickoffMeta?.costUsd ?? 0;
@@ -330,10 +341,18 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               console.log("[kickoff:done] kickoffMeta", kickoffMeta);
               console.log("[kickoff:done] kickoffMetadata", kickoffMetadata);
               console.log("[kickoff:done] taskBreakdown raw", (kickoffMetadata as Record<string, unknown>)?.taskBreakdown);
-              const now = new Date().toISOString();
-              setStepResult("summary", { stepId: "summary", status: "completed", content: kickoffContent, costUsd, durationMs, metadata: kickoffMetadata, timestamp: now });
-              setStepResult("task-breakdown", { stepId: "task-breakdown", status: "completed", content: kickoffContent, costUsd: 0, durationMs: 0, metadata: kickoffMetadata, timestamp: now });
-              useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
+              // Surface failure even when done arrives — step_error may have fired first
+              if (kickoffMeta?.status === "failed") {
+                const errMsg = kickoffMeta?.error ?? "Kickoff failed";
+                console.error("[kickoff:done] status=failed, error:", errMsg);
+                setError(errMsg);
+                useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
+              } else {
+                const now = new Date().toISOString();
+                setStepResult("summary", { stepId: "summary", status: "completed", content: kickoffContent, costUsd, durationMs, metadata: kickoffMetadata, timestamp: now });
+                setStepResult("task-breakdown", { stepId: "task-breakdown", status: "completed", content: kickoffContent, costUsd: 0, durationMs: 0, metadata: kickoffMetadata, timestamp: now });
+                useStepStore.setState({ isRunning: false, currentStep: null, streamingContent: "" });
+              }
             }
           } catch { /* skip */ }
         }
