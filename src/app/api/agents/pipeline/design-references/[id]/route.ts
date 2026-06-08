@@ -16,16 +16,28 @@ interface RouteParams {
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
-  let body: { label?: string; pageHint?: string } = {};
+  let body: {
+    label?: string;
+    pageHint?: string;
+    matchedBy?: "auto" | "manual";
+    matchConfidence?: "high" | "medium" | "low" | null;
+    cssToken?: Record<string, string>;
+  } = {};
   try {
-    body = (await request.json()) as { label?: string; pageHint?: string };
+    body = await request.json();
   } catch {
     return NextResponse.json(
-      { error: "Invalid JSON body. Expected { label?, pageHint? }." },
+      { error: "Invalid JSON body." },
       { status: 400 },
     );
   }
-  const updated = await updateDesignReference(projectRoot(), id, body);
+  const updated = await updateDesignReference(projectRoot(), id, {
+    label: body.label,
+    pageHint: body.pageHint,
+    matchedBy: body.matchedBy,
+    matchConfidence: body.matchConfidence ?? undefined,
+    cssToken: body.cssToken,
+  });
   if (!updated) {
     return NextResponse.json(
       { error: `No reference found with id "${id}".` },
