@@ -255,52 +255,56 @@ export function RouteReferenceGrid({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Top input zone — items-stretch keeps both sides equal height */}
-      <div className="flex gap-3 items-stretch">
-        {/* Image drop zone */}
-        <div
-          className={`flex-1 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 p-5 cursor-pointer transition-colors ${
-            isDraggingOver
-              ? "border-indigo-400 bg-indigo-50"
-              : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-white"
-          }`}
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDraggingOver(true);
-          }}
-          onDragLeave={() => setIsDraggingOver(false)}
-          onDrop={handleFileDrop}
-        >
-          <Image size={20} className={isDraggingOver ? "text-indigo-400" : "text-slate-400"} />
-          <span className="text-[11px] text-slate-500 font-medium">
-            Drop images here or click to upload
-          </span>
-          <span className="text-[10px] text-slate-400">PNG · JPG · WebP · GIF · ≤6 MB</span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            className="hidden"
-            onChange={handleFileInput}
-          />
-        </div>
+      {/* Top input zone */}
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-3">
+          {/* Image drop zone */}
+          <div
+            className={`flex-1 h-[96px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 p-4 cursor-pointer transition-colors ${
+              isDraggingOver
+                ? "border-indigo-400 bg-indigo-50"
+                : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-white"
+            }`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingOver(true);
+            }}
+            onDragLeave={() => setIsDraggingOver(false)}
+            onDrop={handleFileDrop}
+          >
+            <Image size={20} className={isDraggingOver ? "text-indigo-400" : "text-slate-400"} />
+            <span className="text-[11px] text-slate-500 font-medium">
+              Drop images here or click to upload
+            </span>
+            <span className="text-[10px] text-slate-400">PNG · JPG · WebP · GIF · ≤6 MB</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={handleFileInput}
+            />
+          </div>
 
-        {/* URL input */}
-        <div className="flex-1 flex flex-col gap-1.5">
+          {/* URL textarea */}
           <textarea
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             placeholder={
               "Paste URLs, one per line\nhttps://app.example.com/dashboard\nhttps://app.example.com/login"
             }
-            className="flex-1 bg-white border border-slate-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 p-2.5 resize-none font-mono outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100 leading-relaxed"
+            className="flex-1 h-[96px] bg-white border border-slate-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 p-2.5 resize-none font-mono outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100 leading-relaxed"
           />
+        </div>
+
+        {/* Fetch button — right-aligned below the textarea */}
+        <div className="flex justify-end">
           <button
             onClick={handleFetchUrls}
             disabled={!urlInput.trim()}
-            className="self-end text-[11px] font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 transition-colors"
+            className="text-[11px] font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 transition-colors"
           >
             Fetch Screenshots →
           </button>
