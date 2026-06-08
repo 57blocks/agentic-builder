@@ -435,7 +435,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
                   </p>
                 </div>
                 <button
-                  onClick={runKickoff}
+                  onClick={() => void runKickoff()}
                   disabled={isRunning}
                   className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-8 py-3.5 text-[14px] font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -468,7 +468,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
             <div className="rounded-xl border border-red-200 bg-white px-5 py-4 shadow-sm">
               <p className="text-[13px] font-semibold text-red-700">Kick-off failed</p>
               <p className="text-[12px] text-red-500 mt-1">{error}</p>
-              <button onClick={runKickoff}
+              <button onClick={() => void runKickoff()}
                 className="mt-3 px-4 py-1.5 text-[12px] font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
                 Retry
               </button>

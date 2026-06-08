@@ -6,7 +6,7 @@ import {
   ChevronDown, FileText,
 } from "lucide-react";
 import { savePrdReadiness } from "./snapshot";
-import { usePipelineStore } from "@/store/pipeline-store";
+import { useStepStore } from "@/store/step-store";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -197,7 +197,11 @@ export function PrdSubsystemPanel(props: {
   projectSlug?: string;
   initialResult?: DecomposeResponse | null;
 }) {
-  const codeOutputDir = usePipelineStore((s) => s.codeOutputDir);
+  // Same source the rest of the project flow uses (synced from the project's
+  // code_output_dir at project/[projectId]/page.tsx) — NOT pipeline-store, which
+  // is never hydrated in the project route and stays at the "generated-code"
+  // default, sending the decompose manifest to the wrong directory.
+  const codeOutputDir = useStepStore((s) => s.codeOutputDir);
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<DecomposeResponse | null>(props.initialResult ?? null);
   const [error, setError] = useState<string | null>(null);

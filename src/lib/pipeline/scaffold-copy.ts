@@ -73,6 +73,26 @@ const UNPROTECTED_SCAFFOLD_PATHS = new Set([
   "frontend/playwright.config.ts",
 ]);
 
+/**
+ * Pipeline-generated docs that live at the OUTPUT ROOT. The scaffold templates
+ * ship example copies (e.g. `scaffolds/<tier>/PRD.md` is a sample "News Digest"
+ * PRD), but the real docs are written by the pipeline BEFORE the scaffold copy.
+ * Never let the scaffold's examples overwrite them — otherwise the output dir
+ * ends up with the template's placeholder PRD instead of the project's PRD.
+ * Matched against the scaffold-relative path, so only root-level docs are
+ * affected (a nested `foo/PRD.md` would not match).
+ */
+const GENERATED_DOC_PATHS = new Set([
+  "PRD.md",
+  "TRD.md",
+  "SystemDesign.md",
+  "ImplementationGuide.md",
+  "DesignSpec.md",
+  "PencilDesign.md",
+  "PRD_E2E_SPEC.md",
+  "E2E_COVERAGE.md",
+]);
+
 export interface CopyScaffoldResult {
   copied: string[];
   skipped: string[];
@@ -294,6 +314,13 @@ async function copyDir(
 
     if (!entry.isFile()) {
       skipped.push(`${relPath} (not a regular file)`);
+      continue;
+    }
+
+    // Never let a scaffold's example doc clobber the pipeline-generated real doc
+    // (the real PRD.md / TRD.md / … are written to the output root first).
+    if (GENERATED_DOC_PATHS.has(relPath)) {
+      skipped.push(`${relPath} (pipeline-generated doc — scaffold copy never overwrites)`);
       continue;
     }
 
