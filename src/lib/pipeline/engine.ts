@@ -711,6 +711,11 @@ export class PipelineEngine {
         // a prior Phase 0 override) so the TRD prompt has an authoritative
         // mode/roles/seedAccounts/env-keys block to honor.
         const authDecision = await readAuthDecision(process.cwd());
+        // If the PRD has already been decomposed into subsystems (manifest on
+        // disk), feed it so the TRD shapes §3 services/APIs/data per business
+        // domain instead of inventing its own split. Absent on a first fresh
+        // run (decompose happens later in kickoff) → monolithic TRD as before.
+        const subsystemManifest = await readSubsystemManifest(outputRoot);
         run = await this.executeStep(run, "trd", () =>
           this.trdAgent.generateTRD(
             prdContent,
@@ -720,6 +725,7 @@ export class PipelineEngine {
             prdSpec,
             undefined,
             authDecision,
+            subsystemManifest,
           ),
         );
         if (run.status === "failed") return run;
@@ -2406,6 +2412,9 @@ export class PipelineEngine {
         | undefined;
       const prdSpec = prdMetadata?.prdSpec ?? null;
       const authDecision = await readAuthDecision(process.cwd());
+      // Re-generating after a PRD edit: pick up the subsystem manifest so the
+      // refreshed TRD stays domain-shaped (matches the initial-run behavior).
+      const subsystemManifest = await readSubsystemManifest(outputRoot);
       run = await this.executeStep(run, "trd", () =>
         this.trdAgent.generateTRD(
           canonicalPrd,
@@ -2415,6 +2424,7 @@ export class PipelineEngine {
           prdSpec,
           undefined,
           authDecision,
+          subsystemManifest,
         ),
       );
       if (run.status === "failed") return run;

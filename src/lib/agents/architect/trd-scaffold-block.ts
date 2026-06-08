@@ -19,6 +19,7 @@ import type { ProjectTier } from "../shared/project-classifier";
 
 const INSTRUCTION = `The generated project STARTS from this tier's scaffold (already copied into the repo). In the TRD you MUST:
 - §1 Tech Stack: state the scaffold's stack as-is — do NOT propose a different framework, database, or build tool.
+- FRONTEND IS A VITE + REACT + react-router-dom SINGLE-PAGE APP (client-rendered). It is NOT Next.js. Do NOT mention Next.js, the App Router, React Server Components / RSC, SSR, getServerSideProps, or any \`next/*\` import ANYWHERE in the TRD — the scaffold ships none of these and codegen builds on a Vite SPA. Routing is client-side via react-router-dom; data loads through the scaffold HTTP client, not server components.
 - Treat every file / capability listed below as EXISTING infrastructure. Do NOT re-design it, list it as "to build", or duplicate it. NEVER introduce a parallel or renamed copy of a canonical scaffold file (e.g. a second HTTP client, a custom JWT helper, a parallel rate-limiter / worker bootstrap, another docker-compose).
 - Spend §3 (services / data models / APIs), §5, §7, §8 on what is PROJECT-SPECIFIC and MISSING from the scaffold — the domain models, feature endpoints, and domain workflows — built ON the scaffold's middlewares / utils / queue.
 - When a design decision depends on a scaffold file, reference it by its canonical path rather than restating its contents.`;
@@ -55,4 +56,40 @@ export function renderScaffoldFoundationBlock(tier: ProjectTier): string {
   }
 
   return lines.join("\n");
+}
+
+// ── Deterministic framework-drift guard ────────────────────────────────────────
+
+/**
+ * Tokens that prove the TRD drifted to a frontend framework the scaffold does
+ * NOT ship. Every tier's scaffold is a Vite + React + react-router-dom SPA, so
+ * any mention of Next.js / the App Router / Server Components / SSR is a
+ * hallucination that would send codegen down the wrong stack. Kept narrow to
+ * avoid false positives (e.g. plain "next step" / "next semester" never match).
+ */
+const FORBIDDEN_FRONTEND_TOKENS: RegExp[] = [
+  /next\.?js/i,
+  /next\/(app|link|router|image|navigation|font|server|head)\b/i,
+  /\bapp router\b/i,
+  /react server components?/i,
+  /\bserver components?\b/i,
+  /\brsc\b/i,
+  /getServerSideProps|getStaticProps/i,
+];
+
+/**
+ * Scan a generated TRD for frontend-framework drift away from the scaffold.
+ * Returns the distinct offending snippets (empty = clean). Pure, deterministic
+ * — used to reject/correct a TRD that ignored the scaffold's Vite+React stack.
+ */
+export function detectFrontendFrameworkDrift(
+  trd: string,
+  _tier: ProjectTier,
+): string[] {
+  const hits = new Set<string>();
+  for (const re of FORBIDDEN_FRONTEND_TOKENS) {
+    const m = trd.match(re);
+    if (m) hits.add(m[0]);
+  }
+  return [...hits];
 }
