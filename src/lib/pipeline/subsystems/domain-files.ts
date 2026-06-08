@@ -63,6 +63,88 @@ export function extractPrdSections(prd: string, sectionRefs: string[]): string {
   return results.join("\n\n---\n\n");
 }
 
+// ── Shared / global sections ──────────────────────────────────────────────────
+
+/**
+ * Cross-cutting PRD chapters that EVERY domain needs to build correctly but
+ * that the exclusive owned-section split leaves orphaned (they have no single
+ * owner): the design system / component library, information architecture /
+ * navigation, enum catalogs, non-functional requirements, global validation &
+ * boundary rules, error codes, the glossary, the permission model, and storage
+ * contracts. Missing the component-library spec in particular is the leading
+ * cause of per-domain UI drift. Bilingual (Chinese + English) since PRDs vary.
+ *
+ * Deliberately does NOT include the full REST-API-design chapter (huge; the
+ * relevant slice is injected per-domain as Dependency Contracts instead) nor
+ * per-domain chapters (data model, wireframes, acceptance criteria).
+ */
+const SHARED_SECTION_PATTERNS: RegExp[] = [
+  /组件库|设计系统|design system|component library|ui components?\b/i,
+  /信息架构|information architecture|站点地图|sitemap|全局导航|global nav/i,
+  /枚举|\benum/i,
+  /非功能|non-?functional|\bnfr\b/i,
+  /校验|边界规则|validation|boundary rule/i,
+  /错误码|error code/i,
+  /术语表|glossary/i,
+  /角色与权限|权限模型|permission|\brbac\b|access control/i,
+  /存储契约|localstorage|storage contract/i,
+];
+
+/**
+ * Find the top-level (`## N.`) PRD section anchors whose heading marks them as
+ * a shared/global spec (see SHARED_SECTION_PATTERNS). Returns anchors like
+ * "§7", "§8" suitable for {@link extractPrdSections}. Project-agnostic — it
+ * keys on heading text, not hard-coded section numbers.
+ */
+export function collectSharedSectionAnchors(prd: string): string[] {
+  const anchors: string[] = [];
+  const seen = new Set<string>();
+  for (const line of prd.split("\n")) {
+    // Top-level numbered heading only: "## 8. Title" / "## 8 Title".
+    const m = line.match(/^##\s+(\d+)(?:\.\d+)*[.)\s]/);
+    if (!m) continue;
+    const num = m[1];
+    if (seen.has(num)) continue;
+    if (SHARED_SECTION_PATTERNS.some((re) => re.test(line))) {
+      anchors.push(`§${num}`);
+      seen.add(num);
+    }
+  }
+  return anchors;
+}
+
+/**
+ * Render the frozen contracts of the domains this one depends on: the API
+ * endpoints it may call and the collections those domains own (read via their
+ * API, never directly). Gives a single-domain coding session the cross-domain
+ * surface it would otherwise be blind to. Pure.
+ */
+export function buildDependencyContracts(
+  s: Subsystem,
+  allSubsystems: Subsystem[],
+): string {
+  if (s.dependsOn.length === 0) return "";
+  const blocks: string[] = [];
+  for (const depId of s.dependsOn) {
+    const dep = allSubsystems.find((x) => x.id === depId);
+    if (!dep) continue;
+    const lines: string[] = [`### ${dep.name} (\`${dep.id}\`)`, ""];
+    lines.push("**API endpoints you may call (frozen contract):**");
+    if (dep.ownedApiEndpoints.length > 0)
+      dep.ownedApiEndpoints.forEach((e) => lines.push(`- \`${e}\``));
+    else lines.push("_None declared_");
+    lines.push(
+      "",
+      "**Collections it owns (read via its API, never its tables directly):**",
+    );
+    if (dep.ownedCollections.length > 0)
+      dep.ownedCollections.forEach((c) => lines.push(`- \`${c}\``));
+    else lines.push("_None declared_");
+    blocks.push(lines.join("\n"));
+  }
+  return blocks.join("\n\n");
+}
+
 // ── Domain md content ─────────────────────────────────────────────────────────
 
 /**
@@ -74,6 +156,10 @@ export function buildDomainMd(
   allSubsystems: Subsystem[],
   layerIndex: number,
   prdContent: string,
+  /** Extracted cross-cutting spec sections (component library, IA, enums,
+   *  error codes…) to inject so every domain builds to the same global rules.
+   *  Pass "" to omit. */
+  sharedContent = "",
 ): string {
   const nameOf = (id: string) =>
     allSubsystems.find((x) => x.id === id)?.name ?? id;
@@ -106,6 +192,26 @@ export function buildDomainMd(
   appendItems(out, s.ownedModules);
   out.push("", "## PRD Sections", "");
   out.push(prdContent.trim() || "_No specific PRD sections referenced._");
+
+  // Dependency contracts — the cross-domain surface this domain consumes.
+  const contracts = buildDependencyContracts(s, allSubsystems);
+  out.push("", "## Dependency Contracts", "");
+  out.push(
+    contracts ||
+      "_No upstream dependencies — this domain owns everything it needs._",
+  );
+
+  // Shared / global specs — cross-cutting chapters every domain must honour so
+  // the system stays consistent (design system, navigation, enums, error
+  // codes…). Injected, not duplicated by hand: the mega-PRD stays the source.
+  if (sharedContent.trim()) {
+    out.push("", "## Shared / Global Specs", "");
+    out.push(
+      "> Cross-cutting specs that apply to EVERY domain. Build to these so the system stays consistent — they are not optional context.",
+      "",
+      sharedContent.trim(),
+    );
+  }
   out.push("");
 
   return out.join("\n");
@@ -152,10 +258,27 @@ export async function writeDomainFiles(
     return false;
   }
 
+  // Shared/global anchors are project-wide — compute once, reuse per domain.
+  const sharedAnchors = collectSharedSectionAnchors(prd);
+
   let allOk = true;
   for (const s of subsystems) {
     const prdContent = extractPrdSections(prd, s.prdSections);
-    const content = buildDomainMd(s, subsystems, layerOf(s.id), prdContent);
+    // Don't duplicate a shared section a domain already owns outright.
+    const ownedAnchors = new Set(
+      s.prdSections.map((r) => r.replace(/^§/, "").trim()),
+    );
+    const sharedForThis = sharedAnchors.filter(
+      (a) => !ownedAnchors.has(a.replace(/^§/, "").trim()),
+    );
+    const sharedContent = extractPrdSections(prd, sharedForThis);
+    const content = buildDomainMd(
+      s,
+      subsystems,
+      layerOf(s.id),
+      prdContent,
+      sharedContent,
+    );
     const filePath = path.join(outRoot, `domain-${s.id}.md`);
     try {
       await fs.writeFile(filePath, content, "utf-8");
