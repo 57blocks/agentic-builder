@@ -21,7 +21,7 @@ import { backfillPrdIds } from "../gates/prd-id-backfill";
 import { extractPrdInventory } from "./inventory";
 import { decomposePrdIntoSubsystems } from "./decompose";
 import { validateSubsystemManifest } from "./validate";
-import { shouldSplitIntoSubsystems, MIN_ENDPOINTS_FOR_SPLIT } from "./split-decision";
+import { shouldSplitIntoSubsystems, MIN_ENDPOINTS_FOR_SPLIT, MIN_DOMAINS_FOR_SPLIT } from "./split-decision";
 import { resolveDomainRequirementIds } from "./domain-requirements";
 import { runDomainScopedBreakdown, type BreakdownFn } from "./domain-breakdown";
 import type { SubsystemManifest } from "./types";
@@ -112,34 +112,32 @@ export async function runSubsystemAwareTaskBreakdown(
   if (!gate1Candidate && opts?.fallbackManifest) {
     const fb = opts.fallbackManifest;
     const fbValidation = validateSubsystemManifest(fb);
-    const fbDecision = shouldSplitIntoSubsystems({
-      tier: tier as "S" | "M" | "L",
-      inventory,
-      manifest: fb,
-      validation: fbValidation,
-    });
     dumpSubsystemDecision({
       stage: "gate1-fallback",
       tier,
       endpoints: inventory.apiEndpoints.length,
       fallbackDomains: fb.subsystems.length,
-      fallbackDecisionSplit: fbDecision.split,
-      fallbackDecisionReasons: fbDecision.reasons,
-      result: fbDecision.split
-        ? `split using persisted manifest (${fb.subsystems.length} domains)`
-        : `whole-system (fallback manifest also fails: ${fbDecision.reasons.join("; ")})`,
+      fallbackValidationOk: fbValidation.ok,
+      result: fbValidation.ok
+        ? `split using persisted manifest (${fb.subsystems.length} domains, endpoint gate skipped)`
+        : `whole-system (persisted manifest is invalid)`,
     });
-    if (!fbDecision.split) {
-      console.log(`[Subsystems] persisted manifest also fails the gate: ${fbDecision.reasons.join("; ")}`);
+    // For a user-persisted manifest we trust the explicit split decision and
+    // skip the endpoint-count gate (which only applies to auto-detection).
+    // Just re-validate structure and domain count.
+    const minDomains = Number(process.env.BLUEPRINT_SUBSYSTEM_MIN_DOMAINS) || MIN_DOMAINS_FOR_SPLIT;
+    if (!fbValidation.ok || fb.subsystems.length < minDomains) {
+      console.log(
+        `[Subsystems] persisted manifest invalid or too few domains (${fb.subsystems.length} < ${minDomains}) — falling back to whole-system.`,
+      );
       return buildTaskBreakdownFromDocuments(params);
     }
     console.log(
-      `[Subsystems] Gate 1 bypassed — using persisted PRD-step manifest (${fb.subsystems.length} domains).`,
+      `[Subsystems] Gate 1 bypassed — using persisted PRD-step manifest (${fb.subsystems.length} domains, skipping endpoint-count gate).`,
     );
-    // Fast-path: use fallback manifest directly, skip decompose.
     const manifest = fb;
     const buildLayers = fbValidation.buildLayers;
-    const splitReasons = ["gate1 bypassed — persisted PRD-step manifest accepted", ...fbDecision.reasons];
+    const splitReasons = ["gate1 bypassed — persisted PRD-step manifest accepted (endpoint gate skipped)", `domains=${fb.subsystems.length} ≥ ${minDomains}`];
     return runDomainBreakdownWithManifest({
       params, inventory, manifest, buildLayers, splitReasons, usedFallbackManifest: true,
     });

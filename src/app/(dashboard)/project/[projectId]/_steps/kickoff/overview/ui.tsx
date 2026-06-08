@@ -270,7 +270,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const runKickoff = async () => {
+  const runKickoff = async (forceFull = false) => {
     setError(null);
     useStepStore.setState((s) => ({
       isRunning: true,
@@ -298,6 +298,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           pencil: steps.pencil?.content ?? "",
           qa: steps.qa?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
+          ...(forceFull ? { forceFull: true } : {}),
         }),
       });
       if (!resp.ok) throw new Error("Kickoff request failed");
@@ -400,12 +401,12 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {isCompleted && process.env.NEXT_PUBLIC_ENABLE_REGENERATE_SUMMARY === "true" && (
+              {isCompleted && (
                 <button
-                  onClick={runKickoff}
+                  onClick={() => void runKickoff(true)}
                   disabled={isRunning}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-semibold hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Regenerate summary"
+                  title="Regenerate task plan (forceFull)"
                 >
                   <RefreshCw size={11} className={isRunning ? "animate-spin" : ""} />
                   Regenerate
