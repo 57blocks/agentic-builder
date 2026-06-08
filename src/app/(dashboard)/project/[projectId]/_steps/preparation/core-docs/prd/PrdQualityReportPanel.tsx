@@ -5,6 +5,7 @@ import { ShieldCheck, Loader2, AlertTriangle, Info, AlertOctagon, Wand2, Check, 
 import { savePrdReadiness } from "./snapshot";
 import type {
   PrdQualityFinding,
+  PrdQualityDimension,
   PrdQualitySeverity,
 } from "@/lib/pipeline/gates/prd-quality-gate";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
@@ -25,6 +26,20 @@ const SEV_STYLE: Record<PrdQualitySeverity, { label: string; cls: string; Icon: 
 };
 
 const SEV_ORDER: Record<PrdQualitySeverity, number> = { blocker: 0, warn: 1, info: 2 };
+
+// Per-dimension tag color. The three flow/journey dimensions share one violet
+// tag so "business flow is broken" findings stand out as a group at a glance;
+// everything else gets its own muted hue.
+const DIM_STYLE: Record<PrdQualityDimension, { label: string; cls: string }> = {
+  "flow-completeness": { label: "flow", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  "business-flow": { label: "business-flow", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  "user-path": { label: "user-path", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  page: { label: "page", cls: "bg-sky-50 text-sky-700 border-sky-200" },
+  buildability: { label: "buildability", cls: "bg-slate-50 text-slate-600 border-slate-200" },
+  completeness: { label: "completeness", cls: "bg-teal-50 text-teal-700 border-teal-200" },
+  ambiguity: { label: "ambiguity", cls: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+  contradiction: { label: "contradiction", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+};
 
 type FixState = "idle" | "fixing" | "fixed" | "error";
 
@@ -259,7 +274,13 @@ export function PrdQualityReportPanel(props: {
                       <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${sev.cls}`}>
                         <sev.Icon size={11} /> {sev.label}
                       </span>
-                      <span className="text-[10px] font-mono text-slate-400">{f.dimension}</span>
+                      <span
+                        className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border ${
+                          (DIM_STYLE[f.dimension] ?? DIM_STYLE.buildability).cls
+                        }`}
+                      >
+                        {(DIM_STYLE[f.dimension] ?? DIM_STYLE.buildability).label}
+                      </span>
                       <span className="text-[11px] text-slate-500 truncate">@ {f.section}</span>
                       <span className="ml-auto text-[10px] font-mono text-slate-300">{f.id}</span>
                     </div>

@@ -29,6 +29,10 @@ export type PrdQualityDimension =
   | "page"
   | "user-path"
   | "business-flow"
+  // Deterministic finite-state-machine closure check over PrdWorkflowSpec —
+  // every business flow must start somewhere, only reference declared states,
+  // be reachable from its initial state, and have a way to end.
+  | "flow-completeness"
   // Layer-2 (semantic) dimensions — produced by the LLM PRD reviewer, not by
   // the deterministic gate. Kept in the same union so both layers' findings
   // merge into one report.
@@ -266,6 +270,254 @@ function checkBusinessFlow(spec: PrdSpec, c: FindingCollector): void {
   }
 }
 
+/**
+ * Deterministic FSM-closure check over each PrdWorkflowSpec — the cheapest way
+ * to catch a "business flow that breaks midway": an entity that starts in an
+ * undefined state, a transition into a state that was never declared, a state
+ * nothing leads to, or a lifecycle that never ends. Every one of these makes
+ * the downstream state-machine codegen generate a half-wired flow.
+ */
+function checkWorkflowClosure(spec: PrdSpec, c: FindingCollector): void {
+  const workflows = spec.domain?.workflows ?? [];
+
+  for (const w of workflows) {
+    const where = `Workflow ${w.id} (${w.entity})`;
+    const states = w.states ?? [];
+    const transitions = w.transitions ?? [];
+    const stateSet = new Set(states);
+
+    // No states → the FSM is undefined; nothing else is checkable.
+    if (states.length === 0) {
+      c.add({
+        dimension: "flow-completeness",
+        severity: "blocker",
+        section: where,
+        problem: `Workflow "${w.id}" for entity "${w.entity}" declares no states.`,
+        downstreamImpact:
+          "the state-machine codegen has nothing to generate — the entity's lifecycle is left to guesswork.",
+        suggestedFix: `Enumerate the lifecycle states for "${w.entity}" (e.g. initial → … → terminal).`,
+      });
+      continue;
+    }
+
+    // Initial state must be one of the declared states.
+    if (!w.initial || !stateSet.has(w.initial)) {
+      c.add({
+        dimension: "flow-completeness",
+        severity: "blocker",
+        section: where,
+        problem: w.initial
+          ? `Initial state "${w.initial}" is not among the declared states [${states.join(", ")}].`
+          : `Workflow "${w.id}" has no initial state.`,
+        downstreamImpact:
+          "newly created records land in an undefined state and the flow has no defined starting point.",
+        suggestedFix: w.initial
+          ? `Add "${w.initial}" to the states list, or point initial at one of [${states.join(", ")}].`
+          : `Declare the starting state (e.g. initial: "${states[0]}").`,
+      });
+    }
+
+    // Every transition endpoint must be a declared state (no dangling edges),
+    // and every transition must name an action that drives it.
+    for (const t of transitions) {
+      const edge = `${t.from || "?"} → ${t.to || "?"}`;
+      if (!t.from || !stateSet.has(t.from)) {
+        c.add({
+          dimension: "flow-completeness",
+          severity: "blocker",
+          section: where,
+          problem: `Transition ${edge} starts from undeclared state "${t.from || "(empty)"}".`,
+          downstreamImpact:
+            "the generated state machine references a state that doesn't exist → the transition is unreachable or throws at runtime.",
+          suggestedFix: `Add "${t.from}" to the states list, or correct the transition's "from".`,
+        });
+      }
+      if (!t.to || !stateSet.has(t.to)) {
+        c.add({
+          dimension: "flow-completeness",
+          severity: "blocker",
+          section: where,
+          problem: `Transition ${edge} targets undeclared state "${t.to || "(empty)"}".`,
+          downstreamImpact:
+            "the entity moves into a state with no definition → it gets stuck with no further actions and no UI for that state.",
+          suggestedFix: `Add "${t.to}" to the states list, or correct the transition's "to".`,
+        });
+      }
+      if (!t.action || !t.action.trim()) {
+        c.add({
+          dimension: "flow-completeness",
+          severity: "warn",
+          section: where,
+          problem: `Transition ${edge} has no action/trigger.`,
+          downstreamImpact:
+            "there's no event or control to fire this transition → the flow can advance only by manual DB edits.",
+          suggestedFix: `Name the action that drives ${edge} (e.g. a button, API call, or scheduled job).`,
+        });
+      }
+    }
+
+    // Reachability + termination only make sense once initial is valid.
+    if (w.initial && stateSet.has(w.initial)) {
+      const adj = new Map<string, string[]>();
+      for (const t of transitions) {
+        if (stateSet.has(t.from) && stateSet.has(t.to)) {
+          const list = adj.get(t.from) ?? [];
+          list.push(t.to);
+          adj.set(t.from, list);
+        }
+      }
+
+      const reached = new Set<string>([w.initial]);
+      const queue: string[] = [w.initial];
+      while (queue.length) {
+        const s = queue.shift()!;
+        for (const next of adj.get(s) ?? []) {
+          if (!reached.has(next)) {
+            reached.add(next);
+            queue.push(next);
+          }
+        }
+      }
+      const unreachable = states.filter((s) => !reached.has(s));
+      if (unreachable.length > 0) {
+        c.add({
+          dimension: "flow-completeness",
+          severity: "warn",
+          section: where,
+          problem: `State(s) [${unreachable.join(", ")}] can't be reached from the initial state "${w.initial}".`,
+          downstreamImpact:
+            "dead states are generated but never entered → their UI/handlers are built yet unused, and the flow they belong to is broken.",
+          suggestedFix: `Add a transition leading into [${unreachable.join(", ")}], or remove the unused state(s).`,
+        });
+      }
+
+      // Every state has an outgoing edge → the lifecycle never ends.
+      const hasOutgoing = new Set(
+        transitions.filter((t) => stateSet.has(t.from)).map((t) => t.from),
+      );
+      const terminals = states.filter((s) => !hasOutgoing.has(s));
+      if (terminals.length === 0) {
+        c.add({
+          dimension: "flow-completeness",
+          severity: "warn",
+          section: where,
+          problem: `Workflow "${w.id}" has no terminal state — every state has an outgoing transition.`,
+          downstreamImpact:
+            "the lifecycle never completes (no done/closed/archived state) → records loop indefinitely and 'finished' is undefined.",
+          suggestedFix:
+            "Mark at least one end state (e.g. completed / closed / archived) with no outgoing transition.",
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Page-navigation reachability — a deterministic, heuristic graph check over
+ * the pages and their interactive components. Two failure modes it catches:
+ *
+ *   1. Dead control: a component whose effect clearly *navigates* ("go to …",
+ *      "redirect to …") but names no page/route that exists — the classic
+ *      "button placed but never wired to a screen".
+ *   2. Orphan page: a screen no described navigation ever reaches from an entry
+ *      page — built but unreachable.
+ *
+ * Navigation edges are inferred from free text, so this is intentionally
+ * conservative: never a blocker, and orphan detection only runs once the PRD
+ * actually describes navigation (≥1 resolved edge) — otherwise the inferred
+ * graph is too sparse to judge and we stay silent rather than cry wolf.
+ */
+const NAV_INTENT =
+  /\b(navigat\w*|redirect\w*|go(?:es)? to|takes? (?:the )?user to|jump to|route to|leads? to|proceed to|continue to|back to|return to|link to)\b|跳转|进入|前往|返回|打开/i;
+
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9/ ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function checkPageReachability(spec: PrdSpec, c: FindingCollector): void {
+  const pages = spec.pages ?? [];
+  if (pages.length < 2) return; // single screen: nothing to navigate between
+
+  const targets = pages.map((p) => ({
+    page: p,
+    route: (p.route ?? "").trim().toLowerCase(),
+    name: normalizeForMatch(p.name ?? ""),
+  }));
+
+  const edges = new Map<string, Set<string>>(); // fromPageId → set<toPageId>
+  let navEdgeCount = 0;
+
+  for (const p of pages) {
+    for (const cmp of p.interactiveComponents ?? []) {
+      const text = `${cmp.name} ${cmp.interaction} ${cmp.effect}`;
+      const isNavType = /\b(link|tab)\b/i.test(cmp.type);
+      if (!NAV_INTENT.test(text) && !isNavType) continue;
+
+      const hay = normalizeForMatch(text);
+      const dest = targets.find(
+        (t) =>
+          t.page.id !== p.id &&
+          ((t.route.length > 1 && hay.includes(t.route)) ||
+            (t.name.length >= 3 && hay.includes(t.name))),
+      );
+
+      if (dest) {
+        const set = edges.get(p.id) ?? new Set<string>();
+        set.add(dest.page.id);
+        edges.set(p.id, set);
+        navEdgeCount++;
+      } else if (NAV_INTENT.test(text) && !/https?:\/\//i.test(text)) {
+        // Explicit in-app navigation intent, but no destination page resolves.
+        c.add({
+          dimension: "user-path",
+          severity: "warn",
+          section: `${p.id} ${p.name} › ${cmp.name}`,
+          problem: `"${cmp.name}" appears to navigate ("${cmp.effect || cmp.interaction}") but no matching page/route was found.`,
+          downstreamImpact:
+            "the control gets built with no destination wired → clicking it dead-ends (the half-implemented-button case).",
+          suggestedFix: `Name the destination page/route for "${cmp.name}", or add the missing page it should open.`,
+        });
+      }
+    }
+  }
+
+  if (navEdgeCount === 0) return; // PRD describes no navigation — don't guess.
+
+  const entryIds = pages.filter(looksLikeEntry).map((p) => p.id);
+  const roots = entryIds.length > 0 ? entryIds : [pages[0].id];
+  const reached = new Set<string>(roots);
+  const queue = [...roots];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const to of edges.get(id) ?? []) {
+      if (!reached.has(to)) {
+        reached.add(to);
+        queue.push(to);
+      }
+    }
+  }
+
+  const orphans = pages.filter((p) => !reached.has(p.id));
+  if (orphans.length > 0) {
+    c.add({
+      dimension: "user-path",
+      severity: "info",
+      section: "Pages",
+      problem: `No described navigation reaches page(s): ${orphans
+        .map((p) => `${p.id} (${p.name})`)
+        .join(", ")}.`,
+      downstreamImpact:
+        "these screens are built but no flow links to them → users can't get there (orphan pages).",
+      suggestedFix:
+        "Add a navigation control (link/button/menu) from a reachable page, or confirm they're deep-link-only.",
+    });
+  }
+}
+
 // ─── entry point ─────────────────────────────────────────────────────────────
 
 export function runPrdQualityGate(input: {
@@ -281,6 +533,8 @@ export function runPrdQualityGate(input: {
     checkPages(input.spec, c);
     checkUserPath(input.spec, c);
     checkBusinessFlow(input.spec, c);
+    checkWorkflowClosure(input.spec, c);
+    checkPageReachability(input.spec, c);
   }
 
   const findings = c.all();
