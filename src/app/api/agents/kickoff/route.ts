@@ -176,12 +176,6 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Incremental vs full: when a baseline snapshot exists and the new PRD
-        // differs from it — either an ID was added/removed OR any markdown
-        // section body changed — do an incremental task-breakdown so the UI
-        // can badge NEW/RERUN and coding only re-runs affected tasks. Pure
-        // prose edits used to fall through to a full breakdown because the
-        // ID set was identical; the section-diff check fixes that.
         let useIncremental = false;
         try {
           const prevSnapshot = forceFull ? null : await readKickoffSnapshot(outputRoot);
@@ -206,13 +200,26 @@ export async function POST(request: NextRequest) {
             e instanceof Error ? e.message : e,
           );
         }
-        console.log("[KickoffAPI] executeKickoffOnly starting, useIncremental=", useIncremental);
-        const result = useIncremental
-          ? await engine.executeIncrementalKickoffOnly(run, outputRoot)
-          : await engine.executeKickoffOnly(run, outputRoot);
+        // Keep the SSE connection alive while the LLM task breakdown runs.
+        // Without this, Next.js dev server drops idle connections after ~30s.
+        const keepaliveTimer = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": keepalive\n\n"));
+          } catch {
+            clearInterval(keepaliveTimer);
+          }
+        }, 15_000);
 
-        console.log("[KickoffAPI] executeKickoffOnly finished, run.status=", result.status,
-          "kickoff.status=", result.steps.kickoff?.status);
+        let result: Awaited<ReturnType<typeof engine.executeKickoffOnly>>;
+        try {
+          result = useIncremental
+            ? await engine.executeIncrementalKickoffOnly(run, outputRoot)
+            : await engine.executeKickoffOnly(run, outputRoot);
+        } finally {
+          clearInterval(keepaliveTimer);
+        }
+
+        console.log("[KickoffAPI] done, run.status=", result.status, "kickoff.status=", result.steps.kickoff?.status);
 
         // Auto-save pipeline snapshot for debug reuse
         try {
@@ -241,24 +248,16 @@ export async function POST(request: NextRequest) {
           console.error("[KickoffAPI] JSON.stringify(result) failed:", serErr);
           throw serErr;
         }
-        console.log("[KickoffAPI] enqueueing done event, payload length=", donePayload.length);
         controller.enqueue(encoder.encode(`data: ${donePayload}\n\n`));
-        console.log("[KickoffAPI] done event enqueued");
       } catch (error) {
-        const msg =
-          error instanceof Error ? error.message : "Kick-off failed";
-        console.error("[KickoffAPI] CAUGHT ERROR in main try block:", msg, error);
+        const msg = error instanceof Error ? error.message : "Kick-off failed";
+        console.error("[KickoffAPI] error:", msg);
         try {
           controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: "error", error: msg })}\n\n`,
-            ),
+            encoder.encode(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`),
           );
-        } catch (enqErr) {
-          console.error("[KickoffAPI] Failed to enqueue error event:", enqErr);
-        }
+        } catch { /* stream already closed */ }
       } finally {
-        console.log("[KickoffAPI] closing controller");
         controller.close();
       }
     },
