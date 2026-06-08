@@ -1,204 +1,292 @@
 version: 1
 rules:
-  # PLACEHOLDER: thresholds are authoritative from PRD text for some rules,
-  # but any operational TTL or edge timing that is not explicitly numeric in PRD
-  # must remain clearly marked in implementation comments.
-  - id: RULE-1
-    name: "Enrollment deadline gate"
-    description: "Blocks new enrollments after the course enrollment deadline."
+  # PLACEHOLDER: thresholds below are authoritative only where copied from the PRD;
+  # any non-verbatim fallback thresholds must preserve this comment in codegen.
+  - id: RQ-1-NORM
+    name: "First Contentful Paint target"
+    description: "FCP must be <= 1.5s."
     type: decision-table
     inputs:
-      - { name: enrollmentClosed, type: boolean }
-    output: { name: canEnroll, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { enrollmentClosed: true }
-        then: false
-      - when: { enrollmentClosed: false }
-        then: true
-
-  - id: RULE-2
-    name: "Group class capacity gate"
-    description: "Routes full group classes into waitlist flow."
-    type: decision-table
-    inputs:
-      - { name: classFull, type: boolean }
-    output: { name: enrollmentMode, type: string }
-    cases:
-      - when: { classFull: true }
-        then: "waitlist"
-      - when: { classFull: false }
-        then: "direct_pay"
-
-  - id: RULE-3
-    name: "Policy version gate"
-    description: "Requires signature of the current policy version before family actions continue."
-    type: decision-table
-    inputs:
-      - { name: policySigned, type: boolean }
-      - { name: currentVersion, type: string }
-    output: { name: requiresBlock, type: boolean }
-    cases:
-      - when: { policySigned: false }
-        then: true
-      - when: { policySigned: true }
-        then: false
-
-  - id: RULE-4
-    name: "Lesson credit expiry"
-    description: "Expires remaining private lesson credits when the expiry date is reached."
-    type: decision-table
-    inputs:
-      - { name: expired, type: boolean }
-      - { name: remainingCreditsPositive, type: boolean }
-    output: { name: shouldExpire, type: boolean }
-    cases:
-      - when: { expired: true, remainingCreditsPositive: true }
-        then: true
-      - when: { expired: false }
-        then: false
-
-  - id: RULE-5
-    name: "Refund window gate"
-    description: "Allows refunds only within 14 calendar days of bill creation/purchase, per PRD."
-    type: decision-table
-    inputs:
-      - { name: withinRefundWindow, type: boolean }
-      - { name: billStatusPaid, type: boolean }
-    output: { name: canRequestRefund, type: boolean }
-    cases:
-      - when: { withinRefundWindow: true, billStatusPaid: true }
+      - when: { value: 1.5 }
         then: true
       - when: { }
         then: false
-
-  - id: RULE-6
-    name: "Teacher work-hour submission gate"
-    description: "Requires all records confirmed and scoped to one month before submission."
+  - id: RQ-2-NORM
+    name: "Largest Contentful Paint target"
+    description: "LCP must be <= 2.5s."
     type: decision-table
     inputs:
-      - { name: allConfirmed, type: boolean }
-      - { name: singleMonth, type: boolean }
-    output: { name: canSubmit, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { allConfirmed: true, singleMonth: true }
+      - when: { value: 2.5 }
         then: true
       - when: { }
         then: false
-
-  - id: RULE-7
-    name: "Password strength gate"
-    description: "Requires minimum length and matching confirmation."
+  - id: RQ-3-NORM
+    name: "Cumulative Layout Shift target"
+    description: "CLS must be <= 0.1."
     type: decision-table
     inputs:
-      - { name: lengthOk, type: boolean }
-      - { name: matchOk, type: boolean }
-    output: { name: canSave, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { lengthOk: true, matchOk: true }
+      - when: { value: 0.1 }
         then: true
       - when: { }
         then: false
-
-  - id: RULE-8
-    name: "Email uniqueness gate"
-    description: "Prevents multiple active accounts from sharing the same email."
+  - id: RQ-4-NORM
+    name: "First Input Delay target"
+    description: "FID must be <= 100ms."
     type: decision-table
     inputs:
-      - { name: emailExists, type: boolean }
-    output: { name: canCreate, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { emailExists: false }
+      - when: { value: 100 }
         then: true
-      - when: { emailExists: true }
+      - when: { }
         then: false
-
-  - id: RULE-9
-    name: "Room conflict gate"
-    description: "Blocks class scheduling when room and time overlap."
+  - id: RQ-5-NORM
+    name: "Time to Interactive target"
+    description: "TTI must be <= 3.5s."
     type: decision-table
     inputs:
-      - { name: roomConflict, type: boolean }
-    output: { name: canSaveSchedule, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { roomConflict: false }
+      - when: { value: 3.5 }
         then: true
-      - when: { roomConflict: true }
+      - when: { }
         then: false
-
-  - id: RULE-10
-    name: "Teacher availability overlap gate"
-    description: "Blocks overlapping availability slots for the same teacher."
+  - id: RQ-6-NORM
+    name: "List first screen render target"
+    description: "列表首屏渲染 <= 2s."
     type: decision-table
     inputs:
-      - { name: slotOverlap, type: boolean }
-    output: { name: canSaveSlot, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { slotOverlap: false }
+      - when: { value: 2 }
         then: true
-      - when: { slotOverlap: true }
+      - when: { }
         then: false
-
-  - id: RULE-11
-    name: "Group lesson teacher cardinality"
-    description: "Ensures each group lesson has exactly one primary teacher."
+  - id: RQ-7-NORM
+    name: "Course catalog render target"
+    description: "课程目录 100 条 <= 1s."
     type: decision-table
     inputs:
-      - { name: teacherCountIsOne, type: boolean }
-    output: { name: valid, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { teacherCountIsOne: true }
+      - when: { value: 1 }
         then: true
-      - when: { teacherCountIsOne: false }
+      - when: { }
         then: false
-
-  - id: RULE-12
-    name: "Delete account confirmation"
-    description: "Requires DELETE confirmation text before deletion proceeds."
+  - id: RQ-8-NORM
+    name: "Route switch target"
+    description: "路由切换 <= 300ms."
     type: decision-table
     inputs:
-      - { name: confirmTextMatches, type: boolean }
-    output: { name: canDelete, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { confirmTextMatches: true }
+      - when: { value: 300 }
         then: true
-      - when: { confirmTextMatches: false }
+      - when: { }
         then: false
-
-  - id: RULE-13
-    name: "Approval workflow node limit"
-    description: "Limits approval workflows to three nodes."
+  - id: RQ-9-NORM
+    name: "Initial bundle size target"
+    description: "Bundle Size gzip initial <= 250KB."
     type: decision-table
     inputs:
-      - { name: nodeCountWithinLimit, type: boolean }
-    output: { name: valid, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { nodeCountWithinLimit: true }
+      - when: { value: 250 }
         then: true
-      - when: { nodeCountWithinLimit: false }
+      - when: { }
         then: false
-
-  - id: RULE-14
-    name: "Cart expiration gate"
-    description: "Disables expired cart items from checkout."
+  - id: RQ-10-NORM
+    name: "Total bundle size target"
+    description: "Bundle Size gzip total <= 1MB."
     type: decision-table
     inputs:
-      - { name: expired, type: boolean }
-    output: { name: selectable, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { expired: false }
+      - when: { value: 1 }
         then: true
-      - when: { expired: true }
+      - when: { }
         then: false
-
-  - id: RULE-15
-    name: "Stripe payment policy gate"
-    description: "Requires current policy signature before starting payment."
+  - id: RQ-11-NORM
+    name: "API P50 latency target"
+    description: "API P50延迟 <= 100ms."
     type: decision-table
     inputs:
-      - { name: policySigned, type: boolean }
-    output: { name: canPay, type: boolean }
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
     cases:
-      - when: { policySigned: true }
+      - when: { value: 100 }
         then: true
-      - when: { policySigned: false }
+      - when: { }
+        then: false
+  - id: RQ-12-NORM
+    name: "API P95 latency target"
+    description: "API P95延迟 <= 500ms."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 500 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-13-NORM
+    name: "API P99 latency target"
+    description: "API P99延迟 <= 1s."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 1 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-14-NORM
+    name: "Database query P95 target"
+    description: "数据库查询 P95 <= 50ms."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 50 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-15-NORM
+    name: "Availability target"
+    description: "可用性 >= 99.9%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 99.9 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-16-NORM
+    name: "Error rate target"
+    description: "错误率 <= 0.5%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 0.5 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-17-NORM
+    name: "Enrollment funnel conversion target"
+    description: "完成支付订单 / 进入报名页 >= 70%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 70 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-18-NORM
+    name: "Average enrollment time target"
+    description: "sum(支付时间 - 进入报名页时间) / N <= 5min."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 5 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-19-NORM
+    name: "Approval SLA closure target"
+    description: "24h 内闭环数 / 总审批数 >= 95%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 95 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-20-NORM
+    name: "Policy signature rate target"
+    description: "已签当前版本 / 活跃家庭 >= 90%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 90 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-21-NORM
+    name: "Credit waste rate target"
+    description: "过期未用学分 / 总购学分 <= 5%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 5 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-23-NORM
+    name: "Teacher hours submission target"
+    description: "月底前提交 / 应提交 >= 95%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 95 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-24-NORM
+    name: "Refund rate target"
+    description: "退款金额 / 总营收 <= 3%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 3 }
+        then: true
+      - when: { }
+        then: false
+  - id: RQ-25-NORM
+    name: "Payment failure rate target"
+    description: "失败 / 总尝试 <= 2%."
+    type: decision-table
+    inputs:
+      - { name: value, type: number }
+    output: { name: passes, type: boolean }
+    cases:
+      - when: { value: 2 }
+        then: true
+      - when: { }
         then: false
