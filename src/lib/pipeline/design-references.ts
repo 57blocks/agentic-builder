@@ -251,7 +251,15 @@ export async function addDesignReference(
   }
 
   const existing = await readManifest(projectRoot);
-  if (existing.length >= MAX_TOTAL_REFERENCES) {
+
+  // Dedup by fileName: if the same filename is uploaded again, replace the
+  // existing entry in-place so repeated uploads don't eat into the quota.
+  const normalizedName = input.fileName.slice(0, 200) || "";
+  const dupeIdx = normalizedName
+    ? existing.findIndex((e) => e.fileName === normalizedName)
+    : -1;
+
+  if (dupeIdx === -1 && existing.length >= MAX_TOTAL_REFERENCES) {
     return {
       ok: false,
       status: 409,
@@ -263,16 +271,17 @@ export async function addDesignReference(
   const storedFileName = `${id}.${resolved.ext}`;
   const entry: DesignReferenceEntry = {
     id,
-    fileName: input.fileName.slice(0, 200) || `${id}.${resolved.ext}`,
+    fileName: normalizedName || `${id}.${resolved.ext}`,
     storedFileName,
     mime: resolved.mime,
     bytes: input.bytes.byteLength,
     kind: resolved.kind,
     label: (input.label ?? "").trim().slice(0, 200),
-    pageHint: (input.pageHint ?? "").trim().slice(0, 80),
+    // Keep the old pageHint when replacing so manual assignments survive re-uploads.
+    pageHint: (input.pageHint ?? (dupeIdx >= 0 ? existing[dupeIdx]!.pageHint : "")).trim().slice(0, 80),
     uploadedAt: new Date().toISOString(),
     source: input.source ?? "upload",
-    matchedBy: input.matchedBy ?? "auto",
+    matchedBy: input.matchedBy ?? (dupeIdx >= 0 ? existing[dupeIdx]!.matchedBy : "auto"),
     ...(input.matchConfidence !== undefined && { matchConfidence: input.matchConfidence }),
     ...(input.cssToken !== undefined && { cssToken: input.cssToken }),
   };
@@ -283,7 +292,18 @@ export async function addDesignReference(
     input.bytes,
   );
 
-  const manifest = [...existing, entry];
+  // Remove old stored file when replacing.
+  if (dupeIdx >= 0) {
+    const oldStored = existing[dupeIdx]!.storedFileName;
+    try {
+      await fs.unlink(path.join(designReferenceDirAbs(projectRoot), oldStored));
+    } catch { /* best-effort */ }
+  }
+
+  const manifest =
+    dupeIdx >= 0
+      ? existing.map((e, i) => (i === dupeIdx ? entry : e))
+      : [...existing, entry];
   await writeManifest(projectRoot, manifest);
   return { ok: true, entry, manifest };
 }

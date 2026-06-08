@@ -265,6 +265,7 @@ export default function DesignReferencesDialog({
   const updateMeta = usePipelineStore((s) => s.updateDesignReferenceMeta);
   const removeOne = usePipelineStore((s) => s.deleteDesignReference);
   const clearAll = usePipelineStore((s) => s.clearDesignReferences);
+  const deduplicate = usePipelineStore((s) => s.deduplicateDesignReferences);
 
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [dragActive, setDragActive] = useState(false);
@@ -417,6 +418,10 @@ export default function DesignReferencesDialog({
     await clearAll();
   }, [references.length, clearAll]);
 
+  const handleDeduplicate = useCallback(async () => {
+    await deduplicate();
+  }, [deduplicate]);
+
   const statusLine = useMemo(() => {
     if (references.length === 0) return null;
     return `${references.length} reference(s) ready — will be copied to \`<output>/.design-references/\` on the next run.`;
@@ -487,14 +492,24 @@ export default function DesignReferencesDialog({
                   <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
                   <span>{statusLine}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleClearAll()}
-                  disabled={isBusy}
-                  className="rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading === "deleting" ? "Clearing…" : "Clear all"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeduplicate()}
+                    disabled={isBusy}
+                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading === "updating" ? "Deduplicating…" : "Deduplicate"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleClearAll()}
+                    disabled={isBusy}
+                    className="rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading === "deleting" ? "Clearing…" : "Clear all"}
+                  </button>
+                </div>
               </div>
             )}
 

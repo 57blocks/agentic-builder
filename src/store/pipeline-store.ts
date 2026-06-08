@@ -269,6 +269,8 @@ interface PipelineState {
   ) => Promise<boolean>;
   deleteDesignReference: (id: string) => Promise<boolean>;
   clearDesignReferences: () => Promise<boolean>;
+  /** Remove duplicate entries sharing the same fileName, keeping the newest. */
+  deduplicateDesignReferences: () => Promise<boolean>;
   /** Use vision LLM to auto-match unmatched image references to PRD pages. */
   autoMatchDesignReferences: (
     prdContent: string,
@@ -1906,6 +1908,40 @@ export const usePipelineStore = create<PipelineState>()(
             designReferencesLoading: "idle",
             designReferencesError:
               err instanceof Error ? err.message : "Network error.",
+          });
+          return false;
+        }
+      },
+
+      deduplicateDesignReferences: async () => {
+        set({ designReferencesLoading: "updating", designReferencesError: null });
+        try {
+          const resp = await fetch(
+            "/api/agents/pipeline/design-references/deduplicate",
+            { method: "POST" },
+          );
+          const data = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+            references?: DesignReferenceSummary[];
+            removedCount?: number;
+          };
+          if (!resp.ok) {
+            set({
+              designReferencesLoading: "idle",
+              designReferencesError: data.error || "Deduplication failed.",
+            });
+            return false;
+          }
+          if (Array.isArray(data.references)) {
+            set({ designReferences: data.references, designReferencesLoading: "idle" });
+          } else {
+            set({ designReferencesLoading: "idle" });
+          }
+          return true;
+        } catch (err) {
+          set({
+            designReferencesLoading: "idle",
+            designReferencesError: err instanceof Error ? err.message : "Network error.",
           });
           return false;
         }
