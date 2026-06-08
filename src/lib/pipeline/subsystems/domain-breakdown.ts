@@ -24,6 +24,11 @@ import type { KickoffWorkItem } from "../types";
 
 type ProjectTier = "S" | "M" | "L";
 import type { SubsystemManifest } from "./types";
+import {
+  buildDomainMd,
+  extractPrdSections,
+  collectSharedSectionAnchors,
+} from "./domain-files";
 
 /** Phases whose tasks are shared infrastructure, not owned by one domain. */
 export const FOUNDATION_PHASES = new Set([
@@ -96,13 +101,36 @@ export async function runDomainScopedBreakdown(args: {
   sessionId?: string;
   breakdownFn: BreakdownFn;
 }): Promise<DomainBreakdownResult> {
-  const { docs, domainRequirementIds, buildLayers, tier, sessionId, breakdownFn } = args;
+  const { docs, manifest, domainRequirementIds, buildLayers, tier, sessionId, breakdownFn } = args;
   let costUsd = 0;
 
   // 1. Foundation: full breakdown, keep only the shared/structural tasks.
   const foundationFull = await breakdownFn({ ...docs, tier, sessionId });
   costUsd += foundationFull.costUsd;
   const foundationTasks = foundationFull.tasks.filter(isFoundationTask);
+
+  // Per-domain passes feed a SCOPED PRD (the domain's own sections + shared
+  // global specs + dependency contracts — the same slice as domain-{id}.md)
+  // instead of the full mega-PRD. The full PRD was being re-sent on every
+  // domain pass (N× a ~200KB doc); the slice is a fraction of that and carries
+  // exactly what the domain needs. Shared anchors are project-wide → once.
+  const sharedAnchors = collectSharedSectionAnchors(docs.prd);
+  const subsystemById = new Map(manifest.subsystems.map((s) => [s.id, s]));
+  const scopedPrdFor = (domainId: string): string => {
+    const s = subsystemById.get(domainId);
+    if (!s) return docs.prd;
+    const prdSlice = extractPrdSections(docs.prd, s.prdSections);
+    if (!prdSlice.trim()) return docs.prd; // no anchored sections → don't starve it
+    const ownedAnchors = new Set(
+      s.prdSections.map((r) => r.replace(/^§/, "").trim()),
+    );
+    const sharedForThis = sharedAnchors.filter(
+      (a) => !ownedAnchors.has(a.replace(/^§/, "").trim()),
+    );
+    const sharedContent = extractPrdSections(docs.prd, sharedForThis);
+    const layerIdx = buildLayers.findIndex((l) => l.includes(domainId));
+    return buildDomainMd(s, manifest.subsystems, layerIdx, prdSlice, sharedContent);
+  };
 
   // 2. Per-domain scoped passes, in topological order. Domains in the SAME
   //    layer are mutually independent (no dependsOn between them), so they run
@@ -120,6 +148,7 @@ export async function runDomainScopedBreakdown(args: {
         if (reqs.length === 0) return { domainId, tagged: [] as KickoffWorkItem[], costUsd: 0 };
         const r = await breakdownFn({
           ...docs,
+          prd: scopedPrdFor(domainId),
           tier,
           sessionId,
           incremental: { existingTasks, requirementsToCover: reqs },
