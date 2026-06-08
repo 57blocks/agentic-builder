@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { type Project } from "@/types/project";
 
+interface ImportResult {
+  project: Project;
+  restored: boolean;
+  lastStep?: string;
+}
+
 interface UseProjectsReturn {
   projects: Project[];
   loading: boolean;
@@ -14,6 +20,8 @@ interface UseProjectsReturn {
    * Inserted at the front of the list so it appears first in the sidebar.
    */
   addLocalProject: (name?: string) => Project;
+  /** Import an existing directory as a project. Restores blueprint state if present. */
+  importProject: (dirPath: string, name: string, clientId: string) => Promise<ImportResult>;
   /** Rename a project. Optimistic — reverts on failure. */
   renameProject: (id: string, name: string) => Promise<void>;
   /** Delete a project. Optimistic — re-inserts on failure. */
@@ -88,6 +96,36 @@ export function useProjects(): UseProjectsReturn {
       // Notify other useProjects instances (e.g. AppNav sidebar) to re-fetch
       window.dispatchEvent(new Event("projects:refresh"));
       return data.project;
+    },
+    [],
+  );
+
+  const importProject = useCallback(
+    async (dirPath: string, name: string, clientId: string): Promise<ImportResult> => {
+      const res = await fetch("/api/projects/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, dirPath, id: clientId }),
+      });
+
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
+      }
+
+      if (!res.ok) {
+        const msg =
+          (body as { message?: string } | null)?.message ??
+          `Failed to import project (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+
+      const data = body as ImportResult;
+      setProjects((prev) => [data.project, ...prev]);
+      window.dispatchEvent(new Event("projects:refresh"));
+      return data;
     },
     [],
   );
@@ -197,6 +235,7 @@ export function useProjects(): UseProjectsReturn {
     error,
     createProject,
     addLocalProject,
+    importProject,
     renameProject,
     deleteProject,
     refresh,
