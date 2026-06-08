@@ -2472,6 +2472,53 @@ function routeAfterGenerate(state: WorkerState): string {
 }
 
 /**
+ * Produce a compact structural snapshot of a value for debug logging.
+ * Rules:
+ *   - string  → first 10 chars + "…" (or full if <= 10)
+ *   - number | boolean | null | undefined → as-is
+ *   - Array   → "[N items]" header + each element expanded one level
+ *   - object  → key: value pairs, each value recursed one more level
+ * `depth` limits recursion (default 2) so deeply-nested objects don't explode.
+ */
+function snapshotValue(value: unknown, depth = 2): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    return value.length <= 10 ? value : `${value.slice(0, 10)}…`;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    if (depth === 0) return `[${value.length} items]`;
+    return {
+      _length: value.length,
+      ...(value.length > 0 ? { "[0]": snapshotValue(value[0], depth - 1) } : {}),
+    };
+  }
+  if (typeof value === "object") {
+    if (depth === 0) return "{…}";
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        snapshotValue(v, depth - 1),
+      ]),
+    );
+  }
+  return String(value).slice(0, 10);
+}
+
+function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
+  const snap = snapshotValue(state) as Record<string, unknown>;
+  console.log(
+    `[Worker:${state.workerLabel}] ── AGENT CONTEXT SNAPSHOT ──\n` +
+    `  agentType : "${state.role}"\n` +
+    `  task      : "${taskTitle}"\n` +
+    `  context   :\n${JSON.stringify(snap, null, 2)
+      .split("\n")
+      .map((l) => `    ${l}`)
+      .join("\n")}`,
+  );
+}
+
+/**
  * Try to find a design-reference image whose pageHint matches the given task.
  * Matching is two-pass:
  *   1. PAGE-xxx ID match (most reliable — extracted from task title + description)
@@ -2521,6 +2568,7 @@ async function generateCode(state: WorkerState) {
     console.log(
       `[Worker:${state.workerLabel}] Generating code for: "${task.title}" (attempt ${attempt}/${MAX_TASK_GENERATION_RETRIES + 1}) ...`,
     );
+    logAgentContextSnapshot(state, task.title);
 
     const contextParts: string[] = [];
 
