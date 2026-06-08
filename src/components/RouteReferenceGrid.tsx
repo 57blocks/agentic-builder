@@ -255,11 +255,11 @@ export function RouteReferenceGrid({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Top input zone */}
-      <div className="flex gap-3">
+      {/* Top input zone — items-stretch keeps both sides equal height */}
+      <div className="flex gap-3 items-stretch">
         {/* Image drop zone */}
         <div
-          className={`flex-1 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 p-5 cursor-pointer transition-colors min-h-[88px] ${
+          className={`flex-1 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 p-5 cursor-pointer transition-colors ${
             isDraggingOver
               ? "border-indigo-400 bg-indigo-50"
               : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-white"
@@ -295,7 +295,6 @@ export function RouteReferenceGrid({
             placeholder={
               "Paste URLs, one per line\nhttps://app.example.com/dashboard\nhttps://app.example.com/login"
             }
-            rows={3}
             className="flex-1 bg-white border border-slate-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 p-2.5 resize-none font-mono outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100 leading-relaxed"
           />
           <button
