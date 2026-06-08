@@ -152,6 +152,9 @@ export interface CodingSessionSnapshot {
     id: string;
     title: string;
     phase: string;
+    /** Business-domain tag — kept so the topology view can group by domain
+     *  after a session is hydrated from this snapshot. */
+    subsystem?: string;
     codingStatus: CodingTask["codingStatus"];
     generatedFiles: string[];
     error?: string;
@@ -176,6 +179,7 @@ function persistSessionSnapshot(
       id: t.id,
       title: t.title,
       phase: t.phase,
+      subsystem: t.subsystem,
       codingStatus: t.codingStatus,
       generatedFiles: t.generatedFiles ?? [],
       error: t.error,
@@ -801,6 +805,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         id: t.id,
         title: t.title,
         phase: t.phase,
+        subsystem: kickoff?.subsystem ?? t.subsystem,
         description: kickoff?.description ?? "",
         estimatedHours: kickoff?.estimatedHours ?? 0,
         executionKind: kickoff?.executionKind ?? "ai_autonomous",

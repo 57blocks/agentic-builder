@@ -355,9 +355,16 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         </div>
 
         {/* ── Title ─────────────────────────────────────────────────────── */}
-        <p className={`text-[12px] font-semibold leading-snug line-clamp-2 mb-2.5 ${titleCls}`}>
+        <p className={`text-[12px] font-semibold leading-snug line-clamp-2 mb-1.5 ${titleCls}`}>
           {task.title}
         </p>
+
+        {/* ── Domain (subsystem) tag ────────────────────────────────────── */}
+        {task.subsystem && (
+          <span className="mb-2.5 inline-block rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700">
+            {task.subsystem}
+          </span>
+        )}
 
         {/* ── Bottom row: phase icon + duration / stage ─────────────────── */}
         <div className="flex items-center justify-between">

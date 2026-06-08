@@ -41,7 +41,18 @@ import { useElapsedTimer } from "./use-elapsed-timer";
 
 // ─── React Flow node type registry ───────────────────────────────────────────
 
-const nodeTypes = { taskNode: TaskNode };
+/** Background dashed box that visually groups one domain's task nodes. */
+function DomainBoxNode({ data }: { data: { label: string } }) {
+  return (
+    <div className="pointer-events-none relative h-full w-full rounded-2xl border border-dashed border-violet-300/80 bg-violet-50/20">
+      <span className="absolute left-3 top-2 rounded bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+        {data.label}
+      </span>
+    </div>
+  );
+}
+
+const nodeTypes = { taskNode: TaskNode, domainBox: DomainBoxNode };
 
 // ─── DAG layout: assign each node a level = max(dep levels) + 1 ──────────────
 // Produces a left-to-right flow: level 0 at x=0, level 1 at x=COL_GAP, etc.
@@ -84,36 +95,77 @@ function buildFlowGraph(
   if (tasks.length === 0) return { nodes: [], edges: [] };
 
   const levels = computeTopoLevels(tasks);
-
-  // Group by level
-  const levelMap = new Map<number, string[]>();
-  for (const [id, lvl] of levels) {
-    if (!levelMap.has(lvl)) levelMap.set(lvl, []);
-    levelMap.get(lvl)!.push(id);
-  }
-
-  const sortedLevels = Array.from(levelMap.entries()).sort(([a], [b]) => a - b);
-  const maxPerLevel = Math.max(...sortedLevels.map(([, ids]) => ids.length));
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
+  const maxLevel = Math.max(0, ...[...levels.values()]);
+
+  // Group tasks into domain SWIMLANES. Lane membership is purely visual — the
+  // topological level (x) and the dependency edges are unchanged; tasks of the
+  // same subsystem just share a horizontal band so we can draw one dashed box
+  // around them. Untagged / foundation tasks share the first lane.
+  const SHARED = "__shared__";
+  const laneIds = new Map<string, string[]>();
+  let hasShared = false;
+  for (const t of tasks) {
+    const d = (t as KickoffWorkItem).subsystem || SHARED;
+    if (d === SHARED) hasShared = true;
+    if (!laneIds.has(d)) laneIds.set(d, []);
+    laneIds.get(d)!.push(t.id);
+  }
+  const laneOrder = [
+    ...(hasShared ? [SHARED] : []),
+    ...[...laneIds.keys()].filter((d) => d !== SHARED).sort(),
+  ];
+
+  const LABEL_H = 30;
+  const LANE_PAD = 18;
+  const LANE_GAP = 28;
+  const boxW = maxLevel * COL_GAP + NODE_W + LANE_PAD * 2;
 
   const nodes: Node[] = [];
   const posMap = new Map<string, { x: number; y: number }>();
+  let laneTop = 0;
 
-  for (const [lvl, ids] of sortedLevels) {
-    const vertOffset = ((maxPerLevel - ids.length) * ROW_GAP) / 2;
-    ids.forEach((id, rowIdx) => {
-      const x = lvl * COL_GAP;
-      const y = vertOffset + rowIdx * ROW_GAP;
-      posMap.set(id, { x, y });
-      nodes.push({
-        id,
-        type: "taskNode",
-        position: { x, y },
-        selected: id === selectedId,
-        data: { task: taskMap.get(id)! } satisfies TaskNodeData,
-        style: { width: NODE_W, height: NODE_H },
-      });
+  for (const domain of laneOrder) {
+    const ids = laneIds.get(domain) ?? [];
+    // Stack the lane's tasks per topo level (x = global level → columns align).
+    const byLevel = new Map<number, string[]>();
+    for (const id of ids) {
+      const lvl = levels.get(id) ?? 0;
+      if (!byLevel.has(lvl)) byLevel.set(lvl, []);
+      byLevel.get(lvl)!.push(id);
+    }
+    const laneRows = Math.max(1, ...[...byLevel.values()].map((a) => a.length));
+    const laneBodyH = laneRows * ROW_GAP;
+    const contentTop = laneTop + LABEL_H;
+
+    // Dashed domain box (behind its tasks — pushed first within the lane).
+    nodes.push({
+      id: `lane-${domain}`,
+      type: "domainBox",
+      position: { x: -LANE_PAD, y: laneTop },
+      data: { label: domain === SHARED ? "Shared / Foundation" : domain },
+      style: { width: boxW, height: LABEL_H + laneBodyH + LANE_PAD },
+      selectable: false,
+      draggable: false,
     });
+
+    for (const [lvl, levelIds] of byLevel) {
+      levelIds.forEach((id, rowIdx) => {
+        const x = lvl * COL_GAP;
+        const y = contentTop + rowIdx * ROW_GAP;
+        posMap.set(id, { x, y });
+        nodes.push({
+          id,
+          type: "taskNode",
+          position: { x, y },
+          selected: id === selectedId,
+          data: { task: taskMap.get(id)! } satisfies TaskNodeData,
+          style: { width: NODE_W, height: NODE_H },
+        });
+      });
+    }
+
+    laneTop += LABEL_H + laneBodyH + LANE_PAD + LANE_GAP;
   }
 
   // Collect active task ids so edges leading INTO them can be animated
@@ -188,8 +240,16 @@ function useMergedTasks(
     if (codingTasks.length === 0) return kickoffTasks;
     const codingMap = new Map(codingTasks.map((t) => [t.id, t]));
     const kickoffIds = new Set(kickoffTasks.map((t) => t.id));
-    // Merge kickoff tasks with live coding status
-    const merged = kickoffTasks.map((t) => codingMap.get(t.id) ?? t);
+    // Merge kickoff tasks with live coding status. Live status wins, but keep
+    // the kickoff task's `subsystem` tag — the live CodingTask from the coding
+    // SSE doesn't carry it, and the topology view groups domains by it.
+    const merged = kickoffTasks.map((t) => {
+      const live = codingMap.get(t.id);
+      if (!live) return t;
+      const subsystem =
+        (live as KickoffWorkItem).subsystem ?? (t as KickoffWorkItem).subsystem;
+      return subsystem ? { ...live, subsystem } : live;
+    });
     // Append extra tasks injected server-side (e.g. E2E scaffold tasks)
     // that are not part of the original kickoff breakdown
     const extra = codingTasks.filter((t) => !kickoffIds.has(t.id));
