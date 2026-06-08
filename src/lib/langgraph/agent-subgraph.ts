@@ -2523,6 +2523,53 @@ function routeAfterGenerate(state: WorkerState): string {
 }
 
 /**
+ * Produce a compact structural snapshot of a value for debug logging.
+ * Rules:
+ *   - string  → first 10 chars + "…" (or full if <= 10)
+ *   - number | boolean | null | undefined → as-is
+ *   - Array   → "[N items]" header + each element expanded one level
+ *   - object  → key: value pairs, each value recursed one more level
+ * `depth` limits recursion (default 2) so deeply-nested objects don't explode.
+ */
+function snapshotValue(value: unknown, depth = 2): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    return value.length <= 10 ? value : `${value.slice(0, 10)}…`;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    if (depth === 0) return `[${value.length} items]`;
+    return {
+      _length: value.length,
+      ...(value.length > 0 ? { "[0]": snapshotValue(value[0], depth - 1) } : {}),
+    };
+  }
+  if (typeof value === "object") {
+    if (depth === 0) return "{…}";
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        snapshotValue(v, depth - 1),
+      ]),
+    );
+  }
+  return String(value).slice(0, 10);
+}
+
+function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
+  const snap = snapshotValue(state) as Record<string, unknown>;
+  console.log(
+    `[Worker:${state.workerLabel}] ── AGENT CONTEXT SNAPSHOT ──\n` +
+    `  agentType : "${state.role}"\n` +
+    `  task      : "${taskTitle}"\n` +
+    `  context   :\n${JSON.stringify(snap, null, 2)
+      .split("\n")
+      .map((l) => `    ${l}`)
+      .join("\n")}`,
+  );
+}
+
+/**
  * Try to find a design-reference image whose pageHint matches the given task.
  * Matching is two-pass:
  *   1. PAGE-xxx ID match (most reliable — extracted from task title + description)
@@ -2572,6 +2619,7 @@ async function generateCode(state: WorkerState) {
     console.log(
       `[Worker:${state.workerLabel}] Generating code for: "${task.title}" (attempt ${attempt}/${MAX_TASK_GENERATION_RETRIES + 1}) ...`,
     );
+    logAgentContextSnapshot(state, task.title);
 
     const contextParts: string[] = [];
 
@@ -2766,17 +2814,29 @@ async function generateCode(state: WorkerState) {
           const imgBytes = await nodeFs.readFile(imgPath);
           const b64 = imgBytes.toString("base64");
           const dataUrl = `data:${matchedRef.mime};base64,${b64}`;
+
+          // Append CSS tokens to the task text when the matched reference has them.
+          // Tokens are extracted from the source URL and represent the exact design-system
+          // values (colours, spacing, fonts, radii) the user expects to be replicated.
+          const cssTokenEntries = matchedRef.cssToken
+            ? Object.entries(matchedRef.cssToken)
+            : [];
+          const cssTokenNote =
+            cssTokenEntries.length > 0
+              ? `\n\n## CSS Design Tokens for this page\nThe following tokens were extracted from the reference URL. Replicate every value exactly — use Tailwind arbitrary values (e.g. \`bg-[#6366f1]\`, \`gap-[8px]\`) or CSS custom properties. Do not approximate.\n\n${cssTokenEntries.map(([k, v]) => `- \`${k}\`: \`${v}\``).join("\n")}`
+              : "";
+
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
-              { type: "text", text: userTaskText },
+              { type: "text", text: userTaskText + cssTokenNote },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
           injectedVisionImage = true;
           console.log(
-            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint})`,
+            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""})`,
           );
         }
       } catch (err) {

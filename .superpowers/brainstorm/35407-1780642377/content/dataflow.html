@@ -1,0 +1,118 @@
+<h2>整体数据流</h2>
+<p class="subtitle">三条输入路径 → 统一 Vision 匹配队列 → 路由映射表</p>
+
+<div class="mockup">
+  <div class="mockup-header">数据流图</div>
+  <div class="mockup-body" style="padding:24px;">
+    <div style="display:flex;gap:0;align-items:flex-start;justify-content:center;">
+
+      <!-- INPUT COLUMN -->
+      <div style="display:flex;flex-direction:column;gap:10px;width:160px;">
+        <div style="text-align:center;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">输入源</div>
+
+        <div style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:4px;">🖼</div>
+          <div style="font-size:11px;color:#93c5fd;font-weight:600;">上传图片</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;">拖拽 / 点击</div>
+        </div>
+
+        <div style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:4px;">🔗</div>
+          <div style="font-size:11px;color:#93c5fd;font-weight:600;">粘贴 URL 列表</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;">批量抓取</div>
+        </div>
+
+        <div style="background:#1e3a5f;border:1px solid #8b5cf6;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:4px;">📌</div>
+          <div style="font-size:11px;color:#c4b5fd;font-weight:600;">点击空路由</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;">为指定路由输入 URL</div>
+        </div>
+      </div>
+
+      <!-- ARROW 1 -->
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:60px;padding-top:60px;">
+        <div style="width:100%;height:1px;background:linear-gradient(to right,#3b82f6,#6366f1);"></div>
+        <div style="font-size:14px;color:#6366f1;margin-top:-2px;">→</div>
+        <div style="font-size:8px;color:#6b7280;margin-top:2px;text-align:center;">截图<br/>+CSSToken</div>
+      </div>
+
+      <!-- MIDDLE: URL FETCHER -->
+      <div style="display:flex;flex-direction:column;gap:10px;width:130px;padding-top:46px;">
+        <div style="text-align:center;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">URL 处理</div>
+        <div style="background:#292524;border:1px solid #78716c;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:4px;">⚙️</div>
+          <div style="font-size:11px;color:#d6d3d1;font-weight:600;">URL Fetcher</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:4px;text-align:left;line-height:1.5;">
+            • 截图页面<br/>
+            • 提取 CSS token<br/>
+            • 产出图片 + token 包
+          </div>
+        </div>
+        <div style="font-size:8px;color:#78716c;text-align:center;font-style:italic;">（已有能力，复用）</div>
+      </div>
+
+      <!-- ARROW 2 -->
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:60px;padding-top:60px;">
+        <div style="width:100%;height:1px;background:linear-gradient(to right,#6366f1,#8b5cf6);"></div>
+        <div style="font-size:14px;color:#8b5cf6;margin-top:-2px;">→</div>
+        <div style="font-size:8px;color:#6b7280;margin-top:2px;text-align:center;">图片<br/>入队</div>
+      </div>
+
+      <!-- MATCH ENGINE -->
+      <div style="display:flex;flex-direction:column;gap:10px;width:140px;">
+        <div style="text-align:center;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">匹配引擎</div>
+        <div style="background:#14532d;border:1px solid #16a34a;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:4px;">🧠</div>
+          <div style="font-size:11px;color:#86efac;font-weight:600;">Vision Auto-Match</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:4px;text-align:left;line-height:1.5;">
+            • 上传图 + 抓取截图<br/>
+              走同一队列<br/>
+            • PRD 路由作候选集<br/>
+            • 置信度 ≥ medium 才写入<br/>
+            • 同路由：高置信度覆盖
+          </div>
+        </div>
+        <div style="background:#1c1917;border:1px solid #a16207;border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:11px;color:#fcd34d;font-weight:600;">手动覆盖</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;line-height:1.5;">拖拽 / 路由 URL 输入<br/>优先级最高，无视置信度</div>
+        </div>
+      </div>
+
+      <!-- ARROW 3 -->
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:60px;padding-top:60px;">
+        <div style="width:100%;height:1px;background:linear-gradient(to right,#16a34a,#10b981);"></div>
+        <div style="font-size:14px;color:#10b981;margin-top:-2px;">→</div>
+      </div>
+
+      <!-- OUTPUT -->
+      <div style="display:flex;flex-direction:column;gap:10px;width:150px;">
+        <div style="text-align:center;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">最终产物</div>
+        <div style="background:#134e4a;border:1px solid #0d9488;border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:#5eead4;font-weight:600;margin-bottom:8px;">路由映射表</div>
+          <div style="background:#0f2027;border-radius:4px;padding:6px;font-family:monospace;font-size:9px;color:#6b7280;line-height:1.7;">
+            <span style="color:#5eead4;">/dashboard</span><br/>
+            &nbsp;image: ✓<br/>
+            &nbsp;cssToken: ✓<br/>
+            <span style="color:#5eead4;">/login</span><br/>
+            &nbsp;image: ✓<br/>
+            &nbsp;cssToken: —<br/>
+            <span style="color:#9ca3af;">/settings</span><br/>
+            &nbsp;image: —<br/>
+            &nbsp;cssToken: —
+          </div>
+        </div>
+        <div style="font-size:8px;color:#6b7280;text-align:center;line-height:1.5;">上传图片来源：无 cssToken<br/>URL 来源：有 cssToken</div>
+      </div>
+
+    </div>
+
+    <!-- Bottom note -->
+    <div style="margin-top:20px;padding:10px;background:#1a1d27;border-radius:6px;border-left:3px solid #f59e0b;">
+      <span style="font-size:10px;color:#fcd34d;font-weight:600;">关键注意：</span>
+      <span style="font-size:10px;color:#9ca3af;">
+        上传图片只产出截图，无 cssToken；URL 来源同时产出截图 + cssToken。
+        最终 cssToken 只存在于 URL 来源的路由上，这是系统的固有限制，需在 UI 上明示。
+      </span>
+    </div>
+  </div>
+</div>

@@ -46,6 +46,18 @@ export async function POST(request: NextRequest) {
   const pageHints = form
     .getAll("pageHint")
     .map((v) => (typeof v === "string" ? v : ""));
+  const sources = form
+    .getAll("source")
+    .map((v) => (v === "url" ? "url" : "upload")) as Array<"upload" | "url">;
+  const matchedBys = form
+    .getAll("matchedBy")
+    .map((v) => (v === "manual" ? "manual" : "auto")) as Array<"auto" | "manual">;
+  const cssTokensRaw = form
+    .getAll("cssToken")
+    .map((v) => {
+      if (typeof v !== "string" || !v) return undefined;
+      try { return JSON.parse(v) as Record<string, string>; } catch { return undefined; }
+    });
 
   const added: Array<{ id: string; fileName: string }> = [];
   const skipped: Array<{ fileName: string; reason: string }> = [];
@@ -71,6 +83,9 @@ export async function POST(request: NextRequest) {
       bytes: buffer,
       label: labels[i] ?? "",
       pageHint: pageHints[i] ?? "",
+      source: sources[i] ?? "upload",
+      matchedBy: matchedBys[i] ?? "auto",
+      cssToken: cssTokensRaw[i],
     });
 
     if (!result.ok) {

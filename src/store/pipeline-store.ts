@@ -126,6 +126,10 @@ export interface DesignReferenceSummary {
   label: string;
   pageHint: string;
   uploadedAt: string;
+  source: "upload" | "url";
+  matchedBy: "auto" | "manual";
+  matchConfidence?: "high" | "medium" | "low";
+  cssToken?: Record<string, string>;
 }
 
 export interface DesignReferenceUploadResult {
@@ -243,10 +247,25 @@ interface PipelineState {
     labels?: string[],
     pageHints?: string[],
   ) => Promise<DesignReferenceUploadResult | null>;
-  /** Patch metadata (label / pageHint) on a single reference. */
+  /**
+   * Persists a URL-captured screenshot to disk immediately via the fetch-url endpoint.
+   * Call autoMatchDesignReferences afterwards to Vision-match unmatched entries.
+   */
+  fetchUrlDesignReference: (
+    url: string,
+    screenshotDataUrl: string,
+    cssToken?: Record<string, string>,
+    pageHint?: string,
+  ) => Promise<{ referenceId: string; pageHint: string | null } | null>;
+  /** Patch metadata (label / pageHint / matchedBy / matchConfidence) on a single reference. */
   updateDesignReferenceMeta: (
     id: string,
-    patch: { label?: string; pageHint?: string },
+    patch: {
+      label?: string;
+      pageHint?: string;
+      matchedBy?: "auto" | "manual";
+      matchConfidence?: "high" | "medium" | "low" | null;
+    },
   ) => Promise<boolean>;
   deleteDesignReference: (id: string) => Promise<boolean>;
   clearDesignReferences: () => Promise<boolean>;
@@ -1727,6 +1746,49 @@ export const usePipelineStore = create<PipelineState>()(
             designReferencesLoading: "idle",
             designReferencesError:
               err instanceof Error ? err.message : "Network error.",
+          });
+          return null;
+        }
+      },
+
+      fetchUrlDesignReference: async (url, screenshotDataUrl, cssToken, pageHint) => {
+        set({ designReferencesLoading: "uploading", designReferencesError: null });
+        try {
+          const resp = await fetch(
+            "/api/agents/pipeline/design-references/fetch-url",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url, screenshotDataUrl, cssToken, pageHint }),
+            },
+          );
+          const data = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+            referenceId?: string;
+            pageHint?: string | null;
+            references?: DesignReferenceSummary[];
+          };
+          if (!resp.ok) {
+            set({
+              designReferencesLoading: "idle",
+              designReferencesError: data.error || "Failed to persist URL screenshot.",
+            });
+            return null;
+          }
+          if (Array.isArray(data.references)) {
+            set({ designReferences: data.references, designReferencesLoading: "idle", designReferencesError: null });
+          } else {
+            set({ designReferencesLoading: "idle", designReferencesError: null });
+          }
+          return {
+            // API guarantees referenceId on 200 OK; "" is a safe fallback if the shape changes.
+            referenceId: data.referenceId ?? "",
+            pageHint: data.pageHint ?? null,
+          };
+        } catch (err) {
+          set({
+            designReferencesLoading: "idle",
+            designReferencesError: err instanceof Error ? err.message : "Network error.",
           });
           return null;
         }

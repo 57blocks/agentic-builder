@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Upload, X, Link, Loader2, CheckCircle2, AlertCircle, ImageIcon, Layers, RefreshCw, GitCompare } from "lucide-react";
+import { ArrowRight, X, Link, Loader2, RefreshCw, GitCompare } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
@@ -10,7 +10,7 @@ import { getNextStep } from "@/_config/pipeline-flow";
 import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
-import PageScreenshotsPanel from "@/components/PageScreenshotsPanel";
+import { RouteReferenceGrid } from "@/components/RouteReferenceGrid";
 import type { StepUIProps } from "../../../_shared/types";
 import { DocDiffView } from "../../../_shared/DocDiffView";
 import {
@@ -20,16 +20,12 @@ import {
   type DesignStyle,
   type StitchGenerateResult,
 } from "./agent";
-import { formatReferenceTokens } from "@/lib/design/format-reference-tokens";
 
 /**
  * Build the `designDirectionPrompt` fragment for a fetched reference URL.
  * Prefers the Electron-extracted token block; falls back to the raw HTML
  * returned by the non-Electron server fetch.
  */
-function urlReferencePrompt(ref: { url: string; html: string; tokensText?: string }): string {
-  return ref.tokensText ?? `<!-- Reference URL: ${ref.url} -->\n${ref.html}`;
-}
 
 interface KbRecord {
   id: string;
@@ -540,15 +536,6 @@ function ScreenshotCarousel({
   );
 }
 
-// ─── Style reference image (local, not persisted) ────────────────────────────
-
-interface StyleRefImage {
-  key: string;
-  file: File;
-  previewUrl: string;
-  dataUrl: string | null; // base64 data URL, resolved async
-  loading: boolean;
-}
 
 // ─── Phase type ───────────────────────────────────────────────────────────────
 
@@ -614,31 +601,17 @@ export function DesignUI(props: StepUIProps) {
   const [designSourceMode, setDesignSourceMode] = useState<"ai" | "custom">(() => designMeta.designSourceMode ?? "ai");
 
   // Reference sub-mode: style-only (local, not persisted) vs page restoration (persisted, used in coding)
-  const [referenceMode, setReferenceMode] = useState<"style" | "restoration">("style");
 
   // Style-reference images (local React state — not stored to .blueprint/)
-  const [styleRefImages, setStyleRefImages] = useState<StyleRefImage[]>([]);
-  const [styleRefDragActive, setStyleRefDragActive] = useState(false);
 
   // Design references from pipeline store (uploaded screenshots for page restoration)
   const designReferences = usePipelineStore((s) => s.designReferences);
   const uploadDesignReferences = usePipelineStore((s) => s.uploadDesignReferences);
 
   // Custom URL reference
-  const [urlInput, setUrlInput] = useState("");
-  const [urlFetching, setUrlFetching] = useState(false);
-  const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
+  const [isMatching, setIsMatching] = useState(false);
   // `html` is set by the non-Electron fallback fetch; `screenshotDataUrl` +
   // `tokensText` are set by the Electron render-capture path.
-  const [urlFetchedPages, setUrlFetchedPages] = useState<Array<{
-    url: string;
-    html: string;
-    screenshotDataUrl?: string;
-    tokensText?: string;
-  }>>([]);
-  // True while an Electron capture is paused on a detected login wall — drives
-  // the manual "I've logged in — capture now" fallback button.
-  const [awaitingLogin, setAwaitingLogin] = useState(false);
 
   // Stitch — initialized from persisted metadata
   const [stitchResult, setStitchResult] = useState<StitchGenerateResult | null>(() => designMeta.stitchResult ?? null);
@@ -879,39 +852,113 @@ export function DesignUI(props: StepUIProps) {
       .finally(() => setStitchScreensLoading(false));
   }, [stitchResult?.projectId]);
 
-  // ── Style-reference image handlers (local, not persisted) ──────────────────
 
-  const addStyleRefImages = useCallback((files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
-    const entries: StyleRefImage[] = imageFiles.map((file) => ({
-      key: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      file,
-      previewUrl: URL.createObjectURL(file),
-      dataUrl: null,
-      loading: true,
-    }));
-    for (const entry of entries) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setStyleRefImages((prev) =>
-          prev.map((f) =>
-            f.key === entry.key ? { ...f, dataUrl: reader.result as string, loading: false } : f,
-          ),
+  const handleUploadToGrid = useCallback(
+    async (files: File[]) => {
+      const result = await usePipelineStore
+        .getState()
+        .uploadDesignReferences(
+          files,
+          files.map(() => ""),
+          files.map(() => ""),
         );
-      };
-      reader.readAsDataURL(entry.file);
-    }
-    setStyleRefImages((prev) => [...prev, ...entries]);
-  }, []);
+      if (result && prdContent) {
+        setIsMatching(true);
+        try {
+          await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        } finally {
+          setIsMatching(false);
+        }
+      }
+    },
+    [prdContent],
+  );
 
-  const removeStyleRefImage = useCallback((key: string) => {
-    setStyleRefImages((prev) => {
-      const target = prev.find((f) => f.key === key);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((f) => f.key !== key);
-    });
-  }, []);
+  const handleFetchUrlsToGrid = useCallback(
+    async (urls: string[]) => {
+      setIsMatching(true);
+      try {
+        await Promise.allSettled(
+          urls.map(async (url) => {
+            let screenshotDataUrl: string | undefined;
+            let cssToken: Record<string, string> | undefined;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const result = await (window as any).electronAPI.renderReferenceUrl(url);
+                screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
+                cssToken = result?.cssTokens ?? result?.cssToken;
+              } catch {
+                // no screenshot available in Electron
+              }
+            }
+
+            if (!screenshotDataUrl) return; // Non-Electron: skip — no screenshot available
+
+            await usePipelineStore
+              .getState()
+              .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
+          }),
+        );
+        if (prdContent) {
+          await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        }
+      } finally {
+        setIsMatching(false);
+      }
+    },
+    [prdContent],
+  );
+
+  const handleFetchRouteUrl = useCallback(
+    async (url: string, pageHint: string) => {
+      let screenshotDataUrl: string | undefined;
+      let cssToken: Record<string, string> | undefined;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (window as any).electronAPI.renderReferenceUrl(url);
+          screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
+          cssToken = result?.cssTokens ?? result?.cssToken;
+        } catch {
+          // no screenshot
+        }
+      }
+
+      if (!screenshotDataUrl) return;
+
+      await usePipelineStore
+        .getState()
+        .fetchUrlDesignReference(url, screenshotDataUrl, cssToken, pageHint);
+    },
+    [],
+  );
+
+  const handleDropToRoute = useCallback(
+    async (referenceId: string, pageHint: string) => {
+      const currentRefs = usePipelineStore.getState().designReferences;
+      const existingOwner = currentRefs.find(
+        (r) => r.pageHint === pageHint && r.id !== referenceId,
+      );
+      if (existingOwner) {
+        await usePipelineStore
+          .getState()
+          .updateDesignReferenceMeta(existingOwner.id, { pageHint: "" });
+      }
+      await usePipelineStore
+        .getState()
+        .updateDesignReferenceMeta(referenceId, {
+          pageHint,
+          matchedBy: "manual",
+          matchConfidence: null,
+        });
+    },
+    [],
+  );
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -941,42 +988,13 @@ export function DesignUI(props: StepUIProps) {
         designDirectionPrompt,
         useUploadedDesignReferences: false,
       });
-    } else if (referenceMode === "style") {
-      // Style reference mode: pass local images inline (not persisted to disk).
-      const htmlParts: string[] = [];
-      urlFetchedPages.forEach((p) => htmlParts.push(urlReferencePrompt(p)));
-      setDesignContext({
-        designStyleId: null,
-        styleReferenceImageBase64: null,
-        styleReferenceImages: [
-          ...styleRefImages.filter((img) => img.dataUrl).map((img) => img.dataUrl!),
-          ...urlFetchedPages.flatMap((p) => p.screenshotDataUrl ? [p.screenshotDataUrl] : []),
-        ],
-        designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
-        useUploadedDesignReferences: false,
-      });
     } else {
-      // Page restoration mode: persist all URL screenshots to disk so they are
-      // available to both the design agent and downstream coding agents.
-      for (const page of urlFetchedPages) {
-        if (!page.screenshotDataUrl) continue;
-        try {
-          const res = await fetch(page.screenshotDataUrl);
-          const blob = await res.blob();
-          const ext = blob.type === "image/png" ? "png" : "jpg";
-          const file = new File([blob], `url-capture.${ext}`, { type: blob.type || "image/jpeg" });
-          await uploadDesignReferences([file], [page.url], [""]);
-        } catch (e) {
-          console.warn("[design] Failed to persist URL screenshot to disk:", e);
-        }
-      }
-      const htmlParts: string[] = [];
-      urlFetchedPages.forEach((p) => htmlParts.push(urlReferencePrompt(p)));
+      // Custom reference mode: assets are already on disk (persisted immediately on upload/fetch).
       setDesignContext({
         designStyleId: null,
         styleReferenceImageBase64: null,
         styleReferenceImages: undefined,
-        designDirectionPrompt: htmlParts.length > 0 ? htmlParts.join("\n\n") : null,
+        designDirectionPrompt: null,
         useUploadedDesignReferences: true,
       });
     }
@@ -1305,258 +1323,19 @@ export function DesignUI(props: StepUIProps) {
 
               {/* ── Tab: Reference Screenshots ── */}
               {designSourceMode === "custom" && (
-                <div className="flex flex-col gap-5">
-                  {/* Sub-mode toggle */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setReferenceMode("style")}
-                      className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
-                        referenceMode === "style"
-                          ? "border-[#712ae2] bg-violet-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <ImageIcon size={15} className={referenceMode === "style" ? "text-[#712ae2]" : "text-slate-400"} />
-                        <span className={`text-[12.5px] font-semibold ${referenceMode === "style" ? "text-[#712ae2]" : "text-slate-700"}`}>
-                          Style Reference
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-relaxed">
-                        Upload images as visual inspiration. The AI extracts colors, typography, and layout patterns to generate a matching design spec.
-                      </p>
-                    </button>
-                    <button
-                      onClick={() => setReferenceMode("restoration")}
-                      className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
-                        referenceMode === "restoration"
-                          ? "border-[#712ae2] bg-violet-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Layers size={15} className={referenceMode === "restoration" ? "text-[#712ae2]" : "text-slate-400"} />
-                        <span className={`text-[12.5px] font-semibold ${referenceMode === "restoration" ? "text-[#712ae2]" : "text-slate-700"}`}>
-                          Page Restoration
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-relaxed">
-                        Upload one screenshot per page for pixel-perfect replication. Images are matched to PRD pages and used by coding agents.
-                      </p>
-                    </button>
-                  </div>
+                <RouteReferenceGrid
+                  prdContent={prdContent}
+                  references={designReferences}
+                  isMatching={isMatching}
+                  onUpload={handleUploadToGrid}
+                  onFetchUrls={handleFetchUrlsToGrid}
+                  onFetchRouteUrl={handleFetchRouteUrl}
+                  onRemove={async (id) => {
+                    await usePipelineStore.getState().deleteDesignReference(id);
+                  }}
+                  onDropToRoute={handleDropToRoute}
+                />
 
-                  {/* ── Style Reference mode ── */}
-                  {referenceMode === "style" && (
-                    <div className="flex flex-col gap-4">
-                      {/* Drop zone */}
-                      <div
-                        onDragEnter={(e) => { e.preventDefault(); setStyleRefDragActive(true); }}
-                        onDragOver={(e) => { e.preventDefault(); setStyleRefDragActive(true); }}
-                        onDragLeave={() => setStyleRefDragActive(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setStyleRefDragActive(false);
-                          addStyleRefImages(Array.from(e.dataTransfer.files ?? []));
-                        }}
-                        className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors cursor-pointer ${
-                          styleRefDragActive
-                            ? "border-[#712ae2] bg-violet-50"
-                            : "border-slate-300 bg-slate-50 hover:border-slate-400"
-                        }`}
-                      >
-                        <Upload size={22} className={styleRefDragActive ? "text-[#712ae2]" : "text-slate-400"} />
-                        <div className="text-center">
-                          <p className="text-[12px] text-slate-600 font-medium">
-                            Drop screenshots here or{" "}
-                            <label className="text-[#712ae2] cursor-pointer hover:underline">
-                              browse
-                              <input
-                                type="file"
-                                accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
-                                multiple
-                                onChange={(e) => {
-                                  addStyleRefImages(Array.from(e.target.files ?? []));
-                                  e.target.value = "";
-                                }}
-                                className="hidden"
-                              />
-                            </label>
-                          </p>
-                          <p className="text-[10px] text-slate-400 mt-1">PNG, JPG, WebP, GIF</p>
-                        </div>
-                      </div>
-
-                      {/* Preview thumbnails */}
-                      {styleRefImages.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2">
-                          {styleRefImages.map((img) => (
-                            <div key={img.key} className="relative group rounded-lg overflow-hidden border border-slate-200 bg-slate-100 aspect-video">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={img.previewUrl} alt={img.file.name} className="w-full h-full object-cover" />
-                              {img.loading && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-white/60">
-                                  <Loader2 size={14} className="animate-spin text-[#712ae2]" />
-                                </div>
-                              )}
-                              <button
-                                onClick={() => removeStyleRefImage(img.key)}
-                                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
-                              >
-                                <X size={11} />
-                              </button>
-                              <p className="absolute bottom-0 left-0 right-0 px-1.5 py-1 text-[9px] text-white bg-gradient-to-t from-black/60 to-transparent truncate">
-                                {img.file.name}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── Page Restoration mode ── */}
-                  {referenceMode === "restoration" && prdContent.trim() && (
-                    <PageScreenshotsPanel prdContent={prdContent} />
-                  )}
-
-                  {/* Optional URL reference */}
-                  <div className="flex flex-col gap-2">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Or paste reference URLs (optional)</div>
-                      <div className="text-[10.5px] text-slate-400 mt-0.5">One URL per line — each page will be captured as a screenshot and used as a design reference</div>
-                    </div>
-                    <form
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        const urls = urlInput.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-                        if (urls.length === 0) return;
-                        setUrlFetching(true);
-                        setUrlFetchError(null);
-                        setAwaitingLogin(false);
-                        const errors: string[] = [];
-                        for (const url of urls) {
-                          let unsubLoginNeeded: (() => void) | undefined;
-                          try {
-                            // In Electron, render the page in a hidden window so CSR SPAs
-                            // yield a real screenshot + live CSS tokens. Otherwise fall
-                            // back to the server-side raw-HTML fetch.
-                            if (typeof window !== "undefined" && window.electronAPI?.isElectron) {
-                              unsubLoginNeeded = window.electronAPI.onReferenceLoginNeeded?.(() =>
-                                setAwaitingLogin(true),
-                              );
-                              const result = await window.electronAPI.renderReferenceUrl(url);
-                              if (!result.ok || !result.screenshotDataUrl) {
-                                errors.push(`${url}: ${result.error ?? "Failed to render"}`);
-                              } else {
-                                const finalUrl = result.finalUrl ?? url;
-                                setUrlFetchedPages((prev) => [...prev, {
-                                  url: finalUrl,
-                                  html: "",
-                                  screenshotDataUrl: result.screenshotDataUrl,
-                                  tokensText: formatReferenceTokens(finalUrl, result.tokens),
-                                }]);
-                              }
-                            } else {
-                              const res = await fetch("/api/fetch-url-content", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ url }),
-                              });
-                              const data = await res.json() as { html?: string; url?: string; error?: string };
-                              if (!res.ok || data.error) {
-                                errors.push(`${url}: ${data.error ?? "Failed to fetch"}`);
-                              } else {
-                                setUrlFetchedPages((prev) => [...prev, { url: data.url!, html: data.html! }]);
-                              }
-                            }
-                          } catch (err) {
-                            errors.push(`${url}: ${err instanceof Error ? err.message : "Network error"}`);
-                          } finally {
-                            unsubLoginNeeded?.();
-                            setAwaitingLogin(false);
-                          }
-                        }
-                        setUrlFetching(false);
-                        setUrlInput("");
-                        if (errors.length > 0) setUrlFetchError(errors.join("\n"));
-                      }}
-                      className="flex flex-col gap-2"
-                    >
-                      <textarea
-                        value={urlInput}
-                        onChange={(e) => {
-                          setUrlInput(e.target.value);
-                          setUrlFetchError(null);
-                        }}
-                        placeholder={"https://example.com/login\nhttps://example.com/dashboard\nhttps://example.com/settings"}
-                        rows={3}
-                        disabled={urlFetching}
-                        className="w-full text-[12px] text-slate-700 placeholder-slate-400 outline-none bg-white border border-slate-200 rounded-lg px-3 py-2 resize-none leading-relaxed disabled:opacity-50"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!urlInput.trim() || urlFetching}
-                        className="self-end px-3 py-1.5 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-                      >
-                        {urlFetching ? (
-                          <><Loader2 size={13} className="animate-spin" /> Fetching…</>
-                        ) : "Fetch All"}
-                      </button>
-                    </form>
-                    {urlFetchError && (
-                      <div className="flex items-center gap-1.5 text-[11px] text-red-600">
-                        <AlertCircle size={12} className="shrink-0" />
-                        {urlFetchError}
-                      </div>
-                    )}
-                    {awaitingLogin && (
-                      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                        <div className="flex-1 min-w-0 text-[11px] text-amber-800">
-                          A login window opened. Sign in there — capture continues automatically.
-                          If it doesn&apos;t, click here once you&apos;re logged in.
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => window.electronAPI?.confirmReferenceCapture?.()}
-                          className="px-2.5 py-1.5 text-[11px] font-medium text-white bg-amber-600 rounded-md hover:bg-amber-500 transition-colors shrink-0"
-                        >
-                          I&apos;m logged in — capture now
-                        </button>
-                      </div>
-                    )}
-                    {urlFetchedPages.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {urlFetchedPages.map((page, i) => (
-                          <div key={i} className="w-[calc(25%-6px)] flex flex-col rounded-lg border border-emerald-200 bg-emerald-50 overflow-hidden min-w-0 group relative">
-                            {page.screenshotDataUrl ? (
-                              <img
-                                src={page.screenshotDataUrl}
-                                alt="Captured reference page"
-                                className="w-full aspect-video object-cover object-top"
-                              />
-                            ) : (
-                              <div className="w-full aspect-video bg-emerald-100 flex items-center justify-center">
-                                <CheckCircle2 size={16} className="text-emerald-400" />
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1 px-1.5 py-1 min-w-0">
-                              <CheckCircle2 size={9} className="text-emerald-600 shrink-0" />
-                              <p className="text-[9.5px] text-emerald-800 truncate leading-tight">{page.url}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setUrlFetchedPages((prev) => prev.filter((_, idx) => idx !== i))}
-                              className="absolute top-1 right-1 p-0.5 rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60"
-                            >
-                              <X size={10} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
               )}
 
               {/* ── Bottom center next button ── */}
@@ -1565,9 +1344,8 @@ export function DesignUI(props: StepUIProps) {
                   onClick={handleGenerateDesignDoc}
                   disabled={
                     (designSourceMode === "ai" && !selectedStyleId) ||
-                    (designSourceMode === "custom" && referenceMode === "style" && styleRefImages.filter((r) => r.dataUrl).length === 0 && urlFetchedPages.length === 0) ||
-                    (designSourceMode === "custom" && referenceMode === "restoration" && designReferences.filter((r) => r.kind === "image").length === 0 && urlFetchedPages.length === 0) ||
-                    urlFetching ||
+                    (designSourceMode === "custom" && designReferences.filter((r) => r.kind === "image").length === 0) ||
+                    isMatching ||
                     isDesignRunning
                   }
                   className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-[14px] font-semibold rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
@@ -1887,25 +1665,12 @@ export function DesignUI(props: StepUIProps) {
                 if (!i || isDesignRunning) return;
                 setSpecInput("");
                 {
-                  const urlScreenshots =
-                    designSourceMode === "custom"
-                      ? urlFetchedPages.flatMap((p) => p.screenshotDataUrl ? [p.screenshotDataUrl] : [])
-                      : [];
-                  const styleImgs =
-                    designSourceMode === "custom" && referenceMode === "style"
-                      ? styleRefImages.filter((img) => img.dataUrl).map((img) => img.dataUrl!)
-                      : [];
-                  const mergedImgs = [...styleImgs, ...urlScreenshots];
                   setDesignContext({
                     designStyleId: designSourceMode === "ai" ? selectedStyleId : undefined,
                     styleReferenceImageBase64: null,
-                    styleReferenceImages: mergedImgs.length > 0 ? mergedImgs : undefined,
-                    designDirectionPrompt:
-                      designSourceMode === "custom" && urlFetchedPages.length > 0
-                        ? urlFetchedPages.map((p) => urlReferencePrompt(p)).join("\n\n")
-                        : null,
-                    useUploadedDesignReferences:
-                      designSourceMode === "custom" && referenceMode === "restoration",
+                    styleReferenceImages: undefined,
+                    designDirectionPrompt: null,
+                    useUploadedDesignReferences: designSourceMode === "custom",
                   });
                 }
                 void executeStep("design", i);

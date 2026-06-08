@@ -1,0 +1,132 @@
+<h2>Reference Screenshot 重设计：3 个方案</h2>
+<p class="subtitle">架构相同，区别在于 UI 交互模型。选出你偏好的方向。</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f1117;">
+      <div style="display:flex;gap:10px;height:160px;">
+        <!-- Left panel: inputs -->
+        <div style="flex:1;background:#1a1d27;border-radius:8px;border:1px solid #2a2d3a;padding:12px;display:flex;flex-direction:column;gap:8px;">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">输入</div>
+          <div style="flex:1;border:1.5px dashed #374151;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#6b7280;">拖拽上传图片</div>
+          <div style="background:#111827;border:1px solid #374151;border-radius:4px;padding:6px;font-size:9px;color:#6b7280;">粘贴 URL...</div>
+        </div>
+        <!-- Right panel: route grid -->
+        <div style="flex:1.5;background:#1a1d27;border-radius:8px;border:1px solid #2a2d3a;padding:12px;">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">路由映射</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <div style="background:#111827;border:1px solid #10b981;border-radius:4px;padding:6px;">
+              <div style="font-size:8px;color:#10b981;">/dashboard</div>
+              <div style="width:100%;height:28px;background:#1f2937;border-radius:3px;margin-top:4px;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#6ee7b7;">✓ 已匹配</span></div>
+            </div>
+            <div style="background:#111827;border:1px solid #374151;border-radius:4px;padding:6px;">
+              <div style="font-size:8px;color:#9ca3af;">/login</div>
+              <div style="width:100%;height:28px;background:#111827;border-radius:3px;margin-top:4px;border:1px dashed #374151;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#4b5563;">待匹配</span></div>
+            </div>
+            <div style="background:#111827;border:1px solid #10b981;border-radius:4px;padding:6px;">
+              <div style="font-size:8px;color:#10b981;">/settings</div>
+              <div style="width:100%;height:28px;background:#1f2937;border-radius:3px;margin-top:4px;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#6ee7b7;">✓ URL 截图</span></div>
+            </div>
+            <div style="background:#111827;border:1px solid #374151;border-radius:4px;padding:6px;">
+              <div style="font-size:8px;color:#9ca3af;">/profile</div>
+              <div style="width:100%;height:28px;background:#111827;border-radius:3px;margin-top:4px;border:1px dashed #374151;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#4b5563;">待匹配</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — 左右分栏</h3>
+      <p>左侧专注输入（上传区 + URL 输入），右侧实时显示路由映射结果。输入和输出始终可见，随时追加。</p>
+      <div class="pros-cons" style="font-size:12px;margin-top:8px;">
+        <div class="pros"><h4>优点</h4><ul><li>输入/输出分离清晰</li><li>实时反馈直观</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>页面路由多时右侧拥挤</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f1117;">
+      <div style="height:160px;background:#1a1d27;border-radius:8px;border:1px solid #2a2d3a;padding:12px;display:flex;flex-direction:column;gap:8px;">
+        <!-- Top: collapsible add area -->
+        <div style="background:#111827;border:1px solid #374151;border-radius:6px;padding:8px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;color:#6b7280;">+ 添加参考</span>
+          <div style="flex:1;background:#1f2937;height:1px;"></div>
+          <div style="width:60px;background:#1f2937;border-radius:3px;height:22px;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#9ca3af;">展开 ▾</span></div>
+        </div>
+        <!-- Route cards grid (primary view) -->
+        <div style="flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+          <div style="background:#111827;border:1.5px solid #10b981;border-radius:5px;padding:6px;position:relative;">
+            <div style="font-size:8px;color:#10b981;">/dashboard</div>
+            <div style="width:100%;height:36px;background:#1f2937;border-radius:3px;margin-top:4px;"></div>
+            <div style="position:absolute;top:4px;right:4px;width:16px;height:16px;background:#10b981;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;">✓</div>
+          </div>
+          <div style="background:#111827;border:1px dashed #374151;border-radius:5px;padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+            <div style="font-size:8px;color:#9ca3af;">/login</div>
+            <div style="font-size:8px;color:#4b5563;">拖拽到此</div>
+          </div>
+          <div style="background:#111827;border:1.5px solid #f59e0b;border-radius:5px;padding:6px;position:relative;">
+            <div style="font-size:8px;color:#f59e0b;">/settings</div>
+            <div style="width:100%;height:36px;background:#1f2937;border-radius:3px;margin-top:4px;"></div>
+            <div style="position:absolute;top:4px;right:4px;width:16px;height:16px;background:#f59e0b;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;">↻</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — 路由卡片为主</h3>
+      <p>PRD 路由卡片作为主视图铺开，顶部折叠区处理上传/URL。匹配结果直接落在对应卡片上，手动拖拽覆盖任意卡片。</p>
+      <div class="pros-cons" style="font-size:12px;margin-top:8px;">
+        <div class="pros"><h4>优点</h4><ul><li>以路由为中心，目标导向</li><li>哪些路由还缺图一目了然</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>上传区折叠后不够显眼</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f1117;">
+      <div style="display:flex;flex-direction:column;gap:8px;height:160px;">
+        <!-- Top: input bar -->
+        <div style="background:#1a1d27;border:1px solid #2a2d3a;border-radius:6px;padding:8px;display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;border:1px dashed #374151;border-radius:4px;padding:4px 8px;font-size:9px;color:#6b7280;">拖入图片 / 粘贴 URL</div>
+          <div style="background:#3b82f6;border-radius:4px;padding:4px 10px;font-size:9px;color:white;">处理中…</div>
+        </div>
+        <!-- Bottom: split - images list + route grid -->
+        <div style="flex:1;display:flex;gap:8px;">
+          <!-- Left: all images with status -->
+          <div style="width:100px;background:#1a1d27;border-radius:6px;border:1px solid #2a2d3a;padding:8px;display:flex;flex-direction:column;gap:4px;">
+            <div style="font-size:8px;color:#6b7280;">图片池</div>
+            <div style="background:#111827;border-radius:3px;padding:3px 5px;display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;background:#1f2937;border-radius:1px;"></div><span style="font-size:8px;color:#10b981;">→ /dash</span></div>
+            <div style="background:#111827;border-radius:3px;padding:3px 5px;display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;background:#1f2937;border-radius:1px;"></div><span style="font-size:8px;color:#f59e0b;">匹配中…</span></div>
+            <div style="background:#111827;border-radius:3px;padding:3px 5px;display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;background:#1f2937;border-radius:1px;"></div><span style="font-size:8px;color:#6b7280;">待处理</span></div>
+          </div>
+          <!-- Right: route grid -->
+          <div style="flex:1;background:#1a1d27;border-radius:6px;border:1px solid #2a2d3a;padding:8px;">
+            <div style="font-size:8px;color:#6b7280;margin-bottom:6px;">路由映射</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+              <div style="background:#111827;border:1px solid #10b981;border-radius:3px;padding:4px;font-size:8px;color:#10b981;">/dashboard ✓</div>
+              <div style="background:#111827;border:1px solid #374151;border-radius:3px;padding:4px;font-size:8px;color:#4b5563;">/login —</div>
+              <div style="background:#111827;border:1px solid #374151;border-radius:3px;padding:4px;font-size:8px;color:#4b5563;">/settings —</div>
+              <div style="background:#111827;border:1px solid #374151;border-radius:3px;padding:4px;font-size:8px;color:#4b5563;">/profile —</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — 图片池 + 路由映射</h3>
+      <p>顶部统一输入栏，左侧"图片池"列出所有来源图片及其匹配状态，右侧路由映射表。过程透明，适合路由多、图片多的场景。</p>
+      <div class="pros-cons" style="font-size:12px;margin-top:8px;">
+        <div class="pros"><h4>优点</h4><ul><li>匹配过程完全可见</li><li>易于发现"孤儿图片"</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>UI 最复杂，信息密度高</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:16px;padding:12px;background:#1a1d27;border-radius:8px;border-left:3px solid #3b82f6;">
+  <span class="label">我的推荐</span>
+  <p style="margin-top:6px;font-size:13px;color:#d1d5db;">推荐 <strong>B（路由卡片为主）</strong>——因为你的最终产物是路由映射表，以路由为中心思考最自然；哪条路由缺图、哪条已匹配，扫一眼就清楚。上传/URL 输入作为"补充操作"收进折叠区也符合实际使用频率。</p>
+</div>

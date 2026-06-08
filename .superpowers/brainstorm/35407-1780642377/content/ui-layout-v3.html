@@ -1,0 +1,138 @@
+<h2>UI Component Design</h2>
+<p class="subtitle">Approach B — Route cards as primary view (all English, button style matched)</p>
+
+<div class="mockup">
+  <div class="mockup-header">Full Page Layout</div>
+  <div class="mockup-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+    <!-- TOP: Unified input zone -->
+    <div style="background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;padding:12px;">
+      <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Reference Sources — add more at any time</div>
+      <div style="display:flex;gap:10px;align-items:stretch;">
+        <div style="flex:1;border:1.5px dashed #374151;border-radius:6px;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:70px;">
+          <div style="font-size:22px;">🖼</div>
+          <div style="font-size:11px;color:#9ca3af;">Drop images here or click to upload</div>
+          <div style="font-size:9px;color:#4b5563;">Saved to disk immediately · Vision match triggered</div>
+        </div>
+        <div style="flex:1.2;display:flex;flex-direction:column;gap:6px;">
+          <textarea style="flex:1;background:#111827;border:1px solid #374151;border-radius:6px;color:#d1d5db;font-size:11px;padding:8px;resize:none;font-family:monospace;min-height:58px;" placeholder="Paste URLs, one per line&#10;https://app.example.com/dashboard&#10;https://app.example.com/login"></textarea>
+          <button style="background:#3b82f6;border:none;border-radius:4px;color:white;font-size:10px;padding:4px 10px;cursor:pointer;align-self:flex-end;">Fetch Screenshots →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROUTE CARDS GRID -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">Route Mapping <span style="color:#374151;font-size:9px;font-style:normal;text-transform:none;">· 3 / 5 matched</span></div>
+        <div style="font-size:9px;color:#4b5563;">Drag an image onto a card to override</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+
+        <!-- Matched via URL -->
+        <div style="background:#1a1d27;border:1.5px solid #10b981;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#1f2937,#111827);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">🖥</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:white;">URL</div>
+            <div style="position:absolute;top:5px;right:5px;background:#134e4a;border:1px solid #0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:#5eead4;">CSS ✓</div>
+            <div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);border-radius:3px;padding:1px 5px;font-size:8px;color:#10b981;">high</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#10b981;font-weight:600;">/dashboard</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">app.example.com/dashboard</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">Replace</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Matched via upload -->
+        <div style="background:#1a1d27;border:1.5px solid #10b981;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#1e3a5f,#0f1f3d);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">📱</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#1e3a5f;border:1px solid #3b82f6;border-radius:3px;padding:1px 5px;font-size:8px;color:#93c5fd;">Upload</div>
+            <div style="position:absolute;top:5px;right:5px;background:#292524;border:1px solid #57534e;border-radius:3px;padding:1px 5px;font-size:8px;color:#78716c;">CSS —</div>
+            <div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);border-radius:3px;padding:1px 5px;font-size:8px;color:#10b981;">medium</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#10b981;font-weight:600;">/login</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;">login-screenshot.png</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">Replace</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual -->
+        <div style="background:#1a1d27;border:1.5px solid #8b5cf6;border-radius:8px;overflow:hidden;">
+          <div style="position:relative;">
+            <div style="width:100%;height:72px;background:linear-gradient(135deg,#2e1065,#1e0a4f);display:flex;align-items:center;justify-content:center;"><span style="font-size:24px;">👤</span></div>
+            <div style="position:absolute;top:5px;left:5px;background:#3b0764;border:1px solid #7c3aed;border-radius:3px;padding:1px 5px;font-size:8px;color:#c4b5fd;">Manual</div>
+            <div style="position:absolute;top:5px;right:5px;background:#134e4a;border:1px solid #0d9488;border-radius:3px;padding:1px 5px;font-size:8px;color:#5eead4;">CSS ✓</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#8b5cf6;font-weight:600;">/settings</div>
+            <div style="font-size:9px;color:#4b5563;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">app.example.com/settings</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <button style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px;">Replace</button>
+              <button style="background:#1f2937;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 5px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty with URL input -->
+        <div style="background:#1a1d27;border:1.5px dashed #374151;border-radius:8px;overflow:hidden;">
+          <div style="width:100%;height:72px;background:#111827;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;">
+            <div style="font-size:18px;color:#374151;">+</div>
+            <div style="font-size:9px;color:#4b5563;">Drop image here or enter URL below</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#6b7280;font-weight:600;">/profile</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <input style="flex:1;background:#111827;border:1px solid #374151;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 6px;" placeholder="Enter URL to fetch screenshot…" />
+              <button style="background:#374151;border:none;border-radius:3px;color:#9ca3af;font-size:9px;padding:2px 6px;">↵</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty unmatched -->
+        <div style="background:#1a1d27;border:1.5px dashed #2a2d3a;border-radius:8px;overflow:hidden;opacity:0.5;">
+          <div style="width:100%;height:72px;background:#111827;display:flex;align-items:center;justify-content:center;">
+            <div style="font-size:9px;color:#374151;">Unmatched</div>
+          </div>
+          <div style="padding:7px;">
+            <div style="font-size:11px;color:#4b5563;font-weight:600;">/analytics</div>
+            <div style="display:flex;gap:4px;margin-top:5px;">
+              <input style="flex:1;background:#111827;border:1px solid #2a2d3a;border-radius:3px;color:#4b5563;font-size:9px;padding:2px 6px;" placeholder="Enter URL to fetch screenshot…" />
+              <button style="background:#1f2937;border:none;border-radius:3px;color:#374151;font-size:9px;padding:2px 6px;">↵</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- GENERATE BUTTON — matches existing: bg-indigo-600 rounded-lg px-6 py-2.5 centered -->
+    <div style="border-top:1px solid #1f2937;padding-top:14px;display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="font-size:10px;color:#6b7280;margin-bottom:2px;">
+        <span style="color:#10b981;font-weight:600;">3</span> of 5 routes matched &nbsp;·&nbsp;
+        <span style="color:#5eead4;">2</span> routes with CSS token
+      </div>
+      <button style="display:flex;align-items:center;gap-6px;padding:10px 24px;background:#4f46e5;color:white;font-size:14px;font-weight:600;border:none;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(99,102,241,0.4);">
+        Generate based on screenshots &nbsp;→
+      </button>
+      <div style="font-size:9px;color:#4b5563;">Disabled when 0 routes matched</div>
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex;gap:14px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #1f2937;">
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#10b981;"></div><span style="font-size:9px;color:#6b7280;">Auto-matched</span></div>
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#8b5cf6;"></div><span style="font-size:9px;color:#6b7280;">Manual</span></div>
+      <div style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:2px;background:#374151;border:1px dashed #4b5563;"></div><span style="font-size:9px;color:#6b7280;">Unmatched</span></div>
+      <div style="font-size:9px;color:#5eead4;">CSS ✓ = URL source, has token</div>
+      <div style="font-size:9px;color:#78716c;">CSS — = upload only, no token</div>
+    </div>
+  </div>
+</div>

@@ -53,17 +53,47 @@ export async function POST(request: NextRequest) {
 
   // Persist confident matches (pageHint = matched PAGE id, which PageCard
   // resolves back to the page via id/name lookup).
+  const confRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
   let matched = 0;
-  for (const result of results) {
-    if (result.assignedPageId) {
-      await updateDesignReference(projectRoot(), result.referenceId, {
-        pageHint: result.assignedPageId,
-      });
-      matched += 1;
-    }
-  }
-  const skipped = results.length - matched;
 
+  for (const result of results) {
+    if (!result.assignedPageId) continue;
+
+    // Re-read manifest each iteration to get the latest state
+    const currentEntries = await readManifest(projectRoot());
+
+    // Never overwrite a manual assignment on this entry itself
+    const thisEntry = currentEntries.find((e) => e.id === result.referenceId);
+    if (thisEntry?.matchedBy === "manual") continue;
+
+    // Check if another entry already owns this route
+    const existingOwner = currentEntries.find(
+      (e) => e.pageHint === result.assignedPageId && e.id !== result.referenceId,
+    );
+
+    if (existingOwner) {
+      // Never displace a manual owner
+      if (existingOwner.matchedBy === "manual") continue;
+      // Only displace if new match has strictly higher confidence
+      const existingRank = confRank[existingOwner.matchConfidence ?? "low"] ?? 1;
+      const newRank = confRank[result.confidence] ?? 1;
+      if (newRank <= existingRank) continue;
+      // Clear the old owner's pageHint
+      await updateDesignReference(projectRoot(), existingOwner.id, {
+        pageHint: "",
+        matchConfidence: null,
+      });
+    }
+
+    await updateDesignReference(projectRoot(), result.referenceId, {
+      pageHint: result.assignedPageId,
+      matchedBy: "auto",
+      matchConfidence: result.confidence,
+    });
+    matched += 1;
+  }
+
+  const skipped = results.length - matched;
   const references = await readManifest(projectRoot());
   return NextResponse.json({ matched, skipped, references });
 }

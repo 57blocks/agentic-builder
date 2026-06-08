@@ -43,7 +43,7 @@ export interface DesignReferenceEntry {
    * legacy manifest entry (written before HTML support) is read back.
    */
   kind: DesignReferenceKind;
-  /** Human-readable label, e.g. "Login page mockup". */
+  /** Human-readable label. For URL sources, stores the source URL. */
   label: string;
   /**
    * Optional hint binding this reference to a page/route or PRD section,
@@ -52,6 +52,14 @@ export interface DesignReferenceEntry {
   pageHint: string;
   /** ISO timestamp. */
   uploadedAt: string;
+  /** Where this asset came from. Defaults to "upload" for legacy entries. */
+  source: "upload" | "url";
+  /** How pageHint was set. "manual" entries are never overwritten by auto-match. */
+  matchedBy: "auto" | "manual";
+  /** Present only when matchedBy === "auto". */
+  matchConfidence?: "high" | "medium" | "low";
+  /** CSS custom-property map extracted from the source page. URL sources only. */
+  cssToken?: Record<string, string>;
 }
 
 const REFERENCE_DIR_REL = path.join(".blueprint", "design-references");
@@ -163,6 +171,15 @@ export async function readManifest(
           pageHint: (x as DesignReferenceEntry).pageHint ?? "",
           uploadedAt:
             (x as DesignReferenceEntry).uploadedAt ?? new Date(0).toISOString(),
+          // Backfill new fields for entries written before this feature landed.
+          source: (x as DesignReferenceEntry).source ?? "upload",
+          matchedBy: (x as DesignReferenceEntry).matchedBy ?? "auto",
+          ...((x as DesignReferenceEntry).matchConfidence !== undefined && {
+            matchConfidence: (x as DesignReferenceEntry).matchConfidence,
+          }),
+          ...((x as DesignReferenceEntry).cssToken !== undefined && {
+            cssToken: (x as DesignReferenceEntry).cssToken,
+          }),
         };
       });
   } catch {
@@ -188,6 +205,10 @@ export interface AddDesignReferenceInput {
   bytes: Buffer;
   label?: string;
   pageHint?: string;
+  source?: "upload" | "url";
+  matchedBy?: "auto" | "manual";
+  matchConfidence?: "high" | "medium" | "low";
+  cssToken?: Record<string, string>;
 }
 
 export interface AddDesignReferenceResult {
@@ -247,9 +268,13 @@ export async function addDesignReference(
     mime: resolved.mime,
     bytes: input.bytes.byteLength,
     kind: resolved.kind,
-    label: (input.label ?? "").trim().slice(0, 120),
+    label: (input.label ?? "").trim().slice(0, 200),
     pageHint: (input.pageHint ?? "").trim().slice(0, 80),
     uploadedAt: new Date().toISOString(),
+    source: input.source ?? "upload",
+    matchedBy: input.matchedBy ?? "auto",
+    ...(input.matchConfidence !== undefined && { matchConfidence: input.matchConfidence }),
+    ...(input.cssToken !== undefined && { cssToken: input.cssToken }),
   };
 
   await ensureDir(projectRoot);
@@ -266,6 +291,9 @@ export async function addDesignReference(
 export interface UpdateDesignReferenceInput {
   label?: string;
   pageHint?: string;
+  matchedBy?: "auto" | "manual";
+  matchConfidence?: "high" | "medium" | "low" | null;
+  cssToken?: Record<string, string>;
 }
 
 export async function updateDesignReference(
@@ -281,12 +309,18 @@ export async function updateDesignReference(
     ...current,
     label:
       typeof input.label === "string"
-        ? input.label.trim().slice(0, 120)
+        ? input.label.trim().slice(0, 200)
         : current.label,
     pageHint:
       typeof input.pageHint === "string"
         ? input.pageHint.trim().slice(0, 80)
         : current.pageHint,
+    matchedBy: input.matchedBy ?? current.matchedBy,
+    matchConfidence:
+      input.matchConfidence === null
+        ? undefined
+        : input.matchConfidence ?? current.matchConfidence,
+    cssToken: input.cssToken !== undefined ? input.cssToken : current.cssToken,
   };
   entries[idx] = next;
   await writeManifest(projectRoot, entries);
@@ -436,7 +470,11 @@ export function formatDesignReferencesPromptBlock(
   const renderLine = (entry: DesignReferenceEntry, i: number): string => {
     const label = entry.label || "(no label)";
     const hint = entry.pageHint ? ` — target: \`${entry.pageHint}\`` : "";
-    return `${i + 1}. \`.design-references/${entry.storedFileName}\` — **${label}**${hint} (original name: \`${entry.fileName}\`, ${entry.mime})`;
+    const base = `${i + 1}. \`.design-references/${entry.storedFileName}\` — **${label}**${hint} (original name: \`${entry.fileName}\`, ${entry.mime})`;
+    const tokens = entry.cssToken ? Object.entries(entry.cssToken) : [];
+    if (tokens.length === 0) return base;
+    const tokenLines = tokens.map(([k, v]) => `   - \`${k}\`: \`${v}\``).join("\n");
+    return `${base}\n   CSS tokens extracted from this page:\n${tokenLines}`;
   };
 
   const sections: string[] = [
@@ -457,6 +495,7 @@ export function formatDesignReferencesPromptBlock(
       "- If a reference has no `target`, apply its aesthetic across the matching feature area (pick the best-fit page by label).",
       "- Do NOT rename, move, or delete files under `.design-references/` — leave them as-is so downstream tooling can consult them.",
       "- When pixel-matching is impossible (e.g. missing image tools), infer the user intent from the label/target and prioritize matching the structural composition.",
+      "- **CSS tokens** (when listed under an entry above) are the exact design-system values captured from the source page. Use them precisely: match every colour, spacing, font size, border-radius, and shadow using Tailwind arbitrary values (e.g. `bg-[#6366f1]`, `gap-[8px]`, `rounded-[6px]`) or CSS custom properties. Do not approximate or substitute.",
       "",
     );
   }
@@ -613,16 +652,17 @@ export async function autoMatchReferencesToPages(
 ): Promise<AutoMatchResult[]> {
   if (candidates.length === 0) return [];
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
-
   const entries = await readManifest(projectRoot);
   const imageEntries = entries.filter(
     (e) =>
       e.kind === "image" &&
+      e.matchedBy !== "manual" &&
       (options?.force || !e.pageHint.trim()),
   );
   if (imageEntries.length === 0) return [];
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
 
   const minConf = options?.minConfidence ?? "medium";
   const confRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
