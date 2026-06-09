@@ -13,6 +13,7 @@ import {
   Controls,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -553,6 +554,23 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     setSelectedTaskId((prev) => (prev === node.id ? null : node.id));
   }, []);
 
+  // Programmatic focus — used by the DEPENDENCIES tab in the detail panel so
+  // clicking a dep chip both selects the corresponding node and pans the
+  // canvas to centre it. NODE_W/NODE_H offsets are added so the camera lands
+  // on the card's centre, not its top-left corner.
+  const reactFlow = useReactFlow();
+  const focusTask = useCallback(
+    (taskId: string) => {
+      const node = reactFlow.getNode(taskId);
+      if (!node) return;
+      setSelectedTaskId(taskId);
+      const cx = node.position.x + NODE_W / 2;
+      const cy = node.position.y + NODE_H / 2;
+      reactFlow.setCenter(cx, cy, { zoom: 1, duration: 350 });
+    },
+    [reactFlow],
+  );
+
   const handleStart = useCallback(() => {
     if (!isIdle || kickoffTasks.length === 0) return;
     startCoding(
@@ -784,8 +802,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                 <TaskDetailPanel
                   task={selectedTask}
                   allAgentLogs={allAgentLogs}
+                  allTasks={mergedTasks}
                   onClose={() => setSelectedTaskId(null)}
                   onRetry={!isRunning ? handleRetryTask : undefined}
+                  onSelectTask={focusTask}
                 />
               </div>
             </motion.div>

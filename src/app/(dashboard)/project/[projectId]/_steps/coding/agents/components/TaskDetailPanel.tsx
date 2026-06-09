@@ -2,18 +2,24 @@
 
 import { useRef, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { X, RefreshCw, CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
+import { X, RefreshCw, CheckCircle2, Circle, Loader2, AlertCircle, Link2 } from "lucide-react";
 import type { CodingTask, KickoffWorkItem, AgentLogEntry, TaskSubStep } from "@/lib/pipeline/types";
 import { FileActivityPanel } from "./FileActivityPanel";
 
 interface TaskDetailPanelProps {
   task: CodingTask | KickoffWorkItem | null;
   allAgentLogs: AgentLogEntry[];
+  /** Full task list — used to resolve `task.dependencies` IDs to human-readable
+   *  titles / phases / status in the DEPENDENCIES tab. */
+  allTasks?: (CodingTask | KickoffWorkItem)[];
   onClose: () => void;
   onRetry?: (taskId: string) => void;
+  /** Called when the user clicks a dependency chip — the parent uses this to
+   *  select + centre the corresponding node in the flow canvas. */
+  onSelectTask?: (taskId: string) => void;
 }
 
-type PanelTab = "subtasks" | "logs" | "files";
+type PanelTab = "subtasks" | "dependencies" | "logs" | "files";
 type LogTab = "raw" | "filtered";
 
 type SubStepStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -158,8 +164,10 @@ function LogRow({ log, index }: { log: AgentLogEntry; index: number }) {
 export function TaskDetailPanel({
   task,
   allAgentLogs,
+  allTasks,
   onClose,
   onRetry,
+  onSelectTask,
 }: TaskDetailPanelProps) {
   const [panelTab, setPanelTab] = useState<PanelTab>("subtasks");
   const [activeTab, setActiveTab] = useState<LogTab>("raw");
@@ -212,6 +220,27 @@ export function TaskDetailPanel({
     : "pending";
   const subStepStatuses = deriveSubStepStatuses(subSteps, taskCodingStatus, fileWrites);
   const completedSubStepCount = subStepStatuses.filter((s) => s === "completed").length;
+
+  // ── Dependency resolution ─────────────────────────────────────────────
+  // Map each id in task.dependencies back to the full task object (when found)
+  // so the DEPS tab can show titles/phases and status, not just IDs.
+  const depIds = task.dependencies ?? [];
+  const taskByIdLookup = new Map(
+    (allTasks ?? []).map((t) => [t.id, t] as const),
+  );
+  const resolvedDeps = depIds.map((id) => ({
+    id,
+    task: taskByIdLookup.get(id) ?? null,
+  }));
+
+  // If the selected task has no dependencies (DEPS tab is hidden) but the
+  // panel was previously on the dependencies tab, snap back to subtasks so
+  // the content area doesn't go blank.
+  useEffect(() => {
+    if (panelTab === "dependencies" && depIds.length === 0) {
+      setPanelTab("subtasks");
+    }
+  }, [panelTab, depIds.length]);
 
   return (
     <div className="flex flex-col h-full w-full bg-white border-l border-slate-200 overflow-hidden">
@@ -329,22 +358,27 @@ export function TaskDetailPanel({
             />
           )}
         </button>
-        <button
-          onClick={() => setPanelTab("logs")}
-          className={`relative text-[10px] font-semibold px-3 py-2 transition-colors ${
-            panelTab === "logs"
-              ? "text-slate-800"
-              : "text-slate-400 hover:text-slate-600"
-          }`}
-        >
-          REAL-TIME LOGS
-          {panelTab === "logs" && (
-            <motion.span
-              layoutId="panel-tab-indicator"
-              className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
-            />
-          )}
-        </button>
+        {depIds.length > 0 && (
+          <button
+            onClick={() => setPanelTab("dependencies")}
+            className={`relative text-[10px] font-semibold px-3 py-2 transition-colors flex items-center gap-1 ${
+              panelTab === "dependencies"
+                ? "text-slate-800"
+                : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            DEPS
+            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-slate-100 text-slate-500">
+              {depIds.length}
+            </span>
+            {panelTab === "dependencies" && (
+              <motion.span
+                layoutId="panel-tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
+              />
+            )}
+          </button>
+        )}
         <button
           onClick={() => setPanelTab("files")}
           className={`relative text-[10px] font-semibold px-3 py-2 transition-colors flex items-center gap-1 ${
@@ -369,6 +403,22 @@ export function TaskDetailPanel({
             />
           )}
           {panelTab === "files" && (
+            <motion.span
+              layoutId="panel-tab-indicator"
+              className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
+            />
+          )}
+        </button>
+        <button
+          onClick={() => setPanelTab("logs")}
+          className={`relative text-[10px] font-semibold px-3 py-2 transition-colors ${
+            panelTab === "logs"
+              ? "text-slate-800"
+              : "text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          REAL-TIME LOGS
+          {panelTab === "logs" && (
             <motion.span
               layoutId="panel-tab-indicator"
               className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 rounded-t"
@@ -440,6 +490,88 @@ export function TaskDetailPanel({
                 );
               })}
             </ol>
+          )}
+        </div>
+      ) : panelTab === "dependencies" ? (
+        <div className="flex-1 overflow-y-auto px-5 py-4
+          [&::-webkit-scrollbar]:w-1.5
+          [&::-webkit-scrollbar-track]:bg-transparent
+          [&::-webkit-scrollbar-thumb]:bg-slate-200
+          [&::-webkit-scrollbar-thumb]:rounded-full">
+          {depIds.length === 0 ? (
+            <p className="text-[12px] text-slate-400 italic">
+              This task has no upstream dependencies.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {resolvedDeps.map(({ id, task: depTask }) => {
+                const depStatus =
+                  depTask && "codingStatus" in depTask
+                    ? (depTask as CodingTask).codingStatus
+                    : null;
+                const statusCls =
+                  depStatus === "completed" || depStatus === "completed_with_warnings"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : depStatus === "in_progress"
+                    ? "bg-violet-50 text-violet-700 border-violet-200"
+                    : depStatus === "failed"
+                    ? "bg-red-50 text-red-700 border-red-200"
+                    : "bg-slate-50 text-slate-600 border-slate-200";
+                const statusLabel =
+                  depStatus === "completed"
+                    ? "DONE"
+                    : depStatus === "completed_with_warnings"
+                    ? "DONE ⚠"
+                    : depStatus === "in_progress"
+                    ? "ACTIVE"
+                    : depStatus === "failed"
+                    ? "FAILED"
+                    : depTask
+                    ? "PENDING"
+                    : "MISSING";
+                const clickable = !!depTask && !!onSelectTask;
+                return (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      disabled={!clickable}
+                      onClick={() => {
+                        if (depTask && onSelectTask) onSelectTask(depTask.id);
+                      }}
+                      className={`w-full text-left rounded-lg border ${statusCls} px-3 py-2.5 transition-all ${
+                        clickable
+                          ? "hover:shadow-sm hover:scale-[1.01] cursor-pointer"
+                          : "opacity-70 cursor-not-allowed"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Link2 size={11} className="opacity-60" />
+                        <span className="text-[9px] font-mono font-bold opacity-70">
+                          {id}
+                        </span>
+                        <span className="ml-auto text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/60">
+                          {statusLabel}
+                        </span>
+                      </div>
+                      {depTask ? (
+                        <>
+                          <p className="text-[12px] font-semibold leading-snug">
+                            {depTask.title}
+                          </p>
+                          <p className="text-[10px] opacity-60 mt-0.5">
+                            {depTask.phase}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] italic opacity-70">
+                          Referenced task not found in the current task list.
+                        </p>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       ) : panelTab === "logs" ? (
