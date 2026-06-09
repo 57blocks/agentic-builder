@@ -1,3 +1,6 @@
+import fs from "fs/promises";
+import path from "path";
+
 import type { SupervisorState } from "../../state";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
@@ -32,7 +35,7 @@ export async function tddTestWriterAndRed(
     `[Supervisor] TDD Review (pre-implementation): ${review.summary}`,
   );
 
-  const red = await runTddRuntimePhase({
+  let red = await runTddRuntimePhase({
     outputDir: state.outputDir,
     phase: "red",
     emitter,
@@ -40,8 +43,45 @@ export async function tddTestWriterAndRed(
   });
   console.log(`[Supervisor] ${red.summary}`);
 
+  // Enforcement: a RED test that PASSES before any implementation is invalid
+  // (proves nothing). Delete those test files and regenerate them ONCE with the
+  // strengthened writer prompt, then re-run RED. Bounded to a single retry so a
+  // model that keeps writing trivially-passing tests can't loop forever.
+  let extraCost = 0;
+  if (red.redPassedTooEarlyFiles.length > 0) {
+    console.warn(
+      `[Supervisor] TDD: ${red.redPassedTooEarlyFiles.length} RED test(s) passed before implementation (invalid) — deleting + regenerating: ${red.redPassedTooEarlyFiles.join(", ")}`,
+    );
+    emitter?.({
+      stage: "tdd-runtime",
+      event: "tdd_red_invalid_regenerate",
+      details: { files: red.redPassedTooEarlyFiles },
+    });
+    await Promise.all(
+      red.redPassedTooEarlyFiles.map((f) =>
+        fs.unlink(path.join(state.outputDir, f)).catch(() => {}),
+      ),
+    );
+    const rewrite = await runTddTestWriter({
+      outputDir: state.outputDir,
+      tasks: state.tasks,
+      projectContext: state.projectContext,
+      sessionId: state.sessionId,
+      emitter,
+    });
+    extraCost += rewrite.costUsd;
+    console.log(`[Supervisor] TDD Test Writer (RED regenerate): ${rewrite.summary}`);
+    red = await runTddRuntimePhase({
+      outputDir: state.outputDir,
+      phase: "red",
+      emitter,
+      sessionId: state.sessionId,
+    });
+    console.log(`[Supervisor] ${red.summary} (after RED regenerate)`);
+  }
+
   return {
-    totalCostUsd: writer.costUsd,
+    totalCostUsd: writer.costUsd + extraCost,
   };
 }
 
