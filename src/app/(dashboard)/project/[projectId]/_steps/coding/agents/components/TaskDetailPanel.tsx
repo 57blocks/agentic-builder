@@ -91,16 +91,27 @@ function getStatusDot(task: CodingTask | KickoffWorkItem): string {
   return map[(task as CodingTask).codingStatus] ?? "bg-slate-300";
 }
 
+function formatHms(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (h > 0 || m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
 function getDuration(task: CodingTask | KickoffWorkItem): string | null {
   if (!("codingStatus" in task)) return null;
   const t = task as CodingTask;
   if (t.startedAt && t.completedAt) {
-    const ms = new Date(t.completedAt).getTime() - new Date(t.startedAt).getTime();
-    return `${(ms / 1000).toFixed(3)}s`;
+    return formatHms(new Date(t.completedAt).getTime() - new Date(t.startedAt).getTime());
   }
   if (t.startedAt && (t.codingStatus === "in_progress" || t.codingStatus === "failed")) {
-    const ms = Date.now() - new Date(t.startedAt).getTime();
-    return `${(ms / 1000).toFixed(1)}s`;
+    return formatHms(Date.now() - new Date(t.startedAt).getTime());
   }
   return null;
 }

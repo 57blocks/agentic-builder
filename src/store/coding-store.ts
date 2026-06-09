@@ -1408,12 +1408,34 @@ function handleCodingEvent(
   if (type === "repair_event") {
     const repairEvent = payload.data?.event as string | undefined;
 
-    // Any repair_event that carries a taskId means the backend has activated
-    // that task. Promote it from pending → in_progress immediately so the node
-    // reflects "active" before agent_task_start arrives (which only fires after
-    // the LangGraph pick_next_task node finishes, always later than repair events).
+    // Promote pending → in_progress on repair events EXCEPT those from
+    // phase-level stages that emit task IDs for bookkeeping before/after
+    // any worker actually runs (which would flash unrelated tasks "active").
+    // Blacklist is safer than whitelist: new worker-side stages get the
+    // activation for free without code changes.
     const repairTaskId = payload.taskId ?? (payload.data?.taskId as string | undefined);
-    if (repairTaskId) {
+    const repairStage = payload.data?.stage as string | undefined;
+    const PHASE_LEVEL_STAGES = new Set([
+      "prd-spec",
+      "coverage-gate",
+      "phase-gate",
+      "task-breakdown",
+      "architect-triage",
+      "post-gen-audit",
+      "integration-gate",
+      "e2e-triage",
+      "preflight-convention-fix",
+      "preflight-route-audit",
+      "preflight-deps",
+      "preflight-contract-completeness",
+      "preflight-task-contract-coverage",
+      "preflight-stub-generation",
+      "generate_api_contracts",
+      "tdd-test-writer",
+      "tdd-review",
+      "tdd-runtime",
+    ]);
+    if (repairTaskId && !(repairStage && PHASE_LEVEL_STAGES.has(repairStage))) {
       const current = get().tasks.find((t) => t.id === repairTaskId);
       if (current?.codingStatus === "pending") {
         set({

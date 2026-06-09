@@ -127,11 +127,18 @@ function buildFlowGraph(
       .map((t) => t.id),
   );
 
-  // Build edges from dependency graph
+  // Build edges from dependency graph — iterate unique tasks only to avoid
+  // duplicate edge IDs when the tasks array contains repeated task IDs.
+  const seenEdgeIds = new Set<string>();
   const edges: Edge[] = [];
-  for (const task of tasks) {
-    for (const depId of task.dependencies ?? []) {
+  const uniqueTasks = [...new Map(tasks.map((t) => [t.id, t])).values()];
+  for (const task of uniqueTasks) {
+    const uniqueDeps = [...new Set(task.dependencies ?? [])];
+    for (const depId of uniqueDeps) {
       if (!posMap.has(depId) || !posMap.has(task.id)) continue;
+      const edgeId = `e-${depId}-${task.id}`;
+      if (seenEdgeIds.has(edgeId)) continue;
+      seenEdgeIds.add(edgeId);
 
       // Animate the edge when the TARGET node is actively running
       // (i.e. data is flowing from the completed dep into the active task)
@@ -144,7 +151,7 @@ function buildFlowGraph(
         : "#94a3b8";
 
       edges.push({
-        id: `e-${depId}-${task.id}`,
+        id: edgeId,
         source: depId,
         target: task.id,
         // "default" = cubic bezier in React Flow
@@ -433,6 +440,13 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   // ── Progress ───────────────────────────────────────────────────────────────
   const progress = calcProgress(codingState.tasks);
+  const completedCount = mergedTasks.filter(
+    (t) =>
+      "codingStatus" in t &&
+      (t.codingStatus === "completed" ||
+        t.codingStatus === "completed_with_warnings"),
+  ).length;
+  const totalCount = mergedTasks.length;
 
   // ── Persist result when done ───────────────────────────────────────────────
   useEffect(() => {
@@ -541,6 +555,9 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                 {hasStarted ? `${progress}%` : "—"}
               </span>
             </div>
+            <p className="text-[10px] font-medium text-slate-500 mt-1">
+              {completedCount} / {totalCount} tasks completed
+            </p>
           </div>
         </div>
 
