@@ -8,6 +8,7 @@ vi.mock("@/lib/pipeline/kickoff-infra", () => ({
   readKickoffInfraMetadata: vi.fn(),
   internalDatabaseUrlFrom: vi.fn(),
   internalRedisUrlFrom: vi.fn(),
+  s3EnvFrom: vi.fn(),
   persistComposeOnInfra: vi.fn(),
 }));
 vi.mock("../dokploy", () => ({

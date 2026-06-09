@@ -27,6 +27,16 @@ const REDIS_PATTERNS = [
   /\b(?:cache|session\s+store|rate\s*limit(?:er|ing)?|queue)\b/i,
 ];
 
+const S3_PATTERNS = [
+  /\bs3\b/i,
+  /\bminio\b/i,
+  /\bobject\s+storage\b/i,
+  /\bblob\s+storage\b/i,
+  /\bpresigned\s+url\b/i,
+  /\b(?:file|image|avatar|document|media|attachment)\s+(?:upload|storage)\b/i,
+  /\b(?:upload|store)\s+(?:files?|images?|avatars?|documents?|media|attachments?)\b/i,
+];
+
 function anyMatch(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text));
 }
@@ -37,6 +47,7 @@ export function detectRequiredServicesByRegex(
   return {
     needsPostgres: anyMatch(designDocs, POSTGRES_PATTERNS),
     needsRedis: anyMatch(designDocs, REDIS_PATTERNS),
+    needsS3: anyMatch(designDocs, S3_PATTERNS),
   };
 }
 
@@ -72,6 +83,7 @@ export async function detectRequiredServices(
         services: {
           needsPostgres: r.decision.needsPostgres,
           needsRedis: r.decision.needsRedis,
+          needsS3: r.decision.needsS3,
         },
         source: "llm",
         evidence: r.decision.evidence,
