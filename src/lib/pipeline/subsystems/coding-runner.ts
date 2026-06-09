@@ -57,6 +57,11 @@ export interface SubsystemCodingRequest {
   /** Marks this as a scoped sub-call from the orchestrator so the coding route
    *  does NOT re-enter subsystem-orchestration mode (prevents infinite recursion). */
   scopedSubsystemBuild: true;
+  /** The subsystem this build targets. The route uses it to load that domain's
+   *  `domain-{id}.md` PRD slice DIRECTLY — tasks are not reliably tagged with a
+   *  `subsystem` field, so this explicit id (not a task-tag heuristic) is the
+   *  authoritative signal of which domain is being coded. */
+  activeSubsystemId: string;
 }
 
 /** Pure: the POST body for one subsystem build. */
@@ -71,6 +76,7 @@ export function buildSubsystemCodingRequest(
     projectTier: ctx.projectTier,
     retryFailedTaskIds: step.taskIds,
     scopedSubsystemBuild: true,
+    activeSubsystemId: step.subsystemId,
   };
 }
 

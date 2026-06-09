@@ -871,6 +871,7 @@ export async function POST(request: NextRequest) {
     stitchMeta,
     codingMode: codingModeRaw,
     scopedSubsystemBuild,
+    activeSubsystemId,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -900,6 +901,9 @@ export async function POST(request: NextRequest) {
     /** Set on scoped sub-calls from the subsystem orchestrator — prevents this
      *  request from re-entering subsystem-orchestration mode (no recursion). */
     scopedSubsystemBuild?: boolean;
+    /** Set on scoped sub-calls: the subsystem being built. Authoritative signal
+     *  for loading that domain's `domain-{id}.md` PRD slice. */
+    activeSubsystemId?: string;
   };
   const codingMode = normalizeCodingMode(codingModeRaw);
 
@@ -1006,10 +1010,14 @@ export async function POST(request: NextRequest) {
   // `scopedSubsystemBuild`, so it never recurses here); per-domain calls then
   // pick up their `domain-{id}.md` PRD slice automatically. The whole build is
   // streamed to the UI as ONE coding session via the SSE forwarder.
+  // Trigger on the MANIFEST (subsystems.json with >1 domain), NOT on a
+  // `task.subsystem` tag: tasks reaching coding are not reliably tagged — the
+  // authoritative task→domain mapping is the manifest's ownedModules, applied
+  // by the orchestrator at runtime (assignTasksToSubsystems). Gating on a task
+  // tag here is why orchestration silently never fired before.
   if (
     !scopedSubsystemBuild &&
-    !(retryFailedTaskIds && retryFailedTaskIds.length > 0) &&
-    tasksAfterStrip.some((t) => t.subsystem)
+    !(retryFailedTaskIds && retryFailedTaskIds.length > 0)
   ) {
     const manifest = await readSubsystemManifest(outputRoot);
     if (manifest && manifest.subsystems.length > 1) {
@@ -1656,14 +1664,17 @@ export async function POST(request: NextRequest) {
   // the agent context small and relevant — the full PRD can be thousands of
   // lines, whereas the domain file only covers the sections that subsystem owns.
   //
-  // NOTE: derive this from `tasksToRun` (the retry subset actually being coded),
-  // NOT `tasksAfterStrip` (the whole-system task list). Each subsystem build
-  // sends the full task list as `tasks` but scopes execution via
-  // `retryFailedTaskIds`, so `tasksAfterStrip` always spans every domain and
-  // would never collapse to a single subsystem — leaving the slice unused.
-  const taskSubsystems = [
-    ...new Set(tasksToRun.map((t) => t.subsystem).filter(Boolean)),
-  ] as string[];
+  // Source of the active domain(s), in priority order:
+  //   1. `activeSubsystemId` — the explicit id the orchestrator stamps on each
+  //      scoped sub-call. AUTHORITATIVE: tasks are not reliably tagged with a
+  //      `subsystem` field, so this is the only dependable single-domain signal.
+  //   2. `tasksToRun` task tags — fallback for any caller that does tag tasks.
+  // (`tasksToRun`, not `tasksAfterStrip`: the request carries the whole task list
+  //  but scopes execution via `retryFailedTaskIds`, so the full list always spans
+  //  every domain.)
+  const taskSubsystems = activeSubsystemId
+    ? [activeSubsystemId]
+    : ([...new Set(tasksToRun.map((t) => t.subsystem).filter(Boolean))] as string[]);
 
   let domainPrdDoc: string | null = null;
   let activeDomainId: string | null = null;

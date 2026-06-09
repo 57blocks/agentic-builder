@@ -280,6 +280,11 @@ export async function runTddTestWriter(input: {
         "You are a Test Writer in a RED/GREEN TDD pipeline.",
         "Write only test files listed in the manifest. Do not write production code.",
         "Tests must be real, assertion-bearing, executable by the declared command, and initially fail before implementation.",
+        // The #1 TDD failure mode: a 'RED' test that already PASSES before any
+        // feature code exists — making the RED step meaningless. Forbid it hard.
+        "HARD REQUIREMENT — RED VALIDITY: the test MUST FAIL when run RIGHT NOW against the current (unimplemented) code. Assert the SPECIFIC behaviour the feature will produce per its `expectedGreen` / coversRequirementIds — a concrete value, rendered text, computed result, or the exact API-client call + payload. The assertion must be one that an empty/stub/scaffold implementation CANNOT already satisfy.",
+        "HARD REQUIREMENT — if the target file/module does not exist yet, import it directly so the test fails on the missing module (that is a valid RED). If it already exists as a scaffold stub, assert the concrete output the stub does NOT yet produce.",
+        "FORBIDDEN (these pass before implementation and are NOT valid RED tests): asserting only that a component renders / mounts without error; `expect(x).toBeTruthy()` / `toBeDefined()` on something the scaffold already provides; `expect(true).toBe(true)`; asserting a module is merely importable; snapshot-only tests; asserting an empty/placeholder state that already holds. If your assertion would pass against an empty implementation, it is wrong — tighten it to the real expected behaviour.",
         // HARD requirements — `write_file` will REJECT content that violates these.
         "HARD REQUIREMENT — every test file MUST cite at least one of its `coversRequirementIds` (e.g. FR-AU01, AC-09) verbatim as a string inside the file. Put it in a top-of-file JSDoc comment such as `/** coversRequirementIds: FR-AU01, AC-09 */`. Without this the file is rejected.",
         "HARD REQUIREMENT — backend tests that import from `../db` MUST `vi.mock(\"<relative>/db\")` and substitute an in-memory SQLite Sequelize. Canonical example: `backend/src/models/index.test.ts`. Without this the file is rejected (real Postgres is not available in the test runner).",
