@@ -20,8 +20,9 @@ Output STRICT JSON — no prose, no markdown fences:
 {
   "needsPostgres": true|false,
   "needsRedis":    true|false,
+  "needsS3":       true|false,
   "evidence": [
-    { "service": "postgres"|"redis", "quote": "<≤120 chars from the docs>" }
+    { "service": "postgres"|"redis"|"s3", "quote": "<≤120 chars from the docs>" }
   ]
 }
 
@@ -30,12 +31,16 @@ Rules:
   if it's only mentioned in passing or compared in a tech selection discussion.
 - Redis is needed only when the project requires cache, session store, queue,
   rate-limiting, or pub/sub. Mentioning "Redis" in passing is not enough.
+- S3 (object storage) is needed only when the project stores/serves user files,
+  images, avatars, documents, media, or attachments — i.e. binary blobs that
+  don't belong in Postgres. File upload / download / presigned-URL flows count.
+  A purely text/CRUD app with no file handling does NOT need S3.
 - Every "true" decision MUST have at least one matching evidence entry.
 - "false" decisions should have no evidence entries for that service.
 - Quotes must come from the input docs verbatim (or trimmed to ≤120 chars).`;
 
 const EvidenceSchema = z.object({
-  service: z.enum(["postgres", "redis"]),
+  service: z.enum(["postgres", "redis", "s3"]),
   quote: z.string().min(1).max(200),
 });
 
@@ -43,11 +48,17 @@ const ServiceDecisionSchema = z
   .object({
     needsPostgres: z.boolean(),
     needsRedis: z.boolean(),
+    needsS3: z.boolean().default(false),
     evidence: z.array(EvidenceSchema).default([]),
   })
   .superRefine((d, ctx) => {
-    for (const svc of ["postgres", "redis"] as const) {
-      const flag = svc === "postgres" ? d.needsPostgres : d.needsRedis;
+    const flagByService = {
+      postgres: d.needsPostgres,
+      redis: d.needsRedis,
+      s3: d.needsS3,
+    } as const;
+    for (const svc of ["postgres", "redis", "s3"] as const) {
+      const flag = flagByService[svc];
       const has = d.evidence.some((e) => e.service === svc);
       if (flag && !has) {
         ctx.addIssue({

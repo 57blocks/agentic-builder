@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 export interface InfraServiceMeta {
-  kind: "postgres" | "redis";
+  kind: "postgres" | "redis" | "s3";
   appName: string;
   externalPort: number;
   publicUrl: string;
@@ -27,11 +27,13 @@ interface Props {
 const KIND_ICON: Record<InfraServiceMeta["kind"], string> = {
   postgres: "🐘",
   redis: "🟥",
+  s3: "🪣",
 };
 
 const KIND_LABEL: Record<InfraServiceMeta["kind"], string> = {
   postgres: "Postgres",
   redis: "Redis",
+  s3: "S3",
 };
 
 type PingStatus =
@@ -72,9 +74,12 @@ export default function InfraSection({ infra, dokployBaseUrl }: Props) {
     setPings((p) => ({ ...p, [key]: result }));
   }, []);
 
-  // Initial probe — fires once per service when the panel mounts.
+  // Initial probe — fires once per service when the panel mounts. S3 is an
+  // external bucket reached over HTTPS with credentials, not a pingable TCP
+  // endpoint, so we skip the reachability probe for it.
   useEffect(() => {
     for (const svc of services) {
+      if (svc.kind === "s3") continue;
       const key = `${svc.kind}-${svc.appName}`;
       runPing(key, svc.publicUrl);
     }
@@ -156,13 +161,17 @@ export default function InfraSection({ infra, dokployBaseUrl }: Props) {
                   <span className="text-[13px] font-semibold text-zinc-900">
                     {KIND_LABEL[svc.kind]}
                   </span>
-                  <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-700">
-                    :{svc.externalPort}
-                  </span>
-                  <PingBadge
-                    status={ping}
-                    onRetry={() => runPing(key, svc.publicUrl)}
-                  />
+                  {svc.kind !== "s3" && (
+                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-700">
+                      :{svc.externalPort}
+                    </span>
+                  )}
+                  {svc.kind !== "s3" && (
+                    <PingBadge
+                      status={ping}
+                      onRetry={() => runPing(key, svc.publicUrl)}
+                    />
+                  )}
                 </div>
                 <button
                   type="button"
