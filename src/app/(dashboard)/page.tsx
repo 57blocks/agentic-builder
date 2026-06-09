@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProjects } from "@/hooks/useProjects";
@@ -7,11 +8,22 @@ import { useStageStore } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStepStore } from "@/store/step-store";
 import type { Project } from "@/types/project";
+import ImportProjectDialog from "@/components/ImportProjectDialog";
 
 function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
       <path d="M7 1v12M1 7h12" />
+    </svg>
+  );
+}
+
+function ImportIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   );
 }
@@ -70,12 +82,24 @@ function ProjectCard({ project }: { project: Project }) {
 
 export default function LandingPage() {
   const router = useRouter();
-  const { projects, loading, error, addLocalProject, createProject } = useProjects();
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const { projects, loading, error, addLocalProject, createProject, importProject } = useProjects();
   const resetStage = useStageStore((s) => s.resetStage);
   const setProjectSlugForSync = useStageStore((s) => s.setProjectSlugForSync);
   const setProjectName = useStageStore((s) => s.setProjectName);
   const resetPipeline = usePipelineStore((s) => s.reset);
   const pipelineSetProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
+
+  async function handleImportDone(dirPath: string, name: string, clientId: string) {
+    resetStage();
+    resetPipeline();
+    const result = await importProject(dirPath, name, clientId);
+    setProjectSlugForSync(result.project.id);
+    pipelineSetProjectSlugForSync(result.project.id);
+    setProjectName(name);
+    useStepStore.getState().setCodeOutputDir(dirPath);
+    router.push(`/project/${result.project.id}`);
+  }
 
   async function handleNewProject() {
     resetStage();
@@ -125,15 +149,28 @@ export default function LandingPage() {
               rest.
             </p>
           </div>
-          <button
-            onClick={handleNewProject}
-            className="inline-flex items-center gap-2.5 rounded-xl bg-[#0f172a] px-8 py-4 text-[15px] font-semibold text-white shadow-sm transition-all hover:bg-[#1e293b] hover:shadow-md active:scale-[0.98]"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <PlusIcon />
-            New Project
-          </button>
+          <div className="flex items-center gap-3" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+            <button
+              onClick={handleNewProject}
+              className="inline-flex items-center gap-2.5 rounded-xl bg-[#0f172a] px-8 py-4 text-[15px] font-semibold text-white shadow-sm transition-all hover:bg-[#1e293b] hover:shadow-md active:scale-[0.98]"
+            >
+              <PlusIcon />
+              New Project
+            </button>
+            <button
+              onClick={() => setIsImportOpen(true)}
+              className="inline-flex items-center gap-2.5 rounded-xl border border-[#e2e8f0] bg-white px-8 py-4 text-[15px] font-semibold text-[#0b1c30] shadow-sm transition-all hover:bg-[#f8f9ff] hover:shadow-md active:scale-[0.98]"
+            >
+              <ImportIcon />
+              Import Project
+            </button>
+          </div>
         </div>
+        <ImportProjectDialog
+          isOpen={isImportOpen}
+          onClose={() => setIsImportOpen(false)}
+          onImport={handleImportDone}
+        />
       </div>
     );
   }
@@ -152,14 +189,6 @@ export default function LandingPage() {
               {loading ? "Loading…" : `${projects.length} project${projects.length === 1 ? "" : "s"}`}
             </p>
           </div>
-          <button
-            onClick={handleNewProject}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#0f172a] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-[#1e293b] hover:shadow-md active:scale-[0.98]"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <PlusIcon />
-            New Project
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
@@ -175,11 +204,28 @@ export default function LandingPage() {
             <span className="text-[12.5px] font-medium">New Project</span>
           </button>
 
+          {/* Import Project tile */}
+          <button
+            onClick={() => setIsImportOpen(true)}
+            className="group flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-white/50 text-slate-400 transition-all hover:border-slate-400 hover:bg-white hover:text-slate-600"
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 transition-colors group-hover:bg-slate-200">
+              <ImportIcon />
+            </span>
+            <span className="text-[12.5px] font-medium">Import Project</span>
+          </button>
+
           {projects.map((project) => (
             <ProjectCard key={project.id} project={project} />
           ))}
         </div>
       </div>
+      <ImportProjectDialog
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImport={handleImportDone}
+      />
     </div>
   );
 }

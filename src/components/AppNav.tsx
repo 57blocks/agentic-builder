@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, LogOut, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, LogOut, MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { useSidebarStore } from "@/store/sidebar-store";
 import { useProjects } from "@/hooks/useProjects";
 import { useStageStore, STAGE_META, type StageId } from "@/store/stage-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStepStore } from "@/store/step-store";
 import type { Project } from "@/types/project";
+import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import ImportProjectDialog from "@/components/ImportProjectDialog";
 
 function FolderIcon() {
   return (
@@ -36,13 +39,6 @@ function FileIcon() {
   );
 }
 
-function PlusIcon() {
-  return (
-    <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-      <path d="M5 1v8M1 5h8" />
-    </svg>
-  );
-}
 
 function LogoMark() {
   return (
@@ -63,6 +59,7 @@ export default function AppNav() {
     loading,
     createProject,
     addLocalProject,
+    importProject,
     renameProject,
     deleteProject,
   } = useProjects();
@@ -97,6 +94,8 @@ export default function AppNav() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Import project dialog.
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   // Click-outside to close any open menu.
   useEffect(() => {
@@ -163,6 +162,17 @@ export default function AppNav() {
     } finally {
       setDeleteBusy(false);
     }
+  }
+
+  async function handleImportDone(dirPath: string, name: string, clientId: string) {
+    resetStage();
+    resetPipeline();
+    const result = await importProject(dirPath, name, clientId);
+    setProjectSlugForSync(result.project.id);
+    pipelineSetProjectSlugForSync(result.project.id);
+    setProjectName(name);
+    useStepStore.getState().setCodeOutputDir(dirPath);
+    router.push(`/project/${result.project.id}`);
   }
 
   async function handleNewProject() {
@@ -536,16 +546,47 @@ export default function AppNav() {
         )}
       </div>
 
-      {/* Bottom: New Project + User Profile */}
-      <div className={`flex flex-col gap-6 ${collapsed ? "px-2 items-center" : "px-4"}`} style={noDragStyle}>
-        <button
-          onClick={handleNewProject}
-          className={`flex items-center justify-center ${collapsed ? "w-10 h-10" : "gap-2 w-full py-2.5"} bg-slate-950 text-white text-[14px] font-bold rounded-lg hover:bg-slate-800 hover:shadow-md hover:scale-105 transition-all active:bg-slate-950 active:scale-95`}
-          title={collapsed ? "New Project" : undefined}
-        >
-          <PlusIcon />
-          {!collapsed && <span>New Project</span>}
-        </button>
+      {/* Bottom: New Project + Import Project + User Profile */}
+      <div className={`flex flex-col gap-2 ${collapsed ? "px-2 items-center" : "px-4"}`} style={noDragStyle}>
+        {collapsed ? (
+          <ButtonGroup orientation="vertical" className="mb-4 w-10">
+            <Button
+              variant="default"
+              size="icon"
+              onClick={handleNewProject}
+              title="New Project"
+            >
+              <Plus />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsImportOpen(true)}
+              title="Import Project"
+            >
+              <Upload />
+            </Button>
+          </ButtonGroup>
+        ) : (
+          <ButtonGroup className="mb-4 w-full">
+            <Button
+              variant="default"
+              className="flex-1 basis-1/2 min-w-0"
+              onClick={handleNewProject}
+            >
+              <Plus data-icon="inline-start" />
+              New
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 basis-1/2 min-w-0"
+              onClick={() => setIsImportOpen(true)}
+            >
+              <Upload data-icon="inline-start" />
+              Import
+            </Button>
+          </ButtonGroup>
+        )}
 
         <div className={`border-t border-slate-200 flex items-center ${collapsed ? "justify-center pt-4 px-0" : "gap-3 pt-4.25 pb-2 px-3"}`}>
           <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0 overflow-hidden">
@@ -589,6 +630,11 @@ export default function AppNav() {
           onConfirm={() => void confirmDelete()}
         />
       )}
+      <ImportProjectDialog
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImport={handleImportDone}
+      />
     </aside>
   );
 }
