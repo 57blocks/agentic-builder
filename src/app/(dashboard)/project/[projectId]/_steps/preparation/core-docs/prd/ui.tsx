@@ -636,7 +636,7 @@ export function PrdUI(props: StepUIProps) {
       const html2canvas = html2canvasMod.default;
       // Extract the rendered HTML content and re-render in a clean iframe
       // to avoid html2canvas choking on lab() colors in the page's stylesheets.
-      const sourceHtml = contentRef.current!.innerHTML;
+      const sourceHtml = contentRef.current!.innerHTML.replace(/<!--PRD-DIFF:[^>]*-->/g, "");
       const iframe = document.createElement("iframe");
       iframe.style.cssText = "position:fixed;left:0;top:0;z-index:-1;pointer-events:none;width:800px;height:1200px;border:none";
       document.body.appendChild(iframe);
@@ -997,7 +997,7 @@ export function PrdUI(props: StepUIProps) {
                   )}
                 </div>
               )
-              : <MarkdownRenderer content={content} variant="prd" skipMermaid={true} />}
+              : <MarkdownRenderer content={stripDiffMarkers(content)} variant="prd" skipMermaid={true} />}
             <div ref={bottomRef} />
             </div>
           </div>
