@@ -2556,16 +2556,20 @@ function snapshotValue(value: unknown, depth = 2): unknown {
   return String(value).slice(0, 10);
 }
 
+const brief = (s: unknown, n = 50): string => {
+  const str = typeof s === "string" ? s : JSON.stringify(s) ?? "";
+  return str.length <= n ? str : `${str.slice(0, n)}… (${str.length} chars)`;
+};
+
 function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
-  const snap = snapshotValue(state) as Record<string, unknown>;
   console.log(
     `[Worker:${state.workerLabel}] ── AGENT CONTEXT SNAPSHOT ──\n` +
-    `  agentType : "${state.role}"\n` +
-    `  task      : "${taskTitle}"\n` +
-    `  context   :\n${JSON.stringify(snap, null, 2)
-      .split("\n")
-      .map((l) => `    ${l}`)
-      .join("\n")}`,
+    `  role           : ${state.role}\n` +
+    `  task           : ${taskTitle}\n` +
+    `  tasks          : ${state.tasks.length} total, index=${state.currentTaskIndex}\n` +
+    `  projectContext : ${brief(state.projectContext)}\n` +
+    `  fileRegistry   : ${state.fileRegistrySnapshot?.length ?? 0} entries\n` +
+    `  apiContracts   : ${state.apiContractsSnapshot?.length ?? 0} entries`,
   );
 }
 

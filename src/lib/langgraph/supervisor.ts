@@ -3410,6 +3410,9 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   // Fullstack Feature tasks are dispatched in the BACKEND phase (see
   // dispatchBackendAndTestWorkers) so their endpoints are contract-extracted
   // and backend-verified. This gate stays frontend-only.
+  console.log(
+    `[Supervisor] dispatchFrontendWorkers called — frontendTasks=${state.frontendTasks.length}`,
+  );
   if (state.frontendTasks.length === 0) {
     return [
       new Send("fe_worker", {
@@ -3519,6 +3522,14 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   ]
     .filter(Boolean)
     .join("");
+
+  const _fePreview = feContext.slice(0, 50).replace(/\n/g, "↵");
+  console.log(`[Supervisor] feContext (${feContext.length} chars): "${_fePreview}…" — writing to /tmp/fe-context-debug.txt`);
+  try {
+    require("fs").writeFileSync("/tmp/fe-context-debug.txt", feContext, "utf-8");
+  } catch (e) {
+    console.warn("[Supervisor] feContext write failed:", e);
+  }
 
   const sends: Send[] = feChunks.map(
     (tasks, i) =>
