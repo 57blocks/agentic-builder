@@ -202,7 +202,7 @@ function IntentFormCard({
               const isAllClear = form.all_clear || (form.gathered?.length ?? 0) >= PRD_DIMENSIONS.length;
               return (
                 <>
-                  {form.questions.length > 0 && <span className="text-xs text-muted-foreground font-medium">Question {(form.gathered?.length ?? 0) + currentIdx + 1} / {PRD_DIMENSIONS.length}</span>}
+                  {form.questions.length > 0 && <span className="text-xs text-muted-foreground font-medium">Question {Math.min((form.gathered?.length ?? 0) + currentIdx + 1, PRD_DIMENSIONS.length)} / {PRD_DIMENSIONS.length}</span>}
                   <Button onClick={() => onStartGeneration?.(form.questions, answers)} disabled={disabled} className="text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg h-8 px-3 text-sm font-semibold shadow-md hover:shadow-indigo-200 hover:shadow-lg transition-all hover:scale-105 active:scale-95">
                     {isAllClear ? "Next Step" : "Skip to Next Step"} <ArrowRight size={14} />
                   </Button>
