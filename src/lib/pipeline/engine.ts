@@ -1248,6 +1248,12 @@ export class PipelineEngine {
       const trdBody = run.steps.trd?.content ?? "";
       const sysDesignBody = run.steps.sysdesign?.content ?? "";
       const implGuideBody = run.steps.implguide?.content ?? "";
+      // designSpecBody is captured for the kickoff snapshot (used by
+      // incremental rerun) but is intentionally NOT passed to the
+      // task-breakdown LLM below: visual-design content (colors,
+      // typography, component looks) doesn't help the model decide WHAT
+      // tasks to create. It still reaches the coding stage via
+      // `DesignSpec.md` on disk (written by `fileMap` above).
       const designSpecBody = run.steps.design?.content ?? "";
 
       const prdSpec =
@@ -1381,7 +1387,7 @@ export class PipelineEngine {
           trd: trdBody || undefined,
           sysDesign: sysDesignBody || undefined,
           implGuide: implGuideBody || undefined,
-          designSpec: designSpecBody || undefined,
+          // designSpec omitted on purpose — see comment near declaration.
           prdSpec,
           sessionId: run.sessionId,
           tier,
