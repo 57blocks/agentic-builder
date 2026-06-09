@@ -73,6 +73,11 @@ interface CodingState {
   /** Set when integration_verify_fix is waiting for a human to pick an action. */
   pendingHumanDecision: PendingHumanDecision | null;
   codingMode: CodingMode;
+  /** Persist the coding speed/cost selection in the store. The coding view's
+   *  dropdown used local React state, which reset to the default whenever the
+   *  view re-mounted (step navigation / SSE reconnect) — so a user-selected
+   *  "cost" silently reverted to "normal" before handleStart ran. */
+  setCodingMode: (mode: CodingMode) => void;
 
   startCoding: (
     runId: string,
@@ -212,7 +217,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   supervisorLogs: [],
   tddLogs: [],
   pendingHumanDecision: null,
-  codingMode: "normal",
+  codingMode: "cost",
 
   setProjectId: (id) => {
     const current = get();
@@ -233,7 +238,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         supervisorLogs: [],
         tddLogs: [],
         pendingHumanDecision: null,
-        codingMode: "normal",
+        codingMode: "cost",
       });
       return;
     }
@@ -241,6 +246,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   },
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
+
+  setCodingMode: (mode) => set({ codingMode: mode }),
 
   submitHumanDecision: async (decisionId: string) => {
     const { sessionId, pendingHumanDecision } = get();
@@ -262,7 +269,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     taskItems,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {
@@ -379,7 +386,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     tasks,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {
@@ -446,7 +453,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     failedTaskIds,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {

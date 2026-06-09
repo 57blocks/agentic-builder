@@ -272,7 +272,11 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Track whether this mount is a "return visit" (component unmounted and remounted)
   // so we can show a "session still in progress" banner instead of a blank start state.
   const [isReturnVisit, setIsReturnVisit] = useState(false);
-  const [codingMode, setCodingMode] = useState<CodingMode>(codingState.codingMode);
+  // Drive the mode off the store (not local useState) so the selection survives
+  // view re-mounts and is what handleStart actually sends. Local state silently
+  // reset to "normal" on re-mount → cost-saving runs ran as normal.
+  const codingMode = codingState.codingMode;
+  const setCodingMode = codingState.setCodingMode;
   useEffect(() => {
     // On first mount: if there's already an active/completed session in the store,
     // this is a return visit (user navigated away and came back).
