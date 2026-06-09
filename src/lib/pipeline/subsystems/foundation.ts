@@ -20,6 +20,7 @@
 import type { KickoffWorkItem } from "../types";
 import { readSessionCheckpoint } from "../session-checkpoint";
 import { writeActiveScope } from "./active-scope";
+import { resolveCodeOutputRoot } from "../code-output";
 import type { SubsystemManifest } from "./types";
 import {
   assertContractCoversManifest,
@@ -60,6 +61,9 @@ export interface FoundationCodingRequest {
   codeOutputDir?: string;
   projectTier?: "S" | "M" | "L";
   // NOTE: intentionally NO retryFailedTaskIds → full (scaffold) mode.
+  /** Marks this as a scoped sub-call from the orchestrator so the coding route
+   *  does NOT re-enter subsystem-orchestration mode (prevents infinite recursion). */
+  scopedSubsystemBuild: true;
 }
 
 /** Pure: the full-mode coding request that builds the foundation. */
@@ -74,6 +78,7 @@ export function buildFoundationCodingRequest(
     tasks: allTasks.filter((t) => idSet.has(t.id)),
     codeOutputDir: ctx.codeOutputDir,
     projectTier: ctx.projectTier,
+    scopedSubsystemBuild: true,
   };
 }
 
@@ -107,9 +112,12 @@ export async function runFoundationBuild(
   }
 
   const projectRoot = ctx.projectRoot ?? process.cwd();
+  // Scope/contract artifacts live under the code-output root (where the route +
+  // gates read them); only the session checkpoint is keyed to projectRoot.
+  const outputRoot = resolveCodeOutputRoot(projectRoot, ctx.codeOutputDir);
   // Foundation owns no business endpoints — scope gates to none so the route
   // audit / smoke gate check only boot + health (no contract endpoint exists yet).
-  await writeActiveScope(projectRoot, { subsystemId: FOUNDATION_ID, endpoints: [] });
+  await writeActiveScope(outputRoot, { subsystemId: FOUNDATION_ID, endpoints: [] });
   const body = buildFoundationCodingRequest(allTasks, foundationTaskIds, ctx);
   const controller = new AbortController();
   const timer = ctx.timeoutMs ? setTimeout(() => controller.abort(), ctx.timeoutMs) : null;
@@ -169,8 +177,8 @@ export async function runSubsystemPipeline(
   // P3.1 — fail fast if the foundation didn't freeze a complete API contract:
   // every domain's owned endpoints must be declared before domains build.
   if (opts?.manifest) {
-    const projectRoot = ctx.projectRoot ?? process.cwd();
-    const contractCheck = await assertContractCoversManifest(projectRoot, opts.manifest);
+    const outputRoot = resolveCodeOutputRoot(ctx.projectRoot ?? process.cwd(), ctx.codeOutputDir);
+    const contractCheck = await assertContractCoversManifest(outputRoot, opts.manifest);
     if (!contractCheck.ok) {
       return { foundation, subsystems: [], contractCheck };
     }

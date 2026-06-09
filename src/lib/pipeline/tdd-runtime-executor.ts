@@ -49,6 +49,9 @@ export interface TddRuntimeExecutorResult {
   failed: number;
   skipped: number;
   p0Failures: string[];
+  /** RED-phase test FILES that passed before implementation (invalid RED — a
+   *  test that already passes proves nothing). Used to delete + regenerate. */
+  redPassedTooEarlyFiles: string[];
   summary: string;
 }
 
@@ -317,6 +320,7 @@ export async function runTddRuntimePhase(input: {
       failed: 0,
       skipped: 0,
       p0Failures: [],
+      redPassedTooEarlyFiles: [],
       summary,
     };
   }
@@ -326,6 +330,7 @@ export async function runTddRuntimePhase(input: {
   let failed = 0;
   let skipped = 0;
   const p0Failures: string[] = [];
+  const redPassedTooEarlyFiles: string[] = [];
 
   // Neutralize the real DATABASE_URL for the whole phase so any test that
   // imports the real db module (instead of mocking it) fails fast rather than
@@ -364,8 +369,14 @@ export async function runTddRuntimePhase(input: {
         },
       });
 
-      if (event.status === "pass") passed += 1;
-      else if (event.status === "expected_fail") expectedFailed += 1;
+      if (event.status === "pass") {
+        passed += 1;
+        // A RED-phase test that PASSES proves nothing — record its file so the
+        // caller can delete + regenerate it as a genuinely-failing test.
+        if (input.phase === "red" && test.file) {
+          redPassedTooEarlyFiles.push(test.file);
+        }
+      } else if (event.status === "expected_fail") expectedFailed += 1;
       else if (event.status === "skipped") skipped += 1;
       else failed += 1;
 
@@ -407,6 +418,7 @@ export async function runTddRuntimePhase(input: {
     failed,
     skipped,
     p0Failures,
+    redPassedTooEarlyFiles,
     summary,
   };
 }

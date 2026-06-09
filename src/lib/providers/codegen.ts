@@ -65,7 +65,16 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 
 function shouldForceOpenRouter(variant?: CodegenOpenRouterVariant): boolean {
   const codegenProvider = process.env.CODEGEN_PROVIDER?.trim().toLowerCase();
-  if ((variant === "codeGen" || variant === "codeGenFrontend") && codegenProvider === "deepseek") {
+  // CODEGEN_PROVIDER=deepseek opts the whole coding inner loop into DeepSeek
+  // direct — code WRITING (codeGen/codeGenFrontend) AND inline FIXING (codeFix).
+  // Without codeFix here, cost mode still ran the frequent fix passes on the
+  // OpenRouter codex chain, defeating the cost saving.
+  if (
+    (variant === "codeGen" ||
+      variant === "codeGenFrontend" ||
+      variant === "codeFix") &&
+    codegenProvider === "deepseek"
+  ) {
     return false;
   }
 

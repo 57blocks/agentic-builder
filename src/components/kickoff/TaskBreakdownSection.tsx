@@ -132,7 +132,14 @@ function TaskRow({ task: t }: { task: KickoffWorkItem }) {
           {t.phase}
         </td>
         <td className="px-3 py-2.5">
-          <p className="font-medium text-zinc-900">{t.title}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="font-medium text-zinc-900">{t.title}</p>
+            {t.subsystem && (
+              <span className="inline-flex shrink-0 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                {t.subsystem}
+              </span>
+            )}
+          </div>
           <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500 line-clamp-2">
             {t.description}
           </p>

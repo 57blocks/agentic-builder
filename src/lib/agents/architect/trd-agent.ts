@@ -13,7 +13,10 @@ import type { AuthDecision } from "./auth-decision-types";
 import type { SubsystemManifest } from "@/lib/pipeline/subsystems/types";
 import { TRD_GENERATION_CONTRACTS_PROMPT } from "./trd-generation-contracts";
 import { renderAuthoritativeAuthDecisionBlock } from "./trd-auth-block";
-import { renderScaffoldFoundationBlock } from "./trd-scaffold-block";
+import {
+  renderScaffoldFoundationBlock,
+  detectFrontendFrameworkDrift,
+} from "./trd-scaffold-block";
 
 const SYSTEM_PROMPT = `You are a senior Technical Architect Agent.
 
@@ -492,7 +495,40 @@ export class TRDAgent extends BaseAgent {
         sessionId,
       );
     }
-    return this.run(message, ctx, "step-trd", sessionId);
+
+    const result = await this.run(message, ctx, "step-trd", sessionId);
+
+    // Deterministic framework-drift guard: the scaffold is a Vite+React SPA, so
+    // any Next.js / App Router / RSC / SSR mention is a hallucination that would
+    // send codegen down the wrong stack. The scaffold block already forbids it
+    // in-prompt, but the model has a strong Next.js prior — if it still drifts,
+    // regenerate ONCE with the exact violations quoted (a pointed negative
+    // correction the model honors far more reliably than the general rule).
+    const drift = detectFrontendFrameworkDrift(result.content, tier);
+    if (drift.length > 0) {
+      console.warn(
+        `[TRD] frontend-framework drift detected (${drift.join(", ")}); the scaffold is Vite + React. Regenerating once with a correction.`,
+      );
+      const correction = [
+        "## CRITICAL CORRECTION — DO NOT IGNORE",
+        "",
+        `Your previous draft referenced a frontend stack the scaffold does NOT use: ${drift.join(", ")}.`,
+        "The frontend is a **Vite + React + react-router-dom single-page app (client-rendered)**.",
+        "There is NO Next.js, NO App Router, NO Server Components / RSC, NO SSR, NO `next/*` import.",
+        `Rewrite §1 Tech Stack and §2 Frontend Architecture using ONLY the scaffold stack. Do NOT use the words ${drift.join(" / ")} anywhere in the document.`,
+      ].join("\n");
+      const correctedCtx = ctx ? `${ctx}\n\n${correction}` : correction;
+      const retry = await this.run(message, correctedCtx, "step-trd", sessionId);
+      const stillDrifting = detectFrontendFrameworkDrift(retry.content, tier);
+      if (stillDrifting.length > 0) {
+        console.warn(
+          `[TRD] framework drift PERSISTS after correction (${stillDrifting.join(", ")}); returning corrected draft anyway — review §1/§2 manually.`,
+        );
+      }
+      return retry;
+    }
+
+    return result;
   }
 }
 

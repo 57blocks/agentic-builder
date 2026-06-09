@@ -8,6 +8,7 @@ import {
   generatePrdReview,
   mergePrdFindings,
 } from "@/lib/agents/pm/prd-reviewer-agent";
+import { generateFlowTrace } from "@/lib/agents/pm/prd-flow-tracer-agent";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 
 /**
@@ -62,29 +63,54 @@ export async function POST(req: NextRequest) {
     score?: number;
     model?: string;
     costUsd?: number;
+    flowsTraced?: number;
     error?: string;
   } = { ran: false };
   let findings = l1.findings;
 
   if (body.runLayer2) {
-    try {
-      const review = await generatePrdReview(prd, spec, {
+    // Run the general reviewer and the flow tracer concurrently — they answer
+    // different questions (semantic quality vs. broken/missing flows) and
+    // together feed one merged report. Each is independently best-effort.
+    const [reviewRes, flowRes] = await Promise.allSettled([
+      generatePrdReview(prd, spec, {
         knownFindings: l1.findings,
         model: body.model,
-      });
-      findings = mergePrdFindings(l1.findings, review.findings);
+      }),
+      generateFlowTrace(prd, spec, {
+        knownFindings: l1.findings,
+        model: body.model,
+      }),
+    ]);
+
+    const review = reviewRes.status === "fulfilled" ? reviewRes.value : null;
+    const flow = flowRes.status === "fulfilled" ? flowRes.value : null;
+
+    if (review || flow) {
+      // Flow tracer is told the reviewer's findings too, but they run in
+      // parallel so we dedupe here at merge time.
+      const semantic = [...(review?.findings ?? []), ...(flow?.findings ?? [])];
+      findings = mergePrdFindings(l1.findings, semantic);
+      const costUsd = (review?.costUsd ?? 0) + (flow?.costUsd ?? 0);
+      const tracedNote =
+        flow && flow.flows.length
+          ? ` · traced ${flow.flows.length} flow(s)`
+          : "";
       layer2 = {
         ran: true,
-        summary: review.overall.summary,
-        score: review.overall.score,
-        model: review.model,
-        costUsd: review.costUsd,
+        summary: (review?.overall.summary ?? "Flow trace complete") + tracedNote,
+        score: review?.overall.score,
+        model: review?.model ?? flow?.model,
+        costUsd,
+        flowsTraced: flow?.flows.length ?? 0,
       };
-    } catch (e) {
-      // L2 is best-effort — degrade to the L1-only report with a note.
+    } else {
+      // Both passes failed — degrade to the L1-only report with a note.
+      const err =
+        reviewRes.status === "rejected" ? reviewRes.reason : flowRes.status === "rejected" ? flowRes.reason : null;
       layer2 = {
         ran: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: err instanceof Error ? err.message : String(err ?? "Layer 2 failed"),
       };
     }
   }

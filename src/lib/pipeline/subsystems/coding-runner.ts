@@ -23,6 +23,7 @@ import {
   type SessionCheckpoint,
 } from "../session-checkpoint";
 import { writeActiveScope } from "./active-scope";
+import { resolveCodeOutputRoot } from "../code-output";
 import type {
   SubsystemBuildStep,
   SubsystemCodingRunner,
@@ -53,6 +54,14 @@ export interface SubsystemCodingRequest {
   projectTier?: "S" | "M" | "L";
   /** The subset to actually run (subsystem tasks + transitive deps). */
   retryFailedTaskIds: string[];
+  /** Marks this as a scoped sub-call from the orchestrator so the coding route
+   *  does NOT re-enter subsystem-orchestration mode (prevents infinite recursion). */
+  scopedSubsystemBuild: true;
+  /** The subsystem this build targets. The route uses it to load that domain's
+   *  `domain-{id}.md` PRD slice DIRECTLY — tasks are not reliably tagged with a
+   *  `subsystem` field, so this explicit id (not a task-tag heuristic) is the
+   *  authoritative signal of which domain is being coded. */
+  activeSubsystemId: string;
 }
 
 /** Pure: the POST body for one subsystem build. */
@@ -66,6 +75,8 @@ export function buildSubsystemCodingRequest(
     codeOutputDir: ctx.codeOutputDir,
     projectTier: ctx.projectTier,
     retryFailedTaskIds: step.taskIds,
+    scopedSubsystemBuild: true,
+    activeSubsystemId: step.subsystemId,
   };
 }
 
@@ -131,13 +142,17 @@ export function makeHttpCodingRunner(
   ctx: SubsystemCodingContext,
 ): SubsystemCodingRunner {
   const projectRoot = ctx.projectRoot ?? process.cwd();
+  // The active-scope sidecar must land where the route's gates READ it — the
+  // code-output root — not at projectRoot. (The session checkpoint, by contrast,
+  // is written by the route at process.cwd(), so it stays keyed to projectRoot.)
+  const outputRoot = resolveCodeOutputRoot(projectRoot, ctx.codeOutputDir);
   return async (step: SubsystemBuildStep) => {
     if (step.taskIds.length === 0) {
       return { ok: true, summary: `${step.subsystemId}: nothing to build.` };
     }
     // Scope the gates to this subsystem + its deps so not-yet-built domains'
     // endpoints don't fail route-registration / smoke as "missing".
-    await writeActiveScope(projectRoot, {
+    await writeActiveScope(outputRoot, {
       subsystemId: step.subsystemId,
       endpoints: step.scopeEndpoints,
     });

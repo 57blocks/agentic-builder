@@ -8,6 +8,7 @@ import {
   resolveAllPrdDiff,
   wrapWholeDocDiff,
   stripChangeMarkers,
+  looksDegenerate,
 } from "../prd-patch";
 
 const PRD = `# PRD
@@ -96,6 +97,90 @@ describe("stripChangeMarkers", () => {
     const stripped = stripChangeMarkers(legacy);
     expect(stripped).not.toContain("prd-changed-section");
     expect(stripped).toContain("body");
+  });
+});
+
+describe("applyPrdPatches — tolerant heading matching", () => {
+  const RICH = `# PRD
+
+### 5.1 监控看板 📊
+
+old dash body.
+
+## 2. Features
+
+old features.
+`;
+
+  it("matches despite heading-level, emoji, and full-width-digit differences", () => {
+    // Agent emitted "## ５.１ 监控看板" (wrong level, full-width digits, no emoji).
+    const res = applyPrdPatches(RICH, [
+      { heading: "## ５.１ 监控看板", newBody: "new dash body." },
+    ]);
+    expect(res.applied).toHaveLength(1);
+    expect(res.skipped).toHaveLength(0);
+    expect(res.content).toContain("new dash body.");
+  });
+
+  it("matches via a unique substring when the agent drops a trailing clause", () => {
+    const res = applyPrdPatches(RICH, [
+      { heading: "### 5.1 监控看板 (主页)", newBody: "new dash." },
+    ]);
+    expect(res.applied).toHaveLength(1);
+  });
+
+  it("skips an ambiguous heading (multiple sections match) instead of guessing", () => {
+    const dup = `# PRD
+
+## 状态
+
+a body.
+
+## 状态
+
+b body.
+`;
+    const res = applyPrdPatches(dup, [{ heading: "## 状态", newBody: "x" }]);
+    expect(res.applied).toHaveLength(0);
+    expect(res.skipped[0].reason).toMatch(/ambiguous/i);
+    expect(hasPrdDiffMarkers(res.content)).toBe(false);
+  });
+
+  it("still skips a genuinely absent heading as not-found", () => {
+    const res = applyPrdPatches(RICH, [
+      { heading: "## 9. Nonexistent", newBody: "x" },
+    ]);
+    expect(res.applied).toHaveLength(0);
+    expect(res.skipped[0].reason).toMatch(/not found/i);
+  });
+});
+
+describe("looksDegenerate", () => {
+  it("flags instruction-echo repetition collapse", () => {
+    const junk =
+      "Some text. I'll do it. I'll output the full PRD. I'll do it. I'll output the entire PRD. I'll do it.";
+    expect(looksDegenerate(junk)).toBe(true);
+  });
+
+  it("flags a short fragment echoed many times", () => {
+    const junk = Array.from({ length: 12 }, () => "the system shall do the thing").join(". ");
+    expect(looksDegenerate(junk)).toBe(true);
+  });
+
+  it("does not flag a healthy, varied PRD", () => {
+    const ok = `# PRD
+## Overview
+The product lets users create courses and enroll students.
+## Features
+Admins approve refunds within 24 hours, subject to the cancellation policy.
+Teachers can schedule classes and avoid time conflicts automatically.
+## Data Model
+Each course has a title, age range, category, and a roster of students.`;
+    expect(looksDegenerate(ok)).toBe(false);
+  });
+
+  it("returns false on empty input", () => {
+    expect(looksDegenerate("")).toBe(false);
   });
 });
 

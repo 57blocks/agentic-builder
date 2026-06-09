@@ -60,6 +60,10 @@ import type {
   RalphConfig,
 } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
+import { readSubsystemManifest } from "@/lib/pipeline/subsystems/manifest-io";
+import { buildCombinedDomainSlice } from "@/lib/pipeline/subsystems/domain-files";
+import { developBySubsystem } from "@/lib/pipeline/subsystems/develop";
+import { createSubsystemSseForwarder } from "@/lib/pipeline/subsystems/sse-forward";
 import {
   readDesignReferencesFromOutput,
   formatDesignReferencesPromptBlock,
@@ -866,6 +870,8 @@ export async function POST(request: NextRequest) {
     projectId,
     stitchMeta,
     codingMode: codingModeRaw,
+    scopedSubsystemBuild,
+    activeSubsystemId,
   } = body as {
     runId: string;
     tasks: KickoffWorkItem[];
@@ -892,6 +898,12 @@ export async function POST(request: NextRequest) {
       screenshotUrl?: string | null;
     } | null;
     codingMode?: CodingMode | string;
+    /** Set on scoped sub-calls from the subsystem orchestrator — prevents this
+     *  request from re-entering subsystem-orchestration mode (no recursion). */
+    scopedSubsystemBuild?: boolean;
+    /** Set on scoped sub-calls: the subsystem being built. Authoritative signal
+     *  for loading that domain's `domain-{id}.md` PRD slice. */
+    activeSubsystemId?: string;
   };
   const codingMode = normalizeCodingMode(codingModeRaw);
 
@@ -990,6 +1002,101 @@ export async function POST(request: NextRequest) {
 
   const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
 
+  // ── Subsystem-by-subsystem orchestration (large multi-domain PRDs) ─────────
+  // A fresh whole-system request (no retry subset, and not itself a scoped
+  // sub-call) for a project that kickoff decomposed into >1 subsystem builds
+  // foundation → per-domain layers → cross-domain integration, instead of one
+  // monolithic pass. Each step is a scoped sub-call back to THIS route (flagged
+  // `scopedSubsystemBuild`, so it never recurses here); per-domain calls then
+  // pick up their `domain-{id}.md` PRD slice automatically. The whole build is
+  // streamed to the UI as ONE coding session via the SSE forwarder.
+  // Trigger on the MANIFEST (subsystems.json with >1 domain), NOT on a
+  // `task.subsystem` tag: tasks reaching coding are not reliably tagged — the
+  // authoritative task→domain mapping is the manifest's ownedModules, applied
+  // by the orchestrator at runtime (assignTasksToSubsystems). Gating on a task
+  // tag here is why orchestration silently never fired before.
+  if (
+    !scopedSubsystemBuild &&
+    !(retryFailedTaskIds && retryFailedTaskIds.length > 0)
+  ) {
+    const manifest = await readSubsystemManifest(outputRoot);
+    if (manifest && manifest.subsystems.length > 1) {
+      console.log(
+        `[CodingAPI] 🧩 Subsystem orchestration: ${manifest.subsystems.length} domains` +
+        ` — foundation → layers → cross-domain integration.`,
+      );
+      const baseUrl = new URL(request.url).origin;
+      const orchestrationTasks: CodingTask[] = tasksAfterStrip.map((t) => ({
+        ...t,
+        assignedAgentId: null,
+        codingStatus: "pending" as const,
+      }));
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const emit = (event: Record<string, unknown>) =>
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          // One session_start carrying the full task list (shape the store expects),
+          // then forward each sub-build's interior events as one continuous session.
+          emit({ type: "session_start", sessionId: runId, data: { tasks: orchestrationTasks } });
+          const forward = createSubsystemSseForwarder({ emit });
+          try {
+            const result = await developBySubsystem({
+              // Artifact root: manifest, domain-*.md, progress all live under the
+              // code-output root (where this route + the gates read them).
+              projectRoot: outputRoot,
+              allTasks: tasksAfterStrip,
+              manifest,
+              prd: prdBody,
+              codingContext: {
+                baseUrl,
+                runId,
+                allTasks: tasksAfterStrip,
+                codeOutputDir,
+                projectTier: projectTier as "S" | "M" | "L" | undefined,
+                // codingContext.projectRoot intentionally left default (process.cwd()):
+                // the session checkpoint is written by this route at process.cwd(),
+                // so the orchestrator must read it there. active-scope/contract are
+                // re-resolved to the code-output root inside the runner/foundation.
+                onProgress: (subsystemId, chunk) => forward(subsystemId, chunk),
+              },
+            });
+            if (result.ok) {
+              emit({ type: "session_complete", sessionId: runId });
+            } else {
+              emit({
+                type: "session_error",
+                sessionId: runId,
+                data: {
+                  error: result.errors.join("; ") || "Subsystem build failed.",
+                  errorCategory: "graph_error",
+                },
+              });
+            }
+          } catch (err) {
+            emit({
+              type: "session_error",
+              sessionId: runId,
+              data: {
+                error: err instanceof Error ? err.message : String(err),
+                errorCategory: "unknown",
+              },
+            });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
+  }
+
   // ── Goal-mode routing (conservative) ───────────────────────────────────
   // If preparation persisted a runnable build plan (milestones + usable
   // acceptance commands at `.blueprint/build-plan.json`), run the single-agent
@@ -1057,7 +1164,12 @@ export async function POST(request: NextRequest) {
   // SKIP cleanup entirely in retry mode to preserve code generated by previously-
   // completed tasks. The scaffold copy below (forceOverwrite: true) refreshes
   // scaffold files anyway.
-  const KEEP_ENTRIES = new Set([".git", ".ralph"]);
+  // `.blueprint` holds pipeline state coding depends on (kickoff-infra DB url,
+  // auth-decision, and — in subsystem mode — subsystems.json). `domain-*.md`
+  // are the per-domain PRD slices the subsystem orchestrator reads. Both are
+  // INPUTS to coding, so cleanup must preserve them (they are not regenerated
+  // by a plain Start Coding, only by a full kickoff re-decompose).
+  const KEEP_ENTRIES = new Set([".git", ".ralph", ".blueprint"]);
   const KEEP_MD = new Set([
     "PRD.md",
     "TRD.md",
@@ -1068,6 +1180,8 @@ export async function POST(request: NextRequest) {
     "PRD_E2E_SPEC.md",
     "E2E_COVERAGE.md",
   ]);
+  /** Per-domain PRD slices (subsystem mode) — dynamic names, keep all. */
+  const isDomainDoc = (name: string) => /^domain-.+\.md$/.test(name);
   await fs.mkdir(outputRoot, { recursive: true });
   if (retrySet) {
     console.log(
@@ -1078,7 +1192,7 @@ export async function POST(request: NextRequest) {
     let removedCount = 0;
     for (const entry of entries) {
       if (KEEP_ENTRIES.has(entry)) continue;
-      if (entry.endsWith(".md") && KEEP_MD.has(entry)) continue;
+      if (entry.endsWith(".md") && (KEEP_MD.has(entry) || isDomainDoc(entry))) continue;
       const entryPath = path.join(outputRoot, entry);
       try {
         await fs.rm(entryPath, { recursive: true, force: true });
@@ -1544,14 +1658,23 @@ export async function POST(request: NextRequest) {
   const prdDoc = await readDoc("PRD.md");
 
   // ── Domain-scoped PRD ─────────────────────────────────────────────────────
-  // When all tasks in this coding batch belong to the same subsystem (set by
-  // the subsystem-aware orchestrator), load that domain's focused spec file
-  // (domain-{id}.md) and use it in place of the full PRD.md.  This keeps
+  // When all tasks ACTUALLY BEING RUN this batch belong to the same subsystem
+  // (set by the subsystem-aware orchestrator), load that domain's focused spec
+  // file (domain-{id}.md) and use it in place of the full PRD.md. This keeps
   // the agent context small and relevant — the full PRD can be thousands of
   // lines, whereas the domain file only covers the sections that subsystem owns.
-  const taskSubsystems = [
-    ...new Set(tasksAfterStrip.map((t) => t.subsystem).filter(Boolean)),
-  ] as string[];
+  //
+  // Source of the active domain(s), in priority order:
+  //   1. `activeSubsystemId` — the explicit id the orchestrator stamps on each
+  //      scoped sub-call. AUTHORITATIVE: tasks are not reliably tagged with a
+  //      `subsystem` field, so this is the only dependable single-domain signal.
+  //   2. `tasksToRun` task tags — fallback for any caller that does tag tasks.
+  // (`tasksToRun`, not `tasksAfterStrip`: the request carries the whole task list
+  //  but scopes execution via `retryFailedTaskIds`, so the full list always spans
+  //  every domain.)
+  const taskSubsystems = activeSubsystemId
+    ? [activeSubsystemId]
+    : ([...new Set(tasksToRun.map((t) => t.subsystem).filter(Boolean))] as string[]);
 
   let domainPrdDoc: string | null = null;
   let activeDomainId: string | null = null;
@@ -1579,10 +1702,32 @@ export async function POST(request: NextRequest) {
       );
     }
   } else if (taskSubsystems.length > 1) {
-    console.log(
-      `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
-      ` (${taskSubsystems.join(", ")}) — using full PRD.md`,
-    );
+    // Batch spans several domains (a domain + its dependency domains). Instead
+    // of the full mega-PRD, feed the COMBINED slice of just those domains
+    // (owned sections + dependency contracts + shared specs once) — same
+    // context-shrinking idea as the per-domain task breakdown.
+    const manifest = await readSubsystemManifest(outputRoot);
+    if (manifest && prdDoc) {
+      const combined = buildCombinedDomainSlice(
+        taskSubsystems,
+        manifest.subsystems,
+        prdDoc,
+      );
+      if (combined.trim()) {
+        domainPrdDoc = combined;
+        console.log(
+          `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
+          ` (${taskSubsystems.join(", ")}) — using combined domain slice` +
+          ` (${combined.length} chars) instead of full PRD.md (${prdDoc?.length ?? 0} chars)`,
+        );
+      }
+    }
+    if (!domainPrdDoc) {
+      console.log(
+        `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
+        ` (${taskSubsystems.join(", ")}) — using full PRD.md (no combined slice available)`,
+      );
+    }
   } else {
     console.log(
       `[CodingAPI] 📄 No subsystem tag on tasks — using full PRD.md (whole-system mode)`,
@@ -1591,6 +1736,26 @@ export async function POST(request: NextRequest) {
 
   // Use domain-scoped PRD when available; fall back to the full PRD otherwise.
   const effectivePrdDoc = domainPrdDoc ?? prdDoc;
+  // Persistent, auditable record of WHICH PRD context the workers got + how much
+  // it shrank — emitted to .ralph/repair-log.jsonl once the emitter exists, so
+  // PRD slicing can be confirmed after the fact without reading stdout.
+  const prdContextSelection = {
+    sliced: domainPrdDoc != null,
+    mode: domainPrdDoc
+      ? activeDomainId
+        ? `single-domain:${activeDomainId}`
+        : `combined-slice:${taskSubsystems.length}-domains`
+      : taskSubsystems.length > 0
+        ? "full-prd-fallback"
+        : "whole-system",
+    domains: taskSubsystems,
+    effectiveChars: effectivePrdDoc?.length ?? 0,
+    fullPrdChars: prdDoc?.length ?? 0,
+    reductionPct:
+      prdDoc?.length && domainPrdDoc
+        ? Math.round((1 - (effectivePrdDoc?.length ?? 0) / prdDoc.length) * 100)
+        : 0,
+  };
   // ─────────────────────────────────────────────────────────────────────────
 
   const trdDoc = await readDoc("TRD.md", DOC_HARD_CAP);
@@ -1816,6 +1981,14 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
+      // Persist which PRD context the workers received (full vs domain slice vs
+      // combined slice) + the char reduction — auditable in repair-log.jsonl.
+      repairEmitter({
+        sessionId,
+        stage: "worker-context",
+        event: "prd_context_selected",
+        details: prdContextSelection,
+      });
       const auditAttemptTracker = new AttemptTracker({
         outputDir: outputRoot,
       });

@@ -331,7 +331,10 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
                             ) : task.id && rerunTaskIds.has(task.id) ? (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase tracking-wide shrink-0">RERUN</span>
                             ) : null}
-                            <p className="text-[13px] font-semibold text-[#1e293b] truncate">{task.title}</p>
+                            {task.subsystem && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 uppercase tracking-wide shrink-0">{task.subsystem}</span>
+                            )}
+                            <p className="text-[13px] font-semibold text-[#1e293b] truncate min-w-0">{task.title}</p>
                           </div>
                           {task.description && !isExpanded && (
                             <p className="text-[11px] text-[#94a3b8] mt-0.5 line-clamp-1 ml-12">{task.description}</p>

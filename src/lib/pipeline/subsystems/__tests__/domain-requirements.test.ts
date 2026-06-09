@@ -47,4 +47,36 @@ describe("resolveDomainRequirementIds", () => {
     const m2: SubsystemManifest = { version: 1, subsystems: [{ id: "x", name: "x", ownedRoutes: ["/nope"], ownedApiEndpoints: [], ownedCollections: [], ownedModules: ["m"], dependsOn: [], prdSections: [] }] };
     expect(resolveDomainRequirementIds(PRD, m2).unresolved.some((u) => /\/nope/.test(u))).toBe(true);
   });
+
+  it("inherits FR-/AC-/CMP- ids from the domain's owned prdSections (gate alignment)", () => {
+    const prd = [
+      "## 10. Data Models",
+      "### 10.2 Course",
+      "Implements FR-CA01 and AC-03.",
+      "### 10.3 Lesson",
+      "FR-CA02 here. CMP-007 too.",
+      "## 26. API",
+      "### 26.1 Auth",
+      "FR-AU01 AC-01",
+    ].join("\n");
+    const m: SubsystemManifest = {
+      version: 1,
+      subsystems: [
+        { id: "catalog", name: "c", ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: ["m"], dependsOn: [], prdSections: ["§10.2", "§10.3"] },
+        { id: "auth", name: "a", ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: ["m"], dependsOn: [], prdSections: ["§26.1"] },
+      ],
+    };
+    const { byDomain } = resolveDomainRequirementIds(prd, m);
+    expect(byDomain.get("catalog")).toEqual(["AC-03", "CMP-007", "FR-CA01", "FR-CA02"]);
+    expect(byDomain.get("auth")).toEqual(["AC-01", "FR-AU01"]);
+  });
+
+  it("a parent section ref (§10) sweeps all its subsections", () => {
+    const prd = ["## 10. X", "### 10.1 A", "FR-A01", "### 10.2 B", "FR-B01"].join("\n");
+    const m: SubsystemManifest = {
+      version: 1,
+      subsystems: [{ id: "d", name: "d", ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: ["m"], dependsOn: [], prdSections: ["§10"] }],
+    };
+    expect(resolveDomainRequirementIds(prd, m).byDomain.get("d")).toEqual(["FR-A01", "FR-B01"]);
+  });
 });

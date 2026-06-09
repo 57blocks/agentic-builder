@@ -482,6 +482,26 @@ export default function CodingTaskTopologyView({
   );
   const idSet = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
 
+  // Domain swimlanes: group same-subsystem tasks into one dashed lane. Lane
+  // membership is purely visual — the topological stage (column) and the
+  // dependency edges are unchanged. Untagged/foundation tasks share one lane.
+  const SHARED_LANE = "__shared__";
+  const COLUMN_WIDTH = 210; // matches TaskNodeCard width → columns align across lanes
+  const domainOf = useCallback(
+    (id: string) => taskMap.get(id)?.subsystem || SHARED_LANE,
+    [taskMap],
+  );
+  const lanes = useMemo(() => {
+    const domains = new Set<string>();
+    let hasShared = false;
+    for (const t of tasks) {
+      const d = t.subsystem || SHARED_LANE;
+      if (d === SHARED_LANE) hasShared = true;
+      else domains.add(d);
+    }
+    return [...(hasShared ? [SHARED_LANE] : []), ...[...domains].sort()];
+  }, [tasks]);
+
   const selectedTask = selectedTaskId
     ? (taskMap.get(selectedTaskId) ?? null)
     : null;
@@ -574,10 +594,15 @@ export default function CodingTaskTopologyView({
             </svg>
           )}
 
-          <div className="relative z-[1] flex min-w-max gap-10 p-6">
-            {layers.map((col, colIdx) => (
-              <div key={colIdx} className="flex flex-col gap-4">
-                <div className="text-center">
+          <div className="relative z-[1] flex min-w-max flex-col gap-5 p-6">
+            {/* Stage header row — aligned with the per-lane columns below. */}
+            <div className="flex gap-10 pl-3">
+              {layers.map((_, colIdx) => (
+                <div
+                  key={colIdx}
+                  style={{ width: COLUMN_WIDTH }}
+                  className="shrink-0 text-center"
+                >
                   <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-zinc-400">
                     Stage {colIdx + 1}
                   </span>
@@ -587,25 +612,48 @@ export default function CodingTaskTopologyView({
                     </p>
                   )}
                 </div>
-                <div className="flex flex-col gap-3">
-                  {col.map((id) => {
-                    const task = taskMap.get(id);
-                    if (!task) return null;
-                    return (
-                      <TaskNodeCard
-                        key={id}
-                        task={task}
-                        agentById={agentById}
-                        selected={selectedTaskId === id}
-                        onSelect={() =>
-                          onSelectTask(selectedTaskId === id ? null : id)
-                        }
-                        nodeRef={(el) => {
-                          nodeRefs.current[id] = el;
-                        }}
-                      />
-                    );
-                  })}
+              ))}
+            </div>
+
+            {/* One dashed lane per domain — same-domain tasks grouped together,
+                while topo stages (columns) and dependency edges are unchanged. */}
+            {lanes.map((domain) => (
+              <div
+                key={domain}
+                className="rounded-xl border border-dashed border-violet-300/70 bg-violet-50/20 p-3"
+              >
+                <div className="mb-2 inline-flex items-center rounded bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                  {domain === SHARED_LANE ? "Shared / Foundation" : domain}
+                </div>
+                <div className="flex gap-10">
+                  {layers.map((col, colIdx) => (
+                    <div
+                      key={colIdx}
+                      style={{ width: COLUMN_WIDTH }}
+                      className="flex shrink-0 flex-col gap-3"
+                    >
+                      {col
+                        .filter((id) => domainOf(id) === domain)
+                        .map((id) => {
+                          const task = taskMap.get(id);
+                          if (!task) return null;
+                          return (
+                            <TaskNodeCard
+                              key={id}
+                              task={task}
+                              agentById={agentById}
+                              selected={selectedTaskId === id}
+                              onSelect={() =>
+                                onSelectTask(selectedTaskId === id ? null : id)
+                              }
+                              nodeRef={(el) => {
+                                nodeRefs.current[id] = el;
+                              }}
+                            />
+                          );
+                        })}
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}

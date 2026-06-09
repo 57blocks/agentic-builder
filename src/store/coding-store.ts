@@ -73,6 +73,11 @@ interface CodingState {
   /** Set when integration_verify_fix is waiting for a human to pick an action. */
   pendingHumanDecision: PendingHumanDecision | null;
   codingMode: CodingMode;
+  /** Persist the coding speed/cost selection in the store. The coding view's
+   *  dropdown used local React state, which reset to the default whenever the
+   *  view re-mounted (step navigation / SSE reconnect) — so a user-selected
+   *  "cost" silently reverted to "normal" before handleStart ran. */
+  setCodingMode: (mode: CodingMode) => void;
 
   startCoding: (
     runId: string,
@@ -152,6 +157,9 @@ export interface CodingSessionSnapshot {
     id: string;
     title: string;
     phase: string;
+    /** Business-domain tag — kept so the topology view can group by domain
+     *  after a session is hydrated from this snapshot. */
+    subsystem?: string;
     codingStatus: CodingTask["codingStatus"];
     generatedFiles: string[];
     error?: string;
@@ -176,6 +184,7 @@ function persistSessionSnapshot(
       id: t.id,
       title: t.title,
       phase: t.phase,
+      subsystem: t.subsystem,
       codingStatus: t.codingStatus,
       generatedFiles: t.generatedFiles ?? [],
       error: t.error,
@@ -208,7 +217,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   supervisorLogs: [],
   tddLogs: [],
   pendingHumanDecision: null,
-  codingMode: "normal",
+  codingMode: "cost",
 
   setProjectId: (id) => {
     const current = get();
@@ -229,7 +238,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         supervisorLogs: [],
         tddLogs: [],
         pendingHumanDecision: null,
-        codingMode: "normal",
+        codingMode: "cost",
       });
       return;
     }
@@ -237,6 +246,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   },
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
+
+  setCodingMode: (mode) => set({ codingMode: mode }),
 
   submitHumanDecision: async (decisionId: string) => {
     const { sessionId, pendingHumanDecision } = get();
@@ -258,7 +269,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     taskItems,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {
@@ -375,7 +386,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     tasks,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {
@@ -442,7 +453,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     failedTaskIds,
     codeOutputDir,
     projectTier,
-    codingMode = "normal",
+    codingMode = "cost",
     prdContent,
     stitchMeta,
   ) => {
@@ -801,6 +812,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         id: t.id,
         title: t.title,
         phase: t.phase,
+        subsystem: kickoff?.subsystem ?? t.subsystem,
         description: kickoff?.description ?? "",
         estimatedHours: kickoff?.estimatedHours ?? 0,
         executionKind: kickoff?.executionKind ?? "ai_autonomous",

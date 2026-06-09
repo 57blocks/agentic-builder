@@ -131,8 +131,28 @@ function headingLevel(line: string): number {
   return m ? m[1].length : 0;
 }
 
-function normaliseHeading(line: string): string {
-  return line.replace(/\s+/g, " ").trim();
+/**
+ * Tolerant heading key for matching a patch's declared heading against the PRD.
+ * The LLM rarely reproduces a heading byte-for-byte out of a 90-page doc, so we
+ * normalise away the things that differ harmlessly: the leading/trailing `#`
+ * marks (LEVEL IS IGNORED), emoji/pictographs, full-width digits, surrounding
+ * punctuation, and whitespace. Same transform is applied to both sides, so a
+ * near-miss like `### 5.1 监控看板 📊` vs `## 5.1 监控看板` still matches.
+ */
+function headingKey(line: string): string {
+  let s = line.trim();
+  s = s.replace(/^#{1,6}\s*/, ""); // leading ATX marks
+  s = s.replace(/\s*#+\s*$/, ""); // closing ATX marks (### Title ###)
+  // full-width digits → ASCII
+  s = s.replace(/[０-９]/g, (d) =>
+    String.fromCharCode(d.charCodeAt(0) - 0xfee0),
+  );
+  // drop emoji / pictographs + variation selectors
+  s = s.replace(/[\p{Extended_Pictographic}️]/gu, "");
+  s = s.toLowerCase().replace(/\s+/g, " ").trim();
+  // trim surrounding punctuation/symbols (keeps inner text intact)
+  s = s.replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, "");
+  return s;
 }
 
 export function applyPrdPatches(
@@ -142,15 +162,40 @@ export function applyPrdPatches(
   const lines = existingPrd.split("\n");
   const originalLineCount = lines.length;
 
-  // Index each heading line: normalised text -> line index.
-  // First match wins on duplicates (rare but possible).
-  const headingIndex = new Map<string, number>();
+  // Index each heading line: tolerant key -> ALL line indices that share it.
+  // Tracking every occurrence (not first-wins) lets us treat duplicate
+  // headings as AMBIGUOUS and skip them, instead of silently patching the
+  // wrong section.
+  const headingIndex = new Map<string, number[]>();
   for (let i = 0; i < lines.length; i++) {
     if (headingLevel(lines[i]) > 0) {
-      const key = normaliseHeading(lines[i]);
-      if (!headingIndex.has(key)) headingIndex.set(key, i);
+      const key = headingKey(lines[i]);
+      if (!key) continue;
+      const list = headingIndex.get(key) ?? [];
+      list.push(i);
+      headingIndex.set(key, list);
     }
   }
+
+  // Resolve a patch heading to a single PRD line. Exact tolerant-key match
+  // first; if none, fall back to a UNIQUE substring match (handles the agent
+  // adding/dropping a trailing clause). Returns -1 for not-found, -2 for
+  // ambiguous (caller skips with a distinct reason).
+  const resolveHeadingLine = (patchHeading: string): number => {
+    const key = headingKey(patchHeading);
+    if (!key) return -1;
+    const exact = headingIndex.get(key);
+    if (exact) return exact.length === 1 ? exact[0] : -2;
+    // Substring fallback — only when exactly one PRD heading contains (or is
+    // contained by) the patch key, so we never guess between candidates.
+    const candidates: number[] = [];
+    for (const [k, idxs] of headingIndex) {
+      if (k.includes(key) || key.includes(k)) candidates.push(...idxs);
+    }
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length > 1) return -2;
+    return -1;
+  };
 
   // Plan replacements; we operate on line ranges and apply from BOTTOM UP
   // to keep earlier indices stable.
@@ -167,10 +212,16 @@ export function applyPrdPatches(
   const skipped: { heading: string; reason: string }[] = [];
 
   for (const patch of patches) {
-    const key = normaliseHeading(patch.heading);
-    const headingLine = headingIndex.get(key);
-    if (headingLine == null) {
+    const headingLine = resolveHeadingLine(patch.heading);
+    if (headingLine === -1) {
       skipped.push({ heading: patch.heading, reason: "heading not found" });
+      continue;
+    }
+    if (headingLine === -2) {
+      skipped.push({
+        heading: patch.heading,
+        reason: "ambiguous heading (multiple sections match)",
+      });
       continue;
     }
     const level = headingLevel(lines[headingLine]);
@@ -284,6 +335,44 @@ export function wrapWholeDocDiff(oldContent: string, newContent: string): string
     PRD_DIFF_END,
     "",
   ].join("\n");
+}
+
+/**
+ * Detect model "repetition collapse" in regenerated PRD output — the failure
+ * mode where a model asked to re-emit a very long document gets stuck looping
+ * filler ("I'll do it. I'll output the full PRD.") instead of producing real
+ * content, leaking the instruction itself into the document. Such output must
+ * NEVER be persisted. Deliberately conservative — only fires on a clear
+ * collapse signal so a healthy PRD is never rejected.
+ */
+export function looksDegenerate(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+
+  // 1. Instruction-echo filler that leaks during collapse (straight or curly
+  //    apostrophe, or none). Three+ occurrences is unambiguous.
+  const fillerHits = (
+    lower.match(/i['’]?ll (do it|output the (full|entire) prd)/g) ?? []
+  ).length;
+  if (fillerHits >= 3) return true;
+
+  // 2. Generic short-sentence repetition: the same 8–80 char fragment echoed
+  //    6+ times across the document is collapse, not legitimate structure.
+  const segments = text
+    .split(/[.!?。！？\n]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length >= 8 && s.length <= 80);
+  if (segments.length >= 10) {
+    const counts = new Map<string, number>();
+    let maxRepeat = 0;
+    for (const s of segments) {
+      const n = (counts.get(s) ?? 0) + 1;
+      counts.set(s, n);
+      if (n > maxRepeat) maxRepeat = n;
+    }
+    if (maxRepeat >= 6) return true;
+  }
+  return false;
 }
 
 /**

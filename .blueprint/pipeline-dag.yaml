@@ -1,34 +1,27 @@
 version: 1
 pipelines:
-  - id: eventbrite-sync
-    description: "Periodic Eventbrite feed ingestion"
-    schedule: { cron: "7,37 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: stale-feed }
+  - id: approval-lock-release
+    description: "Release expired approval locks every 60 seconds"
+    schedule: { cron: "* * * * *" }
+    failure: { strategy: retry-3, retries: 3, compensation: release-stale-locks }
     nodes:
-      - { id: fetch, service: Admin Ops Service, function: syncEventbriteFeed }
-      - { id: normalize, service: Admin Ops Service, function: normalizeEventbriteFeed, dependsOn: [fetch] }
-      - { id: persist, service: Admin Ops Service, function: persistEventbriteFeed, dependsOn: [normalize] }
-      - { id: notify, service: Messaging Service, function: emitEventbriteSyncNotice, dependsOn: [persist] }
-
-  - id: marketing-sync
-    description: "Periodic marketing sync for Mailchimp and Constant Contact"
-    schedule: { cron: "12,42 * * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: stale-sync }
-    nodes:
-      - { id: fetch, service: Admin Ops Service, function: syncMarketingProviders }
-      - { id: normalize, service: Admin Ops Service, function: normalizeMarketingSync, dependsOn: [fetch] }
-      - { id: persist, service: Admin Ops Service, function: persistMarketingSync, dependsOn: [normalize] }
+      - { id: scan, service: ApprovalService, function: scanExpiredLocks }
+      - { id: release, service: ApprovalService, function: releaseExpiredLocks, dependsOn: [scan] }
 
   - id: credit-expiry-scan
-    description: "Daily private lesson credit expiry sweep"
+    description: "Expire lesson credits daily at 00:00 UTC"
     schedule: { cron: "0 0 * * *" }
-    failure: { strategy: retry-3, retries: 3, compensation: log-only }
+    failure: { strategy: retry-1, retries: 1, compensation: markCreditsStale }
     nodes:
-      - { id: scan, service: Workforce Service, function: expireLessonCredits }
+      - { id: scan, service: LessonService, function: scanExpiredCredits }
+      - { id: expire, service: LessonService, function: expireCredits, dependsOn: [scan] }
+      - { id: notify, service: NotificationService, function: notifyCreditExpiry, dependsOn: [expire] }
 
-  - id: approval-lock-cleanup
-    description: "Periodic cleanup of stale approval locks"
-    schedule: { cron: "*/5 * * * *" }
-    failure: { strategy: continue, retries: 0, compensation: release-later }
+  - id: eventbrite-refresh
+    description: "Refresh event feeds on demand and through sync runs"
+    schedule: { cron: "17 * * * *" }
+    failure: { strategy: abort, retries: 0, compensation: markFeedWarning }
     nodes:
-      - { id: scan, service: Approvals Service, function: cleanupExpiredApprovalLocks }
+      - { id: fetch, service: AdminService, function: refreshEventFeeds }
+      - { id: persist, service: AdminService, function: persistEventFeeds, dependsOn: [fetch] }
+      - { id: notify, service: NotificationService, function: notifyEventFeedRefresh, dependsOn: [persist] }

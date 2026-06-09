@@ -90,6 +90,46 @@ describe("runDomainScopedBreakdown", () => {
     expect(calls["RC"]).toEqual(["F", "RA-t", "RB-t"]);
   });
 
+  it("feeds each domain a SCOPED prd slice (own sections + shared), not the full PRD", async () => {
+    const PRD = `# PRD
+## 7. 信息架构
+nav map
+## 8. UI 组件库规格
+Button specs.
+## 10. Auth pages
+### 10.1 Login
+login page body AUTHONLY
+## 20. Billing pages
+### 20.1 Invoice
+invoice page body BILLINGONLY
+`;
+    const manifest: SubsystemManifest = {
+      version: 1,
+      subsystems: [
+        { id: "auth", name: "Auth", ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: [], dependsOn: [], prdSections: ["§10.1"] },
+        { id: "billing", name: "Billing", ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: [], dependsOn: [], prdSections: ["§20.1"] },
+      ],
+    };
+    const prdByDomain: Record<string, string> = {};
+    const breakdownFn: BreakdownFn = vi.fn(async (input) => {
+      if (!input.incremental) return { tasks: [task("F", "Data Layer")], costUsd: 0 };
+      prdByDomain[input.incremental.requirementsToCover[0]] = input.prd;
+      return { tasks: [task("t", "Backend Services")], costUsd: 0 };
+    });
+    await runDomainScopedBreakdown({
+      docs: { prd: PRD },
+      manifest,
+      domainRequirementIds: new Map([["auth", ["§10.1"]], ["billing", ["§20.1"]]]),
+      buildLayers: [["auth", "billing"]],
+      breakdownFn,
+    });
+    const authPrd = prdByDomain["§10.1"];
+    expect(authPrd).toContain("AUTHONLY"); // own section
+    expect(authPrd).toContain("UI 组件库规格"); // shared spec injected
+    expect(authPrd).not.toContain("BILLINGONLY"); // other domain's section excluded
+    expect(authPrd).not.toBe(PRD); // not the full mega-PRD
+  });
+
   it("skips a domain with no requirement ids (no breakdown call)", async () => {
     const breakdownFn: BreakdownFn = vi.fn(async () => ({ tasks: [], costUsd: 0 }));
     const r = await runDomainScopedBreakdown({

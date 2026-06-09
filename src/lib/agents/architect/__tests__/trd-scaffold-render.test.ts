@@ -4,7 +4,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { renderScaffoldFoundationBlock } from "../trd-scaffold-block";
+import {
+  renderScaffoldFoundationBlock,
+  detectFrontendFrameworkDrift,
+} from "../trd-scaffold-block";
 
 describe("renderScaffoldFoundationBlock", () => {
   it("always emits the do-not-re-specify instruction", () => {
@@ -38,5 +41,32 @@ describe("renderScaffoldFoundationBlock", () => {
     expect(out).toContain("rateLimit");
     expect(out).toContain("logger.ts");
     expect(out).toContain("workers/index.ts");
+  });
+
+  it("forbids Next.js explicitly so the model can't drift to it", () => {
+    for (const tier of ["S", "M", "L"] as const) {
+      const out = renderScaffoldFoundationBlock(tier);
+      expect(out).toMatch(/NOT Next\.js/i);
+      expect(out).toMatch(/react-router-dom/i);
+    }
+  });
+});
+
+describe("detectFrontendFrameworkDrift", () => {
+  it("flags Next.js / App Router / RSC / SSR drift", () => {
+    expect(detectFrontendFrameworkDrift("Frontend framework | Next.js App Router", "L")).toContain(
+      "Next.js",
+    );
+    expect(detectFrontendFrameworkDrift("rendered with the App Router", "L").length).toBeGreaterThan(0);
+    expect(detectFrontendFrameworkDrift("uses React Server Components", "L").length).toBeGreaterThan(0);
+    expect(detectFrontendFrameworkDrift("import x from 'next/navigation'", "M").length).toBeGreaterThan(0);
+    expect(detectFrontendFrameworkDrift("via getServerSideProps", "M").length).toBeGreaterThan(0);
+  });
+
+  it("does not false-positive on a clean Vite/React TRD", () => {
+    const clean = `## 2. Frontend Architecture
+Vite + React + react-router-dom SPA. Client-rendered. Data via the scaffold HTTP client.
+The next step is to define routes. Enrollment opens next semester.`;
+    expect(detectFrontendFrameworkDrift(clean, "L")).toEqual([]);
   });
 });
