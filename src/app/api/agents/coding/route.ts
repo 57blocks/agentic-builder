@@ -1725,6 +1725,26 @@ export async function POST(request: NextRequest) {
 
   // Use domain-scoped PRD when available; fall back to the full PRD otherwise.
   const effectivePrdDoc = domainPrdDoc ?? prdDoc;
+  // Persistent, auditable record of WHICH PRD context the workers got + how much
+  // it shrank — emitted to .ralph/repair-log.jsonl once the emitter exists, so
+  // PRD slicing can be confirmed after the fact without reading stdout.
+  const prdContextSelection = {
+    sliced: domainPrdDoc != null,
+    mode: domainPrdDoc
+      ? activeDomainId
+        ? `single-domain:${activeDomainId}`
+        : `combined-slice:${taskSubsystems.length}-domains`
+      : taskSubsystems.length > 0
+        ? "full-prd-fallback"
+        : "whole-system",
+    domains: taskSubsystems,
+    effectiveChars: effectivePrdDoc?.length ?? 0,
+    fullPrdChars: prdDoc?.length ?? 0,
+    reductionPct:
+      prdDoc?.length && domainPrdDoc
+        ? Math.round((1 - (effectivePrdDoc?.length ?? 0) / prdDoc.length) * 100)
+        : 0,
+  };
   // ─────────────────────────────────────────────────────────────────────────
 
   const trdDoc = await readDoc("TRD.md", DOC_HARD_CAP);
@@ -1950,6 +1970,14 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
+      // Persist which PRD context the workers received (full vs domain slice vs
+      // combined slice) + the char reduction — auditable in repair-log.jsonl.
+      repairEmitter({
+        sessionId,
+        stage: "worker-context",
+        event: "prd_context_selected",
+        details: prdContextSelection,
+      });
       const auditAttemptTracker = new AttemptTracker({
         outputDir: outputRoot,
       });
