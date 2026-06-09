@@ -23,13 +23,21 @@ export function resolveCodeOutputRoot(
   return path.resolve(projectRoot, raw);
 }
 
-/** Design docs tied to the current pipeline run; remove before kickoff write so skipped steps do not leave stale files. */
-const DESIGN_DOC_FILENAMES = ["DesignSpec.md", "PencilDesign.md"] as const;
+/**
+ * Design docs tied to the current pipeline run; removed before kickoff write
+ * so skipped steps do not leave stale files.
+ *
+ * NOTE: `DesignSpec.md` is INTENTIONALLY excluded here. The design step now
+ * owns this artifact directly (via save-doc) and the kickoff API no longer
+ * carries `design` in its request body. Wiping DesignSpec.md every kickoff
+ * would erase what the design step just wrote.
+ */
+const DESIGN_DOC_FILENAMES = ["PencilDesign.md"] as const;
 
 /**
  * Deletes previous design artifacts in the codegen output root.
  * Call before {@link writeCodegenFileMap} on a new kickoff so a new project
- * never inherits another run's DesignSpec / PencilDesign when those steps are skipped.
+ * never inherits another run's PencilDesign when that step is skipped.
  */
 export async function removePreviousDesignDocs(
   outputRoot: string,

@@ -673,6 +673,31 @@ export function DesignUI(props: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prdHash, designStyles, selectedStyleId, designSourceMode, stitchResult]);
 
+  // ── Auto-save DesignSpec.md to <outputDir> when the design content settles ─
+  // Kickoff no longer carries `design` in its request body — the design step
+  // owns this artifact. Debounced so user keystrokes during editing don't
+  // hammer save-doc; only fires when the content stops changing for 800ms and
+  // we're not streaming.
+  const persistedDesignContent = steps.design?.content ?? "";
+  useEffect(() => {
+    if (!persistedDesignContent.trim() || isRunning) return;
+    const codeOutputDir = useStepStore.getState().codeOutputDir;
+    const handle = setTimeout(() => {
+      fetch("/api/agents/save-doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          docId: "design",
+          content: persistedDesignContent,
+          codeOutputDir,
+        }),
+      }).catch((err) =>
+        console.warn("[DesignUI] save-doc DesignSpec.md failed:", err),
+      );
+    }, 800);
+    return () => clearTimeout(handle);
+  }, [persistedDesignContent, isRunning]);
+
   // ── Auto-generate design styles once PRD content is available ────────────
   const autoGenRef = useRef(false);
 

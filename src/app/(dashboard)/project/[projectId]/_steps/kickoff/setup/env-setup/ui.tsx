@@ -194,7 +194,10 @@ export function EnvSetupUI({ onNavigate }: StepUIProps) {
           trd: steps.trd?.content ?? "",
           sysdesign: steps.sysdesign?.content ?? "",
           implguide: steps.implguide?.content ?? "",
-          design: steps.design?.content ?? "",
+          // `design` is intentionally NOT sent: the design step persists
+          // DesignSpec.md to disk via save-doc, and the task-breakdown LLM
+          // does not consume it. Saves request bytes and removes a redundant
+          // LLM input.
           pencil: steps.pencil?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
         }),

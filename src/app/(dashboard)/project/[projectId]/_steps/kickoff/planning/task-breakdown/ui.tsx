@@ -117,7 +117,7 @@ export function TaskBreakdownUI({ onNavigate }: StepUIProps) {
           trd: steps.trd?.content ?? "",
           sysdesign: steps.sysdesign?.content ?? "",
           implguide: steps.implguide?.content ?? "",
-          design: steps.design?.content ?? "",
+          // design persisted to DesignSpec.md on disk by the design step (save-doc)
           pencil: steps.pencil?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
           // Explicit Regenerate = fresh FULL breakdown (subsystem-aware), never

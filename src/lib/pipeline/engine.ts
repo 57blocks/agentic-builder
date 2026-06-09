@@ -953,8 +953,8 @@ export class PipelineEngine {
       fileMap["SystemDesign.md"] = run.steps.sysdesign.content;
     if (run.steps.implguide?.content && !run.steps.implguide.metadata?.skipped)
       fileMap["ImplementationGuide.md"] = run.steps.implguide.content;
-    if (run.steps.design?.content && !run.steps.design.metadata?.skipped)
-      fileMap["DesignSpec.md"] = run.steps.design.content;
+    // DesignSpec.md is written to disk by the design step itself (save-doc).
+    // Kickoff no longer mirrors it through fileMap.
     if (run.steps.pencil?.content && !run.steps.pencil.metadata?.skipped)
       fileMap["PencilDesign.md"] = run.steps.pencil.content;
 
@@ -1057,7 +1057,7 @@ export class PipelineEngine {
         trd: trdContent || undefined,
         sysDesign: sysDesignContent || undefined,
         implGuide: implGuideContent || undefined,
-        designSpec: designContent || undefined,
+        // designSpec intentionally omitted — task breakdown does not need it.
       },
       prdSpec,
       tier,
@@ -2466,7 +2466,7 @@ export class PipelineEngine {
         trd: trdContent || undefined,
         sysDesign: sysDesignContent || undefined,
         implGuide: implGuideContent || undefined,
-        designSpec: designContent || undefined,
+        // designSpec intentionally omitted — task breakdown does not need it.
       },
       prdSpec,
       tier,

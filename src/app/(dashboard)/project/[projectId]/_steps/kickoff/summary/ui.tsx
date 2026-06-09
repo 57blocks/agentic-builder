@@ -277,7 +277,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           trd: steps.trd?.content ?? "",
           sysdesign: steps.sysdesign?.content ?? "",
           implguide: steps.implguide?.content ?? "",
-          design: steps.design?.content ?? "",
+          // design persisted to DesignSpec.md on disk by the design step (save-doc)
           pencil: steps.pencil?.content ?? "",
           qa: steps.qa?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
