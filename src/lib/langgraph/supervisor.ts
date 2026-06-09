@@ -236,6 +236,68 @@ function forceOpenRouterForMode(mode: CodingMode): boolean {
   return shouldForceOpenRouterForCodingMode(mode);
 }
 
+/**
+ * Stable topological sort within a bucket of tasks. Tasks are emitted in
+ * dependency order (parents before children); within the same dependency
+ * level, the original array order is preserved.
+ *
+ * Cross-role dependencies are ignored — only deps that point at another task
+ * in the SAME bucket constrain the order. A cycle within the bucket
+ * degenerates gracefully into the original order (no infinite loop).
+ *
+ * Without this sort, workers execute tasks in raw kickoff array order while
+ * the UI renders them by topological level — leading to visible disagreements
+ * like "root task done → last task starts → intermediate tasks last".
+ */
+function topoSortBucket(bucket: CodingTask[]): CodingTask[] {
+  if (bucket.length <= 1) return bucket;
+  const idToIndex = new Map(bucket.map((t, i) => [t.id, i] as const));
+  const indegree = new Array<number>(bucket.length).fill(0);
+  const children: number[][] = bucket.map(() => []);
+
+  bucket.forEach((t, i) => {
+    for (const dep of t.dependencies ?? []) {
+      const j = idToIndex.get(dep);
+      if (j === undefined) continue; // cross-role / unknown dep — ignore
+      children[j].push(i);
+      indegree[i] += 1;
+    }
+  });
+
+  // Kahn's algorithm with stable tie-breaking by original index.
+  const queue: number[] = [];
+  for (let i = 0; i < bucket.length; i++) if (indegree[i] === 0) queue.push(i);
+  const ordered: CodingTask[] = [];
+  const visited = new Set<number>();
+  while (queue.length > 0) {
+    const i = queue.shift()!;
+    if (visited.has(i)) continue;
+    visited.add(i);
+    ordered.push(bucket[i]);
+    for (const c of children[i]) {
+      indegree[c] -= 1;
+      if (indegree[c] === 0) {
+        // Insert in original-index order to keep within-level order stable.
+        let lo = 0,
+          hi = queue.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (queue[mid] < c) lo = mid + 1;
+          else hi = mid;
+        }
+        queue.splice(lo, 0, c);
+      }
+    }
+  }
+  // Fall back to original order for any task still left (cycle in bucket).
+  if (ordered.length < bucket.length) {
+    for (let i = 0; i < bucket.length; i++) {
+      if (!visited.has(i)) ordered.push(bucket[i]);
+    }
+  }
+  return ordered;
+}
+
 async function classifyTasks(state: SupervisorState) {
   const tasks = stripTestingPhaseTasks(state.tasks);
   const byRole: Record<CodingAgentRole, CodingTask[]> = {
@@ -248,6 +310,12 @@ async function classifyTasks(state: SupervisorState) {
   for (const task of tasks) {
     const role = inferRole(task);
     byRole[role].push(task);
+  }
+  // Reorder each role's bucket topologically so execution order matches the
+  // UI's level-based render. This is a no-op when the kickoff already produced
+  // a topologically-ordered list.
+  for (const role of Object.keys(byRole) as CodingAgentRole[]) {
+    byRole[role] = topoSortBucket(byRole[role]);
   }
 
   const frontendOnly = byRole.backend.length === 0;
@@ -2986,6 +3054,9 @@ async function contractTaskCoverage(
     const role = inferRole(task);
     byRole[role].push(task);
   }
+  for (const role of Object.keys(byRole) as CodingAgentRole[]) {
+    byRole[role] = topoSortBucket(byRole[role]);
+  }
 
   console.log(
     `${label}: injected ${repaired.added.length} supplementary task(s); re-classified into architect=${byRole.architect.length}, backend=${byRole.backend.length}, frontend=${byRole.frontend.length}, test=${byRole.test.length}.`,
@@ -3099,6 +3170,9 @@ async function pageTaskCoverage(
   };
   for (const task of allTasks) {
     byRole[inferRole(task)].push(task);
+  }
+  for (const role of Object.keys(byRole) as CodingAgentRole[]) {
+    byRole[role] = topoSortBucket(byRole[role]);
   }
 
   console.log(
