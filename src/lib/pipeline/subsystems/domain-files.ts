@@ -217,6 +217,55 @@ export function buildDomainMd(
   return out.join("\n");
 }
 
+/**
+ * Build ONE combined spec slice for a SET of domains — used when a coding batch
+ * spans several subsystems (e.g. a domain + its dependency domains) so the
+ * workers get just those domains' owned sections + their dependency contracts +
+ * a single copy of the shared/global specs, instead of the entire mega-PRD.
+ * Shared sections are emitted ONCE (not duplicated per domain). Pure.
+ */
+export function buildCombinedDomainSlice(
+  domainIds: string[],
+  allSubsystems: Subsystem[],
+  prd: string,
+): string {
+  const subs = domainIds
+    .map((id) => allSubsystems.find((s) => s.id === id))
+    .filter((s): s is Subsystem => !!s);
+  if (subs.length === 0) return "";
+
+  const out: string[] = [
+    `# Domains in scope: ${subs.map((s) => s.name).join(", ")}`,
+    "",
+    "> Combined spec for the subsystems built in this batch. Build to each",
+    "> domain's owned sections; consume upstream domains only via their",
+    "> Dependency Contracts; honour the shared/global specs.",
+  ];
+
+  const ownedAnchors = new Set<string>();
+  for (const s of subs) {
+    out.push("", `## ${s.name} (\`${s.id}\`)`, "");
+    const prdSlice = extractPrdSections(prd, s.prdSections);
+    out.push(prdSlice.trim() || "_No specific PRD sections referenced._");
+    s.prdSections.forEach((r) => ownedAnchors.add(r.replace(/^§/, "").trim()));
+    const contracts = buildDependencyContracts(s, allSubsystems);
+    if (contracts) {
+      out.push("", `### ${s.name} — Dependency Contracts`, "", contracts);
+    }
+  }
+
+  // Shared/global specs ONCE, excluding anything these domains already own.
+  const sharedAnchors = collectSharedSectionAnchors(prd).filter(
+    (a) => !ownedAnchors.has(a.replace(/^§/, "").trim()),
+  );
+  const sharedContent = extractPrdSections(prd, sharedAnchors);
+  if (sharedContent.trim()) {
+    out.push("", "## Shared / Global Specs", "", sharedContent.trim());
+  }
+
+  return out.join("\n");
+}
+
 // ── Stamp + write ─────────────────────────────────────────────────────────────
 
 /**

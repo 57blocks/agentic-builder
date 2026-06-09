@@ -61,6 +61,7 @@ import type {
 } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { readSubsystemManifest } from "@/lib/pipeline/subsystems/manifest-io";
+import { buildCombinedDomainSlice } from "@/lib/pipeline/subsystems/domain-files";
 import { developBySubsystem } from "@/lib/pipeline/subsystems/develop";
 import { createSubsystemSseForwarder } from "@/lib/pipeline/subsystems/sse-forward";
 import {
@@ -1690,10 +1691,32 @@ export async function POST(request: NextRequest) {
       );
     }
   } else if (taskSubsystems.length > 1) {
-    console.log(
-      `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
-      ` (${taskSubsystems.join(", ")}) — using full PRD.md`,
-    );
+    // Batch spans several domains (a domain + its dependency domains). Instead
+    // of the full mega-PRD, feed the COMBINED slice of just those domains
+    // (owned sections + dependency contracts + shared specs once) — same
+    // context-shrinking idea as the per-domain task breakdown.
+    const manifest = await readSubsystemManifest(outputRoot);
+    if (manifest && prdDoc) {
+      const combined = buildCombinedDomainSlice(
+        taskSubsystems,
+        manifest.subsystems,
+        prdDoc,
+      );
+      if (combined.trim()) {
+        domainPrdDoc = combined;
+        console.log(
+          `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
+          ` (${taskSubsystems.join(", ")}) — using combined domain slice` +
+          ` (${combined.length} chars) instead of full PRD.md (${prdDoc?.length ?? 0} chars)`,
+        );
+      }
+    }
+    if (!domainPrdDoc) {
+      console.log(
+        `[CodingAPI] 📦 Tasks span ${taskSubsystems.length} domains` +
+        ` (${taskSubsystems.join(", ")}) — using full PRD.md (no combined slice available)`,
+      );
+    }
   } else {
     console.log(
       `[CodingAPI] 📄 No subsystem tag on tasks — using full PRD.md (whole-system mode)`,

@@ -7,6 +7,7 @@ import {
   collectSharedSectionAnchors,
   buildDependencyContracts,
   buildDomainMd,
+  buildCombinedDomainSlice,
   writeDomainFiles,
 } from "../domain-files";
 import type { Subsystem } from "../types";
@@ -117,6 +118,32 @@ describe("buildDomainMd", () => {
     const md = buildDomainMd(CATALOG, [CATALOG, ENROLLMENT], 0, "data model details.", "");
     expect(md).toContain("No upstream dependencies");
     expect(md).not.toContain("## Shared / Global Specs");
+  });
+});
+
+describe("buildCombinedDomainSlice", () => {
+  it("combines several domains' owned sections + contracts + ONE shared block, dropping other domains", () => {
+    const md = buildCombinedDomainSlice(
+      ["enrollment", "catalog"],
+      [ENROLLMENT, CATALOG],
+      PRD,
+    );
+    // both in-scope domains' owned sections present
+    expect(md).toContain("报名"); // enrollment name
+    expect(md).toContain("课程目录"); // catalog name
+    expect(md).toContain("private enrollment page body"); // §10.4 owned body
+    // enrollment depends on catalog → its contracts appear
+    expect(md).toContain("Dependency Contracts");
+    expect(md).toContain("GET /api/v1/courses");
+    // shared block appears exactly once
+    expect(md.split("## Shared / Global Specs").length - 1).toBe(1);
+    expect(md).toContain("UI 组件库规格");
+    // a domain NOT in scope contributes nothing extra
+    expect(md).not.toContain("billing");
+  });
+
+  it("returns empty when no domain ids resolve", () => {
+    expect(buildCombinedDomainSlice(["nope"], [CATALOG], PRD)).toBe("");
   });
 });
 
