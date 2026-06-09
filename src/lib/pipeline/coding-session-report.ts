@@ -2513,6 +2513,40 @@ function formatMarkdownReport(input: {
   );
   lines.push("");
 
+  // ── File-Plan Advisories (P1) ─────────────────────────────────────────────
+  // Predicted `modifies` files the worker never touched. NON-BLOCKING: usually
+  // the requirement is satisfied via other files, and real wiring gaps are
+  // caught by runtime-smoke / contract gates. Listed here so nothing is
+  // silently dropped — review if an endpoint/feature looks missing.
+  {
+    const byFile = new Map<string, Set<string>>();
+    for (const e of input.repairSummary.entries) {
+      if (e.event !== "task_plan_unmodified") continue;
+      const raw = (e.details?.unmodified ?? []) as unknown[];
+      const files = Array.isArray(raw)
+        ? raw.filter((f): f is string => typeof f === "string")
+        : [];
+      for (const f of files) {
+        if (!byFile.has(f)) byFile.set(f, new Set());
+        if (e.taskId) byFile.get(f)!.add(e.taskId);
+      }
+    }
+    if (byFile.size > 0) {
+      lines.push("## File-Plan Advisories (predicted-modify left untouched)");
+      lines.push(
+        "_Non-blocking. Planned `modifies` files no task changed — usually fine " +
+          "(the requirement was met via other files), but verify wiring if a " +
+          "feature/endpoint appears missing._",
+        "",
+      );
+      for (const [file, tasks] of [...byFile.entries()].sort()) {
+        const who = [...tasks].sort().join(", ");
+        lines.push(`- \`${file}\`${who ? ` — ${who}` : ""}`);
+      }
+      lines.push("");
+    }
+  }
+
   lines.push("## TDD Gate");
   const tdd = input.tddEvidenceSummary;
   if (!tdd.manifestPresent && !tdd.evidencePresent) {

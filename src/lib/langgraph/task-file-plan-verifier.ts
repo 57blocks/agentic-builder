@@ -9,12 +9,19 @@
  *
  * This verifier bridges that gap: given a task and the list of files the
  * worker actually wrote, it checks that every entry in `task.files.creates`
- * matched something, and every entry in `task.files.modifies` was actually
- * modified (content changed since the pre-task snapshot).
+ * matched something. A genuinely-missing planned `creates` is the only hard
+ * (blocking) failure.
  *
- * The result is a structured `TASK_FILE_PLAN_UNFULFILLED: <details>`
- * error message — `routeAfterVerify` recognises this prefix and routes the
- * worker back through a fix attempt (see `WORKER_FIX_ELIGIBLE_PREFIXES`).
+ * `task.files.modifies` entries that were NOT touched are reported as a
+ * non-blocking warning (`unmodified`), NOT a failure — the `modifies` list is
+ * a task-breakdown PREDICTION and the worker often satisfies the requirement
+ * via other files; real breakage is caught downstream by tsc / tests /
+ * integration+runtime gates.
+ *
+ * When a `creates` is missing the result is a structured
+ * `TASK_FILE_PLAN_UNFULFILLED: <details>` error — `routeAfterVerify`
+ * recognises this prefix and routes the worker back through a fix attempt
+ * (see `WORKER_FIX_ELIGIBLE_PREFIXES`).
  */
 
 import fs from "fs/promises";
@@ -115,16 +122,22 @@ export async function verifyTaskFilePlan(
     }),
   );
 
+  // Only a genuinely-missing planned `creates` is a hard (blocking) error.
+  // `unmodified` (a planned `modifies` file the worker didn't touch) is NOT
+  // blocking: task-breakdown's `modifies` list is a PREDICTION — the worker
+  // often satisfies the requirement via other files (e.g. adds the route in
+  // routes.ts and never touches the predicted service.ts). Hard-failing on it
+  // produced a flood of false "unfulfilled" tasks and burned the
+  // (model-dependent) fix loop for no recovery; real breakage is still caught
+  // downstream by tsc / tests / integration+runtime gates. It is surfaced to
+  // the caller via the `unmodified` field as a non-blocking warning.
   const errorLines: string[] = [];
   if (missingCreates.length > 0) {
     errorLines.push(`missingCreates=[${missingCreates.join(", ")}]`);
   }
-  if (unmodified.length > 0) {
-    errorLines.push(`unmodified=[${unmodified.join(", ")}]`);
-  }
 
   return {
-    passed: errorLines.length === 0,
+    passed: missingCreates.length === 0,
     missingCreates,
     unmodified,
     errorLines,

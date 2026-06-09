@@ -3472,6 +3472,23 @@ async function verifyCode(state: WorkerState) {
     };
   }
 
+  // Non-blocking: a planned `modifies` file the worker didn't touch. The
+  // requirement is usually satisfied via other files; surface it for
+  // visibility (console + repair-log → coding-session-report) but do NOT fail
+  // the task or trigger the fix loop.
+  if (planResult.unmodified.length > 0) {
+    console.log(
+      `[Worker:${state.workerLabel}] file-plan warning (non-blocking) for "${task.title}": ${planResult.unmodified.length} predicted-modify file(s) left untouched — ${planResult.unmodified.slice(0, 8).join(", ")}${planResult.unmodified.length > 8 ? " …" : ""}`,
+    );
+    getRepairEmitter(state.sessionId)({
+      stage: "worker-verify",
+      event: "task_plan_unmodified",
+      taskId: task.id,
+      files: planResult.unmodified,
+      details: { unmodified: planResult.unmodified },
+    });
+  }
+
   const tsFiles = taskFiles.filter((f) => /\.(ts|tsx)$/.test(f));
   if (tsFiles.length === 0) {
     console.log(
