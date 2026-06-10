@@ -5,7 +5,11 @@ import {
   parseJscpdJson,
   parseMadgeJson,
   countAstAnomalies,
+  auditCodeQuality,
 } from "@/lib/pipeline/code-quality-audit";
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs/promises";
 
 describe("parseTscOutput", () => {
   it("counts `error TS####` lines", () => {
@@ -65,11 +69,6 @@ describe("countAstAnomalies", () => {
   });
 });
 
-import { auditCodeQuality } from "@/lib/pipeline/code-quality-audit";
-import path from "node:path";
-import os from "node:os";
-import fs from "node:fs/promises";
-
 describe("auditCodeQuality (integration with mocked runner)", () => {
   it("returns present=false when no workspaces detected", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "audit-empty-"));
@@ -103,5 +102,55 @@ describe("auditCodeQuality (integration with mocked runner)", () => {
     expect(r.staticChecks.lintErrors).toBe(3);
     expect(r.typeSafety.anyCount).toBe(2);
     expect(r.duplication.percentage).toBeCloseTo(2.5);
+  });
+});
+
+describe("auditCodeQuality error paths", () => {
+  it("captures error string when tool throws without stdout", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "audit-err-"));
+    const fe = path.join(tmp, "frontend");
+    await fs.mkdir(path.join(fe, "src"), { recursive: true });
+    await fs.writeFile(path.join(fe, "package.json"), "{}");
+    await fs.writeFile(path.join(fe, "src", "a.ts"), "export const x = 1;\n");
+    const r = await auditCodeQuality({
+      outputDir: tmp,
+      runner: async () => { throw new Error("pure failure"); },
+    });
+    // The workspace's `errors` array should have captured the throws.
+    const ws = r.workspaces[0];
+    expect(ws.errors.length).toBeGreaterThan(0);
+    expect(ws.errors.some((e) => /pure failure/.test(e))).toBe(true);
+  });
+
+  it("aggregates across two workspaces", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "audit-multi-"));
+    for (const ws of ["frontend", "backend"]) {
+      const p = path.join(tmp, ws);
+      await fs.mkdir(path.join(p, "src"), { recursive: true });
+      await fs.writeFile(path.join(p, "package.json"), "{}");
+      await fs.writeFile(path.join(p, "src", "a.ts"), "export const x: any = 1;\n");
+    }
+    const r = await auditCodeQuality({
+      outputDir: tmp,
+      runner: async (cmd, args) => {
+        if (args.includes("tsc")) return { stdout: "src/a.ts(1,1): error TS2322: x\n", stderr: "" };
+        if (args.includes("eslint")) return { stdout: "[]", stderr: "" };
+        return { stdout: "", stderr: "" };
+      },
+    });
+    expect(r.workspaces).toHaveLength(2);
+    expect(r.staticChecks.tscErrors).toBe(2); // 1 per workspace
+    expect(r.typeSafety.anyCount).toBe(2);
+  });
+});
+
+describe("countAstAnomalies word boundaries", () => {
+  it("does not match `: anyMap` as any", () => {
+    const r = countAstAnomalies("const x: anyMap = 1;");
+    expect(r.anyCount).toBe(0);
+  });
+  it("does match `: any` (exact)", () => {
+    const r = countAstAnomalies("const x: any = 1;");
+    expect(r.anyCount).toBe(1);
   });
 });

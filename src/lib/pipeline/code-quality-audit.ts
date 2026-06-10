@@ -11,6 +11,14 @@ import path from "node:path";
 
 const execFileAsync = promisify(execFile);
 
+const LARGE_FILE_LINE_THRESHOLD = 400;
+// LONG_FUNCTION_LINE_THRESHOLD is defined alongside scanFunctions
+const TSC_TIMEOUT_MS = 180_000;
+const ESLINT_TIMEOUT_MS = 120_000;
+const JSCPD_TIMEOUT_MS = 120_000;
+const MADGE_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 export interface CodeQualityAuditResult {
   present: boolean;
   workspaces: WorkspaceAuditResult[];
@@ -18,7 +26,7 @@ export interface CodeQualityAuditResult {
   complexity: { present: boolean; avgCyclomatic: number; longFunctions: number; largeFiles: number };
   duplication: { present: boolean; percentage: number };
   typeSafety: { present: boolean; anyCount: number; tsIgnoreCount: number; nonNullAssertCount: number };
-  modularity: { present: boolean; circularDeps: number; crossBoundaryImports: number };
+  modularity: { present: boolean; circularDeps: number; crossBoundaryImports?: number };
 }
 
 export interface WorkspaceAuditResult {
@@ -112,8 +120,6 @@ export interface AuditOptions {
   runner?: (cmd: string, args: string[], opts: { cwd: string; timeout: number }) => Promise<{ stdout: string; stderr: string }>;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-
 export async function auditCodeQuality(opts: AuditOptions): Promise<CodeQualityAuditResult> {
   const workspaces = await discoverWorkspaces(opts.outputDir);
   if (workspaces.length === 0) {
@@ -167,7 +173,7 @@ async function auditWorkspace(
 
   // tsc
   try {
-    const { stdout, stderr } = await runner("pnpm", ["exec", "tsc", "--noEmit"], { cwd, timeout: 180_000 });
+    const { stdout, stderr } = await runner("pnpm", ["exec", "tsc", "--noEmit"], { cwd, timeout: TSC_TIMEOUT_MS });
     result.tscErrors = parseTscOutput(stdout + stderr);
   } catch (e: any) {
     if (typeof e?.stdout === "string") result.tscErrors = parseTscOutput(e.stdout + (e.stderr ?? ""));
@@ -176,7 +182,7 @@ async function auditWorkspace(
 
   // eslint
   try {
-    const { stdout } = await runner("pnpm", ["exec", "eslint", ".", "--format", "json"], { cwd, timeout });
+    const { stdout } = await runner("pnpm", ["exec", "eslint", ".", "--format", "json"], { cwd, timeout: ESLINT_TIMEOUT_MS });
     const { lintErrors, lintWarnings } = parseEslintJson(stdout);
     result.lintErrors = lintErrors;
     result.lintWarnings = lintWarnings;
@@ -194,7 +200,7 @@ async function auditWorkspace(
   try {
     const reportDir = path.join(cwd, ".ralph-jscpd");
     await fs.mkdir(reportDir, { recursive: true });
-    await runner("pnpm", ["exec", "jscpd", "src", "--reporters", "json", "--output", reportDir, "--silent"], { cwd, timeout });
+    await runner("pnpm", ["exec", "jscpd", "src", "--reporters", "json", "--output", reportDir, "--silent"], { cwd, timeout: JSCPD_TIMEOUT_MS });
     const reportPath = path.join(reportDir, "jscpd-report.json");
     const raw = await fs.readFile(reportPath, "utf-8");
     result.duplicationPct = parseJscpdJson(raw).percentage;
@@ -204,7 +210,7 @@ async function auditWorkspace(
 
   // madge
   try {
-    const { stdout } = await runner("pnpm", ["exec", "madge", "--circular", "--json", "src"], { cwd, timeout: 60_000 });
+    const { stdout } = await runner("pnpm", ["exec", "madge", "--circular", "--json", "src"], { cwd, timeout: MADGE_TIMEOUT_MS });
     result.circularDeps = parseMadgeJson(stdout).circularDeps;
   } catch (e: any) {
     if (typeof e?.stdout === "string") result.circularDeps = parseMadgeJson(e.stdout).circularDeps;
@@ -243,7 +249,7 @@ async function scanSourceTree(root: string): Promise<{
   for (const f of files) {
     const src = await fs.readFile(f, "utf-8");
     const lines = src.split(/\r?\n/).length;
-    if (lines > 400) largeFile += 1;
+    if (lines > LARGE_FILE_LINE_THRESHOLD) largeFile += 1;
     const anomalies = countAstAnomalies(src);
     any += anomalies.anyCount;
     ign += anomalies.tsIgnoreCount;
@@ -279,23 +285,94 @@ async function walk(dir: string, out: string[]): Promise<void> {
   }
 }
 
+const LONG_FUNCTION_LINE_THRESHOLD = 50;
+
 function scanFunctions(src: string): { longCount: number; cyclomaticSum: number; fnCount: number } {
-  const fnSplits = src.split(/(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(/);
+  // Find all function-like declarations: function NAME(, const X = (, name: function(,
+  // method shorthand `name(args) {`, and arrow functions on the RHS of an assignment.
+  // For each, brace-match forward from the first `{` to find the real body, then
+  // measure that body's line count and count branches inside.
   let longCount = 0;
   let cyclomaticSum = 0;
   let fnCount = 0;
-  for (let i = 1; i < fnSplits.length; i++) {
-    const body = fnSplits[i];
+
+  const declRe = new RegExp(
+    [
+      // function NAME( ... ) {
+      "\\bfunction\\s*[A-Za-z_$][A-Za-z0-9_$]*\\s*\\([^)]*\\)",
+      // function( ... ) { — anonymous
+      "\\bfunction\\s*\\([^)]*\\)",
+      // (...) => or () =>
+      "\\(([^)]*)\\)\\s*=>",
+      // single-arg arrow without parens: x =>
+      "(?<=\\b(?:const|let|var|=|,|\\(|\\?)\\s)[A-Za-z_$][A-Za-z0-9_$]*\\s*=>",
+    ].join("|"),
+    "g",
+  );
+
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(src)) !== null) {
+    // Find the opening `{` after the match (skip whitespace; allow `=> expr` arrow
+    // that returns an expression with no brace — those have no body to measure).
+    const afterMatch = m.index + m[0].length;
+    const openIdx = findNextNonWhitespace(src, afterMatch);
+    if (openIdx === -1 || src[openIdx] !== "{") {
+      // Expression-bodied arrow `() => 42`. Count as 1 function with cyclomatic=1.
+      fnCount += 1;
+      cyclomaticSum += 1;
+      continue;
+    }
+    const closeIdx = matchBrace(src, openIdx);
+    if (closeIdx === -1) continue; // unbalanced — skip rather than crash
+    const body = src.slice(openIdx + 1, closeIdx);
     const lines = body.split(/\r?\n/).length;
-    if (lines > 50) longCount += 1;
+    if (lines > LONG_FUNCTION_LINE_THRESHOLD) longCount += 1;
     const branches =
       (body.match(/\b(if|for|while|case)\b/g)?.length ?? 0) +
       (body.match(/\?\s*[^:]+:/g)?.length ?? 0) +
       (body.match(/&&|\|\|/g)?.length ?? 0);
     cyclomaticSum += 1 + branches;
     fnCount += 1;
+    // Advance past this function so we don't re-match a nested decl as standalone.
+    declRe.lastIndex = closeIdx + 1;
   }
+
   return { longCount, cyclomaticSum, fnCount };
+}
+
+function findNextNonWhitespace(src: string, from: number): number {
+  for (let i = from; i < src.length; i++) {
+    const c = src[i];
+    if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") return i;
+  }
+  return -1;
+}
+
+function matchBrace(src: string, openIdx: number): number {
+  let depth = 0;
+  let inString: '"' | "'" | "`" | null = null;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = openIdx; i < src.length; i++) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (inLineComment) { if (c === "\n") inLineComment = false; continue; }
+    if (inBlockComment) { if (c === "*" && next === "/") { inBlockComment = false; i++; } continue; }
+    if (inString) {
+      if (c === "\\") { i++; continue; }
+      if (c === inString) inString = null;
+      continue;
+    }
+    if (c === "/" && next === "/") { inLineComment = true; i++; continue; }
+    if (c === "/" && next === "*") { inBlockComment = true; i++; continue; }
+    if (c === '"' || c === "'" || c === "`") { inString = c as '"' | "'" | "`"; continue; }
+    if (c === "{") depth += 1;
+    else if (c === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 function aggregateWorkspaces(wsResults: WorkspaceAuditResult[]): CodeQualityAuditResult {
@@ -342,7 +419,7 @@ function aggregateWorkspaces(wsResults: WorkspaceAuditResult[]): CodeQualityAudi
     modularity: {
       present: someHas("circularDeps"),
       circularDeps: sum("circularDeps"),
-      crossBoundaryImports: 0, // Not yet computed; reserved field.
+      // crossBoundaryImports not yet computed; omitted rather than defaulted to 0.
     },
   };
 }
@@ -355,6 +432,6 @@ function emptyResult(): CodeQualityAuditResult {
     complexity: { present: false, avgCyclomatic: 0, longFunctions: 0, largeFiles: 0 },
     duplication: { present: false, percentage: 0 },
     typeSafety: { present: false, anyCount: 0, tsIgnoreCount: 0, nonNullAssertCount: 0 },
-    modularity: { present: false, circularDeps: 0, crossBoundaryImports: 0 },
+    modularity: { present: false, circularDeps: 0 },
   };
 }
