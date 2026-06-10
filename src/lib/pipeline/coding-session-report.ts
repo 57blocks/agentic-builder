@@ -2070,6 +2070,28 @@ function buildImprovementSuggestions(input: {
   return suggestions;
 }
 
+function renderHeaderScore(score: number | null, grade: string): string {
+  if (score === null) return "**N/A** (absent)";
+  return `**${score}/100 (${grade})**`;
+}
+
+function renderCodeQualitySubLines(cq: CodingOutcomeScores["codeQuality"]): string[] {
+  const order: Array<[keyof typeof cq.subScores, string]> = [
+    ["staticChecks", "Static checks"],
+    ["complexity", "Complexity"],
+    ["duplication", "Duplication"],
+    ["typeSafety", "Type safety"],
+    ["modularity", "Modularity"],
+    ["readability", "Readability"],
+    ["idiomaticity", "Idiomaticity"],
+    ["architecture", "Architecture"],
+  ];
+  return order.map(([key, label]) => {
+    const v = cq.subScores[key];
+    return `  - ${label}: ${v ? `${v.score}/100 (${v.grade})` : "absent"}`;
+  });
+}
+
 function formatMarkdownReport(input: {
   sessionId: string;
   startedAt: string;
@@ -2139,6 +2161,9 @@ function formatMarkdownReport(input: {
     `- Session ID: \`${input.sessionId}\``,
     `- Status: **${input.status.toUpperCase()}**`,
     `- Overall score: **${input.outcomeScores.overall.score}/100 (${input.outcomeScores.overall.grade})**`,
+    `- Code Quality: ${renderHeaderScore(input.outcomeScores.codeQuality.overall.score, input.outcomeScores.codeQuality.overall.grade)}`,
+    ...renderCodeQualitySubLines(input.outcomeScores.codeQuality),
+    `- First-Pass Success: ${renderHeaderScore(input.outcomeScores.firstPass.score, input.outcomeScores.firstPass.grade)}`,
     `- Generated baseline: **${input.outcomeScores.generatedBaseline.score}/100 (${input.outcomeScores.generatedBaseline.grade})**`,
     `- Final usability: **${input.outcomeScores.finalUsability.score}/100 (${input.outcomeScores.finalUsability.grade})**`,
     `- Session health: **${input.outcomeScores.sessionHealth.score}/100 (${input.outcomeScores.sessionHealth.grade})**`,
@@ -2294,16 +2319,22 @@ function formatMarkdownReport(input: {
     `| Generated baseline | info | **${input.outcomeScores.generatedBaseline.score}/100 (${input.outcomeScores.generatedBaseline.grade})** | Estimated initial quality after discounting repair burden |`,
   );
   lines.push(
-    `| Final usability | 50% | **${input.outcomeScores.finalUsability.score}/100 (${input.outcomeScores.finalUsability.grade})** | Final build/runtime/gate state and blocking defects |`,
+    `| Final usability | 35% | **${input.outcomeScores.finalUsability.score}/100 (${input.outcomeScores.finalUsability.grade})** | Final build/runtime/gate state and blocking defects |`,
   );
   lines.push(
-    `| Requirement coverage | 20% | **${input.outcomeScores.requirementCoverage.score}/100 (${input.outcomeScores.requirementCoverage.grade})** | PRD hard/soft coverage after audit |`,
+    `| Code Quality | 20% | ${renderHeaderScore(input.outcomeScores.codeQuality.overall.score, input.outcomeScores.codeQuality.overall.grade)} | Aggregate of 5 machine + 3 LLM judge sub-dimensions |`,
   );
   lines.push(
-    `| Evidence completeness | 15% | **${input.outcomeScores.evidence.score}/100 (${input.outcomeScores.evidence.grade})** | Whether validation evidence actually ran |`,
+    `| Requirement coverage | 15% | **${input.outcomeScores.requirementCoverage.score}/100 (${input.outcomeScores.requirementCoverage.grade})** | PRD hard/soft coverage after audit |`,
   );
   lines.push(
-    `| Repair burden | 10% | **${input.outcomeScores.repairBurden.score}/100 (${input.outcomeScores.repairBurden.grade})** | How much fix-loop/self-heal effort was required |`,
+    `| First-Pass Success | 10% | ${renderHeaderScore(input.outcomeScores.firstPass.score, input.outcomeScores.firstPass.grade)} | Tasks that completed with zero codefix iterations |`,
+  );
+  lines.push(
+    `| Evidence completeness | 8% | **${input.outcomeScores.evidence.score}/100 (${input.outcomeScores.evidence.grade})** | Whether validation evidence actually ran |`,
+  );
+  lines.push(
+    `| Repair burden | 7% | **${input.outcomeScores.repairBurden.score}/100 (${input.outcomeScores.repairBurden.grade})** | How much fix-loop/self-heal effort was required |`,
   );
   lines.push(
     `| Cost/speed | 5% | **${input.outcomeScores.costSpeed.score}/100 (${input.outcomeScores.costSpeed.grade})** | Call volume, token volume, and spend |`,
@@ -2311,15 +2342,59 @@ function formatMarkdownReport(input: {
   lines.push("");
   lines.push(`**Overall formula:** \`${input.outcomeScores.overall.reasons[0]?.replace(/^Score formula:\s*/, "") ?? ""}\``);
   lines.push("");
+
+  // ── Code Quality Audit section ──────────────────────────────────────────
+  const cq = input.outcomeScores.codeQuality;
+  lines.push("## Code Quality Audit");
+  lines.push("");
+  lines.push(`Overall: ${renderHeaderScore(cq.overall.score, cq.overall.grade)}`);
+  if (cq.absentLabels.length > 0) {
+    lines.push(`_Absent sub-dimensions:_ ${cq.absentLabels.join(", ")}`);
+  }
+  lines.push("");
+  lines.push("| Sub-dimension | Score | Notes |");
+  lines.push("| --- | ---: | --- |");
+  const subOrder: Array<[string, keyof typeof cq.subScores]> = [
+    ["Static checks (tsc + ESLint)", "staticChecks"],
+    ["Complexity (cyclomatic + LOC)", "complexity"],
+    ["Duplication (jscpd)", "duplication"],
+    ["Type safety (any/ts-ignore/non-null)", "typeSafety"],
+    ["Modularity (madge)", "modularity"],
+    ["Readability (LLM judge)", "readability"],
+    ["Idiomaticity (LLM judge)", "idiomaticity"],
+    ["Architecture (LLM judge)", "architecture"],
+  ];
+  for (const [label, key] of subOrder) {
+    const v = cq.subScores[key];
+    const note = v ? v.reasons.slice(0, 2).join(" / ") : "_absent_";
+    lines.push(`| ${label} | ${v ? `${v.score}/100 (${v.grade})` : "—"} | ${note} |`);
+  }
+  lines.push("");
+  lines.push("Full audit: `.ralph/code-quality-audit.json`, judge: `.ralph/code-quality-judge.json`");
+  lines.push("");
+
+  // ── First-Pass Success section ──────────────────────────────────────────
+  const fp = input.outcomeScores.firstPass;
+  lines.push("## First-Pass Success");
+  if (fp.score === null) {
+    lines.push("_No coding tasks recorded — first-pass rate not computable._");
+  } else {
+    for (const r of fp.reasons) lines.push(`- ${r}`);
+  }
+  lines.push("");
+
   lines.push("### Outcome Notes");
-  for (const [label, breakdown] of [
+  const breakdowns: Array<readonly [string, { score: number | null; grade: string; reasons: string[] }]> = [
     ["Generated baseline", input.outcomeScores.generatedBaseline],
     ["Final usability", input.outcomeScores.finalUsability],
+    ["Code Quality", input.outcomeScores.codeQuality.overall],
     ["Requirement coverage", input.outcomeScores.requirementCoverage],
+    ["First-Pass Success", input.outcomeScores.firstPass],
     ["Evidence completeness", input.outcomeScores.evidence],
     ["Repair burden", input.outcomeScores.repairBurden],
     ["Cost/speed", input.outcomeScores.costSpeed],
-  ] as const) {
+  ];
+  for (const [label, breakdown] of breakdowns) {
     const notes = breakdown.reasons.slice(1, 4);
     lines.push(`- **${label}**: ${notes.join(" | ")}`);
   }
