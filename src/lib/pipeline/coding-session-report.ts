@@ -16,6 +16,11 @@ import {
   type ScoreBreakdown,
   type ScoreLine,
 } from "@/lib/pipeline/coding-outcome-score";
+import { auditCodeQuality } from "@/lib/pipeline/code-quality-audit";
+import type { CodeQualityAuditResult } from "@/lib/pipeline/code-quality-audit";
+import { judgeCodeQuality } from "@/lib/pipeline/code-quality-judge";
+import type { CodeQualityJudgeResult } from "@/lib/pipeline/code-quality-judge";
+import { extractCodefixCounts, deriveFirstPass } from "@/lib/pipeline/first-pass";
 
 const execFileAsync = promisify(execFile);
 
@@ -2953,6 +2958,69 @@ export async function writeCodingSessionReport(
   const tddEvidenceSummary = await readTddEvidenceSummary(input.outputDir, {
     sessionId: input.sessionId,
   });
+
+  // ── Code quality audit + LLM judge (best-effort) ─────────────────────────
+  let codeQualityAudit: CodeQualityAuditResult;
+  try {
+    codeQualityAudit = await auditCodeQuality({ outputDir: input.outputDir });
+  } catch (err) {
+    console.warn(
+      `[coding-session-report] code-quality audit failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    codeQualityAudit = {
+      present: false,
+      workspaces: [],
+      staticChecks: { present: false, tscErrors: 0, lintErrors: 0, lintWarnings: 0 },
+      complexity: { present: false, avgCyclomatic: 0, longFunctions: 0, largeFiles: 0 },
+      duplication: { present: false, percentage: 0 },
+      typeSafety: { present: false, anyCount: 0, tsIgnoreCount: 0, nonNullAssertCount: 0 },
+      modularity: { present: false, circularDeps: 0 },
+    };
+  }
+  let codeQualityJudge: CodeQualityJudgeResult;
+  try {
+    codeQualityJudge = await judgeCodeQuality({
+      outputDir: input.outputDir,
+      sessionId: input.sessionId,
+    });
+  } catch (err) {
+    console.warn(
+      `[coding-session-report] code-quality judge failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    codeQualityJudge = {
+      present: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  // Persist raw audit + judge outputs for human inspection.
+  try {
+    await fs.writeFile(
+      path.join(ralphDir, "code-quality-audit.json"),
+      JSON.stringify(codeQualityAudit, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn(`[coding-session-report] failed to write code-quality-audit.json:`, err);
+  }
+  try {
+    await fs.writeFile(
+      path.join(ralphDir, "code-quality-judge.json"),
+      JSON.stringify(codeQualityJudge, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn(`[coding-session-report] failed to write code-quality-judge.json:`, err);
+  }
+
+  // ── First-pass success ───────────────────────────────────────────────────
+  const codefixCounts = extractCodefixCounts(repairSummary.entries ?? []);
+  const firstPassData = deriveFirstPass({
+    taskResults: input.taskResults,
+    codefixCountsByTask: codefixCounts,
+  });
+
   const stageUsage = aggregateStageUsage({
     usage,
     repairSummary,
@@ -2997,9 +3065,9 @@ export async function writeCodingSessionReport(
     modelUsage,
     scaffoldFixAttempts: input.scaffoldFixAttempts,
     integrationFixAttempts: input.integrationFixAttempts,
-    codeQualityAudit: { present: false },
-    codeQualityJudge: { present: false },
-    firstPassData: { tasksTotal: 0, firstPassCount: 0, avgFixIterations: 0 },
+    codeQualityAudit,
+    codeQualityJudge,
+    firstPassData,
   });
   const suggestions = buildImprovementSuggestions({
     integrationErrors: input.integrationErrors,
