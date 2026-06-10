@@ -63,6 +63,10 @@ interface CodingState {
   selectedAgentId: string | null;
   totalCostUsd: number;
   error: string | null;
+  /** True while the SSE stream dropped but the server-side build is still
+   *  running and we're polling orchestration-status to rehydrate (status stays
+   *  "running"). Lets the UI show "reconnecting…" instead of a false failure. */
+  reconnecting: boolean;
   integrationVerify: IntegrationVerifyState | null;
   e2eVerify: E2EVerifyState | null;
   /** Supervisor-level logs (phase verify, fix, install, etc.) */
@@ -202,6 +206,69 @@ function persistSessionSnapshot(
   );
 }
 
+/**
+ * The SSE stream dropped (idle timeout / navigation / network) but the
+ * subsystem build keeps running server-side. Instead of marking the session
+ * failed, poll the durable orchestration status + checkpoint to rehydrate task
+ * progress and resolve the final outcome without the stream. Falls back to
+ * "failed" only when no orchestration is in flight (e.g. a single-pass run with
+ * no status file). The loop self-terminates on reset (status → "idle").
+ */
+async function reconnectAfterDrop(
+  taskItems: KickoffWorkItem[],
+  set: (partial: Partial<CodingState>) => void,
+  get: () => CodingState,
+): Promise<void> {
+  const POLL_MS = 5000;
+  for (;;) {
+    // A reset()/new session took over — stop polling.
+    if (get().status !== "running") return;
+    let data:
+      | { status?: { state?: string; error?: string } | null; checkpoint?: SessionCheckpoint | null }
+      | null = null;
+    try {
+      const r = await fetch("/api/agents/coding/orchestration-status");
+      if (r.ok) data = await r.json();
+    } catch {
+      /* transient — retry next poll */
+    }
+    if (get().status !== "running") return;
+
+    if (data?.checkpoint) {
+      try {
+        get().hydrateFromCheckpoint(data.checkpoint, taskItems);
+      } catch {
+        /* ignore hydrate errors */
+      }
+    }
+    const state = data?.status?.state;
+    if (state === "completed") {
+      set({ status: "completed", reconnecting: false });
+      const s = get();
+      persistSessionSnapshot(s.projectId ?? "", s);
+      return;
+    }
+    if (state === "failed") {
+      set({
+        status: "failed",
+        reconnecting: false,
+        error: data?.status?.error ?? "Subsystem build failed.",
+      });
+      const s = get();
+      persistSessionSnapshot(s.projectId ?? "", s);
+      return;
+    }
+    if (!data?.status) {
+      // No orchestration in flight (single-pass run) — preserve old behavior.
+      set({ status: "failed", reconnecting: false, error: "Connection lost." });
+      return;
+    }
+    // state === "running": keep showing reconnecting and poll again.
+    set({ reconnecting: true });
+    await new Promise((res) => setTimeout(res, POLL_MS));
+  }
+}
+
 export const useCodingStore = create<CodingState>()((set, get) => ({
   sessionId: null,
   projectId: null,
@@ -211,6 +278,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   selectedAgentId: null,
   totalCostUsd: 0,
   error: null,
+  reconnecting: false,
   integrationVerify: null,
   e2eVerify: null,
   gapAnalysis: null,
@@ -276,6 +344,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     set({
       status: "running",
       error: null,
+      reconnecting: false,
       agents: [],
       tasks: [],
       selectedAgentId: null,
@@ -365,13 +434,26 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         }
 
         const state = get();
-        if (state.status === "running") set({ status: "completed" });
+        if (state.status === "running") {
+          // Stream ended but no session_complete arrived → the SSE dropped while
+          // the server-side build keeps running. Reconnect + poll instead of
+          // falsely marking it completed.
+          void reconnectAfterDrop(taskItems, set, get);
+          return;
+        }
         const finalState = get();
         persistSessionSnapshot(finalState.projectId ?? "", finalState);
       })
       .catch((err) => {
         // Ignore intentional abort from reset() — state is already idle.
         if (err instanceof DOMException && err.name === "AbortError") return;
+        // The stream errored (drop). The build keeps running server-side, so try
+        // to reconnect + poll orchestration-status rather than failing outright.
+        if (get().status === "running") {
+          set({ reconnecting: true });
+          void reconnectAfterDrop(taskItems, set, get);
+          return;
+        }
         set({
           status: "failed",
           error: err instanceof Error ? err.message : "Unknown error",
@@ -428,6 +510,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       selectedAgentId: null,
       totalCostUsd: 0,
       error: null,
+      reconnecting: false,
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
@@ -870,6 +953,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       selectedAgentId: null,
       totalCostUsd: 0,
       error: null,
+      reconnecting: false,
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],

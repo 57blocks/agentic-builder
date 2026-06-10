@@ -61,6 +61,7 @@ import type {
 } from "@/lib/pipeline/types";
 import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { readSubsystemManifest } from "@/lib/pipeline/subsystems/manifest-io";
+import { writeOrchestrationStatus } from "@/lib/pipeline/orchestration-status";
 import { buildCombinedDomainSlice } from "@/lib/pipeline/subsystems/domain-files";
 import { developBySubsystem } from "@/lib/pipeline/subsystems/develop";
 import { createSubsystemSseForwarder } from "@/lib/pipeline/subsystems/sse-forward";
@@ -1093,6 +1094,13 @@ export async function POST(request: NextRequest) {
           // then forward each sub-build's interior events as one continuous session.
           emit({ type: "session_start", sessionId: runId, data: { tasks: orchestrationTasks } });
           const forward = createSubsystemSseForwarder({ emit });
+          // Durable status so the UI can resolve the outcome after an SSE drop.
+          await writeOrchestrationStatus(process.cwd(), {
+            runId,
+            state: "running",
+            domains: manifest.subsystems.length,
+            updatedAt: new Date().toISOString(),
+          });
           try {
             const result = await developBySubsystem({
               // Artifact root: manifest, domain-*.md, progress all live under the
@@ -1115,23 +1123,44 @@ export async function POST(request: NextRequest) {
               },
             });
             if (result.ok) {
+              await writeOrchestrationStatus(process.cwd(), {
+                runId,
+                state: "completed",
+                domains: manifest.subsystems.length,
+                updatedAt: new Date().toISOString(),
+              });
               emit({ type: "session_complete", sessionId: runId });
             } else {
+              const error = result.errors.join("; ") || "Subsystem build failed.";
+              await writeOrchestrationStatus(process.cwd(), {
+                runId,
+                state: "failed",
+                domains: manifest.subsystems.length,
+                error,
+                updatedAt: new Date().toISOString(),
+              });
               emit({
                 type: "session_error",
                 sessionId: runId,
                 data: {
-                  error: result.errors.join("; ") || "Subsystem build failed.",
+                  error,
                   errorCategory: "graph_error",
                 },
               });
             }
           } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            await writeOrchestrationStatus(process.cwd(), {
+              runId,
+              state: "failed",
+              error,
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {});
             emit({
               type: "session_error",
               sessionId: runId,
               data: {
-                error: err instanceof Error ? err.message : String(err),
+                error,
                 errorCategory: "unknown",
               },
             });
