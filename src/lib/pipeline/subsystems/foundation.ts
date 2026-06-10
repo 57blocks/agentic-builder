@@ -29,6 +29,7 @@ import {
 import {
   drainStream,
   verdictFromCheckpoint,
+  waitForFreshCheckpoint,
   type SubsystemCodingContext,
 } from "./coding-runner";
 import {
@@ -121,6 +122,8 @@ export async function runFoundationBuild(
   const body = buildFoundationCodingRequest(allTasks, foundationTaskIds, ctx);
   const controller = new AbortController();
   const timer = ctx.timeoutMs ? setTimeout(() => controller.abort(), ctx.timeoutMs) : null;
+  const startedAt = Date.now();
+  let dropped = false;
   try {
     const resp = await fetch(`${ctx.baseUrl}/api/agents/coding`, {
       method: "POST",
@@ -134,12 +137,25 @@ export async function runFoundationBuild(
     }
     await drainStream(resp.body, ctx.onProgress ? (c) => ctx.onProgress!(FOUNDATION_ID, c) : undefined);
   } catch (err) {
-    return { ok: false, summary: `foundation: request failed — ${err instanceof Error ? err.message : String(err)}`, generatedFiles: [] };
+    // The drain fetch dropped (e.g. bodyTimeout on a long quiet LLM call) but the
+    // foundation build keeps running server-side. Recover via the checkpoint
+    // instead of failing the whole orchestration + orphaning the build.
+    dropped = true;
+    console.warn(
+      `[Subsystems] foundation: drain fetch dropped (${err instanceof Error ? err.message : String(err)}); recovering verdict from checkpoint…`,
+    );
   } finally {
     if (timer) clearTimeout(timer);
   }
 
-  const checkpoint = await readSessionCheckpoint(projectRoot);
+  // On a dropped drain, wait for the still-running build to write a fresh
+  // checkpoint; otherwise read the checkpoint it just wrote.
+  const checkpoint = dropped
+    ? await waitForFreshCheckpoint(projectRoot, startedAt)
+    : await readSessionCheckpoint(projectRoot);
+  if (dropped && !checkpoint) {
+    return { ok: false, summary: "foundation: drain dropped and no fresh checkpoint within the wait window.", generatedFiles: [] };
+  }
   const verdict = verdictFromCheckpoint(checkpoint, step);
   const generatedFiles = checkpoint
     ? foundationTaskIds.flatMap((id) => checkpoint.taskResults[id]?.generatedFiles ?? [])

@@ -117,6 +117,36 @@ export function verdictFromCheckpoint(
   return { ok, summary: `${step.subsystemId}: ${parts.join(" · ")}` };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Recover a sub-build's outcome after its drain fetch dropped.
+ *
+ * The orchestrator → sub-build fetch can be "terminated" (undici's default
+ * bodyTimeout fires when a slow LLM call leaves the SSE silent for minutes; or
+ * the socket resets) even though the sub-build keeps running server-side
+ * (keep-running policy). Failing immediately on that would both fail the whole
+ * orchestration AND orphan the still-running build. Instead, poll the durable
+ * session checkpoint until THIS run writes a fresh one (savedAt >= notBefore)
+ * and recover the verdict from it. Returns the fresh checkpoint, or null if none
+ * appears within the wait window (e.g. the sub-build itself died).
+ */
+export async function waitForFreshCheckpoint(
+  projectRoot: string,
+  notBefore: number,
+  opts?: { pollMs?: number; maxWaitMs?: number },
+): Promise<SessionCheckpoint | null> {
+  const pollMs = opts?.pollMs ?? 15_000;
+  const deadline = Date.now() + (opts?.maxWaitMs ?? 120 * 60_000);
+  while (Date.now() < deadline) {
+    await sleep(pollMs);
+    const cp = await readSessionCheckpoint(projectRoot);
+    const saved = cp ? Date.parse(cp.savedAt) : NaN;
+    if (cp && Number.isFinite(saved) && saved >= notBefore) return cp;
+  }
+  return null;
+}
+
 /** Drain an SSE/NDJSON response body to completion (we rely on the checkpoint
  *  for the verdict; this just waits for the run to finish). */
 export async function drainStream(
@@ -161,6 +191,8 @@ export function makeHttpCodingRunner(
     const timer = ctx.timeoutMs
       ? setTimeout(() => controller.abort(), ctx.timeoutMs)
       : null;
+    const startedAt = Date.now();
+    let dropped = false;
     try {
       const resp = await fetch(`${ctx.baseUrl}/api/agents/coding`, {
         method: "POST",
@@ -174,9 +206,22 @@ export function makeHttpCodingRunner(
       }
       await drainStream(resp.body, ctx.onProgress ? (c) => ctx.onProgress!(step.subsystemId, c) : undefined);
     } catch (err) {
-      return { ok: false, summary: `${step.subsystemId}: coding request failed — ${err instanceof Error ? err.message : String(err)}` };
+      // The drain fetch dropped (e.g. bodyTimeout on a long quiet LLM call), but
+      // the sub-build keeps running server-side. Recover the verdict from its
+      // durable checkpoint rather than failing + orphaning the build.
+      dropped = true;
+      console.warn(
+        `[Subsystems] ${step.subsystemId}: drain fetch dropped (${err instanceof Error ? err.message : String(err)}); recovering verdict from checkpoint…`,
+      );
     } finally {
       if (timer) clearTimeout(timer);
+    }
+    if (dropped) {
+      const fresh = await waitForFreshCheckpoint(projectRoot, startedAt);
+      if (!fresh) {
+        return { ok: false, summary: `${step.subsystemId}: drain dropped and no fresh checkpoint within the wait window.` };
+      }
+      return verdictFromCheckpoint(fresh, step);
     }
     // Verdict from the durable checkpoint.
     const checkpoint = await readSessionCheckpoint(projectRoot);
