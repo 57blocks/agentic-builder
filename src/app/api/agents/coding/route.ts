@@ -2052,6 +2052,20 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Keep-alive comment frames so the stream never goes silent for minutes
+      // during a slow/quiet LLM call. Without this, undici's default bodyTimeout
+      // (~5m) terminates the orchestrator's drain fetch on long builds (the
+      // "request failed — terminated" foundation failure). Consumers ignore any
+      // frame that doesn't start with "data: ".
+      const keepAlive = setInterval(() => {
+        if (clientAborted) return;
+        try {
+          controller.enqueue(encoder.encode(`: keep-alive\n\n`));
+        } catch {
+          clientAborted = true;
+        }
+      }, 15_000);
+
       // ── Self-heal telemetry ────────────────────────────────────────────────
       // Fan out repair events to: (1) SSE channel (front-end log panel),
       // (2) .ralph/repair-log.jsonl on disk, (3) stdout for dev observability.
@@ -2620,6 +2634,7 @@ export async function POST(request: NextRequest) {
         if (activeCodingSessions.get(outputRoot) === sessionAbortController) {
           activeCodingSessions.delete(outputRoot);
         }
+        clearInterval(keepAlive);
         controller.close();
       }
     },
