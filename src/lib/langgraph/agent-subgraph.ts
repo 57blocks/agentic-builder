@@ -94,6 +94,64 @@ const OWNED_FILE_INJECT_CAP = 16_000;
 const REF_FILE_INJECT_CAP = 8_000;
 const MAX_WORKER_TOOL_OUTPUT_CHARS = OWNED_FILE_INJECT_CAP;
 const WORKER_LLM_HEARTBEAT_MS = 10_000;
+// Per-LLM-call wall-clock timeout. A single codegen call that never returns
+// otherwise freezes the worker (and the whole foundation/phase fan-in)
+// indefinitely — observed as an 11h overnight hang. This does NOT harm a
+// "slow but still producing" task: such a task's calls RETURN (that's how it
+// writes), resetting the clock each call; only a genuinely hung call (no
+// response for the full window) is abandoned, surfacing as a normal task error
+// that retries/fails so the worker moves on. It also re-enables the existing
+// per-iteration stagnation guard, which can't fire while an iteration is stuck
+// inside a non-returning call. Override via CODEGEN_LLM_CALL_TIMEOUT_MS.
+const CODEGEN_LLM_CALL_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.CODEGEN_LLM_CALL_TIMEOUT_MS ?? "240000");
+  if (!Number.isFinite(raw) || raw <= 0) return 240_000; // 4 min default
+  return Math.min(Math.max(Math.floor(raw), 60_000), 1_200_000); // clamp 60s–20min
+})();
+
+/**
+ * Race an LLM call against a wall-clock timeout. On timeout the call is
+ * ABANDONED (its late settlement is swallowed so it can't surface as an
+ * unhandled rejection) and a timeout error is thrown to the caller, which
+ * routes through the existing task error/retry path. `cleanup` (e.g. clearing
+ * the heartbeat interval) runs whether the call wins or times out.
+ */
+async function withLlmCallTimeout<T>(
+  makeCall: () => Promise<T>,
+  cleanup: () => void,
+  label: string,
+): Promise<T> {
+  const callP = makeCall();
+  if (CODEGEN_LLM_CALL_TIMEOUT_MS <= 0) {
+    try {
+      return await callP;
+    } finally {
+      cleanup();
+    }
+  }
+  // Swallow a late rejection from an abandoned (timed-out) call.
+  callP.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `LLM codegen call timed out after ${Math.round(
+              CODEGEN_LLM_CALL_TIMEOUT_MS / 1000,
+            )}s (${label}); abandoning the hung request so the worker can fail this task and continue.`,
+          ),
+        ),
+      CODEGEN_LLM_CALL_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([callP, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    cleanup();
+  }
+}
 // Raise the iteration ceiling so complex tasks have enough read rounds.
 // 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
 // enough budget while still bounding the worst case.
@@ -1237,24 +1295,27 @@ async function runCodegenWorkerLoop(
         });
       }
     }, WORKER_LLM_HEARTBEAT_MS);
-    const response = await invokeCodegenOrOpenRouter(messages, {
-      temperature: 0.3,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      openRouterVariant: codegenVariant,
-      codingMode,
-      // When forcing write, omit tools entirely so the model cannot call them.
-      tools: forceWrite ? undefined : WORKER_TOOLS,
-      tool_choice: forceWrite ? "none" : "auto",
-      contextDump: {
-        taskId: toolOptions?.taskId,
-        iteration: i,
-        sessionId,
-        label: workerLabel,
-        outputDir,
-      },
-    }).finally(() => {
-      clearInterval(heartbeat);
-    });
+    const response = await withLlmCallTimeout(
+      () =>
+        invokeCodegenOrOpenRouter(messages, {
+          temperature: 0.3,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          openRouterVariant: codegenVariant,
+          codingMode,
+          // When forcing write, omit tools entirely so the model cannot call them.
+          tools: forceWrite ? undefined : WORKER_TOOLS,
+          tool_choice: forceWrite ? "none" : "auto",
+          contextDump: {
+            taskId: toolOptions?.taskId,
+            iteration: i,
+            sessionId,
+            label: workerLabel,
+            outputDir,
+          },
+        }),
+      () => clearInterval(heartbeat),
+      `task=${toolOptions?.taskId ?? "?"} loop=${i + 1}/${MAX_WORKER_TOOL_ITERATIONS}`,
+    );
     const choice = response.choices[0];
     llmCalls += 1;
     const finishReason = choice?.finish_reason ?? "stop";
@@ -1480,23 +1541,26 @@ async function runCodegenAgentSession(
         `[Worker] codegen agent still waiting... loop=${i + 1}/${CODEGEN_AGENT_MAX_ITERATIONS} waited=${waitedSec}s`,
       );
     }, WORKER_LLM_HEARTBEAT_MS);
-    const response = await invokeCodegenOrOpenRouter(messages, {
-      temperature: 0.3,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      openRouterVariant: codegenVariant,
-      codingMode,
-      tools: WORKER_TOOLS,
-      tool_choice: "auto",
-      contextDump: {
-        taskId: toolOptions?.taskId ?? task.id,
-        iteration: i,
-        sessionId,
-        label: workerLabel,
-        outputDir,
-      },
-    }).finally(() => {
-      clearInterval(heartbeat);
-    });
+    const response = await withLlmCallTimeout(
+      () =>
+        invokeCodegenOrOpenRouter(messages, {
+          temperature: 0.3,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          openRouterVariant: codegenVariant,
+          codingMode,
+          tools: WORKER_TOOLS,
+          tool_choice: "auto",
+          contextDump: {
+            taskId: toolOptions?.taskId ?? task.id,
+            iteration: i,
+            sessionId,
+            label: workerLabel,
+            outputDir,
+          },
+        }),
+      () => clearInterval(heartbeat),
+      `task=${toolOptions?.taskId ?? task.id} loop=${i + 1}/${CODEGEN_AGENT_MAX_ITERATIONS}`,
+    );
 
     const choice = response.choices[0];
     const finishReason = choice?.finish_reason ?? "stop";
