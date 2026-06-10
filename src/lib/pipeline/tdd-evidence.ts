@@ -246,7 +246,16 @@ export async function readTddEvidenceSummary(
     }
 
     if (hasGreenFail) greenFailed += 1;
-    if (priority === "P0" && (!hasValidRed || !hasGreenPass)) {
+    // Block ONLY on a failing/absent GREEN — i.e. "does the test pass after
+    // implementation?", the real correctness signal. RED-validity ("did the
+    // test fail FIRST?") is NOT a hard blocker: when the scaffold or a shared
+    // foundation task already implements a feature, its RED test passes before
+    // implementation and can never be a "valid failing test", which would
+    // otherwise block the task forever for code that actually works (the
+    // frontend-cluster false-failures observed 2026-06-09). `redValid` /
+    // `missingRedEvidence` are still tracked above and surfaced in the score
+    // and session report as a soft quality signal.
+    if (priority === "P0" && !hasGreenPass) {
       p0BlockingFailures.push(test.id);
     }
     if (priority === "P0") {
