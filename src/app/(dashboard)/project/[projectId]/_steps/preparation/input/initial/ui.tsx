@@ -34,7 +34,7 @@ export function InitialUI(props: StepUIProps) {
           <Card className="w-full shadow-[0_10px_40px_-8px_rgba(0,0,0,0.08)] overflow-hidden">
             <CardContent className="p-0">
               <div className="px-6 pt-6 pb-3">
-                <Textarea rows={5} placeholder={"Describe what your agent should do…\ne.g. 'Build a market research agent that scrapes top tech news and summarizes them into a Slack report every morning.'"} value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isRunning} className="border-0 focus-visible:ring-0 text-[15px] text-[#0b1c30] placeholder:text-[#94a3b8] leading-6 min-h-30 px-0 py-0 shadow-none" />
+                <Textarea placeholder={"Describe what your agent should do…\ne.g. 'Build a market research agent that scrapes top tech news and summarizes them into a Slack report every morning.'"} value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isRunning} className="border-0 focus-visible:ring-0 text-[15px] text-[#0b1c30] placeholder:text-[#94a3b8] leading-6 h-40 max-h-40 overflow-y-auto resize-none px-0 py-0 shadow-none" />
               </div>
               <Separator />
               <div className="flex items-center justify-between bg-[#fafbfc] px-4 py-3">
