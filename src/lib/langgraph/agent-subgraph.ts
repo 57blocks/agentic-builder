@@ -103,10 +103,15 @@ const WORKER_LLM_HEARTBEAT_MS = 10_000;
 // that retries/fails so the worker moves on. It also re-enables the existing
 // per-iteration stagnation guard, which can't fire while an iteration is stuck
 // inside a non-returning call. Override via CODEGEN_LLM_CALL_TIMEOUT_MS.
+//
+// Default 8m: a single DeepSeek "thinking" call on a 150K-token context can
+// legitimately take several minutes, so the window must clear that to avoid
+// cutting slow-but-working calls — only a genuinely hung (never-returning) call
+// should be abandoned.
 const CODEGEN_LLM_CALL_TIMEOUT_MS = (() => {
-  const raw = Number(process.env.CODEGEN_LLM_CALL_TIMEOUT_MS ?? "240000");
-  if (!Number.isFinite(raw) || raw <= 0) return 240_000; // 4 min default
-  return Math.min(Math.max(Math.floor(raw), 60_000), 1_200_000); // clamp 60s–20min
+  const raw = Number(process.env.CODEGEN_LLM_CALL_TIMEOUT_MS ?? "480000");
+  if (!Number.isFinite(raw) || raw <= 0) return 480_000; // 8 min default
+  return Math.min(Math.max(Math.floor(raw), 60_000), 1_800_000); // clamp 60s–30min
 })();
 
 /**
