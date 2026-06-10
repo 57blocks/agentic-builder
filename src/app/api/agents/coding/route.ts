@@ -110,6 +110,7 @@ import {
 } from "@/lib/pipeline/model-scoring";
 import {
   writeSessionCheckpoint,
+  readSessionCheckpoint,
   clearSessionCheckpoint,
   type TaskCheckpointEntry,
 } from "@/lib/pipeline/session-checkpoint";
@@ -984,6 +985,38 @@ export async function POST(request: NextRequest) {
         `[CodingAPI] Retry mode: expanded retry set with missing-dependency tasks: ${added.join(", ")}`,
       );
       expandedRetrySet = expandedIds;
+    }
+  }
+
+  // Resume hygiene: never re-run a task the checkpoint marks completed — even
+  // if the retry-set dependency expansion (or a stale "failed" status) pulled
+  // it in. Without this, a "Retry Failed" was re-running finished foundation
+  // tasks (e.g. T-002 scaffold) from scratch, i.e. "starting from the top".
+  if (expandedRetrySet) {
+    try {
+      const cp = await readSessionCheckpoint(process.cwd());
+      if (cp) {
+        const completed = new Set(
+          Object.entries(cp.taskResults)
+            .filter(
+              ([, r]) =>
+                r.status === "completed" ||
+                r.status === "completed_with_warnings",
+            )
+            .map(([id]) => id),
+        );
+        const before = expandedRetrySet.size;
+        expandedRetrySet = new Set(
+          [...expandedRetrySet].filter((id) => !completed.has(id)),
+        );
+        if (expandedRetrySet.size < before) {
+          console.log(
+            `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-completed task(s) from the retry set (checkpoint).`,
+          );
+        }
+      }
+    } catch {
+      /* no/unreadable checkpoint → nothing to exclude */
     }
   }
 
@@ -1933,12 +1966,16 @@ export async function POST(request: NextRequest) {
 
   let clientAborted = false;
   request.signal.addEventListener("abort", () => {
+    // A dropped/closed tab (client disconnect) stops the SSE stream but MUST
+    // NOT kill the coding graph — otherwise a long session dies the moment the
+    // browser navigates away, leaving most tasks unrun. We only flip
+    // `clientAborted` so `send()` stops enqueuing; the graph keeps running in
+    // the background, completes, and persists its checkpoint + report. The run
+    // is stopped ONLY by an explicit /abort, or by a NEW session for this
+    // outputRoot (which aborts the prior controller above).
     clientAborted = true;
-    // Propagate client-disconnect into the session controller so the stream
-    // loop exits even if checked via sessionAbortController.signal.
-    sessionAbortController.abort();
     console.warn(
-      `[CodingAPI] Session ${sessionId}: client disconnected (signal aborted)`,
+      `[CodingAPI] Session ${sessionId}: client disconnected — coding continues in the background (not aborted).`,
     );
   });
   // Wire external abort (e.g. /abort endpoint or new session auto-abort) back
