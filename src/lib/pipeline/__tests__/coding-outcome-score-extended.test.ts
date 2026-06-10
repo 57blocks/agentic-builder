@@ -6,6 +6,10 @@ import {
   scoreDuplication,
   scoreTypeSafety,
   scoreModularity,
+  scoreCodeQuality,
+  scoreFirstPass,
+  type CodeQualityAuditLike,
+  type CodeQualityJudgeLike,
 } from "@/lib/pipeline/coding-outcome-score";
 
 describe("renormalizeWeightedAverage", () => {
@@ -98,5 +102,77 @@ describe("scoreModularity", () => {
   });
   it("caps both penalties", () => {
     expect(scoreModularity({ circularDeps: 10, crossBoundaryImports: 30 }).score).toBe(40);
+  });
+});
+
+describe("scoreCodeQuality", () => {
+  const FULL_AUDIT: CodeQualityAuditLike = {
+    present: true,
+    staticChecks: { present: true, tscErrors: 0, lintErrors: 0, lintWarnings: 0 },
+    complexity: { present: true, avgCyclomatic: 4, longFunctions: 0, largeFiles: 0 },
+    duplication: { present: true, percentage: 0 },
+    typeSafety: { present: true, anyCount: 0, tsIgnoreCount: 0, nonNullAssertCount: 0 },
+    modularity: { present: true, circularDeps: 0, crossBoundaryImports: 0 },
+  };
+  const FULL_JUDGE: CodeQualityJudgeLike = {
+    present: true,
+    readability: { score: 90, reason: "ok" },
+    idiomaticity: { score: 80, reason: "ok" },
+    architecture: { score: 70, reason: "ok" },
+  };
+
+  it("perfect machine + judge → 100", () => {
+    const r = scoreCodeQuality(FULL_AUDIT, FULL_JUDGE);
+    // machine all 100, judge 90/80/70 → 0.18*100 + 0.12*100 + 0.12*100 + 0.10*100 + 0.08*100 + 0.14*90 + 0.14*80 + 0.12*70 = 60 + 12.6 + 11.2 + 8.4 = 92.2 → 92
+    expect(r.overall.score).toBe(92);
+    expect(r.subScores.staticChecks?.score).toBe(100);
+    expect(r.subScores.readability?.score).toBe(90);
+  });
+
+  it("when judge absent, machine 60% reweighted to 100%", () => {
+    const r = scoreCodeQuality(FULL_AUDIT, { present: false });
+    expect(r.overall.score).toBe(100);
+    expect(r.subScores.readability).toBeNull();
+    expect(r.overall.reasons.join("\n")).toMatch(/absent/i);
+  });
+
+  it("when audit completely absent and judge absent → null overall", () => {
+    const r = scoreCodeQuality({ present: false }, { present: false });
+    expect(r.overall.score).toBeNull();
+  });
+});
+
+describe("scoreFirstPass", () => {
+  it("100 when all tasks first-pass, 0 fix iterations", () => {
+    const r = scoreFirstPass({
+      tasksTotal: 3,
+      firstPassCount: 3,
+      avgFixIterations: 0,
+    });
+    expect(r.score).toBe(100);
+  });
+  it("50% first-pass → score around 50", () => {
+    const r = scoreFirstPass({
+      tasksTotal: 4,
+      firstPassCount: 2,
+      avgFixIterations: 1,
+    });
+    expect(r.score).toBe(50);
+  });
+  it("avgFixIterations > 1 incurs additional penalty", () => {
+    const r = scoreFirstPass({
+      tasksTotal: 2,
+      firstPassCount: 2,
+      avgFixIterations: 3,
+    });
+    expect(r.score).toBe(84); // 100 - (3-1)*8
+  });
+  it("0 tasks → null (no signal)", () => {
+    const r = scoreFirstPass({
+      tasksTotal: 0,
+      firstPassCount: 0,
+      avgFixIterations: 0,
+    });
+    expect(r.score).toBeNull();
   });
 });

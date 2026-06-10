@@ -442,6 +442,141 @@ export function scoreModularity(input: ModularityInput): ScoreBreakdown {
   return finishScore(100, lines, "Modularity boundaries clean.");
 }
 
+export interface CodeQualityAuditLike {
+  present: boolean;
+  staticChecks?: { present: boolean; tscErrors?: number; lintErrors?: number; lintWarnings?: number };
+  complexity?: { present: boolean; avgCyclomatic?: number; longFunctions?: number; largeFiles?: number };
+  duplication?: { present: boolean; percentage?: number };
+  typeSafety?: { present: boolean; anyCount?: number; tsIgnoreCount?: number; nonNullAssertCount?: number };
+  modularity?: { present: boolean; circularDeps?: number; crossBoundaryImports?: number };
+}
+
+export interface CodeQualityJudgeLike {
+  present: boolean;
+  readability?: { score: number; reason: string };
+  idiomaticity?: { score: number; reason: string };
+  architecture?: { score: number; reason: string };
+}
+
+export interface CodeQualityScoreResult {
+  overall: { score: number | null; grade: string; reasons: string[] };
+  subScores: {
+    staticChecks: ScoreBreakdown | null;
+    complexity: ScoreBreakdown | null;
+    duplication: ScoreBreakdown | null;
+    typeSafety: ScoreBreakdown | null;
+    modularity: ScoreBreakdown | null;
+    readability: ScoreBreakdown | null;
+    idiomaticity: ScoreBreakdown | null;
+    architecture: ScoreBreakdown | null;
+  };
+  absentLabels: string[];
+}
+
+const CODE_QUALITY_WEIGHTS = {
+  staticChecks: 0.18,
+  complexity:   0.12,
+  duplication:  0.12,
+  typeSafety:   0.10,
+  modularity:   0.08,
+  readability:  0.14,
+  idiomaticity: 0.14,
+  architecture: 0.12,
+} as const;
+
+function judgeBreakdown(score: number, reason: string): ScoreBreakdown {
+  return { score: roundScore(score), grade: scoreToGrade(roundScore(score)), reasons: [reason || "LLM judge rating"] };
+}
+
+export function scoreCodeQuality(
+  audit: CodeQualityAuditLike,
+  judge: CodeQualityJudgeLike,
+): CodeQualityScoreResult {
+  const sub = {
+    staticChecks: audit.staticChecks?.present
+      ? scoreStaticChecks({
+          tscErrors: audit.staticChecks.tscErrors ?? 0,
+          lintErrors: audit.staticChecks.lintErrors ?? 0,
+          lintWarnings: audit.staticChecks.lintWarnings ?? 0,
+        })
+      : null,
+    complexity: audit.complexity?.present
+      ? scoreComplexity({
+          avgCyclomatic: audit.complexity.avgCyclomatic ?? 0,
+          longFunctions: audit.complexity.longFunctions ?? 0,
+          largeFiles: audit.complexity.largeFiles ?? 0,
+        })
+      : null,
+    duplication: audit.duplication?.present
+      ? scoreDuplication({ percentage: audit.duplication.percentage ?? 0 })
+      : null,
+    typeSafety: audit.typeSafety?.present
+      ? scoreTypeSafety({
+          anyCount: audit.typeSafety.anyCount ?? 0,
+          tsIgnoreCount: audit.typeSafety.tsIgnoreCount ?? 0,
+          nonNullAssertCount: audit.typeSafety.nonNullAssertCount ?? 0,
+        })
+      : null,
+    modularity: audit.modularity?.present
+      ? scoreModularity({
+          circularDeps: audit.modularity.circularDeps ?? 0,
+          crossBoundaryImports: audit.modularity.crossBoundaryImports ?? 0,
+        })
+      : null,
+    readability: judge.readability ? judgeBreakdown(judge.readability.score, judge.readability.reason) : null,
+    idiomaticity: judge.idiomaticity ? judgeBreakdown(judge.idiomaticity.score, judge.idiomaticity.reason) : null,
+    architecture: judge.architecture ? judgeBreakdown(judge.architecture.score, judge.architecture.reason) : null,
+  };
+
+  const dims: WeightedDimension[] = (Object.keys(CODE_QUALITY_WEIGHTS) as Array<keyof typeof CODE_QUALITY_WEIGHTS>).map((k) => ({
+    score: sub[k]?.score ?? null,
+    weight: CODE_QUALITY_WEIGHTS[k],
+    absent: !sub[k],
+    label: k,
+  }));
+  const r = renormalizeWeightedAverage(dims);
+  const reasons = [
+    r.score === null
+      ? "Code quality score unavailable — all 8 sub-dimensions absent."
+      : `Active sub-weights: ${Object.entries(r.activeWeights).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(", ")}`,
+  ];
+  if (r.absentLabels.length > 0) reasons.push(`Absent sub-dimensions: ${r.absentLabels.join(", ")}`);
+  return {
+    overall: {
+      score: r.score,
+      grade: r.score === null ? "N/A" : scoreToGrade(r.score),
+      reasons,
+    },
+    subScores: sub,
+    absentLabels: r.absentLabels,
+  };
+}
+
+export interface FirstPassInput {
+  tasksTotal: number;
+  firstPassCount: number;
+  avgFixIterations: number;
+}
+export function scoreFirstPass(input: FirstPassInput): ScoreBreakdown & { score: number | null } {
+  if (input.tasksTotal === 0) {
+    return { score: null as unknown as number, grade: "N/A", reasons: ["No coding tasks recorded."] };
+  }
+  const rate = input.firstPassCount / input.tasksTotal;
+  const base = rate * 100;
+  const extra = Math.max(0, input.avgFixIterations - 1);
+  const penalty = Math.min(20, Math.round(extra * 8));
+  const score = roundScore(base - penalty);
+  return {
+    score,
+    grade: scoreToGrade(score),
+    reasons: [
+      `First-pass rate: ${(rate * 100).toFixed(1)}% (${input.firstPassCount}/${input.tasksTotal})`,
+      `Avg fix iterations per task: ${input.avgFixIterations.toFixed(2)}`,
+      `Formula: ${base.toFixed(1)} - ${penalty}(extra-iterations) = ${score}`,
+    ],
+  };
+}
+
 export function scoreToGrade(score: number): string {
   if (score >= 90) return "A";
   if (score >= 80) return "B";
