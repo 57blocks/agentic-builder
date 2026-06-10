@@ -458,7 +458,7 @@ export class PMAgent extends BaseAgent {
           : "Generate a comprehensive, enterprise-grade PRD for the following feature brief";
 
     const result = await this.run(
-      `${tierHint}. **Your entire response must be formatted as valid Markdown** — use ATX headings, Markdown tables, and fenced code blocks exactly as specified in the output format. Do not output plain prose without structure.\n\n${featureBrief}`,
+      `${tierHint}. Output the PRD body directly as Markdown — use ATX headings, Markdown tables, and ATX section structure as specified in the output format. **Do NOT wrap your entire response in a code fence (no leading \`\`\`markdown / \`\`\`md and no trailing \`\`\`).** Only use fenced code blocks for actual code, JSON, or mermaid samples inside the PRD. Do not output plain prose without structure.\n\n${featureBrief}`,
       additionalContext,
       "step-prd",
       sessionId,
@@ -480,7 +480,7 @@ export class PMAgent extends BaseAgent {
           ? "Generate a practical PRD for this application"
           : "Generate a comprehensive, enterprise-grade PRD for the following feature brief";
 
-    const userMsg = `${tierHint}. **Your entire response must be formatted as valid Markdown** — use ATX headings, Markdown tables, and fenced code blocks exactly as specified in the output format. Do not output plain prose without structure.\n\n${featureBrief}`;
+    const userMsg = `${tierHint}. Output the PRD body directly as Markdown — use ATX headings, Markdown tables, and ATX section structure as specified in the output format. **Do NOT wrap your entire response in a code fence (no leading \`\`\`markdown / \`\`\`md and no trailing \`\`\`).** Only use fenced code blocks for actual code, JSON, or mermaid samples inside the PRD. Do not output plain prose without structure.\n\n${featureBrief}`;
 
     const result = await this.streamRun(
       userMsg,
@@ -503,7 +503,7 @@ export class PMAgent extends BaseAgent {
     onChunk: (chunk: string, type: "thinking" | "content") => void,
     sessionId?: string,
   ) {
-    const userMsg = `You are editing an existing PRD based on the user's instruction. **Output the COMPLETE updated PRD as valid Markdown** — preserve all sections not affected by the edit, and apply the requested changes precisely.\n\n## Existing PRD\n\n${existingPrd}\n\n## Edit Instruction\n\n${editInstruction}\n\nRespond with the full updated PRD only. No preamble or explanation.`;
+    const userMsg = `You are editing an existing PRD based on the user's instruction. Output the COMPLETE updated PRD as Markdown body — preserve all sections not affected by the edit, and apply the requested changes precisely. **Do NOT wrap your entire response in a code fence (no leading \`\`\`markdown / \`\`\`md and no trailing \`\`\`).** Only use fenced code blocks for actual code, JSON, or mermaid samples inside the PRD.\n\n## Existing PRD\n\n${existingPrd}\n\n## Edit Instruction\n\n${editInstruction}\n\nRespond with the full updated PRD only. No preamble or explanation.`;
 
     const result = await this.streamRun(
       userMsg,

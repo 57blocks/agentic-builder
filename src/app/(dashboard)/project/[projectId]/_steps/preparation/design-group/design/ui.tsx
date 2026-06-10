@@ -1369,7 +1369,7 @@ export function DesignUI(props: StepUIProps) {
                   onClick={handleGenerateDesignDoc}
                   disabled={
                     (designSourceMode === "ai" && !selectedStyleId) ||
-                    (designSourceMode === "custom" && designReferences.filter((r) => r.kind === "image").length === 0) ||
+                    (designSourceMode === "custom" && designReferences.length === 0) ||
                     isMatching ||
                     isDesignRunning
                   }
