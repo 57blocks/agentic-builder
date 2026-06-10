@@ -3,6 +3,7 @@ import { parseJudgeResponse, pickJudgeSamples } from "@/lib/pipeline/code-qualit
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import type { JudgeSample } from "@/lib/pipeline/code-quality-judge";
 
 describe("parseJudgeResponse", () => {
   it("parses well-formed JSON", () => {
@@ -40,5 +41,33 @@ describe("pickJudgeSamples", () => {
     expect(samples).toHaveLength(2);
     expect(samples[0].path.endsWith("big.ts")).toBe(true);
     expect(samples.every(s => !s.path.endsWith(".test.ts"))).toBe(true);
+  });
+});
+
+describe("judgeCodeQuality sample budget", () => {
+  it("does not exceed maxFiles when workspaces > maxFiles", async () => {
+    // NOTE: This test mirrors the loop logic inside judgeCodeQuality without
+    // calling it directly (which would trigger a network/LLM call). It verifies
+    // that the perRoot-cap discipline — using Math.min(perRoot, remaining) and
+    // breaking early — keeps total samples at or below the requested max.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "judge-budget-"));
+    // Two workspaces, but caller only wants 1 file total.
+    for (const ws of ["frontend", "backend"]) {
+      const wsPath = path.join(tmp, ws);
+      await fs.mkdir(path.join(wsPath, "src"), { recursive: true });
+      await fs.writeFile(path.join(wsPath, "package.json"), "{}");
+      await fs.writeFile(path.join(wsPath, "src", "a.ts"), "export const x = 1;\n");
+    }
+    const roots = [path.join(tmp, "frontend"), path.join(tmp, "backend")];
+    const max = 1;
+    const perRoot = Math.max(1, Math.floor(max / roots.length));
+    const samples: JudgeSample[] = [];
+    for (const r of roots) {
+      const remaining = max - samples.length;
+      if (remaining <= 0) break;
+      const picks = await pickJudgeSamples(r, Math.min(perRoot, remaining));
+      samples.push(...picks);
+    }
+    expect(samples).toHaveLength(1);
   });
 });

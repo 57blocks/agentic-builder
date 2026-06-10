@@ -41,6 +41,7 @@ export interface JudgeSample {
 
 const MAX_SAMPLES_DEFAULT = 8;
 const MAX_FILE_BYTES = 12_000;
+const WORKSPACE_SUBDIRS = ["frontend", "backend"] as const;
 
 export function parseJudgeResponse(raw: string): CodeQualityJudgeResult {
   const trimmed = raw
@@ -108,7 +109,7 @@ Respond with STRICT JSON only:
 export async function judgeCodeQuality(opts: JudgeOptions): Promise<CodeQualityJudgeResult> {
   try {
     const roots: string[] = [];
-    for (const name of ["frontend", "backend"]) {
+    for (const name of WORKSPACE_SUBDIRS) {
       const p = path.join(opts.outputDir, name);
       try { await fs.access(path.join(p, "package.json")); roots.push(p); } catch {}
     }
@@ -118,7 +119,9 @@ export async function judgeCodeQuality(opts: JudgeOptions): Promise<CodeQualityJ
     const perRoot = Math.max(1, Math.floor(max / roots.length));
     const samples: JudgeSample[] = [];
     for (const r of roots) {
-      const picks = await pickJudgeSamples(r, perRoot);
+      const remaining = max - samples.length;
+      if (remaining <= 0) break;
+      const picks = await pickJudgeSamples(r, Math.min(perRoot, remaining));
       samples.push(...picks);
     }
     if (samples.length === 0) return { present: false, error: "no source files" };
