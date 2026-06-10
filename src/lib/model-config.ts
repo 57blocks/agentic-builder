@@ -77,6 +77,10 @@ const OPENROUTER_MODEL_CONFIG = {
    *  (implemented | partial | missing) + gap category (coverage | wiring). Small,
    *  high-volume, JSON-only task → a cheap-but-capable model. */
   featureAuditJudge: "openai/gpt-5.4-mini",
+  /** Code-quality LLM judge — reads sampled source files and rates readability /
+   *  idiomaticity / architecture on a 0–100 rubric. Cross-vendor (non-DeepSeek)
+   *  to avoid sharing blind spots with the codegen model. */
+  qualityJudge: ["claude-sonnet-4", "openai/gpt-5.4"] as string[],
   sysdesign: "gpt-4o",
   implguide: "gpt-4o",
   design: "openai/gpt-5.4",
@@ -184,6 +188,8 @@ export const DEEPSEEK_MODEL_CONFIG = {
   prdReviewer: "claude-sonnet-4",
   // Feature-audit L3 judge — cheap code-reading judge; DeepSeek direct is fine.
   featureAuditJudge: DEEPSEEK_DIRECT_MODEL,
+  // Quality judge — cross-vendor (Claude). Falls back to DeepSeek if unreachable.
+  qualityJudge: ["claude-sonnet-4", DEEPSEEK_DIRECT_MODEL] as string[],
   sysdesign: DEEPSEEK_DIRECT_MODEL,
   implguide: DEEPSEEK_DIRECT_MODEL,
   design: DEEPSEEK_DIRECT_MODEL,
