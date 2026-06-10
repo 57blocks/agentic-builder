@@ -168,10 +168,90 @@ export async function runDomainScopedBreakdown(args: {
     }
   }
 
+  // Each pass numbers locally from T-001 and re-emits a foundation task, so the
+  // merged list has colliding ids + duplicate foundations + ambiguous deps.
+  // Normalise deterministically (no LLM) before returning.
+  const normalized = normalizeGlobalTaskIds(foundationTasks, byDomain, buildLayers);
   return {
-    foundationTasks,
-    byDomain,
-    allTasks: accumulated,
+    foundationTasks: normalized.foundationTasks,
+    byDomain: normalized.byDomain,
+    allTasks: normalized.allTasks,
     costUsd,
   };
+}
+
+/**
+ * Deterministic post-pass over the per-domain breakdown output:
+ *   1. Foundation dedup — each domain pass re-emits a "frontend foundation"
+ *      task; drop those (the shared foundation already owns them).
+ *   2. Global re-numbering — every pass numbers locally from T-001, so ids
+ *      collide across domains. Reassign unique T-001..T-NNN in build order
+ *      (foundation first, then domains by topological layer).
+ *   3. Dependency re-link — rewrite each task's `dependencies` from its pass's
+ *      local id to the new global id, WITHIN the same scope. Deps that don't
+ *      resolve in-scope (cross-scope refs, or a stripped foundation dupe) are
+ *      dropped: cross-scope ordering is guaranteed by the build-layer order,
+ *      not per-task deps, so a dangling/ambiguous ref is worse than none.
+ */
+export function normalizeGlobalTaskIds(
+  foundationTasks: KickoffWorkItem[],
+  byDomain: Map<string, KickoffWorkItem[]>,
+  buildLayers: string[][],
+): {
+  foundationTasks: KickoffWorkItem[];
+  byDomain: Map<string, KickoffWorkItem[]>;
+  allTasks: KickoffWorkItem[];
+} {
+  // 1. Drop foundation-pattern tasks duplicated inside each domain.
+  const dedupByDomain = new Map<string, KickoffWorkItem[]>();
+  for (const [domainId, tasks] of byDomain) {
+    dedupByDomain.set(domainId, tasks.filter((t) => !isFoundationTask(t)));
+  }
+
+  // Scope order: foundation, then domains in build-layer (topological) order.
+  const domainOrder: string[] = [];
+  for (const layer of buildLayers) {
+    for (const d of layer) {
+      if (dedupByDomain.has(d) && !domainOrder.includes(d)) domainOrder.push(d);
+    }
+  }
+  for (const d of dedupByDomain.keys()) {
+    if (!domainOrder.includes(d)) domainOrder.push(d);
+  }
+
+  // 2. Assign globally-unique ids per scope.
+  const remap = new Map<string, string>(); // `${scope}::${oldId}` → newId
+  let seq = 0;
+  const pad = (n: number) => `T-${String(n).padStart(3, "0")}`;
+  const register = (scope: string, tasks: KickoffWorkItem[]) => {
+    for (const t of tasks) remap.set(`${scope}::${t.id}`, pad(++seq));
+  };
+  register("foundation", foundationTasks);
+  for (const d of domainOrder) register(d, dedupByDomain.get(d) ?? []);
+
+  // 3. Rewrite id + in-scope dependencies.
+  const rewrite = (scope: string, tasks: KickoffWorkItem[]): KickoffWorkItem[] =>
+    tasks.map((t) => {
+      const newId = remap.get(`${scope}::${t.id}`)!;
+      const deps = Array.isArray(t.dependencies) ? t.dependencies : [];
+      const newDeps = [
+        ...new Set(
+          deps
+            .map((d) => remap.get(`${scope}::${d}`))
+            .filter((x): x is string => Boolean(x) && x !== newId),
+        ),
+      ];
+      return { ...t, id: newId, dependencies: newDeps };
+    });
+
+  const newFoundation = rewrite("foundation", foundationTasks);
+  const newByDomain = new Map<string, KickoffWorkItem[]>();
+  for (const d of domainOrder) {
+    newByDomain.set(d, rewrite(d, dedupByDomain.get(d) ?? []));
+  }
+  const allTasks = [
+    ...newFoundation,
+    ...domainOrder.flatMap((d) => newByDomain.get(d) ?? []),
+  ];
+  return { foundationTasks: newFoundation, byDomain: newByDomain, allTasks };
 }

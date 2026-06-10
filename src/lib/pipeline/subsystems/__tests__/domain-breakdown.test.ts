@@ -48,13 +48,17 @@ describe("runDomainScopedBreakdown", () => {
       breakdownFn,
     });
 
-    // foundation = only structural tasks (X-page dropped)
-    expect(r.foundationTasks.map((t) => t.id).sort()).toEqual(["F-models", "F-scaffold"]);
+    // foundation = only structural tasks (X-page dropped); ids re-numbered
+    // globally by normalizeGlobalTaskIds (assert content via title, order/uniqueness via id).
+    expect(r.foundationTasks.map((t) => t.title)).toEqual(["F-scaffold", "F-models"]);
+    expect(r.foundationTasks.map((t) => t.id)).toEqual(["T-001", "T-002"]);
     // each domain tagged
     expect(r.byDomain.get("auth")!.every((t) => t.subsystem === "auth")).toBe(true);
     expect(r.byDomain.get("billing")!.every((t) => t.subsystem === "billing")).toBe(true);
-    // order: foundation first, then auth (layer 0), then billing (layer 1)
-    expect(r.allTasks.map((t) => t.id)).toEqual(["F-scaffold", "F-models", "API-001-svc", "API-010-svc"]);
+    // order: foundation first, then auth (layer 0), then billing (layer 1);
+    // globally-unique sequential ids after normalization.
+    expect(r.allTasks.map((t) => t.title)).toEqual(["F-scaffold", "F-models", "API-001-svc", "API-010-svc"]);
+    expect(r.allTasks.map((t) => t.id)).toEqual(["T-001", "T-002", "T-003", "T-004"]);
     // cost summed (foundation 0.01 + 2 domains 0.02 each)
     expect(r.costUsd).toBeCloseTo(0.05, 5);
     // scoped calls carried the domain's requirementsToCover + accumulated existingTasks
