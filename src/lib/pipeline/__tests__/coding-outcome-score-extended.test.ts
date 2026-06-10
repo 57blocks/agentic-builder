@@ -122,7 +122,7 @@ describe("scoreCodeQuality", () => {
     architecture: { score: 70, reason: "ok" },
   };
 
-  it("perfect machine + judge → 100", () => {
+  it("perfect machine + judge → 92", () => {
     const r = scoreCodeQuality(FULL_AUDIT, FULL_JUDGE);
     // machine all 100, judge 90/80/70 → 0.18*100 + 0.12*100 + 0.12*100 + 0.10*100 + 0.08*100 + 0.14*90 + 0.14*80 + 0.12*70 = 60 + 12.6 + 11.2 + 8.4 = 92.2 → 92
     expect(r.overall.score).toBe(92);

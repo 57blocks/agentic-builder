@@ -11,6 +11,14 @@ export interface ScoreBreakdown {
   reasons: string[];
 }
 
+/** A score that may be `null` to signal "no signal" (e.g., zero tasks). Distinct
+ *  from a 0-score — readers must check for null explicitly. */
+export interface NullableScoreBreakdown {
+  score: number | null;
+  grade: string;
+  reasons: string[];
+}
+
 export interface RepairSummaryLike {
   byEvent: Record<string, number>;
 }
@@ -53,7 +61,7 @@ export interface CodingOutcomeScores {
   repairBurden: ScoreBreakdown;
   costSpeed: ScoreBreakdown;
   codeQuality: CodeQualityScoreResult;
-  firstPass: ScoreBreakdown & { score: number | null };
+  firstPass: NullableScoreBreakdown;
 }
 
 export interface CodingOutcomeScoreInput {
@@ -368,9 +376,10 @@ export interface RenormalizedResult {
 export function renormalizeWeightedAverage(
   dims: WeightedDimension[],
 ): RenormalizedResult {
-  const active = dims.filter((d) => !d.absent && d.score !== null);
-  const absent = dims.filter((d) => d.absent);
-  const absentLabels = absent.map((d, i) => d.label ?? String(dims.indexOf(d)));
+  const indexed = dims.map((d, i) => ({ ...d, _key: d.label ?? String(i) }));
+  const active = indexed.filter((d) => !d.absent && d.score !== null);
+  const absentLabels = indexed.filter((d) => d.absent).map((d) => d._key);
+
   if (active.length === 0) {
     return { score: null, activeWeights: {}, absentLabels };
   }
@@ -378,9 +387,8 @@ export function renormalizeWeightedAverage(
   const activeWeights: Record<string, number> = {};
   let weighted = 0;
   for (const d of active) {
-    const key = d.label ?? String(dims.indexOf(d));
     const w = d.weight / totalWeight;
-    activeWeights[key] = w;
+    activeWeights[d._key] = w;
     weighted += (d.score as number) * w;
   }
   return {
@@ -582,9 +590,9 @@ export interface FirstPassInput {
   firstPassCount: number;
   avgFixIterations: number;
 }
-export function scoreFirstPass(input: FirstPassInput): ScoreBreakdown & { score: number | null } {
+export function scoreFirstPass(input: FirstPassInput): NullableScoreBreakdown {
   if (input.tasksTotal === 0) {
-    return { score: null as unknown as number, grade: "N/A", reasons: ["No coding tasks recorded."] };
+    return { score: null, grade: "N/A", reasons: ["No coding tasks recorded."] };
   }
   const rate = input.firstPassCount / input.tasksTotal;
   const base = rate * 100;
