@@ -370,6 +370,78 @@ export function roundScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+export interface StaticChecksInput {
+  tscErrors: number;
+  lintErrors: number;
+  lintWarnings: number;
+}
+export function scoreStaticChecks(input: StaticChecksInput): ScoreBreakdown {
+  const lines: ScoreLine[] = [];
+  if (input.tscErrors > 0) {
+    lines.push(line(-Math.min(40, input.tscErrors * 4), `tsc:${input.tscErrors}`, `${input.tscErrors} TypeScript error(s).`));
+  }
+  if (input.lintErrors > 0) {
+    lines.push(line(-Math.min(30, input.lintErrors * 2), `lint-err:${input.lintErrors}`, `${input.lintErrors} ESLint error(s).`));
+  }
+  if (input.lintWarnings > 0) {
+    lines.push(line(-Math.min(15, Math.round(input.lintWarnings * 0.5)), `lint-warn:${input.lintWarnings}`, `${input.lintWarnings} ESLint warning(s).`));
+  }
+  return finishScore(100, lines, "No static check findings.");
+}
+
+export interface ComplexityInput {
+  avgCyclomatic: number;
+  longFunctions: number;
+  largeFiles: number;
+}
+export function scoreComplexity(input: ComplexityInput): ScoreBreakdown {
+  const lines: ScoreLine[] = [];
+  if (input.avgCyclomatic > 5) {
+    const delta = -Math.min(30, Math.round((input.avgCyclomatic - 5) * 3));
+    lines.push(line(delta, `cyclomatic:${input.avgCyclomatic.toFixed(1)}`, `Average cyclomatic complexity ${input.avgCyclomatic.toFixed(1)} exceeds 5.`));
+  }
+  if (input.longFunctions > 0) {
+    lines.push(line(-Math.min(20, input.longFunctions * 4), `long-fn:${input.longFunctions}`, `${input.longFunctions} function(s) longer than threshold (50 lines).`));
+  }
+  if (input.largeFiles > 0) {
+    lines.push(line(-Math.min(20, input.largeFiles * 4), `large-file:${input.largeFiles}`, `${input.largeFiles} file(s) larger than threshold (400 lines).`));
+  }
+  return finishScore(100, lines, "Complexity within thresholds.");
+}
+
+export interface DuplicationInput { percentage: number }
+export function scoreDuplication(input: DuplicationInput): ScoreBreakdown {
+  const lines: ScoreLine[] = [];
+  if (input.percentage > 0) {
+    lines.push(line(-Math.min(60, Math.round(input.percentage * 3)), `dup:${input.percentage.toFixed(1)}%`, `Code duplication ${input.percentage.toFixed(1)}%.`));
+  }
+  return finishScore(100, lines, "No duplication detected.");
+}
+
+export interface TypeSafetyInput {
+  anyCount: number;
+  tsIgnoreCount: number;
+  nonNullAssertCount: number;
+}
+export function scoreTypeSafety(input: TypeSafetyInput): ScoreBreakdown {
+  const lines: ScoreLine[] = [];
+  if (input.anyCount > 0) lines.push(line(-Math.min(30, Math.round(input.anyCount * 1.5)), `any:${input.anyCount}`, `${input.anyCount} \`any\` usage(s).`));
+  if (input.tsIgnoreCount > 0) lines.push(line(-Math.min(20, input.tsIgnoreCount * 4), `ts-ignore:${input.tsIgnoreCount}`, `${input.tsIgnoreCount} \`@ts-ignore\`/\`@ts-expect-error\` directive(s).`));
+  if (input.nonNullAssertCount > 0) lines.push(line(-Math.min(15, Math.round(input.nonNullAssertCount * 0.5)), `non-null:${input.nonNullAssertCount}`, `${input.nonNullAssertCount} non-null assertion(s).`));
+  return finishScore(100, lines, "Type safety is clean.");
+}
+
+export interface ModularityInput {
+  circularDeps: number;
+  crossBoundaryImports: number;
+}
+export function scoreModularity(input: ModularityInput): ScoreBreakdown {
+  const lines: ScoreLine[] = [];
+  if (input.circularDeps > 0) lines.push(line(-Math.min(40, input.circularDeps * 10), `circular:${input.circularDeps}`, `${input.circularDeps} circular dependency cycle(s).`));
+  if (input.crossBoundaryImports > 0) lines.push(line(-Math.min(20, input.crossBoundaryImports * 2), `cross-import:${input.crossBoundaryImports}`, `${input.crossBoundaryImports} cross-boundary import(s).`));
+  return finishScore(100, lines, "Modularity boundaries clean.");
+}
+
 export function scoreToGrade(score: number): string {
   if (score >= 90) return "A";
   if (score >= 80) return "B";
