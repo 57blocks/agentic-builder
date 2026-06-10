@@ -323,6 +323,48 @@ function taskCounts(tasks: AuditTaskSummary[]): {
   };
 }
 
+export interface WeightedDimension {
+  score: number | null;
+  weight: number;
+  absent: boolean;
+  label?: string;
+}
+
+export interface RenormalizedResult {
+  /** Weighted average over only the non-absent dimensions. null if all absent. */
+  score: number | null;
+  /** Effective (renormalized) weight per active dimension, keyed by label
+   *  (falls back to numeric index when label omitted). */
+  activeWeights: Record<string, number>;
+  /** Labels of dimensions that were absent. */
+  absentLabels: string[];
+}
+
+export function renormalizeWeightedAverage(
+  dims: WeightedDimension[],
+): RenormalizedResult {
+  const active = dims.filter((d) => !d.absent && d.score !== null);
+  const absent = dims.filter((d) => d.absent);
+  const absentLabels = absent.map((d, i) => d.label ?? String(dims.indexOf(d)));
+  if (active.length === 0) {
+    return { score: null, activeWeights: {}, absentLabels };
+  }
+  const totalWeight = active.reduce((sum, d) => sum + d.weight, 0);
+  const activeWeights: Record<string, number> = {};
+  let weighted = 0;
+  for (const d of active) {
+    const key = d.label ?? String(dims.indexOf(d));
+    const w = d.weight / totalWeight;
+    activeWeights[key] = w;
+    weighted += (d.score as number) * w;
+  }
+  return {
+    score: roundScore(weighted),
+    activeWeights,
+    absentLabels,
+  };
+}
+
 export function roundScore(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
