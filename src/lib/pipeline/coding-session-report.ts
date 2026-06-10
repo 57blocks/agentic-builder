@@ -2997,6 +2997,9 @@ export async function writeCodingSessionReport(
     modelUsage,
     scaffoldFixAttempts: input.scaffoldFixAttempts,
     integrationFixAttempts: input.integrationFixAttempts,
+    codeQualityAudit: { present: false },
+    codeQualityJudge: { present: false },
+    firstPassData: { tasksTotal: 0, firstPassCount: 0, avgFixIterations: 0 },
   });
   const suggestions = buildImprovementSuggestions({
     integrationErrors: input.integrationErrors,

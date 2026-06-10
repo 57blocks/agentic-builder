@@ -8,6 +8,7 @@ import {
   scoreModularity,
   scoreCodeQuality,
   scoreFirstPass,
+  calculateCodingOutcomeScores,
   type CodeQualityAuditLike,
   type CodeQualityJudgeLike,
 } from "@/lib/pipeline/coding-outcome-score";
@@ -174,5 +175,56 @@ describe("scoreFirstPass", () => {
       avgFixIterations: 0,
     });
     expect(r.score).toBeNull();
+  });
+});
+
+describe("calculateCodingOutcomeScores (extended formula)", () => {
+  const baseInput = {
+    status: "pass" as const,
+    sessionHealth: { score: 80, grade: "B", reasons: [] },
+    taskResults: [
+      { id: "T-001", title: "x", coversRequirementIds: [], generatedFiles: [], status: "completed" as const },
+    ],
+    repairSummary: { byEvent: {}, byStage: {}, totalEvents: 0, entries: [] as any[] },
+    runtimeReadiness: { present: true, clean: true, hasError: false, findingsTotal: 0, errorCount: 0, warnCount: 0 },
+    migrationCoverage: { present: false, tasksTouchedModels: 0, tasksWithGaps: 0, totalGaps: 0 },
+    tddEvidenceSummary: { manifestPresent: true, evidencePresent: true, p0BlockingFailures: [] as any[] } as any,
+    gatesExecuted: { integrationVerify: true, runtimeVerify: true, e2eVerify: true },
+    modelUsage: [{ calls: 10, costUsd: 0.01, totalTokens: 1000 }],
+    codeQualityAudit: { present: false } as any,
+    codeQualityJudge: { present: false } as any,
+    firstPassData: { tasksTotal: 1, firstPassCount: 1, avgFixIterations: 0 },
+  };
+
+  it("overall includes codeQuality and firstPass when present", () => {
+    const r = calculateCodingOutcomeScores({
+      ...baseInput,
+      codeQualityAudit: {
+        present: true,
+        staticChecks: { present: true, tscErrors: 0, lintErrors: 0, lintWarnings: 0 },
+        complexity: { present: true, avgCyclomatic: 4, longFunctions: 0, largeFiles: 0 },
+        duplication: { present: true, percentage: 0 },
+        typeSafety: { present: true, anyCount: 0, tsIgnoreCount: 0, nonNullAssertCount: 0 },
+        modularity: { present: true, circularDeps: 0, crossBoundaryImports: 0 },
+      },
+      codeQualityJudge: {
+        present: true,
+        readability: { score: 100, reason: "ok" },
+        idiomaticity: { score: 100, reason: "ok" },
+        architecture: { score: 100, reason: "ok" },
+      },
+    });
+    expect(r.codeQuality.overall.score).toBe(100);
+    expect(r.firstPass.score).toBe(100);
+    // Without finalAudit, requirementCoverage is ~70; overall lands ~94
+    expect(r.overall.score).toBeGreaterThanOrEqual(90);
+    expect(r.overall.reasons[0]).toMatch(/35%/);
+  });
+
+  it("renormalizes overall when codeQuality and firstPass absent", () => {
+    const r = calculateCodingOutcomeScores({ ...baseInput, firstPassData: { tasksTotal: 0, firstPassCount: 0, avgFixIterations: 0 } });
+    expect(r.codeQuality.overall.score).toBeNull();
+    expect(r.firstPass.score).toBeNull();
+    expect(r.overall.reasons.some((x: string) => /absent/i.test(x))).toBe(true);
   });
 });

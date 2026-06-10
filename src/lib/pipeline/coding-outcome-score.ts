@@ -52,6 +52,8 @@ export interface CodingOutcomeScores {
   evidence: ScoreBreakdown;
   repairBurden: ScoreBreakdown;
   costSpeed: ScoreBreakdown;
+  codeQuality: CodeQualityScoreResult;
+  firstPass: ScoreBreakdown & { score: number | null };
 }
 
 export interface CodingOutcomeScoreInput {
@@ -70,14 +72,19 @@ export interface CodingOutcomeScoreInput {
   modelUsage: ModelUsageLike[];
   scaffoldFixAttempts?: number;
   integrationFixAttempts?: number;
+  codeQualityAudit: CodeQualityAuditLike;
+  codeQualityJudge: CodeQualityJudgeLike;
+  firstPassData: FirstPassInput;
 }
 
 const WEIGHTS = {
-  finalUsability: 0.5,
-  requirementCoverage: 0.2,
-  evidence: 0.15,
-  repairBurden: 0.1,
-  costSpeed: 0.05,
+  finalUsability:      0.35,
+  codeQuality:         0.20,
+  requirementCoverage: 0.15,
+  firstPass:           0.10,
+  evidence:            0.08,
+  repairBurden:        0.07,
+  costSpeed:           0.05,
 } as const;
 
 export function calculateCodingOutcomeScores(
@@ -88,23 +95,37 @@ export function calculateCodingOutcomeScores(
   const evidence = scoreEvidence(input);
   const repairBurden = scoreRepairBurden(input);
   const costSpeed = scoreCostSpeed(input);
+  const codeQuality = scoreCodeQuality(input.codeQualityAudit, input.codeQualityJudge);
+  const firstPass = scoreFirstPass(input.firstPassData);
   const generatedBaseline = scoreGeneratedBaseline(finalUsability, repairBurden);
 
-  const rawOverall =
-    finalUsability.score * WEIGHTS.finalUsability +
-    requirementCoverage.score * WEIGHTS.requirementCoverage +
-    evidence.score * WEIGHTS.evidence +
-    repairBurden.score * WEIGHTS.repairBurden +
-    costSpeed.score * WEIGHTS.costSpeed;
-  const overallScore = roundScore(rawOverall);
+  const dims: WeightedDimension[] = [
+    { score: finalUsability.score,       weight: WEIGHTS.finalUsability,      absent: false, label: "finalUsability" },
+    { score: codeQuality.overall.score,  weight: WEIGHTS.codeQuality,         absent: codeQuality.overall.score === null, label: "codeQuality" },
+    { score: requirementCoverage.score,  weight: WEIGHTS.requirementCoverage, absent: false, label: "requirementCoverage" },
+    { score: firstPass.score,            weight: WEIGHTS.firstPass,           absent: firstPass.score === null, label: "firstPass" },
+    { score: evidence.score,             weight: WEIGHTS.evidence,            absent: false, label: "evidence" },
+    { score: repairBurden.score,         weight: WEIGHTS.repairBurden,        absent: false, label: "repairBurden" },
+    { score: costSpeed.score,            weight: WEIGHTS.costSpeed,           absent: false, label: "costSpeed" },
+  ];
+  const renorm = renormalizeWeightedAverage(dims);
+  const overallScore = renorm.score ?? 0;
+  const activeFormula = Object.entries(renorm.activeWeights)
+    .map(([k, w]) => {
+      const score = dims.find((d) => d.label === k)?.score ?? 0;
+      return `${score}x${(w * 100).toFixed(0)}%`;
+    })
+    .join(" + ");
 
   return {
     overall: {
       score: overallScore,
       grade: scoreToGrade(overallScore),
       reasons: [
-        `Score formula: ${finalUsability.score}x50% + ${requirementCoverage.score}x20% + ${evidence.score}x15% + ${repairBurden.score}x10% + ${costSpeed.score}x5% = ${overallScore}`,
-        "Overall prioritizes final app usability over whether the original session ran perfectly.",
+        `Score formula: ${activeFormula} = ${overallScore}`,
+        renorm.absentLabels.length > 0
+          ? `Renormalized: dims absent → ${renorm.absentLabels.join(", ")}`
+          : "All 7 outer dimensions participated.",
       ],
     },
     generatedBaseline,
@@ -114,6 +135,8 @@ export function calculateCodingOutcomeScores(
     evidence,
     repairBurden,
     costSpeed,
+    codeQuality,
+    firstPass,
   };
 }
 
@@ -205,6 +228,8 @@ function scoreEvidence(input: CodingOutcomeScoreInput): ScoreBreakdown {
   if (!input.runtimeReadiness.present) lines.push(line(-10, "readiness-missing", "Runtime-readiness audit evidence is missing."));
   if (!input.tddEvidenceSummary.manifestPresent) lines.push(line(-10, "tdd-manifest", "TDD manifest evidence is missing."));
   if (!input.tddEvidenceSummary.evidencePresent) lines.push(line(-10, "tdd-evidence", "TDD execution evidence is missing."));
+  if (!input.codeQualityAudit.present) lines.push(line(-10, "quality-audit-missing", "Code quality audit produced no results."));
+  if (!input.codeQualityJudge.present) lines.push(line(-5, "judge-missing", "Code quality LLM judge did not run."));
   if (input.status === "aborted") lines.push(line(-10, "aborted", "Session ended before all evidence could be collected."));
   return finishScore(100, lines, "Quality evidence is complete enough to support the score.");
 }
