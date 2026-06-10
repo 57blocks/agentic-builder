@@ -1068,8 +1068,27 @@ export async function POST(request: NextRequest) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
-          const emit = (event: Record<string, unknown>) =>
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          let closed = false;
+          const emit = (event: Record<string, unknown>) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            } catch {
+              closed = true; // client gone — stop enqueuing
+            }
+          };
+          // Keep-alive comment frames stop a browser/proxy idle-timeout from
+          // dropping this long-lived (multi-hour) stream — which previously
+          // made the UI mark every in-progress task "failed" while the build
+          // kept running. The store ignores any frame not starting with "data: ".
+          const keepAlive = setInterval(() => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`: keep-alive\n\n`));
+            } catch {
+              closed = true;
+            }
+          }, 15_000);
           // One session_start carrying the full task list (shape the store expects),
           // then forward each sub-build's interior events as one continuous session.
           emit({ type: "session_start", sessionId: runId, data: { tasks: orchestrationTasks } });
@@ -1117,7 +1136,13 @@ export async function POST(request: NextRequest) {
               },
             });
           } finally {
-            controller.close();
+            clearInterval(keepAlive);
+            closed = true;
+            try {
+              controller.close();
+            } catch {
+              /* already closed (client disconnected) */
+            }
           }
         },
       });
