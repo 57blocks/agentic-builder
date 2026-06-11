@@ -73,12 +73,16 @@ function WriteEntry({ activity }: WriteEntryProps) {
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
         <FilePlus size={12} className="shrink-0 text-emerald-400" />
-        <span className="flex-1 min-w-0">
-          <span className="text-[11px] font-semibold text-emerald-300 font-mono">
+        <span className="flex-1 min-w-0 flex items-baseline gap-1 overflow-hidden">
+          <span className="shrink-0 text-[11px] font-semibold text-emerald-300 font-mono">
             {fileName}
           </span>
           {dirPath && (
-            <span className="text-[10px] text-slate-500 font-mono ml-1">
+            <span
+              className="min-w-0 truncate text-[10px] text-slate-500 font-mono"
+              title={`${dirPath}/`}
+              dir="rtl"
+            >
               {dirPath}/
             </span>
           )}
@@ -135,11 +139,17 @@ function ReadEntry({ path }: ReadEntryProps) {
   const dirPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-[#0d1117] border border-[#21262d]">
+    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-[#0d1117] border border-[#21262d] min-w-0 overflow-hidden">
       <Eye size={11} className="shrink-0 text-sky-400" />
-      <span className="text-[11px] font-mono text-sky-300 truncate">{fileName}</span>
+      <span className="shrink-0 text-[11px] font-mono text-sky-300">{fileName}</span>
       {dirPath && (
-        <span className="text-[10px] font-mono text-slate-600 truncate">{dirPath}/</span>
+        <span
+          className="min-w-0 flex-1 truncate text-[10px] font-mono text-slate-600"
+          title={`${dirPath}/`}
+          dir="rtl"
+        >
+          {dirPath}/
+        </span>
       )}
     </div>
   );
