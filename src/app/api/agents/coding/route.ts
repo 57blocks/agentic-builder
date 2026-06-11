@@ -1021,6 +1021,47 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // After a crash there is often no checkpoint, so the dependency-expansion
+  // above re-pulls a selected unfinished task's ALREADY-BUILT dependencies and
+  // the run re-does finished work (the user's complaint: "it's re-running tasks
+  // I already built"). Drop any dependency-pulled task whose `creates` files all
+  // exist on disk. Explicitly-selected tasks (in `retrySet`) are NEVER dropped —
+  // if the user hand-picked a built task to re-fix it, honour that.
+  if (expandedRetrySet && retrySet) {
+    const outputRootForCheck = resolveCodeOutputRoot(
+      process.cwd(),
+      codeOutputDir,
+    );
+    const taskById = new Map(tasksAfterStrip.map((t) => [t.id, t]));
+    const isBuiltOnDisk = (id: string): boolean => {
+      const t = taskById.get(id);
+      if (!t) return false;
+      const creates = Array.isArray(t.files)
+        ? t.files
+        : t.files?.creates ?? [];
+      if (creates.length === 0) return false; // can't prove built → keep it
+      return creates.every((f: string) => {
+        try {
+          require("fs").accessSync(path.join(outputRootForCheck, f));
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    };
+    const before = expandedRetrySet.size;
+    expandedRetrySet = new Set(
+      [...expandedRetrySet].filter(
+        (id) => retrySet.has(id) || !isBuiltOnDisk(id),
+      ),
+    );
+    if (expandedRetrySet.size < before) {
+      console.log(
+        `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-built dependency task(s) from the run set (on-disk); only unbuilt deps + explicitly-selected tasks run.`,
+      );
+    }
+  }
+
   const tasksToRun = expandedRetrySet
     ? tasksAfterStrip.filter((t) => expandedRetrySet!.has(t.id))
     : tasksAfterStrip;
