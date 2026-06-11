@@ -549,7 +549,7 @@ async function runArchitectPhase(state: SupervisorState) {
         ralphConfig: state.ralphConfig,
         sessionId: state.sessionId,
       },
-      { recursionLimit: 150 },
+      { recursionLimit: workerRecursionLimit(mustRunTasks.length) },
     );
 
     const workerState = result as WorkerState;
@@ -586,7 +586,7 @@ async function runArchitectPhase(state: SupervisorState) {
       sessionId: state.sessionId,
       prdSpec: state.prdSpec,
     },
-    { recursionLimit: 150 },
+    { recursionLimit: workerRecursionLimit(state.architectTasks.length) },
   );
 
   const workerState = result as WorkerState;
@@ -4963,6 +4963,19 @@ function dispatchParallelWorkers(state: SupervisorState): Send[] {
   return sends;
 }
 
+/**
+ * Recursion limit for a worker-subgraph invoke, scaled to the chunk's task
+ * count. Each task costs several graph transitions (pick_next_task →
+ * generate_code → verify → fix-loop → done/failed → pick_next_task), so a large
+ * foundation chunk (70+ tasks) blows a fixed 150 long before finishing — which
+ * surfaced as a GraphRecursionError that failed the whole foundation after ~6h
+ * with 5 tasks left unrun. Bounded (not infinite), so a genuinely runaway graph
+ * is still caught.
+ */
+function workerRecursionLimit(taskCount: number): number {
+  return Math.max(150, taskCount * 30 + 50);
+}
+
 async function parallelWorkerNode(
   input: WorkerState,
 ): Promise<Partial<SupervisorState>> {
@@ -4976,7 +4989,9 @@ async function parallelWorkerNode(
   console.log(
     `[Supervisor] Parallel worker ${input.workerLabel}: starting ${input.tasks.length} tasks...`,
   );
-  const result = await workerGraph.invoke(input, { recursionLimit: 150 });
+  const result = await workerGraph.invoke(input, {
+    recursionLimit: workerRecursionLimit(input.tasks.length),
+  });
   const workerState = result as WorkerState;
 
   const phaseResult: PhaseResult = {
