@@ -4976,6 +4976,82 @@ function workerRecursionLimit(taskCount: number): number {
   return Math.max(150, taskCount * 30 + 50);
 }
 
+/** Tasks per worker-subgraph invoke. Bounding the batch keeps each invoke well
+ *  under the recursion limit and makes one bad batch isolable. Override via
+ *  CODEGEN_WORKER_BATCH_SIZE. */
+const WORKER_BATCH_SIZE = (() => {
+  const raw = Number(process.env.CODEGEN_WORKER_BATCH_SIZE ?? "12");
+  if (!Number.isFinite(raw) || raw <= 0) return 12;
+  return Math.min(Math.max(Math.floor(raw), 1), 100);
+})();
+
+/**
+ * Invoke the worker subgraph in bounded batches so no single invoke can exhaust
+ * the LangGraph recursionLimit and abort the whole graph. Each batch gets a
+ * fresh recursion budget; the file registry, task results and cost accumulate
+ * across batches (later batches see earlier batches' files). If one batch throws
+ * (recursion limit or otherwise) it is CAUGHT — its tasks are recorded as failed
+ * and the loop continues — so a single bad batch never kills the session; the
+ * run finishes the rest and only the offending tasks are left for retry.
+ */
+async function invokeWorkerBatched(base: WorkerState): Promise<WorkerState> {
+  const tasks = base.tasks ?? [];
+  if (tasks.length <= WORKER_BATCH_SIZE) {
+    return (await workerGraph.invoke(base, {
+      recursionLimit: workerRecursionLimit(tasks.length),
+    })) as WorkerState;
+  }
+  let fileRegistry: GeneratedFile[] = base.fileRegistrySnapshot ?? [];
+  const taskResults: TaskResult[] = [];
+  const generated: GeneratedFile[] = [];
+  let cost = 0;
+  const batchCount = Math.ceil(tasks.length / WORKER_BATCH_SIZE);
+  for (let b = 0; b < batchCount; b++) {
+    const batch = tasks.slice(b * WORKER_BATCH_SIZE, (b + 1) * WORKER_BATCH_SIZE);
+    console.log(
+      `[Supervisor] ${base.workerLabel}: worker batch ${b + 1}/${batchCount} (${batch.length} tasks)…`,
+    );
+    try {
+      const res = (await workerGraph.invoke(
+        {
+          ...base,
+          tasks: batch,
+          currentTaskIndex: 0,
+          fileRegistrySnapshot: fileRegistry,
+        },
+        { recursionLimit: workerRecursionLimit(batch.length) },
+      )) as WorkerState;
+      taskResults.push(...(res.taskResults ?? []));
+      generated.push(...(res.generatedFiles ?? []));
+      fileRegistry = [...fileRegistry, ...(res.generatedFiles ?? [])];
+      cost += res.workerCostUsd ?? 0;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[Supervisor] ${base.workerLabel}: worker batch ${b + 1}/${batchCount} aborted (${msg}); recording its tasks as failed and continuing.`,
+      );
+      for (const t of batch) {
+        taskResults.push({
+          taskId: t.id,
+          status: "failed",
+          generatedFiles: [],
+          costUsd: 0,
+          durationMs: 0,
+          verifyPassed: false,
+          fixCycles: 0,
+          warnings: [`worker batch aborted: ${msg}`.slice(0, 300)],
+        });
+      }
+    }
+  }
+  return {
+    ...base,
+    taskResults,
+    generatedFiles: generated,
+    workerCostUsd: cost,
+  } as WorkerState;
+}
+
 async function parallelWorkerNode(
   input: WorkerState,
 ): Promise<Partial<SupervisorState>> {
@@ -4989,10 +5065,7 @@ async function parallelWorkerNode(
   console.log(
     `[Supervisor] Parallel worker ${input.workerLabel}: starting ${input.tasks.length} tasks...`,
   );
-  const result = await workerGraph.invoke(input, {
-    recursionLimit: workerRecursionLimit(input.tasks.length),
-  });
-  const workerState = result as WorkerState;
+  const workerState = await invokeWorkerBatched(input);
 
   const phaseResult: PhaseResult = {
     role: input.role,
