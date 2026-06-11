@@ -2463,6 +2463,13 @@ async function pickNextTask(state: WorkerState) {
   }
 
   return {
+    // Mirror role/workerLabel into the streamed update so the SSE event-mapper
+    // knows the real role of this worker. The supervisor dispatches all of
+    // backend / test / fullstack via the same `be_worker` node, so the node
+    // name alone cannot identify the role — without this mirror a Test
+    // Engineer worker would surface in the UI as a backend agent.
+    role: state.role,
+    workerLabel: state.workerLabel,
     verifyErrors: "",
     fixAttempts: 0,
     currentTaskRetryCount: 0,
@@ -3952,6 +3959,8 @@ async function taskDone(state: WorkerState) {
   };
 
   return {
+    role: state.role,
+    workerLabel: state.workerLabel,
     taskResults: [result],
     fileRegistrySnapshot: state.generatedFiles,
     currentTaskIndex: state.currentTaskIndex + 1,
@@ -4037,6 +4046,8 @@ async function taskFailed(state: WorkerState) {
   };
 
   return {
+    role: state.role,
+    workerLabel: state.workerLabel,
     taskResults: [result],
     fileRegistrySnapshot: state.generatedFiles,
     currentTaskIndex: state.currentTaskIndex + 1,

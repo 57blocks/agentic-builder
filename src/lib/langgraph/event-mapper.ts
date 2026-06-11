@@ -428,8 +428,14 @@ export class EventMapper {
       const idx = this.instanceCounts.get(baseNode) ?? 0;
       this.instanceCounts.set(baseNode, idx + 1);
 
-      const role = this.inferRole(baseNode);
-      const label = this.inferLabel(baseNode, idx);
+      // The supervisor routes backend / test / fullstack workers all through
+      // the `be_worker` node, so `baseNode` alone can't identify the role.
+      // Each meaningful node return mirrors `role` and `workerLabel` from
+      // WorkerState into its update — prefer those over name-inferred values.
+      const { role: trueRole, label: trueLabel } =
+        this.extractWorkerIdentity(updates);
+      const role = trueRole ?? this.inferRole(baseNode);
+      const label = trueLabel ?? this.inferLabel(baseNode, idx);
       const agentId = `agent-${baseNode}-${idx}`;
 
       this.workers.set(nsKey, { agentId, role, label, lastKnownTaskId: null });
@@ -710,6 +716,25 @@ export class EventMapper {
       });
     }
     return results;
+  }
+
+  /**
+   * Scan a worker subgraph update for the WorkerState `role` / `workerLabel`
+   * mirrored by pick_next_task / task_done / task_failed. Returns the first
+   * non-empty pair found, or {} if none of those nodes are present.
+   */
+  private extractWorkerIdentity(
+    updates: Record<string, unknown>,
+  ): { role?: string; label?: string } {
+    for (const key of ["pick_next_task", "task_done", "task_failed"]) {
+      const u = updates[key] as Record<string, unknown> | undefined;
+      if (!u) continue;
+      const role = typeof u.role === "string" ? u.role : undefined;
+      const label =
+        typeof u.workerLabel === "string" ? u.workerLabel : undefined;
+      if (role || label) return { role, label };
+    }
+    return {};
   }
 
   private inferRole(baseNode: string): string {
