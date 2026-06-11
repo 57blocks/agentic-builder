@@ -75,14 +75,16 @@ export function TaskRerunPicker({
     };
   }, [tasks, codeOutputDir]);
 
-  // Effective status: a real live status (failed / in_progress / completed)
-  // wins; otherwise an on-disk build upgrades a pending task to completed.
+  // Effective status. On disk is ground truth: after a crash the store keeps
+  // STALE live statuses (tasks left "failed"/"in_progress" mid-flight) for work
+  // that is actually complete on disk — trusting those re-ran already-built
+  // tasks. So a task whose `creates` files all exist is "completed" regardless
+  // of its stale live status; otherwise fall back to the live/pending status.
   const statusOf = (t: MergedTask): CodingTaskStatus => {
-    const live = (t as CodingTask).codingStatus;
-    if (live && live !== "pending" && live !== "queued") return live;
     if (builtIds?.has(t.id)) return "completed";
-    return live ?? "pending";
+    return (t as CodingTask).codingStatus ?? "pending";
   };
+  const scanning = builtIds === null;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -206,7 +208,7 @@ export function TaskRerunPicker({
             <div className="flex-1" />
             <button
               onClick={toggleAllVisible}
-              disabled={visibleIds.length === 0}
+              disabled={visibleIds.length === 0 || scanning}
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
             >
               {allVisibleSelected ? (
@@ -278,7 +280,15 @@ export function TaskRerunPicker({
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
           <span className="text-[12px] text-slate-500">
-            已选 <span className="font-bold text-slate-700">{selected.size}</span> 个任务
+            {scanning ? (
+              <span className="text-amber-600">扫描磁盘已建任务中…</span>
+            ) : (
+              <>
+                已选{" "}
+                <span className="font-bold text-slate-700">{selected.size}</span>{" "}
+                个任务
+              </>
+            )}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -289,7 +299,7 @@ export function TaskRerunPicker({
             </button>
             <button
               onClick={() => onRun([...selected])}
-              disabled={selected.size === 0}
+              disabled={selected.size === 0 || scanning}
               className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-[12px] font-bold text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Play size={13} />
