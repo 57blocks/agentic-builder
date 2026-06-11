@@ -408,8 +408,21 @@ export class EventMapper {
     updates: Record<string, unknown>,
     events: SseEvent[],
   ): void {
-    // Lazily create a tracker the first time we see this worker instance.
+    // Only register a worker once we observe an update that proves it is
+    // actually doing task-level work. Otherwise the supervisor's "No-op"
+    // Send fallback (dispatched when there are zero backend / test / fullstack
+    // tasks just to keep LangGraph's conditional-edge router happy) would
+    // create a phantom backend agent in the UI even though the task graph
+    // contains no backend work.
+    const isMeaningfulUpdate =
+      "pick_next_task" in updates ||
+      "generate_code" in updates ||
+      "task_done" in updates ||
+      "task_failed" in updates;
+
     if (!this.workers.has(nsKey)) {
+      if (!isMeaningfulUpdate) return;
+
       // Strip any LangGraph UUID suffix (e.g. "be_worker:abc123" → "be_worker")
       const baseNode = parentNode.split(":")[0] ?? parentNode;
       const idx = this.instanceCounts.get(baseNode) ?? 0;

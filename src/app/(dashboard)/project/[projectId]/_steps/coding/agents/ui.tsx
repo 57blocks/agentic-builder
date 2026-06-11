@@ -31,8 +31,9 @@ import { useStepStore } from "@/store/step-store";
 import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
-import type { CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
+import type { CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
+import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
 import { TaskNode, type TaskNodeData } from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
@@ -328,6 +329,12 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     () => parseKickoffTaskBreakdownFromMetadata(taskMeta),
     [taskMeta],
   );
+
+  const placeholderRoles = useMemo<CodingAgentRole[]>(() => {
+    const seen = new Set<CodingAgentRole>();
+    for (const task of kickoffTasks) seen.add(inferRole(task));
+    return Array.from(seen);
+  }, [kickoffTasks]);
 
   const runId =
     typeof taskMeta?.runId === "string"
@@ -658,7 +665,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
             ACTIVE AGENTS
           </p>
-          <AgentBubbles agents={codingState.agents} />
+          <AgentBubbles agents={codingState.agents} placeholderRoles={placeholderRoles} />
         </div>
 
         {/* Cost */}
