@@ -113,13 +113,55 @@ export async function runFoundationBuild(
   }
 
   const projectRoot = ctx.projectRoot ?? process.cwd();
+
+  // Resume: skip foundation tasks the checkpoint already marks completed. A
+  // foundation can be 70+ tasks and take hours; a re-triggered orchestration
+  // (e.g. to reach the domain phase that a prior recursion-limit failure never
+  // got to) must NOT redo the work already on disk. If every foundation task is
+  // already complete, short-circuit straight to the domain phase.
+  const priorCheckpoint = await readSessionCheckpoint(projectRoot).catch(
+    () => null,
+  );
+  const completedIds = priorCheckpoint
+    ? new Set(
+        Object.entries(priorCheckpoint.taskResults)
+          .filter(
+            ([, r]) =>
+              r.status === "completed" ||
+              r.status === "completed_with_warnings",
+          )
+          .map(([id]) => id),
+      )
+    : new Set<string>();
+  const remainingTaskIds = foundationTaskIds.filter(
+    (id) => !completedIds.has(id),
+  );
+  if (remainingTaskIds.length === 0) {
+    const generatedFiles = priorCheckpoint
+      ? foundationTaskIds.flatMap(
+          (id) => priorCheckpoint.taskResults[id]?.generatedFiles ?? [],
+        )
+      : [];
+    return {
+      ok: true,
+      summary: `foundation: all ${foundationTaskIds.length} shared tasks already complete (resumed, nothing to rebuild).`,
+      generatedFiles,
+    };
+  }
+  if (remainingTaskIds.length < foundationTaskIds.length) {
+    console.log(
+      `[Subsystems] foundation: resuming — ${foundationTaskIds.length - remainingTaskIds.length}/${foundationTaskIds.length} tasks already complete, building the remaining ${remainingTaskIds.length}.`,
+    );
+  }
+
   // Scope/contract artifacts live under the code-output root (where the route +
   // gates read them); only the session checkpoint is keyed to projectRoot.
   const outputRoot = resolveCodeOutputRoot(projectRoot, ctx.codeOutputDir);
   // Foundation owns no business endpoints — scope gates to none so the route
   // audit / smoke gate check only boot + health (no contract endpoint exists yet).
   await writeActiveScope(outputRoot, { subsystemId: FOUNDATION_ID, endpoints: [] });
-  const body = buildFoundationCodingRequest(allTasks, foundationTaskIds, ctx);
+  // Build only the not-yet-completed foundation tasks (full mode over a subset).
+  const body = buildFoundationCodingRequest(allTasks, remainingTaskIds, ctx);
   const controller = new AbortController();
   const timer = ctx.timeoutMs ? setTimeout(() => controller.abort(), ctx.timeoutMs) : null;
   const startedAt = Date.now();
@@ -156,10 +198,22 @@ export async function runFoundationBuild(
   if (dropped && !checkpoint) {
     return { ok: false, summary: "foundation: drain dropped and no fresh checkpoint within the wait window.", generatedFiles: [] };
   }
-  const verdict = verdictFromCheckpoint(checkpoint, step);
-  const generatedFiles = checkpoint
-    ? foundationTaskIds.flatMap((id) => checkpoint.taskResults[id]?.generatedFiles ?? [])
+  // The checkpoint is written per-session over THIS run's task set, so when we
+  // resumed (ran only `remainingTaskIds`), the already-completed foundation
+  // tasks are not in it. Judge the verdict over only what this run built — the
+  // skipped ones were proven complete by the checkpoint above. Merge generated
+  // files from both so the foundation-file protection list stays complete.
+  const verdict = verdictFromCheckpoint(checkpoint, {
+    ...step,
+    taskIds: remainingTaskIds,
+  });
+  const priorFiles = foundationTaskIds.flatMap(
+    (id) => priorCheckpoint?.taskResults[id]?.generatedFiles ?? [],
+  );
+  const newFiles = checkpoint
+    ? remainingTaskIds.flatMap((id) => checkpoint.taskResults[id]?.generatedFiles ?? [])
     : [];
+  const generatedFiles = [...new Set([...priorFiles, ...newFiles])];
   return { ok: verdict.ok, summary: verdict.summary.replace(FOUNDATION_ID, "foundation"), generatedFiles };
 }
 
@@ -186,12 +240,25 @@ export async function runSubsystemPipeline(
   contractCheck?: ContractPreconditionResult;
 }> {
   const foundation = await runFoundationBuild(allTasks, plan, ctx);
+
+  // The real precondition for building domains is a COMPLETE frozen API contract
+  // (P3.1 below) — NOT a 100%-green foundation. The old hard `!foundation.ok`
+  // gate meant a single incidental foundation-task failure (or a recursion-limit
+  // abort) silently skipped ALL domains, orphaning every domain-owned task with
+  // no failed-marker. We now proceed when the contract is complete; a partial
+  // foundation failure is reported (develop.ts folds it into the overall verdict)
+  // but no longer blocks domains whose dependencies are otherwise satisfied. The
+  // per-layer `stopOnFailure` inside runSubsystemBuilds still protects a
+  // dependent domain from building on a broken dependency.
   if (!foundation.ok) {
-    return { foundation, subsystems: [] };
+    console.warn(
+      `[Subsystems] foundation not fully green (${foundation.summary}); proceeding to the domain phase gated by the frozen-contract precondition (a partial foundation failure no longer skips all domains).`,
+    );
   }
 
   // P3.1 — fail fast if the foundation didn't freeze a complete API contract:
-  // every domain's owned endpoints must be declared before domains build.
+  // every domain's owned endpoints must be declared before domains build. This
+  // is the genuine prerequisite — domains code against these contracts.
   if (opts?.manifest) {
     const outputRoot = resolveCodeOutputRoot(ctx.projectRoot ?? process.cwd(), ctx.codeOutputDir);
     const contractCheck = await assertContractCoversManifest(outputRoot, opts.manifest);
