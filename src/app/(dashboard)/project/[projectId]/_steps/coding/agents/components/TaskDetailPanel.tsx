@@ -254,7 +254,10 @@ export function TaskDetailPanel({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
               CURRENTLY SELECTING
             </p>
-            <h3 className="text-[15px] font-bold text-slate-900 leading-tight">
+            <h3
+              className="text-[15px] font-bold text-slate-900 leading-tight line-clamp-2 break-words"
+              title={task.title}
+            >
               {task.title}
             </h3>
           </div>
@@ -272,7 +275,7 @@ export function TaskDetailPanel({
       {/* Description */}
       {task.description && (
         <div className="shrink-0 px-5 py-3 border-b border-slate-100">
-          <p className="text-[12px] text-slate-500 leading-relaxed">
+          <p className="text-[12px] text-slate-500 leading-relaxed max-h-24 overflow-y-auto">
             {task.description}
           </p>
         </div>
