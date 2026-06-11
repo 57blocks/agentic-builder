@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { Search, Play, X, CheckSquare, Square } from "lucide-react";
 
@@ -8,10 +8,6 @@ import type { CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
 import type { CodingTaskStatus } from "@/lib/pipeline/types";
 
 type MergedTask = KickoffWorkItem | CodingTask;
-
-function statusOf(t: MergedTask): CodingTaskStatus {
-  return (t as CodingTask).codingStatus ?? "pending";
-}
 
 /** Visual treatment per status. "pending" also covers never-run kickoff tasks. */
 const STATUS_META: Record<
@@ -37,16 +33,56 @@ function isIncomplete(s: CodingTaskStatus): boolean {
 
 export function TaskRerunPicker({
   tasks,
+  codeOutputDir,
   onRun,
   onClose,
 }: {
   tasks: MergedTask[];
+  codeOutputDir?: string | null;
   onRun: (taskIds: string[]) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("incomplete");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Tasks proven built on disk (creates files all exist). Lets us show real
+  // completion even with no live session/checkpoint (post-crash/restart), so
+  // "未完成" lists only genuinely-unbuilt tasks instead of everything.
+  const [builtIds, setBuiltIds] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/agents/coding/built-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        codeOutputDir,
+        tasks: tasks.map((t) => ({
+          id: t.id,
+          files: (t as KickoffWorkItem).files,
+        })),
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : { builtIds: [] }))
+      .then((d: { builtIds?: string[] }) => {
+        if (!cancelled) setBuiltIds(new Set(d.builtIds ?? []));
+      })
+      .catch(() => {
+        if (!cancelled) setBuiltIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tasks, codeOutputDir]);
+
+  // Effective status: a real live status (failed / in_progress / completed)
+  // wins; otherwise an on-disk build upgrades a pending task to completed.
+  const statusOf = (t: MergedTask): CodingTaskStatus => {
+    const live = (t as CodingTask).codingStatus;
+    if (live && live !== "pending" && live !== "queued") return live;
+    if (builtIds?.has(t.id)) return "completed";
+    return live ?? "pending";
+  };
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -67,7 +103,8 @@ export function TaskRerunPicker({
         ((t as KickoffWorkItem).subsystem ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tasks, query, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, query, filter, builtIds]);
 
   const visibleIds = useMemo(() => visible.map((t) => t.id), [visible]);
   const allVisibleSelected =
@@ -98,7 +135,8 @@ export function TaskRerunPicker({
       if (isIncomplete(s)) incomplete += 1;
     }
     return { failed, incomplete, total: tasks.length };
-  }, [tasks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, builtIds]);
 
   const FILTER_TABS: { key: StatusFilter; label: string }[] = [
     { key: "incomplete", label: `未完成 (${counts.incomplete})` },

@@ -886,6 +886,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       {pickerOpen && (
         <TaskRerunPicker
           tasks={mergedTasks}
+          codeOutputDir={codeOutputDir}
           onRun={handleRunSelected}
           onClose={() => setPickerOpen(false)}
         />
