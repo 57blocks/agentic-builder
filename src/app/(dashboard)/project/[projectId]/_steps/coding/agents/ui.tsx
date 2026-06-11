@@ -22,7 +22,14 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { Play, Clock, RotateCcw, AlertTriangle, RefreshCw } from "lucide-react";
+import {
+  Play,
+  Clock,
+  RotateCcw,
+  AlertTriangle,
+  RefreshCw,
+  ListChecks,
+} from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import { useCodingStore } from "@/store/coding-store";
@@ -37,6 +44,7 @@ import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
 import { TaskNode, type TaskNodeData } from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
+import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
 import { StatusBar } from "./components/StatusBar";
 import { useElapsedTimer } from "./use-elapsed-timer";
@@ -429,6 +437,37 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     prdContent,
   ]);
 
+  // ── Re-run a hand-picked set of tasks ─────────────────────────────────────
+  // Same plumbing as "Retry Failed" (retryFailedTasks → retryFailedTaskIds),
+  // but the user chooses the task ids in the picker instead of it defaulting to
+  // the failed set. Lets you re-run never-run / specific tasks without a full
+  // rerun. Already-completed dependencies are skipped server-side.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const handleRunSelected = useCallback(
+    (taskIds: string[]) => {
+      if (taskIds.length === 0) return;
+      retryFailedTasks(
+        runId,
+        kickoffTasks,
+        taskIds,
+        codeOutputDir,
+        projectTier,
+        codingMode,
+        prdContent,
+      );
+      setPickerOpen(false);
+    },
+    [
+      retryFailedTasks,
+      runId,
+      kickoffTasks,
+      codeOutputDir,
+      projectTier,
+      codingMode,
+      prdContent,
+    ],
+  );
+
   // ── Rerun the entire coding session from scratch ──────────────────────────
   // Used when the user wants to discard the current results (regardless of
   // success/failure / in-progress) and re-trigger the full coding pipeline
@@ -623,7 +662,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#f8fafc]">
+    <div className="relative flex flex-col h-full overflow-hidden bg-[#f8fafc]">
       {/* ─── Top bar ────────────────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-6 px-6 py-3 bg-white border-b border-slate-200">
         {/* Overall progress */}
@@ -736,6 +775,20 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           </button>
         )}
 
+        {/* Re-run a hand-picked subset — available whenever a run is not in
+            flight (idle, done or failed). Mid-flight is excluded so it can't
+            race the active session. */}
+        {!isRunning && kickoffTasks.length > 0 && (
+          <button
+            onClick={() => setPickerOpen(true)}
+            title="Pick specific tasks to re-run"
+            className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
+          >
+            <ListChecks size={13} />
+            选择重跑
+          </button>
+        )}
+
         {/* Rerun — always available once the user has triggered at least one
             coding run, regardless of success / failure / in-flight. Confirm
             dialog inside handleRerun prevents accidental clicks. */}
@@ -828,6 +881,15 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         isReturnVisit={isReturnVisit}
         onAbort={() => codingState.reset()}
       />
+
+      {/* Pick-and-rerun overlay */}
+      {pickerOpen && (
+        <TaskRerunPicker
+          tasks={mergedTasks}
+          onRun={handleRunSelected}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }
