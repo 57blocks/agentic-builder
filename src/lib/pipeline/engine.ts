@@ -2817,35 +2817,50 @@ export class PipelineEngine {
     implGuide: string | null;
     designSpec: string | null;
   }> {
-    const tryRead = async (names: string[]): Promise<string | null> => {
+    const tryRead = async (
+      label: string,
+      names: string[],
+    ): Promise<string | null> => {
       for (const name of names) {
+        const full = path.join(outputRoot, name);
         try {
-          const raw = await fs.readFile(path.join(outputRoot, name), "utf-8");
-          if (raw.trim().length > 0) return raw;
+          const raw = await fs.readFile(full, "utf-8");
+          if (raw.trim().length > 0) {
+            console.log(`[CodingContext] ${label} resolved → ${full}`);
+            return raw;
+          }
         } catch {
           /* try next */
         }
       }
+      console.log(
+        `[CodingContext] ${label} not found (tried: ${names.join(", ")})`,
+      );
       return null;
     };
 
     const [prd, trd, sysDesign, implGuide, designSpec] = await Promise.all([
-      tryRead(["PRD.md", "prd.md"]),
-      tryRead(["TRD.md", "trd.md"]),
-      tryRead([
+      tryRead("PRD", ["PRD.md", "prd.md"]),
+      tryRead("TRD", ["TRD.md", "trd.md"]),
+      tryRead("SystemDesign", [
         "SystemDesign.md",
         "system-design.md",
         "SysDesign.md",
         "SYSTEM_DESIGN.md",
       ]),
-      tryRead([
+      tryRead("ImplementGuide", [
         "ImpelementGuide.md",
         "ImplementGuide.md",
         "ImplementationGuide.md",
         "impl-guide.md",
         "IMPLEMENTATION_GUIDE.md",
       ]),
-      tryRead(["DesignSpec.md", "design-spec.md", "DESIGN.md", "Design.md"]),
+      tryRead("DesignSpec", [
+        "DesignSpec.md",
+        "design-spec.md",
+        "DESIGN.md",
+        "Design.md",
+      ]),
     ]);
 
     return { prd, trd, sysDesign, implGuide, designSpec };

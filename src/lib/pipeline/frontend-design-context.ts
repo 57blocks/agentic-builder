@@ -4,6 +4,7 @@ import { fetchStitchScreenHtml } from "@/lib/stitch-api";
 import {
   readManifest,
   buildVisionDescriptionsForReferences,
+  buildVisionDescriptionsFromDir,
   formatVisionDescriptionsBlock,
 } from "@/lib/pipeline/design-references";
 
@@ -178,6 +179,15 @@ export async function buildFrontendDesignContextForCodegen(
   stitchMeta?: StitchDesignMeta,
   projectRoot?: string,
 ): Promise<string> {
+  console.log("[FrontendDesignContext] ── building frontend coding context ──");
+  console.log(`[FrontendDesignContext] outputRoot = ${outputRoot}`);
+  console.log(`[FrontendDesignContext] projectRoot = ${projectRoot ?? process.cwd()}`);
+  console.log(
+    `[FrontendDesignContext] designSpecDoc = ${designSpecDoc.trim() ? `${designSpecDoc.length} chars` : "(empty)"}`,
+  );
+  console.log(
+    `[FrontendDesignContext] pencilDesignRaw = ${pencilDesignRaw.trim() ? `${pencilDesignRaw.length} chars` : "(empty)"}`,
+  );
   // ── Fetch fresh Stitch design at coding time ──────────────────────────────
   // The user may have modified the design in Stitch after kickoff, so the
   // cached StitchDesign.html is stale. Call Stitch MCP get_screen to get
@@ -197,6 +207,9 @@ export async function buildFrontendDesignContextForCodegen(
 
   const stitchRaw = await readStitchDesignHtml(outputRoot);
   const stitchText = prepareStitchHtmlForCodegen(stitchRaw);
+  console.log(
+    `[FrontendDesignContext] StitchDesign.html = ${path.join(outputRoot, "StitchDesign.html")} ${stitchRaw ? `(${stitchRaw.length} chars)` : "(missing)"}`,
+  );
   const assets = await buildPublicDesignAssetsBlock(outputRoot);
 
   // Log the Stitch project URL for debugging
@@ -245,12 +258,54 @@ export async function buildFrontendDesignContextForCodegen(
   // the exact layout, colors, and components.
   let visionBlock = "";
   const rootForVision = projectRoot ?? process.cwd();
+  const canonicalDir = path.join(rootForVision, ".blueprint", "design-references");
+  const fallbackDir = path.join(outputRoot, ".design-references");
   try {
-    const refEntries = await readManifest(rootForVision);
+    let refEntries = await readManifest(rootForVision);
+    let resolvedDir = canonicalDir;
+    let usedFallback = false;
+
+    if (refEntries.length === 0) {
+      // Fallback: coding mirrors .blueprint/design-references → outputRoot/.design-references.
+      // If the canonical source is missing (cleaned/moved), read from the mirror.
+      try {
+        const raw = await fs.readFile(path.join(fallbackDir, "manifest.json"), "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          refEntries = parsed.filter(
+            (x: unknown): x is { kind?: string; storedFileName?: string } =>
+              typeof x === "object" && x !== null &&
+              typeof (x as { storedFileName?: unknown }).storedFileName === "string",
+          ) as typeof refEntries;
+          resolvedDir = fallbackDir;
+          usedFallback = true;
+        }
+      } catch {
+        /* no fallback either */
+      }
+    }
+
+    console.log(
+      `[FrontendDesignContext] design-references manifest = ${path.join(resolvedDir, "manifest.json")} (${refEntries.length} entr${refEntries.length === 1 ? "y" : "ies"})${usedFallback ? " [fallback: outputRoot/.design-references]" : ""}`,
+    );
+
     const imageRefs = refEntries.filter((e) => e.kind === "image");
     if (imageRefs.length > 0) {
-      const descriptions = await buildVisionDescriptionsForReferences(rootForVision, imageRefs);
+      console.log(
+        `[FrontendDesignContext] image references (${imageRefs.length}):`,
+      );
+      for (const r of imageRefs) {
+        const pageHint = r.pageHint ? ` [${r.pageHint}]` : "";
+        console.log(
+          `  - ${path.join(resolvedDir, r.storedFileName)} (orig: ${r.fileName})${pageHint}`,
+        );
+      }
+      const descriptions = usedFallback
+        ? await buildVisionDescriptionsFromDir(resolvedDir, imageRefs)
+        : await buildVisionDescriptionsForReferences(rootForVision, imageRefs);
       visionBlock = formatVisionDescriptionsBlock(imageRefs, descriptions);
+    } else {
+      console.log("[FrontendDesignContext] no image references in manifest.");
     }
   } catch (err) {
     console.warn("[FrontendDesignContext] Failed to build vision descriptions (ignored):", err instanceof Error ? err.message : err);
