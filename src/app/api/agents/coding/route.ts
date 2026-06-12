@@ -67,6 +67,7 @@ import { createSubsystemSseForwarder } from "@/lib/pipeline/subsystems/sse-forwa
 import {
   readDesignReferencesFromOutput,
   formatDesignReferencesPromptBlock,
+  copyDesignReferencesToOutput,
 } from "@/lib/pipeline/design-references";
 import { DEFAULT_RALPH_CONFIG } from "@/lib/pipeline/types";
 import {
@@ -1299,6 +1300,23 @@ export async function POST(request: NextRequest) {
     );
   } catch {
     /* nothing stashed */
+  }
+
+  // Re-mirror .blueprint/design-references/ → <outputRoot>/.design-references/
+  // because cleanup above removes the top-level .design-references dir kickoff
+  // wrote. Doing it here also picks up any references the user added/edited
+  // between kickoff and Start Coding.
+  try {
+    const mirrored = await copyDesignReferencesToOutput(process.cwd(), outputRoot);
+    if (mirrored.length > 0) {
+      console.log(
+        `[CodingAPI] Mirrored ${mirrored.length} design reference(s) into ${outputRoot}/.design-references/`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[CodingAPI] Failed to mirror design references: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   try {
