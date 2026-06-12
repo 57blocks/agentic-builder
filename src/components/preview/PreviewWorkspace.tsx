@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import PreviewPanel from "@/components/PreviewPanel";
+import FirstLoginPanel from "./FirstLoginPanel";
 import ConsolePanel from "./console/ConsolePanel";
 import { useIframeConsole } from "./console/useIframeConsole";
 import { usePreviewServerLogs } from "./usePreviewServerLogs";
@@ -23,6 +24,7 @@ export default function PreviewWorkspace({ codeOutputDir }: Props) {
   return (
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
+        <FirstLoginPanel codeOutputDir={codeOutputDir} />
         <div className="min-h-0 flex-1">
           <PreviewPanel codeOutputDir={codeOutputDir} />
         </div>
