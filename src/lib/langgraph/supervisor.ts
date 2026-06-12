@@ -114,6 +114,12 @@ import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
 import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
 import { formatRuntimeSmokeBlock } from "@/lib/pipeline/runtime-smoke-block";
+import { BUILD_FAILED_MARKER_REL } from "@/lib/pipeline/build-quarantine";
+import {
+  runBackendTscGate,
+  decideBackendReadinessRoute,
+} from "@/lib/pipeline/backend-readiness-gate";
+import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
 import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
@@ -5589,6 +5595,16 @@ async function integrationVerifyAndFix(
         totalBudget: INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
       },
     });
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      category: "circuit-breaker",
+      gate: "integration-verify-fix",
+      phase: "integration",
+      attempts: priorIntegrationAttempts,
+      summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations without clearing the gate.`,
+      evidence: state.integrationErrors ? [state.integrationErrors.slice(0, 500)] : undefined,
+      artifacts: [".ralph/runtime-smoke.json", ".ralph/tdd-review.json"],
+    });
     return {
       integrationErrors: [
         state.integrationErrors?.trim(),
@@ -7727,6 +7743,16 @@ async function integrationVerifyAndFix(
           },
         });
 
+        await recordUnresolvedProblem(state.outputDir, {
+          sessionId: state.sessionId,
+          category: "stagnation",
+          gate: "integration-verify-fix",
+          phase: "integration",
+          attempts: iterations,
+          summary: `Stagnation fallback exhausted — LLM could not determine the right action${repeatedAction ? ` (most repeated: ${repeatedAction})` : ""}; escalating to human decision.`,
+          evidence: [humanDecisionContext.slice(0, 500)],
+          artifacts: [".ralph/contract-usage-coverage.json", ".ralph/runtime-smoke.json"],
+        });
         console.warn(
           `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
         );
@@ -8032,9 +8058,24 @@ async function integrationVerifyAndFix(
           .filter(Boolean)
           .join("\n\n")
           .slice(0, 4000);
+        await recordUnresolvedProblem(state.outputDir, {
+          sessionId: state.sessionId,
+          category: "runtime-smoke-404",
+          gate: "integration-smoke",
+          phase: "integration",
+          summary: smoke.bootFailed
+            ? "Backend did not start during runtime smoke."
+            : `${allFailures.length} contract endpoint(s) unreachable/failing after repair (${smoke.probedEndpoints.length} probed).`,
+          evidence: top,
+          artifacts: [".ralph/runtime-smoke.json"],
+        });
       }
     } catch (err) {
-      // Smoke gate must NEVER hard-fail the pipeline — surface as a warning.
+      // G4: fail-closed. An unexpected throw from the smoke gate means we could
+      // NOT prove the backend is runnable — historically this was swallowed to a
+      // warning ("must NEVER hard-fail"), which let an unbootable backend pass.
+      // Treat it as a failure unless an operator explicitly opts out for a known
+      // infra issue (e.g. no DB provisioned in this environment).
       console.warn(
         `[supervisor] runtime smoke gate threw: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -8045,6 +8086,17 @@ async function integrationVerifyAndFix(
           error: err instanceof Error ? err.message : String(err),
         },
       });
+      if (process.env.BLUEPRINT_TOLERATE_SMOKE_INFRA_THROW !== "1") {
+        finalStatus = "fail";
+        finalSummary = [
+          finalSummary,
+          "Runtime smoke gate could not complete (threw) — treating as FAIL (set BLUEPRINT_TOLERATE_SMOKE_INFRA_THROW=1 to override for a known-infra issue).",
+          err instanceof Error ? err.message : String(err),
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+          .slice(0, 4000);
+      }
     } finally {
       // Always drop the isolated test schema, even on failure/throw.
       if (prepared) {
@@ -8111,6 +8163,38 @@ async function integrationVerifyAndFix(
   console.log(
     `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
   );
+
+  // G1: quarantine marker. A FAILED integration must not look runnable to
+  // downstream consumers — the generated code stays on disk, so without a
+  // durable signal a human can run a build whose backend 404s every route.
+  // Write `.blueprint/BUILD_FAILED.json` on fail; delete it on pass. Consumers
+  // (e.g. the coding route's blocking-gate check, any "open/run project"
+  // surface) MUST refuse to present the output as ready when it is present.
+  try {
+    const markerRel = BUILD_FAILED_MARKER_REL;
+    if (finalStatus === "fail") {
+      await fsWrite(
+        markerRel,
+        JSON.stringify(
+          {
+            sessionId: state.sessionId,
+            failedAt: new Date().toISOString(),
+            gate: "integration",
+            summary: finalSummary.slice(0, 2000),
+          },
+          null,
+          2,
+        ),
+        state.outputDir,
+      );
+    } else {
+      await fs.rm(path.join(state.outputDir, markerRel), { force: true });
+    }
+  } catch (markerErr) {
+    console.warn(
+      `[supervisor] could not write/clear BUILD_FAILED marker: ${markerErr instanceof Error ? markerErr.message : String(markerErr)}`,
+    );
+  }
 
   return {
     integrationErrors:
@@ -8271,6 +8355,115 @@ function dispatchGate(_state: SupervisorState) {
   return {};
 }
 
+/**
+ * Backend readiness gate (G2, flag-gated by BLUEPRINT_BACKEND_GATE_BEFORE_FRONTEND=1).
+ *
+ * Runs between `be_phase_verify` and the frontend phase. `be_phase_verify`
+ * already records its result in `scaffoldErrors` ("" = backend green), but the
+ * edge to the frontend was UNCONDITIONAL — a backend verify+fix loop that *gave
+ * up* with errors still advanced into the frontend phase (the test-x "194 backend
+ * type errors carried into frontend" failure). This node treats backend-not-green
+ * as a stop: it writes the BUILD_FAILED quarantine marker so the router can divert
+ * away from the frontend phase. Belt-and-suspenders: it also re-runs a
+ * deterministic backend `tsc` so a loop that self-reported pass can't slip type
+ * errors through.
+ *
+ * Flag OFF (default): returns `{}` immediately — zero behavioural change; the
+ * router always proceeds to the frontend phase exactly as the old unconditional edge.
+ */
+async function backendReadinessGate(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  if (process.env.BLUEPRINT_BACKEND_GATE_BEFORE_FRONTEND !== "1") return {};
+  if (state.backendTasks.length === 0) return {}; // frontend-only project
+
+  let notGreen = Boolean(state.scaffoldErrors && state.scaffoldErrors.trim());
+  let reason = notGreen ? "backend verify+fix ended with unresolved errors" : "";
+  try {
+    const tsc = await runBackendTscGate(state.outputDir);
+    if (!tsc.skipped && !tsc.pass) {
+      notGreen = true;
+      reason = `backend tsc reports ${tsc.errorCount} error(s): ${tsc.firstErrors.slice(0, 4).join(" | ")}`;
+    }
+  } catch (err) {
+    console.warn(
+      `[Supervisor] backend readiness gate: tsc probe threw (ignored): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!notGreen) return {};
+
+  try {
+    await fsWrite(
+      BUILD_FAILED_MARKER_REL,
+      JSON.stringify(
+        {
+          sessionId: state.sessionId,
+          failedAt: new Date().toISOString(),
+          gate: "backend-readiness",
+          summary: `Backend not green before frontend phase — ${reason}`,
+        },
+        null,
+        2,
+      ),
+      state.outputDir,
+    );
+  } catch (err) {
+    console.warn(
+      `[Supervisor] backend readiness gate: could not write quarantine marker: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  // Record to the unresolved-problems ledger for later pattern analysis (both modes).
+  await recordUnresolvedProblem(state.outputDir, {
+    sessionId: state.sessionId,
+    category: "backend-not-green",
+    gate: "backend-readiness",
+    phase: "backend",
+    summary: `Backend not green before frontend phase — ${reason}`,
+    evidence: state.scaffoldErrors ? [state.scaffoldErrors.slice(0, 500)] : undefined,
+    artifacts: [".ralph/tsc-diagnostics.json", ".ralph/runtime-smoke.json"],
+  });
+  // Two modes once the backend is NOT green (both keep the quarantine marker above):
+  //  - "proceed-quarantined" (DEFAULT): build the frontend anyway. We don't lose
+  //    the frontend work and the marker (G1) still stops the output being used as
+  //    ready. Safer when the verify loop *gave up* on a recoverable backend.
+  //  - "hard-stop" (opt-in BLUEPRINT_BACKEND_GATE_MODE=hard-stop): skip the
+  //    frontend entirely to save tokens on a hopeless backend. To divert in the
+  //    router we must surface "not green" in state, so we set scaffoldErrors.
+  if (process.env.BLUEPRINT_BACKEND_GATE_MODE === "hard-stop") {
+    console.log(
+      `[Supervisor] backend readiness gate: NOT GREEN — hard-stop, skipping the frontend phase. ${reason}`,
+    );
+    return {
+      scaffoldErrors: `Backend readiness gate (hard-stop) failed before frontend phase: ${reason}`,
+    };
+  }
+  console.log(
+    `[Supervisor] backend readiness gate: NOT GREEN — proceed-quarantined: building frontend anyway, output marked BUILD_FAILED. ${reason}`,
+  );
+  return {}; // proceed; quarantine marker already written, scaffoldErrors left as-is
+}
+
+/**
+ * Route after the backend readiness gate.
+ *  - Flag OFF → always proceed to the frontend phase (identical to the previous
+ *    unconditional edge).
+ *  - Flag ON, backend green → proceed.
+ *  - Flag ON, backend NOT green → only "hard-stop" mode diverts to the terminal;
+ *    the default ("proceed-quarantined") still builds the frontend (the output is
+ *    already quarantined, so it can't be used as ready).
+ * Exported for unit testing.
+ */
+export function routeAfterBackendReadiness(state: SupervisorState): string {
+  const decision = decideBackendReadinessRoute({
+    flagOn: process.env.BLUEPRINT_BACKEND_GATE_BEFORE_FRONTEND === "1",
+    hasBackendTasks: state.backendTasks.length > 0,
+    backendNotGreen: Boolean(state.scaffoldErrors && state.scaffoldErrors.trim()),
+    hardStop: process.env.BLUEPRINT_BACKEND_GATE_MODE === "hard-stop",
+  });
+  return decision === "stop" ? "summary" : "extract_real_contracts";
+}
+
 export function createSupervisorGraph() {
   const feDispatchGate = (_state: SupervisorState) => ({});
 
@@ -8289,6 +8482,7 @@ export function createSupervisorGraph() {
     .addNode("be_phase_verify", (s) =>
       phaseVerifyAndFix(s, { workerHintRoles: ["backend", "test"] }),
     )
+    .addNode("be_readiness_gate", backendReadinessGate)
     .addNode("extract_real_contracts", extractRealContracts)
     .addNode("fe_dispatch_gate", feDispatchGate)
     .addNode("fe_worker", parallelWorkerNode)
@@ -8316,7 +8510,17 @@ export function createSupervisorGraph() {
     .addEdge("page_task_coverage", "tdd_test_writer")
     .addConditionalEdges("tdd_test_writer", dispatchBackendAndTestWorkers)
     .addEdge("be_worker", "be_phase_verify")
-    .addEdge("be_phase_verify", "extract_real_contracts")
+    // G2 (flag-gated): gate the backend→frontend transition on backend readiness.
+    // Flag OFF → routeAfterBackendReadiness always returns "extract_real_contracts"
+    // (identical to the previous unconditional edge). Flag ON + backend not green →
+    // default "proceed-quarantined" still builds the frontend (output is quarantined
+    // via the BUILD_FAILED marker); only BLUEPRINT_BACKEND_GATE_MODE=hard-stop diverts
+    // to "summary" and skips the frontend.
+    .addEdge("be_phase_verify", "be_readiness_gate")
+    .addConditionalEdges("be_readiness_gate", routeAfterBackendReadiness, {
+      extract_real_contracts: "extract_real_contracts",
+      summary: "summary",
+    })
     .addEdge("extract_real_contracts", "fe_dispatch_gate")
     .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
     .addEdge("fe_worker", "fe_phase_verify")

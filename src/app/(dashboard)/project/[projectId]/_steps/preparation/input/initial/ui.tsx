@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Paperclip, ArrowRight, Info } from "lucide-react";
+import { useRef, useState, type ChangeEvent } from "react";
+import { Paperclip, ArrowRight, Info, ImagePlus } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
+import { usePipelineStore } from "@/store/pipeline-store";
 import ImportPrdDialog from "@/components/ImportPrdDialog";
 import type { StepUIProps } from "../../../_shared/types";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,27 @@ export function InitialUI(props: StepUIProps) {
 
   const setFeatureBrief = useStepStore((s) => s.setFeatureBrief);
   const isRunning       = useStepStore((s) => s.isRunning);
+
+  // Reference screenshots → stored via the shared design-references store, so the
+  // PRD intent pass summarizes functional requirements from them (and the Design
+  // stage later reuses the same uploads for the visual system — single upload).
+  const uploadDesignReferences = usePipelineStore((s) => s.uploadDesignReferences);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageCount, setImageCount] = useState(0);
+  const [uploadingImages, setUploadingImages] = useState(false);
+
+  async function handleImagesSelected(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = ""; // allow re-selecting the same file
+    if (files.length === 0) return;
+    setUploadingImages(true);
+    try {
+      const res = await uploadDesignReferences(files);
+      if (res) setImageCount((c) => c + files.length);
+    } finally {
+      setUploadingImages(false);
+    }
+  }
 
   function handleInitialize() { if (!prompt.trim() || isRunning) return; setFeatureBrief(prompt.trim()); props.onNavigate("intent"); }
 
@@ -42,6 +64,8 @@ export function InitialUI(props: StepUIProps) {
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setPrdDialogOpen(true)} className="text-xs text-[#64748b] h-7 px-2.5"><Paperclip className="size-3" /> PRD</Button>
+                    <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={handleImagesSelected} />
+                    <Button variant="ghost" size="sm" disabled={uploadingImages || isRunning} onClick={() => imageInputRef.current?.click()} className="text-xs text-[#64748b] h-7 px-2.5" title="Attach reference screenshots — the PRD step will summarize requirements from them"><ImagePlus className="size-3" /> {uploadingImages ? "Uploading…" : imageCount > 0 ? `${imageCount} image${imageCount > 1 ? "s" : ""}` : "Images"}</Button>
                   </div>
                   <Button disabled={!prompt.trim() || isRunning} onClick={handleInitialize} size="sm" className="text-[13px] font-bold px-5 h-9">{isRunning ? "Starting…" : "Start Generation"}<ArrowRight className="size-3" /></Button>
                 </div>

@@ -1,8 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generatePrdIntent } from "@/lib/agents/intent";
+import fs from "fs/promises";
+import path from "path";
+import { generatePrdIntent, type PrdIntentImage } from "@/lib/agents/intent";
+import { readManifest } from "@/lib/pipeline/design-references";
 
 // v2 prompt emits ~30 questions worst case; allow generous room for slow models.
 export const maxDuration = 180;
+
+/** Max reference screenshots fed to the vision pass (keeps the payload sane). */
+const MAX_INTENT_IMAGES = 8;
+
+/**
+ * Load uploaded design-reference IMAGES (shared with the Design stage) as
+ * vision-ready data URLs so the PRD intent pass can summarize functional
+ * requirements from them. Best-effort: returns [] on any failure.
+ */
+async function loadUploadedImages(): Promise<PrdIntentImage[]> {
+  try {
+    const refs = await readManifest(process.cwd());
+    const imageRefs = refs.filter((r) => r.kind === "image").slice(0, MAX_INTENT_IMAGES);
+    const out: PrdIntentImage[] = [];
+    for (const ref of imageRefs) {
+      try {
+        const bytes = await fs.readFile(
+          path.join(process.cwd(), ".blueprint", "design-references", ref.storedFileName),
+        );
+        out.push({
+          dataUrl: `data:${ref.mime};base64,${bytes.toString("base64")}`,
+          label: ref.label || ref.fileName,
+          pageHint: ref.pageHint || undefined,
+        });
+      } catch {
+        // skip unreadable file
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 
 /**
  * POST /api/agents/prd-intent
@@ -43,9 +79,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Opt-out flag; default ON so uploaded reference screenshots enrich the PRD.
+  const useUploadedImages =
+    !body ||
+    typeof body !== "object" ||
+    !("useUploadedImages" in body) ||
+    (body as { useUploadedImages?: unknown }).useUploadedImages !== false;
+
   try {
-    const result = await generatePrdIntent(featureBrief);
-    return NextResponse.json({ result });
+    const images = useUploadedImages ? await loadUploadedImages() : [];
+    if (images.length > 0) {
+      console.log(`[prd-intent] vision pass with ${images.length} reference screenshot(s).`);
+    }
+    const result = await generatePrdIntent(featureBrief, { images });
+    return NextResponse.json({ result, imagesUsed: images.length });
   } catch (err) {
     const msg =
       err instanceof Error

@@ -5,6 +5,8 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { v4 as uuidv4 } from "uuid";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
+import { readBuildFailedMarker } from "@/lib/pipeline/build-quarantine";
+import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
@@ -2468,6 +2470,20 @@ export async function POST(request: NextRequest) {
           const blockingFailures = summarizeBlockingGateErrors(
             collectedGateSnapshot,
           );
+          // G1: refuse to present a quarantined (known-broken) build as ready.
+          // The integration node writes .blueprint/BUILD_FAILED.json when its
+          // gate fails; if it's present we must not report a passing session.
+          const quarantineMarker = await readBuildFailedMarker(outputRoot);
+          if (quarantineMarker) {
+            blockingFailures.push(
+              [
+                `Build quarantined (.blueprint/BUILD_FAILED.json) — integration gate failed at ${quarantineMarker.failedAt}.`,
+                quarantineMarker.summary.slice(0, 300),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            );
+          }
           if (!finalAudit.passed) {
             // Use hardUncovered to exclude IC-xx interaction specs (soft warnings).
             const remainingIds = (
@@ -2482,6 +2498,13 @@ export async function POST(request: NextRequest) {
                 .filter(Boolean)
                 .join("\n"),
             );
+            await recordUnresolvedProblem(outputRoot, {
+              sessionId,
+              category: "feature-coverage",
+              gate: "feature-audit",
+              summary: `Feature audit gate failed: ${remainingIds.length} PRD requirement id(s) unresolved.`,
+              evidence: remainingIds.slice(0, 12),
+            });
           }
           if (blockingFailures.length > 0) {
             throw new Error(blockingFailures.join("\n\n"));
