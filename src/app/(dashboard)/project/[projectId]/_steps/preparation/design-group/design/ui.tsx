@@ -913,8 +913,8 @@ export function DesignUI(props: StepUIProps) {
               try {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const result = await (window as any).electronAPI.renderReferenceUrl(url);
-                screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
-                cssToken = result?.cssTokens ?? result?.cssToken;
+                screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
+                cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
               } catch {
                 // no screenshot available in Electron
               }
@@ -947,8 +947,8 @@ export function DesignUI(props: StepUIProps) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const result = await (window as any).electronAPI.renderReferenceUrl(url);
-          screenshotDataUrl = result?.screenshot ?? result?.screenshotDataUrl;
-          cssToken = result?.cssTokens ?? result?.cssToken;
+          screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
+          cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
         } catch {
           // no screenshot
         }
