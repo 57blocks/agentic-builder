@@ -552,14 +552,11 @@ interface VisionCacheEntry {
   generatedAt: string;
 }
 
-async function readVisionCache(
-  projectRoot: string,
+async function readVisionCacheFromDir(
+  absDir: string,
 ): Promise<Map<string, VisionCacheEntry>> {
   try {
-    const raw = await fs.readFile(
-      path.join(designReferenceDirAbs(projectRoot), VISION_CACHE_FILE),
-      "utf-8",
-    );
+    const raw = await fs.readFile(path.join(absDir, VISION_CACHE_FILE), "utf-8");
     const arr = JSON.parse(raw) as VisionCacheEntry[];
     return new Map(arr.map((e) => [e.storedFileName, e]));
   } catch {
@@ -567,13 +564,13 @@ async function readVisionCache(
   }
 }
 
-async function writeVisionCache(
-  projectRoot: string,
+async function writeVisionCacheToDir(
+  absDir: string,
   cache: Map<string, VisionCacheEntry>,
 ): Promise<void> {
-  await ensureDir(projectRoot);
+  await fs.mkdir(absDir, { recursive: true });
   await fs.writeFile(
-    path.join(designReferenceDirAbs(projectRoot), VISION_CACHE_FILE),
+    path.join(absDir, VISION_CACHE_FILE),
     JSON.stringify([...cache.values()], null, 2),
     "utf-8",
   );
@@ -737,6 +734,22 @@ export async function buildVisionDescriptionsForReferences(
   projectRoot: string,
   entries: DesignReferenceEntry[],
 ): Promise<Map<string, string>> {
+  return buildVisionDescriptionsFromDir(
+    designReferenceDirAbs(projectRoot),
+    entries,
+  );
+}
+
+/**
+ * Same as `buildVisionDescriptionsForReferences`, but reads images and cache
+ * from an arbitrary absolute directory. Used as a fallback when the canonical
+ * `<projectRoot>/.blueprint/design-references/` is missing but the mirrored
+ * copy at `<outputRoot>/.design-references/` is present.
+ */
+export async function buildVisionDescriptionsFromDir(
+  absDir: string,
+  entries: DesignReferenceEntry[],
+): Promise<Map<string, string>> {
   const imageEntries = entries.filter((e) => e.kind === "image");
   if (imageEntries.length === 0) return new Map();
 
@@ -746,24 +759,20 @@ export async function buildVisionDescriptionsForReferences(
     return new Map();
   }
 
-  const cache = await readVisionCache(projectRoot);
+  const cache = await readVisionCacheFromDir(absDir);
   const result = new Map<string, string>();
   let cacheUpdated = false;
 
   for (const entry of imageEntries) {
-    // Use cached description if the file hasn't changed (same bytes count = same file)
     const cached = cache.get(entry.storedFileName);
     if (cached && cached.bytes === entry.bytes) {
       result.set(entry.storedFileName, cached.description);
       continue;
     }
 
-    // Read image file and encode as base64
     let imageData: Buffer;
     try {
-      imageData = await fs.readFile(
-        path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
-      );
+      imageData = await fs.readFile(path.join(absDir, entry.storedFileName));
     } catch {
       console.warn(`[DesignReferences] Could not read ${entry.storedFileName} for vision`);
       continue;
@@ -823,7 +832,7 @@ export async function buildVisionDescriptionsForReferences(
   }
 
   if (cacheUpdated) {
-    await writeVisionCache(projectRoot, cache).catch((e) =>
+    await writeVisionCacheToDir(absDir, cache).catch((e) =>
       console.warn("[DesignReferences] Failed to persist vision cache:", e),
     );
   }
