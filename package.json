@@ -2,6 +2,17 @@
   "name": "agentic-builder",
   "version": "0.1.0",
   "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "sharp",
+      "msw",
+      "unrs-resolver",
+      "core-js"
+    ]
+  },
   "description": "AI-powered desktop application built with Next.js and Electron",
   "main": "electron/main.js",
   "scripts": {
