@@ -1,8 +1,14 @@
 import { NextRequest } from "next/server";
-import { streamChatCompletion, resolveModel } from "@/lib/openrouter";
+import {
+  streamChatCompletion,
+  resolveModel,
+  openRouterVisionChatCompletion,
+} from "@/lib/openrouter";
+import type { VisionContentPart, VisionChatMessage } from "@/lib/llm-types";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { classifyProject } from "@/lib/agents/shared/project-classifier";
 import { PRD_DIMENSIONS } from "@/lib/agents/intent/gap-checklist";
+import { loadReferenceImagesAsDataUrls } from "@/lib/pipeline/design-references";
 import { fallbackIntentForm } from "./intent-fallback";
 
 // Generous timeout — 10-dim + per-concept prompt + json_object on a stream
@@ -92,10 +98,12 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       brief?: string;
       conversationHistory?: { role: "user" | "assistant"; content: string }[];
+      projectId?: string;
     };
 
     const brief = (body.brief ?? "").trim();
     const conversationHistory = body.conversationHistory ?? [];
+    const projectId = (body.projectId ?? "").trim() || undefined;
 
     if (!brief) {
       return new Response(JSON.stringify({ error: "brief is required" }), {
@@ -115,6 +123,47 @@ export async function POST(request: NextRequest) {
       );
     } else {
       userTurnParts.push("(No answers yet — this is the initial check)");
+    }
+
+    // ── Vision pre-step ──
+    // Derive functional requirements from this project's uploaded reference
+    // screenshots and fold them into the brief as confirmed input, so the
+    // text clarification engine below incorporates them. Best-effort: a vision
+    // failure (or no images) simply falls back to the text-only flow.
+    try {
+      const images = await loadReferenceImagesAsDataUrls(process.cwd(), projectId);
+      if (images.length > 0) {
+        const parts: VisionContentPart[] = [
+          {
+            type: "text",
+            text: `These are ${images.length} reference screenshot(s) of the target UI. List the FUNCTIONAL requirements they reveal — screens/pages, components, fields, actions/buttons, visible states, and flows implied by navigation between screens. Only describe what is visibly present; do NOT invent. Output concise plain-text bullet points.`,
+          },
+        ];
+        for (const img of images) {
+          if (img.label) parts.push({ type: "text", text: `Screenshot: ${img.label}` });
+          parts.push({ type: "image_url", image_url: { url: img.dataUrl, detail: "high" } });
+        }
+        const visionMessages: VisionChatMessage[] = [
+          { role: "system", content: "You are a precise UI analyst extracting functional requirements from screenshots." },
+          { role: "user", content: parts },
+        ];
+        const visionResp = await openRouterVisionChatCompletion(visionMessages, {
+          model: resolveModel(MODEL_CONFIG.design),
+          temperature: 0.2,
+          max_tokens: 2048,
+        });
+        const visionText = visionResp.choices[0]?.message?.content?.trim() ?? "";
+        if (visionText) {
+          userTurnParts.push(
+            `\nFunctional requirements extracted from ${images.length} uploaded reference screenshot(s) — treat as confirmed product input:\n${visionText}`,
+          );
+          console.log(`[intent-recheck] vision pre-step folded ${images.length} screenshot(s) into the brief.`);
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[intent-recheck] vision pre-step failed (continuing text-only): ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     const messages: { role: "system" | "user" | "assistant"; content: string }[] = [

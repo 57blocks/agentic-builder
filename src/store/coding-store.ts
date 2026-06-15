@@ -384,6 +384,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         codingMode,
         prd: prdContent,
         stitchMeta,
+        // Project slug — isolates per-project design references for mirroring.
+        projectId: get().projectId ?? undefined,
       }),
     })
       .then(async (resp) => {
@@ -608,6 +610,8 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         prd: prdContent,
         stitchMeta,
         retryFailedTaskIds: failedTaskIds,
+        // Project slug — isolates per-project design references for mirroring.
+        projectId: get().projectId ?? undefined,
       }),
     })
       .then(async (resp) => {

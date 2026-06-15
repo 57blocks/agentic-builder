@@ -18,6 +18,17 @@ function scheduleSync(getState: () => PipelineState) {
 }
 
 /**
+ * Returns a `projectId=<slug>` query fragment for design-reference API calls so
+ * uploads are isolated per project. Empty string when no project is active
+ * (server falls back to the legacy global store).
+ */
+function designReferenceProjectIdParam(): string {
+  return _currentProjectSlug
+    ? `projectId=${encodeURIComponent(_currentProjectSlug)}`
+    : "";
+}
+
+/**
  * Maps a pipeline step ID to the (stage, subStage) it belongs to.
  * Used to determine where to file a substage snapshot when a step completes.
  */
@@ -1661,10 +1672,14 @@ export const usePipelineStore = create<PipelineState>()(
           designReferencesError: null,
         });
         try {
-          const resp = await fetch("/api/agents/pipeline/design-references", {
-            method: "GET",
-            cache: "no-store",
-          });
+          const pid = designReferenceProjectIdParam();
+          const resp = await fetch(
+            `/api/agents/pipeline/design-references${pid ? `?${pid}` : ""}`,
+            {
+              method: "GET",
+              cache: "no-store",
+            },
+          );
           if (!resp.ok) {
             const data = (await resp.json().catch(() => ({}))) as {
               error?: string;
@@ -1710,10 +1725,14 @@ export const usePipelineStore = create<PipelineState>()(
             form.append("label", labels?.[idx] ?? "");
             form.append("pageHint", pageHints?.[idx] ?? "");
           });
-          const resp = await fetch("/api/agents/pipeline/design-references", {
-            method: "POST",
-            body: form,
-          });
+          const pid = designReferenceProjectIdParam();
+          const resp = await fetch(
+            `/api/agents/pipeline/design-references${pid ? `?${pid}` : ""}`,
+            {
+              method: "POST",
+              body: form,
+            },
+          );
           const data = (await resp.json().catch(() => ({}))) as {
             error?: string;
             added?: Array<{ id: string; fileName: string }>;
@@ -1756,8 +1775,9 @@ export const usePipelineStore = create<PipelineState>()(
       fetchUrlDesignReference: async (url, screenshotDataUrl, cssToken, pageHint) => {
         set({ designReferencesLoading: "uploading", designReferencesError: null });
         try {
+          const pid = designReferenceProjectIdParam();
           const resp = await fetch(
-            "/api/agents/pipeline/design-references/fetch-url",
+            `/api/agents/pipeline/design-references/fetch-url${pid ? `?${pid}` : ""}`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1802,8 +1822,9 @@ export const usePipelineStore = create<PipelineState>()(
           designReferencesError: null,
         });
         try {
+          const pid = designReferenceProjectIdParam();
           const resp = await fetch(
-            `/api/agents/pipeline/design-references/${encodeURIComponent(id)}`,
+            `/api/agents/pipeline/design-references/${encodeURIComponent(id)}${pid ? `?${pid}` : ""}`,
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -1849,8 +1870,9 @@ export const usePipelineStore = create<PipelineState>()(
           designReferencesError: null,
         });
         try {
+          const pid = designReferenceProjectIdParam();
           const resp = await fetch(
-            `/api/agents/pipeline/design-references/${encodeURIComponent(id)}`,
+            `/api/agents/pipeline/design-references/${encodeURIComponent(id)}${pid ? `?${pid}` : ""}`,
             { method: "DELETE" },
           );
           const data = (await resp.json().catch(() => ({}))) as {
@@ -1887,8 +1909,9 @@ export const usePipelineStore = create<PipelineState>()(
           designReferencesError: null,
         });
         try {
+          const pid = designReferenceProjectIdParam();
           const resp = await fetch(
-            "/api/agents/pipeline/design-references?all=true",
+            `/api/agents/pipeline/design-references?all=true${pid ? `&${pid}` : ""}`,
             { method: "DELETE" },
           );
           if (!resp.ok) {
@@ -1916,8 +1939,9 @@ export const usePipelineStore = create<PipelineState>()(
       deduplicateDesignReferences: async () => {
         set({ designReferencesLoading: "updating", designReferencesError: null });
         try {
+          const pid = designReferenceProjectIdParam();
           const resp = await fetch(
-            "/api/agents/pipeline/design-references/deduplicate",
+            `/api/agents/pipeline/design-references/deduplicate${pid ? `?${pid}` : ""}`,
             { method: "POST" },
           );
           const data = (await resp.json().catch(() => ({}))) as {
@@ -1950,11 +1974,15 @@ export const usePipelineStore = create<PipelineState>()(
       autoMatchDesignReferences: async (prdContent, options) => {
         set({ designReferencesLoading: "updating", designReferencesError: null });
         try {
-          const resp = await fetch("/api/agents/pipeline/design-references/auto-match", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prdContent, force: options?.force ?? false }),
-          });
+          const pid = designReferenceProjectIdParam();
+          const resp = await fetch(
+            `/api/agents/pipeline/design-references/auto-match${pid ? `?${pid}` : ""}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prdContent, force: options?.force ?? false }),
+            },
+          );
           const data = (await resp.json().catch(() => ({}))) as {
             error?: string;
             matched?: number;

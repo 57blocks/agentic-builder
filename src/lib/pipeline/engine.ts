@@ -192,9 +192,9 @@ export interface ExecutePipelineOptions {
    * agent's additionalContext as binding requirements.
    *
    * Shape: { result, answers }
-   * - `result` is the full IntentResult returned by `/api/agents/prd-intent`
-   *   (contains the original questions so the engine can resolve answer
-   *   values to labels for readable output).
+   * - `result` is the full IntentResult produced by the intent clarification
+   *   engine (`/api/agents/intent-recheck`) (contains the original questions so
+   *   the engine can resolve answer values to labels for readable output).
    * - `answers` is the user's submissions, keyed by `questionId`.
    */
   prdIntent?: {
@@ -308,7 +308,7 @@ export class PipelineEngine {
     });
 
     // Stash PRD intent clarifications (questions + user answers gathered via
-    // /api/agents/prd-intent) onto the intent step metadata so the UI and
+    // /api/agents/intent-recheck) onto the intent step metadata so the UI and
     // downstream introspection can see what was confirmed before PRD writing.
     const prdIntentPayload = options.prdIntent;
     if (prdIntentPayload) {

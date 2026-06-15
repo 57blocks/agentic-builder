@@ -1452,7 +1452,11 @@ export async function POST(request: NextRequest) {
   // wrote. Doing it here also picks up any references the user added/edited
   // between kickoff and Start Coding.
   try {
-    const mirrored = await copyDesignReferencesToOutput(process.cwd(), outputRoot);
+    const mirrored = await copyDesignReferencesToOutput(
+      process.cwd(),
+      outputRoot,
+      projectId ?? undefined,
+    );
     if (mirrored.length > 0) {
       console.log(
         `[CodingAPI] Mirrored ${mirrored.length} design reference(s) into ${outputRoot}/.design-references/`,

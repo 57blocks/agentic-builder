@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import {
@@ -13,8 +13,12 @@ function projectRoot() {
   return process.cwd();
 }
 
-async function writeManifest(root: string, entries: DesignReferenceEntry[]) {
-  const dir = designReferenceDirAbs(root);
+async function writeManifest(
+  root: string,
+  entries: DesignReferenceEntry[],
+  projectId?: string,
+) {
+  const dir = designReferenceDirAbs(root, projectId);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(
     path.join(dir, "manifest.json"),
@@ -29,9 +33,11 @@ async function writeManifest(root: string, entries: DesignReferenceEntry[]) {
  * Removes duplicate entries that share the same fileName, keeping only the
  * most recently uploaded one per name. Also deletes the orphaned stored files.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
   const root = projectRoot();
-  const all = await readManifest(root);
+  const all = await readManifest(root, projectId);
 
   // Group by fileName, keep the latest (highest uploadedAt) per name.
   const byName = new Map<string, DesignReferenceEntry>();
@@ -48,14 +54,14 @@ export async function POST() {
   const removed = all.filter((e) => !keptIds.has(e.id));
 
   // Delete orphaned files.
-  const dir = designReferenceDirAbs(root);
+  const dir = designReferenceDirAbs(root, projectId);
   for (const entry of removed) {
     try {
       await fs.unlink(path.join(dir, entry.storedFileName));
     } catch { /* best-effort */ }
   }
 
-  await writeManifest(root, kept);
+  await writeManifest(root, kept, projectId);
 
   return NextResponse.json({
     ok: true,

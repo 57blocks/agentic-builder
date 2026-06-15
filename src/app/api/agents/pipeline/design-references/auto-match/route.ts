@@ -103,25 +103,34 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as {
     prdContent?: string;
     force?: boolean;
+    projectId?: string;
   };
 
   const prdContent = typeof body.prdContent === "string" ? body.prdContent : "";
   const force = body.force === true;
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") ||
+    (typeof body.projectId === "string" && body.projectId
+      ? body.projectId
+      : undefined);
 
   const candidates: PageCandidate[] = extractPrdPageHints(prdContent).map(
     (p) => ({ id: p.id, name: p.name }),
   );
 
   if (candidates.length === 0) {
-    const references = await readManifest(projectRoot());
+    const references = await readManifest(projectRoot(), projectId);
     return NextResponse.json({ matched: 0, skipped: 0, references });
   }
 
   let results;
   try {
-    results = await autoMatchReferencesToPages(projectRoot(), candidates, {
-      force,
-    });
+    results = await autoMatchReferencesToPages(
+      projectRoot(),
+      candidates,
+      { force },
+      projectId,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Auto-match failed.";
     const status = /OPENROUTER_API_KEY/.test(message) ? 400 : 500;
@@ -137,7 +146,7 @@ export async function POST(request: NextRequest) {
     if (!result.assignedPageId) continue;
 
     // Re-read manifest each iteration to get the latest state
-    const currentEntries = await readManifest(projectRoot());
+    const currentEntries = await readManifest(projectRoot(), projectId);
 
     // Never overwrite a manual assignment on this entry itself
     const thisEntry = currentEntries.find((e) => e.id === result.referenceId);
@@ -160,27 +169,39 @@ export async function POST(request: NextRequest) {
       const newRank = confRank[result.confidence] ?? 1;
       if (newRank <= existingRank) continue;
       // Clear the old owner's pageHint
-      await updateDesignReference(projectRoot(), existingOwner.id, {
-        pageHint: "",
-        matchConfidence: null,
-      });
+      await updateDesignReference(
+        projectRoot(),
+        existingOwner.id,
+        {
+          pageHint: "",
+          matchConfidence: null,
+        },
+        projectId,
+      );
     }
 
+    // Keep both: the enriched multi-token pageHint (new main) AND per-project
+    // scoping via projectId (this branch).
     const enrichedHint = buildEnrichedPageHint(
       result.assignedPageId,
       result.assignedPageName,
       { label: thisEntry?.label ?? "", source: thisEntry?.source ?? "upload" },
     );
 
-    await updateDesignReference(projectRoot(), result.referenceId, {
-      pageHint: enrichedHint,
-      matchedBy: "auto",
-      matchConfidence: result.confidence,
-    });
+    await updateDesignReference(
+      projectRoot(),
+      result.referenceId,
+      {
+        pageHint: enrichedHint,
+        matchedBy: "auto",
+        matchConfidence: result.confidence,
+      },
+      projectId,
+    );
     matched += 1;
   }
 
   const skipped = results.length - matched;
-  const references = await readManifest(projectRoot());
+  const references = await readManifest(projectRoot(), projectId);
   return NextResponse.json({ matched, skipped, references });
 }

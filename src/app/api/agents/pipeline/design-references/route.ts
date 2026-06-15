@@ -11,12 +11,16 @@ function projectRoot() {
   return process.cwd();
 }
 
-export async function GET() {
-  const manifest = await readManifest(projectRoot());
+export async function GET(request: NextRequest) {
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
+  const manifest = await readManifest(projectRoot(), projectId);
   return NextResponse.json({ references: manifest });
 }
 
 export async function POST(request: NextRequest) {
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
   let form: FormData;
   try {
     form = await request.formData();
@@ -31,6 +35,13 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  const formProjectId = form.get("projectId");
+  const effectiveProjectId =
+    projectId ||
+    (typeof formProjectId === "string" && formProjectId
+      ? formProjectId
+      : undefined);
 
   const files = form.getAll("file");
   if (files.length === 0) {
@@ -86,6 +97,7 @@ export async function POST(request: NextRequest) {
       source: sources[i] ?? "upload",
       matchedBy: matchedBys[i] ?? "auto",
       cssToken: cssTokensRaw[i],
+      projectId: effectiveProjectId,
     });
 
     if (!result.ok) {
@@ -95,7 +107,7 @@ export async function POST(request: NextRequest) {
     added.push({ id: result.entry.id, fileName: result.entry.fileName });
   }
 
-  const manifest = await readManifest(projectRoot());
+  const manifest = await readManifest(projectRoot(), effectiveProjectId);
   const status = added.length > 0 ? 200 : 400;
   return NextResponse.json(
     {
@@ -110,8 +122,9 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const url = new URL(request.url);
+  const projectId = url.searchParams.get("projectId") || undefined;
   if (url.searchParams.get("all") === "true") {
-    await clearAllDesignReferences(projectRoot());
+    await clearAllDesignReferences(projectRoot(), projectId);
     return NextResponse.json({ ok: true, references: [] });
   }
   return NextResponse.json(
