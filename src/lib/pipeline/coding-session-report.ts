@@ -2127,6 +2127,7 @@ function formatMarkdownReport(input: {
     e2eVerify: boolean;
   };
   generatorGitSha?: string | null;
+  promptCapture: import("@/lib/pipeline/prompt-capture").RolePromptsCapture;
 }): string {
   const completed = input.taskResults.filter((task) => task.status === "completed").length;
   const warnings = input.taskResults.filter(
@@ -2173,6 +2174,7 @@ function formatMarkdownReport(input: {
     `- Ended at: ${input.endedAt}`,
     `- Total duration: ${formatDuration(Date.parse(input.endedAt) - Date.parse(input.startedAt))}`,
     `- Generator git: \`${input.generatorGitSha ?? "(unknown)"}\``,
+    `- Prompt set: ${input.promptCapture.present ? `\`${input.promptCapture.promptSetHash.slice(0, 8)}\`${input.promptCapture.workingTreeDirty ? " ⚠️ dirty" : ""}` : "_capture failed_"}`,
     `- Scaffold fix attempts: ${input.scaffoldFixAttempts ?? 0}`,
     `- Integration fix attempts: ${input.integrationFixAttempts ?? 0}`,
     `- Total LLM calls: ${totalCalls}`,
@@ -3014,6 +3016,29 @@ function formatMarkdownReport(input: {
     });
   }
 
+  // ── Prompts Used appendix ──────────────────────────────────────────────────
+  lines.push("## Prompts Used (this session)");
+  lines.push("");
+  if (!input.promptCapture.present) {
+    lines.push(`_Prompt capture failed: ${input.promptCapture.error ?? "unknown"}_`);
+  } else {
+    lines.push(`Prompt set fingerprint: \`${input.promptCapture.promptSetHash}\``);
+    if (input.promptCapture.workingTreeDirty) {
+      lines.push(`Git state: \`${input.promptCapture.gitHeadSha ?? "(unknown)"}\` ⚠️ working tree dirty (role-prompts.ts modified, not committed)`);
+    } else {
+      lines.push(`Git state: \`${input.promptCapture.gitHeadSha ?? "(unknown)"}\` ✅ clean`);
+    }
+    lines.push("");
+    lines.push("| Role | Prompt SHA-256 (first 16) | Bytes |");
+    lines.push("| --- | --- | ---: |");
+    for (const e of input.promptCapture.entries) {
+      lines.push(`| \`${e.role}\` | \`${e.hash.slice(0, 16)}…\` | ${e.bytes.toLocaleString()} |`);
+    }
+    lines.push("");
+    lines.push(`Full text: \`.ralph/role-prompts.${input.sessionId}.json\``);
+  }
+  lines.push("");
+
   return lines.join("\n");
 }
 
@@ -3095,6 +3120,23 @@ export async function writeCodingSessionReport(
     taskResults: input.taskResults,
     codefixCountsByTask: codefixCounts,
   });
+
+  // ── Role prompt capture (best-effort) ────────────────────────────────────
+  const { capturePrompts } = await import("@/lib/pipeline/prompt-capture");
+  const generatorRoot = process.cwd();
+  const promptCapture = await capturePrompts({
+    generatorRoot,
+    outputDir: input.outputDir,
+  });
+  try {
+    await fs.writeFile(
+      path.join(ralphDir, `role-prompts.${input.sessionId}.json`),
+      JSON.stringify(promptCapture, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn(`[coding-session-report] failed to write role-prompts.json:`, err);
+  }
 
   const stageUsage = aggregateStageUsage({
     usage,
@@ -3282,6 +3324,7 @@ export async function writeCodingSessionReport(
     integrationFixAttempts: input.integrationFixAttempts,
     gatesExecuted: input.gatesExecuted,
     generatorGitSha,
+    promptCapture,
   });
 
   const latestJsonPath = path.join(ralphDir, "coding-session-report.json");
