@@ -70,6 +70,7 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { trimProjectContextForTask } from "./worker-context-trim";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
+import { logTaskContext } from "./task-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -2066,10 +2067,32 @@ function getRemainingPlannedCreates(
   writtenFiles: string[],
 ): string[] {
   const { creates } = getTaskFilePlanBuckets(task.files);
-  const writtenSet = new Set(
-    writtenFiles.map((file) => file.replace(/\\/g, "/")),
-  );
-  return creates.filter((file) => !writtenSet.has(file.replace(/\\/g, "/")));
+  const normalize = (p: string): string => p.replace(/\\/g, "/");
+  const writtenNorm = writtenFiles.map(normalize);
+  const writtenSet = new Set(writtenNorm);
+
+  // Strip the common project-root prefixes that diverge between the
+  // task-breakdown's plan ("src/components/X.tsx") and what the worker
+  // actually writes to disk ("frontend/src/components/X.tsx"). Without this
+  // fuzzy step the worker tool loop never reaches the success-exit condition
+  // (`remainingCreates.length === 0`), because every written path mismatches
+  // by the missing tier prefix — the model dutifully writes the right file
+  // to the right place but the loop sees zero progress and keeps re-prompting
+  // until CODEGEN_AGENT_MAX_ITERATIONS (default 300) is hit. The fuzzy match
+  // is anchored at the path root, so it doesn't accept spurious basename
+  // collisions (e.g. two different `index.ts` files).
+  const fuzz = (p: string): string =>
+    normalize(p)
+      .replace(/^\.\//, "")
+      .replace(/^(frontend|backend|apps\/web|apps\/api|packages\/[^/]+)\//, "");
+  const fuzzyWrittenSet = new Set(writtenNorm.map(fuzz));
+
+  return creates.filter((file) => {
+    const norm = normalize(file);
+    if (writtenSet.has(norm)) return false;
+    if (fuzzyWrittenSet.has(fuzz(norm))) return false;
+    return true;
+  });
 }
 
 function scoreGeneratedFileForTask(
@@ -2657,13 +2680,41 @@ function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
  * Returns the first matching entry or undefined.
  */
 function findTaskDesignReference(
-  task: { title: string; description: string },
+  task: {
+    title: string;
+    description: string;
+    coversRequirementIds?: string[];
+    files?: string[] | { creates?: string[]; modifies?: string[]; reads?: string[] };
+  },
   refs: DesignReferenceEntry[],
 ): DesignReferenceEntry | undefined {
   const imageRefs = refs.filter((r) => r.kind === "image" && r.pageHint);
   if (imageRefs.length === 0) return undefined;
 
-  const taskText = `${task.title} ${task.description}`;
+  // Widen the searchable text. The original implementation only looked at
+  // title + description, which misses two common shapes the task breakdown
+  // emits:
+  //   1. PAGE-* / CMP-* IDs are written to `coversRequirementIds`, not the
+  //      free-text fields (per task-breakdown-agent prompt).
+  //   2. Page semantics often live in the target file name (e.g.
+  //      `BillTrackerDashboard.tsx`) rather than the task title.
+  const filePaths: string[] = Array.isArray(task.files)
+    ? task.files
+    : [
+        ...(task.files?.creates ?? []),
+        ...(task.files?.modifies ?? []),
+        ...(task.files?.reads ?? []),
+      ];
+  const taskText = [
+    task.title,
+    task.description,
+    ...(task.coversRequirementIds ?? []),
+    ...filePaths,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // ── Step A: precise PAGE-id match ────────────────────────────────────────
   const pageIdMatches = taskText.match(/\bPAGE-\d+\b/gi);
   const taskPageIds = new Set(
     (pageIdMatches ?? []).map((s) => s.toUpperCase()),
@@ -2680,14 +2731,48 @@ function findTaskDesignReference(
     if (found) return found;
   }
 
-  // Name-based fallback: normalize both sides and check containment
-  const titleNorm = task.title.toLowerCase().replace(/[-_\s]+/g, "");
+  // ── Step B: token-overlap fallback ───────────────────────────────────────
+  // Split pageHint into alphanumeric tokens (>=4 chars, excluding generic
+  // stopwords). Any token appearing as a substring of the expanded task text
+  // counts as a match. This is intentionally looser than strict substring
+  // alignment so a pageHint like "PAGE-001 family billing" can bind to a
+  // task whose files include "FamilyBillingPage.tsx" even though neither
+  // side contains the other verbatim.
+  const STOPWORDS = new Set([
+    "page",
+    "pages",
+    "view",
+    "views",
+    "screen",
+    "screens",
+    "component",
+    "components",
+    "frontend",
+    "backend",
+    "src",
+    "tsx",
+    "jsx",
+    "html",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "this",
+    "that",
+    "main",
+    "index",
+    "common",
+    "shared",
+  ]);
+  const taskTextNorm = taskText.toLowerCase();
   return imageRefs.find((r) => {
-    const hintNorm = r.pageHint.toLowerCase().replace(/[-_\s]+/g, "");
-    return (
-      hintNorm.length >= 4 &&
-      (titleNorm.includes(hintNorm) || hintNorm.includes(titleNorm.slice(0, 12)))
-    );
+    const tokens = r.pageHint
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+    return tokens.some((t) => taskTextNorm.includes(t));
   });
 }
 
@@ -2881,6 +2966,15 @@ async function generateCode(state: WorkerState) {
     // `.design-references/` in the output tree and include it directly in the
     // first user message so the coding model can see the exact target layout.
     let injectedVisionImage = false;
+    let loggedVisionImageInfo:
+      | {
+          bytes: Buffer;
+          mime: string;
+          referenceId: string;
+          storedFileName: string;
+          pageHint: string;
+        }
+      | undefined;
     if (state.role === "frontend") {
       try {
         const refs = await readDesignReferencesFromOutput(state.outputDir);
@@ -2894,6 +2988,13 @@ async function generateCode(state: WorkerState) {
           const imgBytes = await nodeFs.readFile(imgPath);
           const b64 = imgBytes.toString("base64");
           const dataUrl = `data:${matchedRef.mime};base64,${b64}`;
+          loggedVisionImageInfo = {
+            bytes: imgBytes,
+            mime: matchedRef.mime,
+            referenceId: matchedRef.id,
+            storedFileName: matchedRef.storedFileName,
+            pageHint: matchedRef.pageHint,
+          };
 
           // Append CSS tokens to the task text when the matched reference has them.
           // Tokens are extracted from the source URL and represent the exact design-system
@@ -2903,14 +3004,23 @@ async function generateCode(state: WorkerState) {
             : [];
           const cssTokenNote =
             cssTokenEntries.length > 0
-              ? `\n\n## CSS Design Tokens for this page\nThe following tokens were extracted from the reference URL. Replicate every value exactly — use Tailwind arbitrary values (e.g. \`bg-[#6366f1]\`, \`gap-[8px]\`) or CSS custom properties. Do not approximate.\n\n${cssTokenEntries.map(([k, v]) => `- \`${k}\`: \`${v}\``).join("\n")}`
+              ? `\n\n## CSS Design Tokens for this page\nThe following tokens were extracted from the reference URL. Replicate every value exactly — use Tailwind arbitrary values (e.g. \`bg-[#6366f1]\`, \`gap-[8px]\`) or CSS custom properties. Do not approximate.\n\n## Token-to-slot semantics (HARD RULE)\nA token name encodes its intended slot. Do NOT swap roles:\n- \`--bg\`, \`--bg-elevated\`, \`--bg-subtle\`, \`--bg-muted\` → page / surface / card backgrounds. NEVER use \`--accent\`/\`--primary\`/\`--warning\`/status colours as the page background — those are call-to-action / status pill / icon colours.\n- \`--primary\` (+ \`-hover\`/\`-active\`/\`-soft\`) → primary action buttons, active nav, focused borders.\n- \`--accent\` (+ \`-soft\`) → accent CTA / highlight only; usually a small surface, not a fill of the whole viewport.\n- \`--text\`, \`--text-muted\`, \`--text-subtle\`, \`--text-inverse\` → text on light / on dark surfaces, respectively.\n- \`--border\`, \`--border-strong\`, \`--border-focus\` → card/input borders and focus rings.\n- \`--status-*-bg\` / \`--status-*-text\` → status pills (one matched pair per state). Match the state name (paid/approved/pending/rejected/waitlist) to the pill.\n- \`--shadow-*\` → card / modal elevation, in ascending intensity (xs → lg).\nIf the reference image's overall background looks pale/cream/neutral, the page background MUST come from \`--bg\` (or \`--bg-elevated\`), never from \`--accent\` or \`--warning\`.\n\n${cssTokenEntries.map(([k, v]) => `- \`${k}\`: \`${v}\``).join("\n")}`
               : "";
+
+          // ── Visual contract: image overrides any UI noun in the task text ──
+          // Task titles emitted by task-breakdown often hardcode a UI primitive
+          // (e.g. "with table", "as a list", "form-based") that may disagree
+          // with what the reference image actually shows. When that happens
+          // the IMAGE wins — match the reference's component type, density,
+          // and visual hierarchy. Treat the title's noun as data-domain hint
+          // only, never as a layout directive.
+          const visualPriorityNote = `\n\n## Visual contract (HARD RULE — applies because a reference image is attached)\nThe image attached to this message is the **highest-priority visual contract** for this task. It overrides any UI primitive named in the task title or description (e.g. words like "table", "list", "grid", "form", "card", "dashboard"). When the text and the image disagree on structure, the IMAGE WINS.\n\nConcretely:\n- **Component type / layout**: replicate exactly what the image shows — if the image shows a vertical stack of rich cards (thumbnail + multi-line content + actions), build CARDS, not a \`<table>\`, even if the title says "table". If the image shows a data table, build a table even if the title says "list".\n- **Visual hierarchy**: match the heading + subtitle pattern, the filter row position, the per-row content density (thumbnail / multi-line text / right-aligned price + buttons / status badge placement), and any floating widgets (role switcher, FAB, etc.) visible in the image.\n- **Page chrome**: if the image clearly shows brand header / global nav / user menu / cart, surface those — DON'T render an isolated CRUD viewport when the design embeds the page inside a product shell. (If those belong to a separate scaffold task, still render the matching slot inside the layout — never leave the page rootless.)\n- **Action set**: copy the buttons and labels shown (e.g. "VIEW RECEIPT", "DOWNLOAD RECEIPT", "REQUEST REFUND", "CONTINUE PAYMENT"). Do NOT default to generic "Edit" / "Delete" if the design shows domain-specific actions.\n- **Empty / sparse states**: if the image shows ≥N richly-populated rows, ensure the mock/seed data renders at least that many items covering the same status variety (Paid / Pending Payment / Refund Under Review / Refunded / etc.); a one-row demo is not acceptable when the design demonstrates a populated screen.\n- **Typography & density**: follow the image's heading style (serif vs sans), price formatting (e.g. monospace large numerals), gutter widths, card radii, and shadow depth.\n\nUse the task title only as a hint about what data domain to fetch (bills, courses, lessons, …). Use the image as the layout contract.`;
 
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
-              { type: "text", text: userTaskText + cssTokenNote },
+              { type: "text", text: userTaskText + visualPriorityNote + cssTokenNote },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
@@ -2929,6 +3039,37 @@ async function generateCode(state: WorkerState) {
     if (!injectedVisionImage) {
       messages.push({ role: "user", content: userTaskText });
     }
+
+    // ── Per-task context dump (all roles) ─────────────────────────────────
+    // Snapshots the FULL assembled context (system prompt, projectContext,
+    // memory recall, user message, vision image when present) to a per-task
+    // folder under `<repoRoot>/.logs/coding/<role>/<taskSlug>/<runStamp>/`.
+    // Fire-and-forget: never blocks or fails the worker.
+    void logTaskContext({
+      sessionId: state.sessionId,
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        files: task.files,
+        coversRequirementIds: task.coversRequirementIds,
+        subSteps: task.subSteps,
+        tddPlan: task.tddPlan,
+      },
+      workerLabel: state.workerLabel,
+      role: state.role,
+      attempt,
+      messages,
+      projectContext: state.projectContext,
+      memoryRecallBlock: memoryRecall.block,
+      visionImage: loggedVisionImageInfo,
+      model: injectedVisionImage ? "codeGenFrontend" : "codeGen",
+      extras: {
+        injectedVisionImage,
+        fileRegistryCount: state.fileRegistrySnapshot.length,
+        apiContractCount: state.apiContractsSnapshot.length,
+      },
+    });
 
     const startMs = Date.now();
     const fsOpts =

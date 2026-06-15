@@ -4,6 +4,7 @@ import {
   updateDesignReference,
   readManifest,
   type PageCandidate,
+  type DesignReferenceEntry,
 } from "@/lib/pipeline/design-references";
 import { extractPrdPageHints } from "@/lib/requirements/prd-page-hints";
 
@@ -11,6 +12,82 @@ export const runtime = "nodejs";
 
 function projectRoot() {
   return process.cwd();
+}
+
+/**
+ * Build a pageHint string with multiple matching surfaces beyond the bare
+ * `PAGE-xxx` id, so the downstream task↔reference matcher
+ * (`findTaskDesignReference` in `agent-subgraph.ts`) can hit via either:
+ *   (a) the exact PAGE-id when the task carries it, or
+ *   (b) any semantic token (page name word, URL slug segment) when it does
+ *       not.
+ *
+ * Output is capped at 80 chars (the manifest's `pageHint` limit). Order is
+ * deterministic: PAGE-id first, then page-name tokens, then URL-slug tokens.
+ */
+const PAGEHINT_STOPWORDS = new Set([
+  "page",
+  "pages",
+  "view",
+  "views",
+  "screen",
+  "screens",
+  "main",
+  "index",
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "into",
+  "app",
+  "web",
+]);
+const PAGEHINT_MAX_LEN = 80;
+
+function buildEnrichedPageHint(
+  pageId: string,
+  pageName: string | null | undefined,
+  entry: Pick<DesignReferenceEntry, "label" | "source">,
+): string {
+  const tokens: string[] = [pageId];
+  const seen = new Set([pageId.toLowerCase()]);
+
+  const pushToken = (raw: string) => {
+    const t = raw.trim().toLowerCase();
+    if (t.length < 3 || PAGEHINT_STOPWORDS.has(t)) return;
+    if (seen.has(t)) return;
+    seen.add(t);
+    tokens.push(t);
+  };
+
+  for (const w of (pageName ?? "").split(/[^A-Za-z0-9]+/)) {
+    if (w) pushToken(w);
+  }
+
+  if (entry.source === "url" && entry.label) {
+    try {
+      const u = new URL(entry.label);
+      for (const w of u.pathname.split(/[^A-Za-z0-9]+/)) {
+        if (w) pushToken(w);
+      }
+    } catch {
+      // label was not a parseable URL — skip
+    }
+  }
+
+  let out = tokens.join(" ");
+  if (out.length > PAGEHINT_MAX_LEN) {
+    out = out.slice(0, PAGEHINT_MAX_LEN).trimEnd();
+  }
+  return out;
+}
+
+function pageHintOwnsId(pageHint: string, pageId: string): boolean {
+  const target = pageId.toUpperCase();
+  return pageHint
+    .split(/[^A-Za-z0-9]+/)
+    .some((tok) => tok.toUpperCase() === target);
 }
 
 /**
@@ -66,9 +143,13 @@ export async function POST(request: NextRequest) {
     const thisEntry = currentEntries.find((e) => e.id === result.referenceId);
     if (thisEntry?.matchedBy === "manual") continue;
 
-    // Check if another entry already owns this route
+    // Check if another entry already owns this route. Match against the
+    // PAGE-id as a TOKEN inside pageHint (not strict equality) so enriched
+    // hints like "PAGE-001 family billing" still count as ownership.
     const existingOwner = currentEntries.find(
-      (e) => e.pageHint === result.assignedPageId && e.id !== result.referenceId,
+      (e) =>
+        e.id !== result.referenceId &&
+        pageHintOwnsId(e.pageHint, result.assignedPageId!),
     );
 
     if (existingOwner) {
@@ -85,8 +166,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const enrichedHint = buildEnrichedPageHint(
+      result.assignedPageId,
+      result.assignedPageName,
+      { label: thisEntry?.label ?? "", source: thisEntry?.source ?? "upload" },
+    );
+
     await updateDesignReference(projectRoot(), result.referenceId, {
-      pageHint: result.assignedPageId,
+      pageHint: enrichedHint,
       matchedBy: "auto",
       matchConfidence: result.confidence,
     });

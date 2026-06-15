@@ -79,3 +79,6 @@ public/project-covers/
 
 # agentic-build channel: generated project workspaces (user output, not source)
 agentic-builds/
+
+# Per-task frontend context dumps written by frontend-context-logger.ts
+/.logs/

@@ -3014,6 +3014,14 @@ function formatMarkdownReport(input: {
     });
   }
 
+  // ── Per-task prompt pointer ─────────────────────────────────────────────
+  lines.push("## Per-Task Prompts");
+  lines.push("");
+  lines.push(
+    "Each coding task dumps its full LLM context to `.logs/coding/<role>/<taskSlug>__<timestamp>__attempt<N>/`. Open `prompt.md` for the human-readable form (system + user messages, memory recall, vision image references). `messages.json` has the structured form. `task.json` and `summary.json` carry metadata.",
+  );
+  lines.push("");
+
   return lines.join("\n");
 }
 

@@ -97,6 +97,10 @@ import {
   type FeatureChecklistAuditResult,
 } from "@/lib/pipeline/self-heal";
 import {
+  registerWorkerChunkSink,
+  unregisterWorkerChunkSink,
+} from "@/lib/langgraph/worker-event-bridge";
+import {
   runEvidenceGate,
   collectCodingStageEvidence,
 } from "@/lib/pipeline/gates";
@@ -993,11 +997,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Resume hygiene: never re-run a task the checkpoint marks completed — even
-  // if the retry-set dependency expansion (or a stale "failed" status) pulled
-  // it in. Without this, a "Retry Failed" was re-running finished foundation
-  // tasks (e.g. T-002 scaffold) from scratch, i.e. "starting from the top".
-  if (expandedRetrySet) {
+  // Resume hygiene: never re-run a task the checkpoint marks completed when
+  // it was only pulled in by dependency expansion. Without this, a
+  // "Retry Failed" was re-running finished foundation tasks (e.g. T-002
+  // scaffold) from scratch, i.e. "starting from the top".
+  //
+  // Carve-out: tasks the user EXPLICITLY picked (`retrySet`) are never dropped
+  // here — if the user hand-picked an already-completed task to re-run, the
+  // checkpoint must NOT silently filter it out. Otherwise the request 400s
+  // with "None of the retryFailedTaskIds matched any known task" and the UI
+  // is left with optimistic-pending status but no execution. (Mirrors the
+  // same carve-out in the on-disk built filter below.)
+  if (expandedRetrySet && retrySet) {
     try {
       const cp = await readSessionCheckpoint(process.cwd());
       if (cp) {
@@ -1012,11 +1023,13 @@ export async function POST(request: NextRequest) {
         );
         const before = expandedRetrySet.size;
         expandedRetrySet = new Set(
-          [...expandedRetrySet].filter((id) => !completed.has(id)),
+          [...expandedRetrySet].filter(
+            (id) => retrySet.has(id) || !completed.has(id),
+          ),
         );
         if (expandedRetrySet.size < before) {
           console.log(
-            `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-completed task(s) from the retry set (checkpoint).`,
+            `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-completed dependency task(s) from the retry set (checkpoint); explicitly-selected tasks were preserved.`,
           );
         }
       }
@@ -2152,6 +2165,23 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
+
+      // Register a sink that forwards worker sub-graph chunks (emitted by
+      // invokeWorkerBatched via workerGraph.stream) back into this SSE pipe.
+      // Without this the outer stream never sees pick_next_task / generate_code
+      // updates and the UI leaves successfully-running tasks stuck at
+      // "pending". See: src/lib/langgraph/worker-event-bridge.ts.
+      registerWorkerChunkSink(sessionId, (chunk) => {
+        try {
+          const events = mapper.mapChunk(chunk);
+          for (const ev of events) send(ev);
+        } catch (err) {
+          console.warn(
+            `[CodingAPI] worker chunk forward failed (ignored):`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      });
       // Persist which PRD context the workers received (full vs domain slice vs
       // combined slice) + the char reduction — auditable in repair-log.jsonl.
       repairEmitter({
@@ -2288,6 +2318,7 @@ export async function POST(request: NextRequest) {
             ralphConfig,
             sessionId,
             prdSpec,
+            retryMode: !!(retryFailedTaskIds && retryFailedTaskIds.length > 0),
           },
           { subgraphs: true, streamMode: "updates", recursionLimit: 10000 },
         );
@@ -2698,6 +2729,7 @@ export async function POST(request: NextRequest) {
 
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
+        unregisterWorkerChunkSink(sessionId);
         // Remove from registry only if we are still the active session
         // (a newer session may have already replaced us).
         if (activeCodingSessions.get(outputRoot) === sessionAbortController) {
