@@ -607,6 +607,17 @@ export function DesignUI(props: StepUIProps) {
   // Design references from pipeline store (uploaded screenshots for page restoration)
   const designReferences = usePipelineStore((s) => s.designReferences);
   const uploadDesignReferences = usePipelineStore((s) => s.uploadDesignReferences);
+  const refreshDesignReferences = usePipelineStore((s) => s.refreshDesignReferences);
+  const setProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
+
+  // Load THIS project's stored design references on mount — including screenshots
+  // uploaded earlier at the PRD step — so they show up under Reference Screenshots.
+  // (The references are scoped per project; set the slug first so the list query
+  // targets .blueprint/projects/<slug>/design-references.)
+  useEffect(() => {
+    if (props.projectSlug) setProjectSlugForSync(props.projectSlug);
+    void refreshDesignReferences();
+  }, [props.projectSlug, setProjectSlugForSync, refreshDesignReferences]);
 
   // Custom URL reference
   const [isMatching, setIsMatching] = useState(false);
