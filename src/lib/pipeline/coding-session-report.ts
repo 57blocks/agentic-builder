@@ -3291,6 +3291,7 @@ export async function writeCodingSessionReport(
     finalAudit: input.finalAudit ?? null,
     suggestions,
     codegenRetrofits,
+    promptCapture,
   };
 
   const markdown = formatMarkdownReport({
