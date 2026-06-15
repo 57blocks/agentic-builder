@@ -231,6 +231,18 @@ export const SupervisorStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
+
+  /**
+   * When true, this coding session was triggered by a "rerun specific tasks"
+   * action (the request carried `retryFailedTaskIds`). Coverage/self-heal
+   * gates that auto-inject extra tasks (contract_task_coverage,
+   * page_task_coverage) MUST honour this and skip — re-running a subset
+   * should not balloon into a full coverage-repair pass.
+   */
+  retryMode: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
 });
 
 export type SupervisorState = typeof SupervisorStateAnnotation.State;

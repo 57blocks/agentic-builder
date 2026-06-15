@@ -2067,10 +2067,32 @@ function getRemainingPlannedCreates(
   writtenFiles: string[],
 ): string[] {
   const { creates } = getTaskFilePlanBuckets(task.files);
-  const writtenSet = new Set(
-    writtenFiles.map((file) => file.replace(/\\/g, "/")),
-  );
-  return creates.filter((file) => !writtenSet.has(file.replace(/\\/g, "/")));
+  const normalize = (p: string): string => p.replace(/\\/g, "/");
+  const writtenNorm = writtenFiles.map(normalize);
+  const writtenSet = new Set(writtenNorm);
+
+  // Strip the common project-root prefixes that diverge between the
+  // task-breakdown's plan ("src/components/X.tsx") and what the worker
+  // actually writes to disk ("frontend/src/components/X.tsx"). Without this
+  // fuzzy step the worker tool loop never reaches the success-exit condition
+  // (`remainingCreates.length === 0`), because every written path mismatches
+  // by the missing tier prefix — the model dutifully writes the right file
+  // to the right place but the loop sees zero progress and keeps re-prompting
+  // until CODEGEN_AGENT_MAX_ITERATIONS (default 300) is hit. The fuzzy match
+  // is anchored at the path root, so it doesn't accept spurious basename
+  // collisions (e.g. two different `index.ts` files).
+  const fuzz = (p: string): string =>
+    normalize(p)
+      .replace(/^\.\//, "")
+      .replace(/^(frontend|backend|apps\/web|apps\/api|packages\/[^/]+)\//, "");
+  const fuzzyWrittenSet = new Set(writtenNorm.map(fuzz));
+
+  return creates.filter((file) => {
+    const norm = normalize(file);
+    if (writtenSet.has(norm)) return false;
+    if (fuzzyWrittenSet.has(fuzz(norm))) return false;
+    return true;
+  });
 }
 
 function scoreGeneratedFileForTask(

@@ -135,6 +135,28 @@ function normalizeBaseUrl(base: string): string {
 }
 
 /**
+ * Returns true if any message in the array carries a multimodal `image_url`
+ * content part (OpenAI vision format). Used to gate provider selection so
+ * we don't try DeepSeek V4 direct — which rejects `image_url` with a 400.
+ */
+function messagesContainVisionContent(messages: ChatMessage[]): boolean {
+  for (const m of messages) {
+    const content = (m as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (
+        part &&
+        typeof part === "object" &&
+        (part as { type?: unknown }).type === "image_url"
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * OpenAI-compatible POST /v1/chat/completions (e.g. gptsapi.net Claude proxies).
  */
 async function chatCompletionsOpenAICompatible(
@@ -317,10 +339,27 @@ export async function invokeCodegenOrOpenRouter(
     (key === "codeGen" || key === "codeGenFrontend") &&
     process.env.CODEGEN_PROVIDER?.trim().toLowerCase() === "deepseek";
 
+  // DeepSeek V4 does NOT accept OpenAI-style multimodal `image_url` content
+  // parts — it 400s with `unknown variant 'image_url', expected 'text'`. When
+  // any message carries a vision part (e.g. a frontend task with a matched
+  // design-reference image), skip the DeepSeek-direct branch entirely so we
+  // don't burn time + tokens on a guaranteed-failing call before the
+  // OpenRouter chain's codex path. The chain itself is also reordered: any
+  // models that lack vision support (deepseek/qwen text-only variants) are
+  // skipped via `shouldForceOpenRouter`-like logic upstream; here we only
+  // need to handle the direct-API branch.
+  const hasVisionPart = messagesContainVisionContent(messages);
+  if (hasVisionPart && isDeepSeekV4Provider()) {
+    console.log(
+      `[LLM] Skipping DeepSeek V4 direct branch — request carries a vision image part (DeepSeek V4 rejects \`image_url\`). Going straight to OpenRouter chain.`,
+    );
+  }
+
   if (
     isDeepSeekV4Provider() &&
     !modeForceOpenRouter &&
-    !shouldForceOpenRouter(key)
+    !shouldForceOpenRouter(key) &&
+    !hasVisionPart
   ) {
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;

@@ -613,9 +613,19 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       .then(async (resp) => {
         if (!resp.ok) {
           const errData = await resp.json().catch(() => ({}));
+          // Roll back the optimistic `pending` reset so the picker doesn't
+          // leave a "ghost pending" row when the API rejects the retry (e.g.
+          // returns 400). For each task we forced to pending above, restore
+          // its prior status from the snapshot taken before the optimistic
+          // update.
+          const prevById = new Map(existingTasks.map((t) => [t.id, t]));
+          const rolledBack = get().tasks.map((t) =>
+            retrySet.has(t.id) && prevById.has(t.id) ? prevById.get(t.id)! : t,
+          );
           set({
             status: "failed",
             error: (errData as { error?: string }).error || "Retry failed",
+            tasks: rolledBack,
           });
           return;
         }

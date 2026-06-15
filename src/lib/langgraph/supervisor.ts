@@ -10,6 +10,7 @@ import {
   type ApiContract,
   type TaskResult,
 } from "./state";
+import { getWorkerChunkSink } from "./worker-event-bridge";
 import {
   createWorkerSubGraph,
   classifyTscErrors,
@@ -2945,6 +2946,17 @@ async function contractTaskCoverage(
   const label = "[Supervisor] ContractTaskCoverage";
   const emit = getRepairEmitter(state.sessionId);
 
+  // Retry mode: the user asked to re-run a specific subset of tasks. Injecting
+  // supplementary backend tasks here would silently balloon the run scope —
+  // skip the whole gate. Whole-system contract coverage stays the
+  // responsibility of the next full build.
+  if (state.retryMode) {
+    console.log(
+      `${label}: retry mode — skipping coverage gate (user re-ran a task subset).`,
+    );
+    return {};
+  }
+
   // ── 1. Load contracts ─────────────────────────────────────────────────
   const contractsRaw = await fsRead("API_CONTRACTS.json", state.outputDir);
   if (
@@ -3094,6 +3106,15 @@ async function pageTaskCoverage(
 ): Promise<Partial<SupervisorState>> {
   const label = "[Supervisor] PageTaskCoverage";
   const emit = getRepairEmitter(state.sessionId);
+
+  // Retry mode: same rationale as contractTaskCoverage — re-running a task
+  // subset must not silently inject extra frontend tasks for unrelated pages.
+  if (state.retryMode) {
+    console.log(
+      `${label}: retry mode — skipping coverage gate (user re-ran a task subset).`,
+    );
+    return {};
+  }
 
   const pages = state.prdSpec?.pages ?? [];
   if (pages.length === 0 || state.tasks.length === 0) return {};
@@ -5000,12 +5021,61 @@ const WORKER_BATCH_SIZE = (() => {
  * and the loop continues — so a single bad batch never kills the session; the
  * run finishes the rest and only the offending tasks are left for retry.
  */
+/**
+ * Run the worker sub-graph for one batch and forward its stream chunks
+ * through the session-keyed event sink (if one is registered) so the
+ * outer SSE pipeline sees `pick_next_task` / `generate_code` / `task_done`
+ * updates and emits the corresponding agent_task_* events. Falls back to
+ * a plain `.invoke()` when no sink is registered (e.g. tests, headless
+ * batch runs).
+ *
+ * Returns the final WorkerState — when streaming, taken from the last
+ * `"values"` frame; with plain invoke, from the return value as before.
+ */
+async function runWorkerBatch(
+  payload: WorkerState,
+  recursionLimit: number,
+): Promise<WorkerState> {
+  const sink = getWorkerChunkSink(payload.sessionId);
+  if (!sink) {
+    return (await workerGraph.invoke(payload, {
+      recursionLimit,
+    })) as WorkerState;
+  }
+
+  // Synthesize a worker namespace so the SSE EventMapper treats these chunks
+  // as worker-subgraph updates (it splits the parent node name on ":" and
+  // uses the leading segment to attribute the worker). Including the role
+  // keeps multiple parallel batches distinguishable in the UI.
+  const nsKey = `${payload.role === "frontend" ? "fe_worker" : "be_worker"}:${payload.workerLabel || payload.role}`;
+
+  let finalState: WorkerState | null = null;
+  const iter = (await workerGraph.stream(payload, {
+    recursionLimit,
+    streamMode: ["updates", "values"],
+  })) as AsyncIterable<[string, unknown]>;
+  for await (const frame of iter) {
+    const [mode, data] = frame;
+    if (mode === "values") {
+      finalState = data as WorkerState;
+    } else if (mode === "updates") {
+      try {
+        sink([[nsKey], data as Record<string, unknown>]);
+      } catch (err) {
+        console.warn(
+          `[Supervisor] worker chunk sink threw (non-fatal):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+  return finalState ?? payload;
+}
+
 async function invokeWorkerBatched(base: WorkerState): Promise<WorkerState> {
   const tasks = base.tasks ?? [];
   if (tasks.length <= WORKER_BATCH_SIZE) {
-    return (await workerGraph.invoke(base, {
-      recursionLimit: workerRecursionLimit(tasks.length),
-    })) as WorkerState;
+    return await runWorkerBatch(base, workerRecursionLimit(tasks.length));
   }
   let fileRegistry: GeneratedFile[] = base.fileRegistrySnapshot ?? [];
   const taskResults: TaskResult[] = [];
@@ -5018,15 +5088,15 @@ async function invokeWorkerBatched(base: WorkerState): Promise<WorkerState> {
       `[Supervisor] ${base.workerLabel}: worker batch ${b + 1}/${batchCount} (${batch.length} tasks)…`,
     );
     try {
-      const res = (await workerGraph.invoke(
+      const res = await runWorkerBatch(
         {
           ...base,
           tasks: batch,
           currentTaskIndex: 0,
           fileRegistrySnapshot: fileRegistry,
         },
-        { recursionLimit: workerRecursionLimit(batch.length) },
-      )) as WorkerState;
+        workerRecursionLimit(batch.length),
+      );
       taskResults.push(...(res.taskResults ?? []));
       generated.push(...(res.generatedFiles ?? []));
       fileRegistry = [...fileRegistry, ...(res.generatedFiles ?? [])];
