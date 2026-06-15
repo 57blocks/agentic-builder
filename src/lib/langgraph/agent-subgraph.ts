@@ -70,6 +70,7 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { trimProjectContextForTask } from "./worker-context-trim";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
+import { logFrontendTaskContext } from "./frontend-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -2657,13 +2658,41 @@ function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
  * Returns the first matching entry or undefined.
  */
 function findTaskDesignReference(
-  task: { title: string; description: string },
+  task: {
+    title: string;
+    description: string;
+    coversRequirementIds?: string[];
+    files?: string[] | { creates?: string[]; modifies?: string[]; reads?: string[] };
+  },
   refs: DesignReferenceEntry[],
 ): DesignReferenceEntry | undefined {
   const imageRefs = refs.filter((r) => r.kind === "image" && r.pageHint);
   if (imageRefs.length === 0) return undefined;
 
-  const taskText = `${task.title} ${task.description}`;
+  // Widen the searchable text. The original implementation only looked at
+  // title + description, which misses two common shapes the task breakdown
+  // emits:
+  //   1. PAGE-* / CMP-* IDs are written to `coversRequirementIds`, not the
+  //      free-text fields (per task-breakdown-agent prompt).
+  //   2. Page semantics often live in the target file name (e.g.
+  //      `BillTrackerDashboard.tsx`) rather than the task title.
+  const filePaths: string[] = Array.isArray(task.files)
+    ? task.files
+    : [
+        ...(task.files?.creates ?? []),
+        ...(task.files?.modifies ?? []),
+        ...(task.files?.reads ?? []),
+      ];
+  const taskText = [
+    task.title,
+    task.description,
+    ...(task.coversRequirementIds ?? []),
+    ...filePaths,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // ── Step A: precise PAGE-id match ────────────────────────────────────────
   const pageIdMatches = taskText.match(/\bPAGE-\d+\b/gi);
   const taskPageIds = new Set(
     (pageIdMatches ?? []).map((s) => s.toUpperCase()),
@@ -2680,14 +2709,48 @@ function findTaskDesignReference(
     if (found) return found;
   }
 
-  // Name-based fallback: normalize both sides and check containment
-  const titleNorm = task.title.toLowerCase().replace(/[-_\s]+/g, "");
+  // ── Step B: token-overlap fallback ───────────────────────────────────────
+  // Split pageHint into alphanumeric tokens (>=4 chars, excluding generic
+  // stopwords). Any token appearing as a substring of the expanded task text
+  // counts as a match. This is intentionally looser than strict substring
+  // alignment so a pageHint like "PAGE-001 family billing" can bind to a
+  // task whose files include "FamilyBillingPage.tsx" even though neither
+  // side contains the other verbatim.
+  const STOPWORDS = new Set([
+    "page",
+    "pages",
+    "view",
+    "views",
+    "screen",
+    "screens",
+    "component",
+    "components",
+    "frontend",
+    "backend",
+    "src",
+    "tsx",
+    "jsx",
+    "html",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "this",
+    "that",
+    "main",
+    "index",
+    "common",
+    "shared",
+  ]);
+  const taskTextNorm = taskText.toLowerCase();
   return imageRefs.find((r) => {
-    const hintNorm = r.pageHint.toLowerCase().replace(/[-_\s]+/g, "");
-    return (
-      hintNorm.length >= 4 &&
-      (titleNorm.includes(hintNorm) || hintNorm.includes(titleNorm.slice(0, 12)))
-    );
+    const tokens = r.pageHint
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+    return tokens.some((t) => taskTextNorm.includes(t));
   });
 }
 
@@ -2881,6 +2944,15 @@ async function generateCode(state: WorkerState) {
     // `.design-references/` in the output tree and include it directly in the
     // first user message so the coding model can see the exact target layout.
     let injectedVisionImage = false;
+    let loggedVisionImageInfo:
+      | {
+          bytes: Buffer;
+          mime: string;
+          referenceId: string;
+          storedFileName: string;
+          pageHint: string;
+        }
+      | undefined;
     if (state.role === "frontend") {
       try {
         const refs = await readDesignReferencesFromOutput(state.outputDir);
@@ -2894,6 +2966,13 @@ async function generateCode(state: WorkerState) {
           const imgBytes = await nodeFs.readFile(imgPath);
           const b64 = imgBytes.toString("base64");
           const dataUrl = `data:${matchedRef.mime};base64,${b64}`;
+          loggedVisionImageInfo = {
+            bytes: imgBytes,
+            mime: matchedRef.mime,
+            referenceId: matchedRef.id,
+            storedFileName: matchedRef.storedFileName,
+            pageHint: matchedRef.pageHint,
+          };
 
           // Append CSS tokens to the task text when the matched reference has them.
           // Tokens are extracted from the source URL and represent the exact design-system
@@ -2928,6 +3007,39 @@ async function generateCode(state: WorkerState) {
     }
     if (!injectedVisionImage) {
       messages.push({ role: "user", content: userTaskText });
+    }
+
+    // ── Per-task context dump (frontend only) ──────────────────────────────
+    // Snapshots the FULL assembled context (system prompt, projectContext,
+    // memory recall, user message, vision image when present) to a per-task
+    // folder under `<repoRoot>/.logs/fe/<projectId>/<taskSlug>/<runStamp>/`.
+    // Fire-and-forget: never blocks or fails the worker.
+    if (state.role === "frontend") {
+      void logFrontendTaskContext({
+        sessionId: state.sessionId,
+        task: {
+          id: task.id,
+          title: task.title,
+          description: task.description,
+          files: task.files,
+          coversRequirementIds: task.coversRequirementIds,
+          subSteps: task.subSteps,
+          tddPlan: task.tddPlan,
+        },
+        workerLabel: state.workerLabel,
+        role: state.role,
+        attempt,
+        messages,
+        projectContext: state.projectContext,
+        memoryRecallBlock: memoryRecall.block,
+        visionImage: loggedVisionImageInfo,
+        model: injectedVisionImage ? "codeGenFrontend" : "codeGen",
+        extras: {
+          injectedVisionImage,
+          fileRegistryCount: state.fileRegistrySnapshot.length,
+          apiContractCount: state.apiContractsSnapshot.length,
+        },
+      });
     }
 
     const startMs = Date.now();
