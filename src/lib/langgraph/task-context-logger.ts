@@ -1,13 +1,15 @@
 /**
- * Per-task context logger for frontend coding tasks.
+ * Per-task context logger for all coding roles.
  *
- * For every frontend worker task, dump the FULL context that was assembled
+ * For every worker task, dump the FULL context that was assembled
  * for the LLM call into:
  *
- *   <repoRoot>/.logs/fe/<taskSlug>__<runStamp>__attempt<N>/
+ *   <repoRoot>/.logs/coding/<role>/<taskSlug>__<runStamp>__attempt<N>/
  *     messages.json         — full ChatMessage[] (image_url replaced with a
  *                             pointer to image.* in the same folder, so the
  *                             json stays readable)
+ *     prompt.md             — human-readable form: system + user messages,
+ *                             memory recall, vision image references
  *     image.<ext>           — copy of the vision image injected (if any)
  *     project-context.md    — the projectContext system block as plain text
  *     task.json             — the task object (id/title/description/files/…)
@@ -23,7 +25,7 @@ import fs from "node:fs/promises";
 
 import type { ChatMessage } from "@/lib/openrouter";
 
-const LOG_ROOT_REL = path.join(".logs", "fe");
+const LOG_ROOT_REL = path.join(".logs", "coding");
 
 function sanitizeForPath(s: string, max = 80): string {
   return (
@@ -39,7 +41,7 @@ function nowStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-export interface FrontendContextLogInput {
+export interface TaskContextLogInput {
   sessionId: string;
   task: {
     id: string;
@@ -129,13 +131,86 @@ function extImageMime(mime: string): string {
   return "bin";
 }
 
-export async function logFrontendTaskContext(
-  input: FrontendContextLogInput,
+function renderPromptMarkdown(input: TaskContextLogInput, imageFilename: string | null): string {
+  const lines: string[] = [];
+  lines.push(`# ${input.task.id} · ${input.task.title}`);
+  lines.push("");
+  lines.push(`- Role: \`${input.role}\``);
+  lines.push(`- Worker: ${input.workerLabel}`);
+  lines.push(`- Attempt: ${input.attempt}`);
+  lines.push(`- Model: ${input.model ?? "(unspecified)"}`);
+  lines.push(`- Captured: ${new Date().toISOString()}`);
+  lines.push(`- Session: \`${input.sessionId}\``);
+  if (input.visionImage) {
+    lines.push(`- Vision image: \`${input.visionImage.referenceId}\` (\`${input.visionImage.storedFileName}\`, ${input.visionImage.bytes.byteLength.toLocaleString()} bytes)`);
+  } else {
+    lines.push(`- Vision image: none`);
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+
+  // Walk messages in order, render each one as a section.
+  let sysCounter = 0;
+  let userCounter = 0;
+  let asstCounter = 0;
+  for (const m of input.messages) {
+    const msg = m as { role: string; content: unknown };
+    if (msg.role === "system") {
+      sysCounter += 1;
+      lines.push(`## System message #${sysCounter}`);
+    } else if (msg.role === "user") {
+      userCounter += 1;
+      lines.push(`## User message${userCounter > 1 ? ` #${userCounter}` : ""}`);
+    } else if (msg.role === "assistant") {
+      asstCounter += 1;
+      lines.push(`## Assistant message #${asstCounter}`);
+    } else {
+      lines.push(`## ${msg.role} message`);
+    }
+    lines.push("");
+    // Content can be string OR array of parts (vision messages).
+    if (typeof msg.content === "string") {
+      lines.push(msg.content);
+    } else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part && typeof part === "object") {
+          const p = part as { type?: string; text?: string; image_url?: { detail?: string } };
+          if (p.type === "text" && typeof p.text === "string") {
+            lines.push(p.text);
+          } else if (p.type === "image_url") {
+            lines.push("");
+            lines.push(
+              imageFilename
+                ? `*(Vision image attached: \`./${imageFilename}\`, detail=${p.image_url?.detail ?? "high"})*`
+                : "*(Vision image attached — base64 data url omitted)*",
+            );
+          }
+        }
+      }
+    }
+    lines.push("");
+  }
+
+  if (input.memoryRecallBlock && input.memoryRecallBlock.trim()) {
+    lines.push("---");
+    lines.push("");
+    lines.push("## Memory recall (injected into the system block above)");
+    lines.push("");
+    lines.push(input.memoryRecallBlock);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+export async function logTaskContext(
+  input: TaskContextLogInput,
 ): Promise<string | null> {
   try {
     const taskSlug = `${sanitizeForPath(input.task.id, 20)}__${sanitizeForPath(input.task.title, 60)}`;
     const folderName = `${taskSlug}__${nowStamp()}__attempt${input.attempt}`;
-    const dir = path.resolve(process.cwd(), LOG_ROOT_REL, folderName);
+    const dir = path.resolve(process.cwd(), LOG_ROOT_REL, input.role, folderName);
     await fs.mkdir(dir, { recursive: true });
 
     // 1) Image (if injected)
@@ -157,21 +232,30 @@ export async function logFrontendTaskContext(
       "utf-8",
     );
 
-    // 3) projectContext as a standalone markdown file
+    // 3) Human-readable prompt.md — same content as messages.json but flat
+    //    Markdown so you can just open it. Vision image references point at
+    //    the sibling image.<ext> file.
+    await fs.writeFile(
+      path.join(dir, "prompt.md"),
+      renderPromptMarkdown(input, imageFilename),
+      "utf-8",
+    );
+
+    // 4) projectContext as a standalone markdown file
     await fs.writeFile(
       path.join(dir, "project-context.md"),
       input.projectContext ?? "",
       "utf-8",
     );
 
-    // 4) task snapshot
+    // 5) task snapshot
     await fs.writeFile(
       path.join(dir, "task.json"),
       JSON.stringify(input.task, null, 2),
       "utf-8",
     );
 
-    // 5) memory recall block (only when present)
+    // 6) memory recall block (only when present)
     if (input.memoryRecallBlock && input.memoryRecallBlock.trim()) {
       await fs.writeFile(
         path.join(dir, "memory-recall.txt"),
@@ -180,7 +264,7 @@ export async function logFrontendTaskContext(
       );
     }
 
-    // 6) summary metadata
+    // 7) summary metadata
     const summary = {
       timestamp: new Date().toISOString(),
       role: input.role,
@@ -212,11 +296,11 @@ export async function logFrontendTaskContext(
       "utf-8",
     );
 
-    console.log(`[FrontendContextLog] Wrote ${dir}`);
+    console.log(`[TaskContextLog] Wrote ${dir}`);
     return dir;
   } catch (err) {
     console.warn(
-      `[FrontendContextLog] Failed to write frontend context log:`,
+      `[TaskContextLog] Failed to write task context log:`,
       err instanceof Error ? err.message : err,
     );
     return null;

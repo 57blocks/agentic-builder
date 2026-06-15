@@ -70,7 +70,7 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { trimProjectContextForTask } from "./worker-context-trim";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
-import { logFrontendTaskContext } from "./frontend-context-logger";
+import { logTaskContext } from "./task-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -3009,38 +3009,36 @@ async function generateCode(state: WorkerState) {
       messages.push({ role: "user", content: userTaskText });
     }
 
-    // ── Per-task context dump (frontend only) ──────────────────────────────
+    // ── Per-task context dump (all roles) ─────────────────────────────────
     // Snapshots the FULL assembled context (system prompt, projectContext,
     // memory recall, user message, vision image when present) to a per-task
-    // folder under `<repoRoot>/.logs/fe/<projectId>/<taskSlug>/<runStamp>/`.
+    // folder under `<repoRoot>/.logs/coding/<role>/<taskSlug>/<runStamp>/`.
     // Fire-and-forget: never blocks or fails the worker.
-    if (state.role === "frontend") {
-      void logFrontendTaskContext({
-        sessionId: state.sessionId,
-        task: {
-          id: task.id,
-          title: task.title,
-          description: task.description,
-          files: task.files,
-          coversRequirementIds: task.coversRequirementIds,
-          subSteps: task.subSteps,
-          tddPlan: task.tddPlan,
-        },
-        workerLabel: state.workerLabel,
-        role: state.role,
-        attempt,
-        messages,
-        projectContext: state.projectContext,
-        memoryRecallBlock: memoryRecall.block,
-        visionImage: loggedVisionImageInfo,
-        model: injectedVisionImage ? "codeGenFrontend" : "codeGen",
-        extras: {
-          injectedVisionImage,
-          fileRegistryCount: state.fileRegistrySnapshot.length,
-          apiContractCount: state.apiContractsSnapshot.length,
-        },
-      });
-    }
+    void logTaskContext({
+      sessionId: state.sessionId,
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        files: task.files,
+        coversRequirementIds: task.coversRequirementIds,
+        subSteps: task.subSteps,
+        tddPlan: task.tddPlan,
+      },
+      workerLabel: state.workerLabel,
+      role: state.role,
+      attempt,
+      messages,
+      projectContext: state.projectContext,
+      memoryRecallBlock: memoryRecall.block,
+      visionImage: loggedVisionImageInfo,
+      model: injectedVisionImage ? "codeGenFrontend" : "codeGen",
+      extras: {
+        injectedVisionImage,
+        fileRegistryCount: state.fileRegistrySnapshot.length,
+        apiContractCount: state.apiContractsSnapshot.length,
+      },
+    });
 
     const startMs = Date.now();
     const fsOpts =

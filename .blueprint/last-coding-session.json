@@ -1,6 +1,6 @@
 {
-  "sessionId": "d7170808-c5de-400e-a808-294d0b587dec",
-  "savedAt": "2026-06-12T08:53:14.168Z",
+  "sessionId": "caf345be-d1cb-4845-bbc4-6663953d8767",
+  "savedAt": "2026-06-15T02:51:19.940Z",
   "completedTaskIds": [
     "T-001",
     "T-E2E-001",
@@ -12,71 +12,66 @@
   "failedTaskIds": [],
   "taskResults": {
     "T-001": {
-      "status": "completed_with_warnings",
-      "generatedFiles": [
-        "test-startup.html",
-        "billboard.html",
-        "styles.css",
-        "script.js",
-        "README.md",
-        "_index_vanilla.html",
-        ".agentic-snapshot/T-001/index.html",
-        "Index.html",
-        "index.html"
-      ]
+      "status": "completed",
+      "generatedFiles": []
     },
     "T-E2E-001": {
       "status": "completed",
       "generatedFiles": [
-        "package.json",
         "e2e/fixtures.ts",
         "e2e/utils.ts",
         "frontend/playwright.config.ts",
         "frontend/tests/e2e/fixtures.ts",
-        "frontend/tests/e2e/utils.ts"
+        "frontend/tests/e2e/utils.ts",
+        "frontend/package.json"
       ]
     },
     "T-E2E-002": {
       "status": "completed",
       "generatedFiles": [
-        "src/types/bill.ts",
-        "src/data/bills.ts",
-        "src/components/Header.tsx",
-        "src/components/FilterTabs.tsx",
-        "src/components/BillCard.tsx",
-        "src/components/EmptyState.tsx",
-        "UI_CONTRACT.md",
-        "frontend/tests/e2e/generated/e2e-001-default-home-view-renders-bills-badges-a.spec.ts",
-        "frontend/tests/e2e/generated/e2e-002-status-tabs-filter-bill-list-correctly.spec.ts",
-        "frontend/tests/e2e/generated/e2e-003-expand-and-collapse-inline-bill-details.spec.ts",
-        "frontend/tests/e2e/generated/e2e-004-mark-an-overdue-bill-as-paid-and-verify-.spec.ts",
-        "frontend/tests/e2e/generated/e2e-005-empty-state-path-and-clear-filter-recove.spec.ts",
-        "frontend/tests/e2e/generated/e2e-006-state-resets-on-refresh-and-app-performs.spec.ts",
-        "script.js",
-        "styles.css",
-        "frontend/tests/e2e/fixtures.ts",
-        "e2e/fixtures.ts"
+        "frontend/tests/e2e/generated/e2e-001-dashboard-default-load-and-empty-states.spec.ts",
+        "frontend/tests/e2e/generated/e2e-002-add-tasks-by-button-and-enter-preserve-o.spec.ts",
+        "frontend/tests/e2e/generated/e2e-003-toggle-completion-and-filter-results-inc.spec.ts",
+        "frontend/tests/e2e/generated/e2e-004-edit-task-and-save-changes.spec.ts",
+        "frontend/tests/e2e/generated/e2e-005-edit-modal-cancel-close-icon-and-escape-.spec.ts",
+        "frontend/tests/e2e/generated/e2e-006-delete-modal-cancel-and-escape-keep-task.spec.ts"
       ]
     },
     "T-002": {
       "status": "completed",
       "generatedFiles": [
-        "billboard.html",
-        "test-startup.html",
-        "test-bill-rendering.html"
+        "src/types/Task.ts",
+        "src/services/taskService.ts",
+        "src/hooks/useTasks.ts",
+        "src/services/taskService.test.ts"
       ]
     },
     "T-003": {
       "status": "completed",
       "generatedFiles": [
-        "test-filter-functionality.html",
-        "script.js"
+        "src/components/TaskDashboard.test.tsx",
+        "src/components/AddTaskForm.tsx",
+        "src/components/FilterBar.tsx",
+        "src/components/TaskItem.tsx",
+        "src/components/TaskList.tsx",
+        "src/components/TaskDashboard.tsx"
       ]
     },
     "T-004": {
       "status": "completed",
       "generatedFiles": [
-        "test-bill-expansion.html"
+        "src/components/Modal.tsx",
+        "src/components/EditTaskModal.tsx",
+        "src/components/DeleteConfirmModal.tsx",
+        "src/components/EditTaskModal.test.tsx",
+        "src/components/TaskDashboard.tsx",
+        "src/components/TaskItem.tsx",
+        "src/components/TaskList.tsx",
+        "src/components/AddTaskForm.tsx",
+        "src/components/FilterBar.tsx",
+        "src/services/taskService.ts",
+        "src/components/TaskDashboard.test.tsx",
+        "src/services/taskService.test.ts"
       ]
     }
   }
