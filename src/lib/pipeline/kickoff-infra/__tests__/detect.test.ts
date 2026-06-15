@@ -8,7 +8,7 @@ describe("detectRequiredServicesByRegex", () => {
   it("detects postgres by name", () => {
     expect(
       detectRequiredServicesByRegex("We use PostgreSQL for storage."),
-    ).toEqual({ needsPostgres: true, needsRedis: false });
+    ).toEqual({ needsPostgres: true, needsRedis: false, needsS3: false });
   });
   it("detects postgres via ORM mention", () => {
     expect(
@@ -23,6 +23,7 @@ describe("detectRequiredServicesByRegex", () => {
     expect(detectRequiredServicesByRegex("Sessions stored in Redis.")).toEqual({
       needsPostgres: false,
       needsRedis: true,
+      needsS3: false,
     });
   });
   it("detects redis via BullMQ / cache hints", () => {
@@ -36,19 +37,44 @@ describe("detectRequiredServicesByRegex", () => {
       true,
     );
   });
-  it("detects both", () => {
+  it("detects s3 by name", () => {
     expect(
-      detectRequiredServicesByRegex(
-        "PostgreSQL for the main store; Redis for session cache.",
-      ),
-    ).toEqual({ needsPostgres: true, needsRedis: true });
+      detectRequiredServicesByRegex("Store uploads in an S3 bucket."),
+    ).toEqual({ needsPostgres: false, needsRedis: false, needsS3: true });
   });
-  it("neither detected for a static site", () => {
+  it("detects s3 via upload / object-storage hints", () => {
+    expect(
+      detectRequiredServicesByRegex("Users can upload avatar images.")
+        .needsS3,
+    ).toBe(true);
+    expect(
+      detectRequiredServicesByRegex("Files persisted to object storage.")
+        .needsS3,
+    ).toBe(true);
+    expect(
+      detectRequiredServicesByRegex("Generate a presigned URL for downloads.")
+        .needsS3,
+    ).toBe(true);
+    expect(
+      detectRequiredServicesByRegex("Document upload with MinIO.").needsS3,
+    ).toBe(true);
+  });
+  it("does NOT flag s3 for a text-only CRUD app", () => {
+    expect(
+      detectRequiredServicesByRegex("A todo list app with PostgreSQL.").needsS3,
+    ).toBe(false);
+  });
+  it("detects all three", () => {
     expect(
       detectRequiredServicesByRegex(
-        "A simple static site rendered with Vite.",
+        "PostgreSQL for the main store; Redis for session cache; S3 for media uploads.",
       ),
-    ).toEqual({ needsPostgres: false, needsRedis: false });
+    ).toEqual({ needsPostgres: true, needsRedis: true, needsS3: true });
+  });
+  it("none detected for a static site", () => {
+    expect(
+      detectRequiredServicesByRegex("A simple static site rendered with Vite."),
+    ).toEqual({ needsPostgres: false, needsRedis: false, needsS3: false });
   });
 });
 
@@ -63,8 +89,14 @@ describe("detectRequiredServices (orchestration)", () => {
   });
 
   it("uses regex path when INFRA_DETECT_REGEX_ONLY is set", async () => {
-    const r = await detectRequiredServices("PostgreSQL with Redis caching.");
+    const r = await detectRequiredServices(
+      "PostgreSQL with Redis caching and S3 image uploads.",
+    );
     expect(r.source).toBe("regex");
-    expect(r.services).toEqual({ needsPostgres: true, needsRedis: true });
+    expect(r.services).toEqual({
+      needsPostgres: true,
+      needsRedis: true,
+      needsS3: true,
+    });
   });
 });

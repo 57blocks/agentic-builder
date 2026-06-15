@@ -37,6 +37,7 @@ import {
   resolveBackendPort,
   upsertBackendPrivyAppIdMirror,
   resolvePrivyAppIdMirrorFromFilledResources,
+  upsertEnvVars,
 } from "@/lib/pipeline/generated-code-env";
 import {
   normalizeProjectTier,
@@ -50,6 +51,7 @@ import {
   readKickoffInfraMetadata,
   databaseUrlFrom,
   redisUrlFrom,
+  s3EnvFrom,
 } from "@/lib/pipeline/kickoff-infra";
 import {
   readResourceRequirements,
@@ -1663,7 +1665,10 @@ export async function POST(request: NextRequest) {
     const withRedisUrl = redisUrlForEnv
       ? upsertRedisUrlEnv(withDbUrl, redisUrlForEnv)
       : withDbUrl;
-    const withJwt = upsertJwtEnvVars(withRedisUrl);
+    // S3 credential bundle (shared bucket + per-app folder) from kickoff infra.
+    const s3Env = s3EnvFrom(kickoffInfra);
+    const withS3 = s3Env ? upsertEnvVars(withRedisUrl, s3Env) : withRedisUrl;
+    const withJwt = upsertJwtEnvVars(withS3);
     const withPort = upsertBackendPortEnv(withJwt);
     const withResources = upsertResourceEnvVars(withPort, backendResources);
     const privyMirror =
