@@ -1,8 +1,8 @@
 ---
 id: scaffold-owned-files
 agent: task-breakdown
-version: v1
-description: When an auth scaffold (password-rbac / magic-link) is selected, the task list MUST NOT recreate scaffold-owned files, MUST use the generic PersonaShell + ProtectedRoute(requiredDomainRole), and MUST register every /admin/* route in the shipped admin-aliases.routes.ts (not in a parallel modules/admin/* tree).
+version: v2
+description: When an auth scaffold (password-rbac / magic-link) is selected, the task list MUST NOT recreate scaffold-owned files, MUST keep exactly ONE auth page (the shipped LoginPage.tsx at /login — never a parallel AuthPage / /auth route), MUST use the generic PersonaShell + ProtectedRoute(requiredDomainRole), and MUST register every /admin/* route in the shipped admin-aliases.routes.ts (not in a parallel modules/admin/* tree).
 priority: 85
 excludes: []
 trigger:
@@ -207,6 +207,37 @@ gates. The scaffold already supports this — no model / script changes
 needed. The task list MUST NOT create a new seed script or overwrite
 `seed-auth-users.ts`.
 
+## Hard rule 6 — Exactly ONE auth page, mounted at `/login`
+
+The scaffold ships `frontend/src/views/LoginPage.tsx` mounted at `/login`, and
+`ProtectedRoute` redirects unauthenticated users to `/login`. ALL sign-in,
+registration, email-verification, onboarding and role-selection UI belongs in
+`LoginPage.tsx` on the `/login` route. Hard rule 1 already forbids *recreating*
+`LoginPage.tsx`; this rule additionally forbids standing up a SECOND auth
+surface beside it.
+
+### What NEVER to plan
+
+- ❌ A new `frontend/src/views/AuthPage.tsx` (or a separate `SignInPage` /
+  `SignupPage` / `OnboardingPage` used as the *primary auth surface*). It
+  competes with the scaffold's `LoginPage`: `ProtectedRoute` keeps sending
+  users to `/login` while `/` redirects to the new page, so the two drift and
+  half the app redirect-loops / 401s. (Shipped at least once: `LoginPage` at
+  `/login` AND `AuthPage` at `/auth` in the same build — two login screens, one
+  dead.)
+- ❌ An `/auth` route (or any second login route) in `router.tsx`.
+
+### What IS expected
+
+- ONE task that lists `frontend/src/views/LoginPage.tsx` under `files.modifies`
+  to extend/restyle the sign-in + registration + onboarding UI (keeping the
+  `useAuthStore.login` call — the scaffold contract).
+- The `/` root redirect and every post-logout / post-account-deletion redirect
+  target `/login` (never `/auth`).
+- In STEP 1 PAGE INVENTORY, fold a separate "Auth page" / "Onboarding page"
+  that is really the same sign-in surface into the single `LoginPage` entry —
+  count them as ONE page.
+
 ## Self-check before emitting tasks
 
 Before returning the task array, run the following mental pass over your
@@ -226,6 +257,10 @@ draft:
    task.
 5. Confirm no task lists `RoleGuard.tsx` or `authStore.ts` (the
    no-hyphen variant) in its `creates`.
+6. Grep candidate `creates` for `AuthPage` and `router.tsx` route definitions
+   for an `/auth` path. Every match is a violation of Hard rule 6 — there is
+   exactly one auth page (`LoginPage.tsx` at `/login`); fold the
+   sign-in/registration/onboarding UI into it and drop the second route.
 
 The downstream `coding` worker has NO knowledge of which files the
 scaffold already wrote. If a task `creates` a scaffold-owned file, the

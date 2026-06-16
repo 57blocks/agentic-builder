@@ -449,16 +449,6 @@ If the PRD describes a different OAuth provider that is NOT yet a registered \`_
 
 This rule is **independent** of the External API split rule and the Background-job lifecycle rule below.
 
-## CRITICAL: password-rbac auth — reuse the shipped LoginPage at /login (DEFAULT auth)
-When the project uses the DEFAULT \`password-rbac\` auth mode (scaffold \`auth-password-rbac\` applied — NOT Privy/OAuth), the scaffold has ALREADY shipped \`frontend/src/views/LoginPage.tsx\` (an email+password form calling \`useAuthStore.login\`) plus a Zustand auth-store. The canonical auth route is \`/login\`, and \`ProtectedRoute\` redirects unauthenticated users there.
-
-The PRD's login / sign-in / registration / email-verification / onboarding page(s) MUST collapse into a SINGLE task that lists \`frontend/src/views/LoginPage.tsx\` in \`files.modifies\` (extend/restyle it, keep the \`useAuthStore.login\` call) and reuses the existing \`/login\` route.
-
-- DO NOT plan a separate \`AuthPage.tsx\`, and DO NOT plan an \`/auth\` route (or any second login route). There is exactly ONE auth page, mounted at \`/login\`.
-- The root \`/\` redirect and any post-logout / post-account-deletion redirect target \`/login\` (never \`/auth\`).
-- In STEP 1 PAGE INVENTORY, when you see both a "Login" page and a separate "Auth"/"Onboarding" page that are really the same sign-in surface, count them as ONE page → \`views/LoginPage.tsx\` at \`/login\`.
-- This is NOT an OAuth project: do NOT plan \`PrivyProvider\` / \`LoginModal\` / \`usePrivyAuthBridge\` tasks.
-
 ## TDD seed plan — REQUIRED for P0/P1 tasks
 Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in each P0/P1 task:
 - Backend route/API tasks MUST include at least one \`api-contract\` test.
