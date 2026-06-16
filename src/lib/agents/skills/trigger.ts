@@ -21,6 +21,7 @@ import {
 import { MODEL_CONFIG } from "@/lib/model-config";
 import type {
   SkillTrigger,
+  ContextTrigger,
   TriggerResult,
   TriggerMatchSource,
   LoaderContext,
@@ -50,6 +51,19 @@ export async function evaluateTrigger(
     const { matched, evidence } = evaluateRegex(trigger.any_of, trigger.match, ctx);
     return {
       result: { matched, evidence, reason: matched ? undefined : "regex did not match" },
+      costUsd: 0,
+      durationMs: Date.now() - t0,
+    };
+  }
+
+  if (trigger.type === "context") {
+    const { matched, evidence } = evaluateContext(trigger, ctx);
+    return {
+      result: {
+        matched,
+        evidence,
+        reason: matched ? undefined : "project config did not match",
+      },
       costUsd: 0,
       durationMs: Date.now() - t0,
     };
@@ -142,6 +156,35 @@ function evaluateRegex(
       const evidence = extractLineAround(haystack, m.index, 200);
       return { matched: true, evidence };
     }
+  }
+  return { matched: false };
+}
+
+// ─── Context (project-config) eval ──────────────────────────────────────────
+
+function evaluateContext(
+  trigger: ContextTrigger,
+  ctx: LoaderContext,
+): { matched: boolean; evidence?: string } {
+  const features = ctx.appliedOptionalFeatures ?? [];
+  const envKeys = ctx.declaredEnvKeys ?? [];
+  const flags = ctx.flags ?? {};
+
+  if (trigger.any_of_features?.length) {
+    for (const want of trigger.any_of_features) {
+      const w = want.toLowerCase();
+      const hit = features.find((f) => f.toLowerCase().includes(w));
+      if (hit) return { matched: true, evidence: `feature: ${hit}` };
+    }
+  }
+  if (trigger.any_of_env_keys?.length) {
+    const hit = trigger.any_of_env_keys.find((k) => envKeys.includes(k));
+    if (hit) return { matched: true, evidence: `env: ${hit}` };
+  }
+  if (trigger.all_of_flags?.length) {
+    const allSet = trigger.all_of_flags.every((f) => flags[f] === true);
+    if (allSet)
+      return { matched: true, evidence: `flags: ${trigger.all_of_flags.join(", ")}` };
   }
   return { matched: false };
 }

@@ -54,6 +54,11 @@ export interface PromptContext {
     hasBackgroundJobs?: boolean;
     hasAggregationPipeline?: boolean;
   };
+  /** Pre-formatted Markdown block of codegen-role skills auto-applied to this
+   *  project (from `formatAppliedSkills()`). Appended verbatim to the role
+   *  prompt. Empty / undefined when no skill applied. Conditional codegen rules
+   *  live as skills under `.blueprint/skills/<role>/` rather than inline here. */
+  skillsBlock?: string;
 }
 
 const EMPTY_CONTEXT: PromptContext = {
@@ -288,14 +293,6 @@ DO NOT re-implement these files.`;
 const FRONTEND_EMAIL_AUTH_RULE = `**Email + password auth guidance:**
 The base \`LoginModal.tsx\` is an email+password form. Implement the \`POST /api/auth/login\` flow that returns a JWT and call \`useAuth().login(jwt)\` from the landing page.`;
 
-const FRONTEND_PASSWORD_RBAC_RULE = `**Auth = the scaffold's LoginPage at \`/login\` (HARD RULE — this project uses the default password-rbac auth):**
-The \`auth-password-rbac\` scaffold has ALREADY shipped \`frontend/src/views/LoginPage.tsx\` (an email+password form that calls \`useAuthStore.login(email, password)\`) plus a Zustand \`auth-store\`. The canonical auth route is \`/login\`, and \`ProtectedRoute\` already redirects unauthenticated users there.
-- Implement ALL sign-in / registration / email-verification / onboarding / role-selection UI by EXTENDING (overwriting) \`frontend/src/views/LoginPage.tsx\`. You MUST keep the \`useAuthStore.login(...)\` call — that is the contract with the rest of the scaffold.
-- There is EXACTLY ONE auth page, mounted at \`/login\`. DO NOT create a separate \`AuthPage.tsx\`, and DO NOT register an \`/auth\` route (or any second login route). If you find an \`/auth\` route, treat it as a bug and consolidate onto \`/login\`.
-- The root \`/\` redirect and EVERY post-logout / post-account-deletion redirect MUST target \`/login\` — never \`/auth\`.
-- After a successful login, navigate to the signed-in user's role landing route (e.g. \`/family/dashboard\`, \`/teacher/dashboard\`, \`/admin/...\`).
-- This is NOT an OAuth/Privy project: there is no \`PrivyProvider\` / \`LoginModal\` / \`usePrivyAuthBridge\`. Ignore any OAuth-specific guidance.`;
-
 const AUTH_IDENTITY_RULE = `**External identity vs database primary key (HARD RULE — applies because an OAuth provider is wired in):**
 \`ctx.state.user.id\` is the EXTERNAL provider id (Privy DID like \`did:privy:cmoir...\`, Clerk userId, Auth0 sub) — NOT your database row's primary key. The User row stores it as a SEPARATE column (typically \`privy_id\` / \`clerk_id\` / \`external_id\`); the DB primary key is an internal UUID.
 
@@ -425,8 +422,12 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `- The backend is the source of truth for both fields. On \`/api/users/me\` response, set local state from the response.`,
     `- \`AuthContext\` / auth store: read token from localStorage on mount, expose \`login(token, user?)\` / \`logout()\`. Never ship a no-op stub. When using a custom store + \`useSyncExternalStore\`, follow the snapshot caching pitfall above.`,
     ``,
+    // password-rbac auth guidance now lives as a codegen skill
+    // (.blueprint/skills/frontend/auth-password-rbac-login-page.md), injected
+    // via ctx.skillsBlock — so emit nothing inline for it here. OAuth / plain
+    // email fallbacks stay inline until they are migrated to skills too.
     hasPasswordRbacAuth(ctx)
-      ? FRONTEND_PASSWORD_RBAC_RULE
+      ? ""
       : hasAuthScaffold(ctx)
         ? FRONTEND_OAUTH_RULE
         : FRONTEND_EMAIL_AUTH_RULE,
@@ -441,7 +442,9 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildBackendPrompt(ctx: PromptContext): string {
@@ -491,7 +494,9 @@ function buildBackendPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -534,8 +539,12 @@ function buildFullstackPrompt(ctx: PromptContext): string {
     ``,
     HOOK_RETURN_TYPE_RULE,
     ``,
+    // password-rbac auth guidance now lives as a codegen skill
+    // (.blueprint/skills/frontend/auth-password-rbac-login-page.md), injected
+    // via ctx.skillsBlock — so emit nothing inline for it here. OAuth / plain
+    // email fallbacks stay inline until they are migrated to skills too.
     hasPasswordRbacAuth(ctx)
-      ? FRONTEND_PASSWORD_RBAC_RULE
+      ? ""
       : hasAuthScaffold(ctx)
         ? FRONTEND_OAUTH_RULE
         : FRONTEND_EMAIL_AUTH_RULE,
@@ -573,7 +582,9 @@ function buildFullstackPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildTestPrompt(): string {

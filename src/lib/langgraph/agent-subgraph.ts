@@ -70,6 +70,7 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { trimProjectContextForTask } from "./worker-context-trim";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
+import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
@@ -2895,10 +2896,35 @@ async function generateCode(state: WorkerState) {
     const fileHint = formatTaskFileHints(task.files);
 
     const promptContext = await loadPromptContext(state.outputDir);
+    // Codegen-role skills (.blueprint/skills/<role>/) — conditional guidance
+    // selected by project config (context triggers), injected via skillsBlock.
+    // Deterministic only (no LLM confirm) since this runs per worker invoke.
+    // NOTE: `promptContext` is cached per outputDir & shared across roles —
+    // never mutate it; build a per-role copy carrying this role's skillsBlock.
+    let roleContext = promptContext;
+    try {
+      const skillsLoaded = await loadSkillsForAgent(
+        {
+          agent: state.role,
+          prdContent: "",
+          trdContent: "",
+          appliedOptionalFeatures: promptContext.appliedOptionalFeatures,
+          declaredEnvKeys: promptContext.declaredEnvKeys,
+          flags: promptContext.flags,
+        },
+        { enableLlmConfirm: false },
+      );
+      const skillsBlock = formatAppliedSkills(skillsLoaded);
+      if (skillsBlock) roleContext = { ...promptContext, skillsBlock };
+    } catch (err) {
+      console.warn(
+        `[AgentSubgraph] skill load failed for role ${state.role} (ignored): ${err instanceof Error ? err.message : err}`,
+      );
+    }
     const messages: ChatMessage[] = [
       {
         role: "system",
-        content: buildRolePrompt(state.role, promptContext),
+        content: buildRolePrompt(state.role, roleContext),
       },
     ];
     if (contextParts.length > 0) {
