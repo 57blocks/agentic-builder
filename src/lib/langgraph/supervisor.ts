@@ -1788,14 +1788,27 @@ async function detectE2eCommand(
 
   const frontendDir = path.join(outputDir, "frontend");
   const pm = await detectPackageManager(frontendDir);
+  // Playwright browser binaries are NOT guaranteed present in the run env, and
+  // a missing browser fails EVERY test at launch with
+  // "browserType.launch: Executable doesn't exist" — an environment gap the
+  // e2e auto-fix can't repair, so the session stalls at e2e forever. Always
+  // install first. `playwright install` (no browser arg) is idempotent and
+  // covers ALL browsers the config's `projects` may use (chromium/firefox/
+  // webkit) — the scaffold's own `e2e` script only installs chromium, so a
+  // config that also runs firefox still fails without this.
+  const installBrowsers = "npx playwright install";
   if (scripts.e2e) {
-    const command =
+    const runE2e =
       pm === "pnpm"
-        ? "pnpm run e2e 2>&1"
+        ? "pnpm run e2e"
         : pm === "yarn"
-          ? "yarn run e2e 2>&1"
-          : "npm run e2e 2>&1";
-    return { command, cwd: frontendDir, label: "frontend:e2e-script" };
+          ? "yarn run e2e"
+          : "npm run e2e";
+    return {
+      command: `${installBrowsers} && ${runE2e} 2>&1`,
+      cwd: frontendDir,
+      label: "frontend:e2e-script",
+    };
   }
 
   const hasPlaywrightConfig = !(
@@ -1803,7 +1816,7 @@ async function detectE2eCommand(
   ).startsWith("FILE_NOT_FOUND");
   if (hasPlaywrightConfig) {
     return {
-      command: "npx playwright test 2>&1",
+      command: `${installBrowsers} && npx playwright test 2>&1`,
       cwd: frontendDir,
       label: "frontend:playwright",
     };
@@ -2471,13 +2484,28 @@ Each element has this shape:
   "service": "string (service or module name, e.g. auth, orders, users)",
   "endpoint": "string (path with leading slash, e.g. /api/users/:id)",
   "method": "GET|POST|PUT|PATCH|DELETE",
-  "requestSchema": "string (TypeScript type literal for request body/params, or 'none')",
-  "responseSchema": "string (TypeScript type literal for success response body)",
+  "requestType": "string (EXACT request interface name from the Shared schema, or 'none')",
+  "responseType": "string (EXACT success-response interface name from the Shared schema)",
+  "requestSchema": "string (the body of the named request type, copied VERBATIM from the Shared schema, or 'none')",
+  "responseSchema": "string (the body of the named response type, copied VERBATIM from the Shared schema)",
   "auth": "none|bearer|session",
   "description": "string (one sentence)",
   "prdJustification": "string (verbatim PRD line/section that justifies this endpoint)",
   "audience": "user|admin"
 }
+
+## CRITICAL: shapes come from the Shared schema (HARD RULE — read first)
+
+A "## Shared schema (SOURCE OF TRUTH)" section is provided in the context (the TRD's
+\`shared-schema.ts\`, including an \`ENDPOINTS\` registry mapping "METHOD /path" → type names).
+The schema is the ONLY authority for request/response SHAPES. For every endpoint:
+  - Set \`requestType\` / \`responseType\` to the EXACT interface name from that schema
+    (use its \`ENDPOINTS\` registry to pick the right names).
+  - \`requestSchema\` / \`responseSchema\` MUST be the body of that named interface copied
+    VERBATIM from the schema — do NOT invent, paraphrase, rename fields, or change casing.
+  - If an endpoint needs a type that is MISSING from the schema, still set \`responseType\`
+    to the name it SHOULD have and put "MISSING_FROM_SCHEMA" at the start of \`description\`
+    (so the contract-owner can add it to the schema) — never fabricate a shape inline.
 
 ## CRITICAL: Contract scope rule (HARD RULE — read first)
 
@@ -2610,6 +2638,17 @@ async function generateApiContracts(state: SupervisorState) {
     .map((t) => `- ${t.title}: ${t.description.slice(0, 200)}`)
     .join("\n");
   contextParts.push(`## Backend tasks to implement\n${taskList}`);
+
+  // The TRD shared schema is the SOURCE OF TRUTH for shapes. Inject it so the
+  // contract REFERENCES its exact type names (via the ENDPOINTS registry) instead
+  // of independently re-authoring request/response shapes (the #1 cause of
+  // frontend↔backend contract drift). See docs/contract-single-source-of-truth.md.
+  const canonicalSchema = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
+  if (!canonicalSchema.startsWith("FILE_NOT_FOUND") && canonicalSchema.trim()) {
+    contextParts.push(
+      `## Shared schema (SOURCE OF TRUTH — reference these EXACT type names; do NOT re-author shapes)\n\`\`\`typescript\n${canonicalSchema.slice(0, 12000)}\n\`\`\``,
+    );
+  }
 
   const contractModelChain = resolveCodingChain(
     state.codingMode,
