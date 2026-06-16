@@ -1,0 +1,65 @@
+/**
+ * Design-system semantic tokens (Tailwind v4 @theme).
+ *
+ * This file is PRE-WIRED: `frontend/src/index.css` already does
+ * `@import "./styles/tokens.css";`, so every `bg-primary` / `text-secondary`
+ * / `bg-surface` / `rounded-md` utility below resolves out of the box.
+ *
+ * The frontend Foundation task REPLACES the palette below with the values
+ * derived from the project's DesignSpec. Keep the `@theme` block and the
+ * `--color-*` / `--radius-*` naming — downstream pages depend on these class
+ * names. The values here are a neutral fallback so the app is themed even if
+ * the Foundation task has not run yet.
+ *
+ * HARD RULE for pages: use these semantic utilities (bg-primary, text-muted,
+ * rounded-md). Inline arbitrary hex (bg-[#7d976b]) is FORBIDDEN — it causes
+ * cross-page colour drift.
+ */
+@theme {
+  /* ── Core palette (neutral fallback — Foundation overrides) ─────────── */
+  --color-primary: #4f6670;
+  --color-primary-light: #dbe4e8;
+  --color-primary-dark: #3a4d56;
+  --color-primary-ink: #ffffff;
+
+  --color-secondary: #6f8c96;
+  --color-secondary-light: #d8e4e8;
+  --color-secondary-dark: #58717a;
+
+  --color-accent: #b5713f;
+  --color-accent-light: #f0d8c4;
+  --color-accent-dark: #8f5730;
+
+  /* ── Surfaces & background ──────────────────────────────────────────── */
+  --color-bg: #f4f6f8;
+  --color-bg-subtle: #fbfcfd;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f3f6f8;
+  --color-surface-tint: #eef3f6;
+
+  --color-border: #d7dde2;
+  --color-border-strong: #bcc6cd;
+
+  /* ── Text ───────────────────────────────────────────────────────────── */
+  --color-text-primary: #1f2a30;
+  --color-text-secondary: #4d5a62;
+  --color-text-muted: #8a949b;
+  --color-text-inverse: #ffffff;
+
+  /* ── Status ─────────────────────────────────────────────────────────── */
+  --color-status-success: #4f7a52;
+  --color-status-success-bg: #e7f1e6;
+  --color-status-warning: #9a6a1f;
+  --color-status-warning-bg: #f7ecd6;
+  --color-status-error: #a4453a;
+  --color-status-error-bg: #f7e2df;
+  --color-status-info: #4f6670;
+  --color-status-info-bg: #e6eef1;
+
+  /* ── Radii ──────────────────────────────────────────────────────────── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+}

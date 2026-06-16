@@ -81,11 +81,15 @@ const FOUNDATION_DESCRIPTION = [
   "page reuses one visual language instead of re-deriving it.",
   "",
   "Deliverables:",
-  `  1. Semantic design tokens in \`${TOKENS_FILE}\` (imported by \`${INDEX_CSS}\`):`,
-  "     map the SELECTED DesignSpec palette/spacing/typography to named tokens",
-  "     (--color-primary, --color-surface, --radius-md, --space-*, font scale)",
-  "     and expose them to Tailwind (@theme / theme.extend) as bg-primary,",
-  "     text-muted, rounded-md, etc.",
+  `  1. Semantic design tokens in \`${TOKENS_FILE}\`. This file ALREADY EXISTS`,
+  `     (scaffold stub) and is ALREADY imported by \`${INDEX_CSS}\` via`,
+  `     \`@import "./styles/tokens.css";\` — you do NOT need to touch ${INDEX_CSS}.`,
+  "     REPLACE the stub's `@theme { … }` block with tokens mapped from the",
+  "     SELECTED DesignSpec palette/spacing/typography (--color-primary,",
+  "     --color-surface, --radius-md, --space-*, font scale) so Tailwind",
+  "     exposes them as bg-primary, text-muted, rounded-md, etc. KEEP the",
+  "     `@theme` wrapper and the `--color-*` / `--radius-*` naming — downstream",
+  "     pages depend on these exact class names.",
   "  2. Shared UI primitives in `frontend/src/components/ui/` (Button, Card,",
   "     Input, Select, Textarea, Badge, Table, Modal, EmptyState, Spinner) that",
   "     consume ONLY the tokens above, re-exported from the `index.ts` barrel.",
@@ -189,7 +193,11 @@ export function ensureFrontendFoundationTask(
         priority: "P0",
         files: {
           creates: uniq([...hostCreates, ...foundationCreates]),
-          modifies: uniq([...hostModifies, INDEX_CSS]),
+          // index.css is NOT modified here: the scaffold pre-wires
+          // `@import "./styles/tokens.css";`, and tokens.css is in `creates`.
+          // Keeping index.css out of the plan prevents a worker rewrite from
+          // dropping the import edge (the music-school dead-theme failure).
+          modifies: uniq(hostModifies),
           reads: getReads(t),
         },
       };
@@ -209,7 +217,9 @@ export function ensureFrontendFoundationTask(
       files: {
         // Guarantee the shell anchor files exist even if none were owned.
         creates: uniq([...foundationCreates, ...SHELL_FILES]),
-        modifies: [INDEX_CSS],
+        // index.css intentionally omitted — scaffold pre-wires the
+        // `@import "./styles/tokens.css";` edge; tokens.css is in `creates`.
+        modifies: [],
         reads: [],
       },
     };

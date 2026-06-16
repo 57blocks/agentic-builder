@@ -174,8 +174,33 @@ function normalisePath(p: string): string {
   return noLead.split(path.sep).join("/");
 }
 
+/**
+ * Strip the project-root prefix that diverges between the task-breakdown's
+ * plan ("src/components/X.tsx") and what the worker actually writes to disk
+ * ("frontend/src/components/X.tsx" for the M-tier layout). Without this,
+ * a correctly-written file is reported as `missingCreates` and the codeFix
+ * step re-writes it at the WRONG (plan) path, producing two copies and
+ * dropping the vision context. Keep mirrored with the same regex used in
+ * `agent-subgraph.ts:getRemainingPlannedCreates`.
+ */
+function stripTierPrefix(p: string): string {
+  return p.replace(
+    /^(frontend|backend|apps\/web|apps\/api|packages\/[^/]+)\//,
+    "",
+  );
+}
+
 function matchesAny(pattern: string, generatedSet: Set<string>): boolean {
   if (generatedSet.has(pattern)) return true;
+  // Fuzzy match: a plan path "src/components/X.tsx" is considered satisfied
+  // by a write to "frontend/src/components/X.tsx" (and vice versa). Same
+  // semantics as the worker tool loop's `getRemainingPlannedCreates` — keeps
+  // the two verifiers from disagreeing about whether the task wrote the
+  // planned files.
+  const patternStripped = stripTierPrefix(pattern);
+  for (const g of generatedSet) {
+    if (stripTierPrefix(g) === patternStripped) return true;
+  }
   // Plain equality failed — try a glob match if the pattern contains wildcards.
   if (!pattern.includes("*")) return false;
   // Reject a `**/*`-style wildcard that matches everything — too loose to be
