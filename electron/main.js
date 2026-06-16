@@ -97,6 +97,15 @@ const LOGIN_URL_PATTERN = /\b(login|log-in|signin|sign-in|sso|oauth|authenticate
 // presses the manual "I've logged in — capture now" fallback button.
 let manualCaptureResolve = null;
 
+// Token extraction script — runs in the rendered reference page.
+//   (1) Scrapes \`--*\` custom properties from every accessible stylesheet
+//       (skips cross-origin sheets that throw on cssRules access).
+//   (2) Samples computed styles from a handful of anchor elements
+//       (h1/h2/h3/body/p/button + first card-shaped element) and emits
+//       them as \`--computed-*\` tokens. These give the coding agent NUMERIC
+//       anchors for font-size / line-height / padding / radius — dimensions
+//       the model cannot reliably eyeball from a static screenshot.
+//   (3) Returns body-level summary for legacy callers.
 const TOKEN_EXTRACT_SCRIPT = `(() => {
   const vars = {};
   for (const sheet of Array.from(document.styleSheets)) {
@@ -110,6 +119,40 @@ const TOKEN_EXTRACT_SCRIPT = `(() => {
       }
     }
   }
+
+  // ── Sample computed styles from anchor elements ──────────────────────────
+  // Each entry: [tokenPrefix, selector, properties[]]. Selectors are
+  // best-effort — when the document has no matching element we just skip
+  // the entry. The chosen properties are the ones a coding agent most
+  // commonly has to guess from the screenshot.
+  const ANCHORS = [
+    ['h1',      'h1',                                ['font-size','line-height','font-weight','font-family','letter-spacing']],
+    ['h2',      'h2',                                ['font-size','line-height','font-weight','font-family']],
+    ['h3',      'h3',                                ['font-size','line-height','font-weight']],
+    ['body',    'body',                              ['font-size','line-height','font-family','background-color','color']],
+    ['p',       'p',                                 ['font-size','line-height']],
+    ['button',  'button, [role="button"]',           ['font-size','line-height','padding','border-radius','font-weight']],
+    ['input',   'input:not([type="hidden"]), select, textarea', ['font-size','line-height','padding','border-radius']],
+    ['card',    '[class*="card" i], [data-testid*="card" i], article', ['padding','border-radius','box-shadow','gap']],
+    ['nav',     'nav, header',                       ['padding','height','font-size']],
+  ];
+  for (const [prefix, selector, props] of ANCHORS) {
+    let el = null;
+    try { el = document.querySelector(selector); } catch (e) { /* malformed selector */ }
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    for (const p of props) {
+      const v = cs.getPropertyValue(p);
+      if (!v) continue;
+      const trimmed = String(v).trim();
+      if (!trimmed) continue;
+      // Skip default/uninteresting values that would just add noise.
+      if (trimmed === 'normal' || trimmed === 'none' || trimmed === 'auto') continue;
+      if (trimmed === 'rgba(0, 0, 0, 0)' || trimmed === 'transparent') continue;
+      vars['--computed-' + prefix + '-' + p] = trimmed;
+    }
+  }
+
   const b = getComputedStyle(document.body);
   return JSON.stringify({
     cssVars: vars,

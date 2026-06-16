@@ -74,7 +74,7 @@ export const DEFAULT_WORKER_CONTEXT_BUDGET_CHARS = (() => {
  * "error handling" in passing.
  */
 const ALWAYS_KEEP_HEADING_RE =
-  /\b(common|shared|glossary|convention|conventions|data format|data formats|data model|data models|error handling|env|environment|env vars|environment vars|design token|design tokens|api contract|api contracts|shared ui|ui rules|theme|theming|color|colors|typography|spacing|layout rules|routing|navigation|auth|authentication|authorization|credentials|credentials \(env vars\)|external resources)\b/i;
+  /\b(common|shared|glossary|convention|conventions|data format|data formats|data model|data models|error handling|env|environment|env vars|environment vars|design token|design tokens|design specification|design references|design spec|stitch ui|stitch|pencil design|pencil|codegen handoff|prd|pages? & screens?|pages? and screens?|pages?|screens?|interactive components?|user flows?|acceptance criteria|acceptance|core features|technical constraints|scaffold specification|scaffold spec|e2e spec|api contract|api contracts|shared ui|ui rules|theme|theming|color|colors|typography|spacing|layout rules|routing|navigation|auth|authentication|authorization|credentials|credentials \(env vars\)|external resources)\b/i;
 
 /**
  * Extract heuristic keywords from a task's title + description. Used as

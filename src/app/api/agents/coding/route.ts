@@ -51,6 +51,7 @@ import {
   databaseUrlFrom,
   redisUrlFrom,
 } from "@/lib/pipeline/kickoff-infra";
+import { recoverFromCrashedTddNeutralization } from "@/lib/pipeline/tdd-runtime-executor";
 import {
   readResourceRequirements,
   upsertResourceEnvVars,
@@ -1656,6 +1657,12 @@ export async function POST(request: NextRequest) {
   // Always ensure backend/.env has JWT_SECRET (and DATABASE_URL if available).
   const backendEnvPath = path.join(outputRoot, "backend", ".env");
   try {
+    // Heal before reading: a prior TDD run that was killed mid-blank leaves
+    // backend/.env with `DATABASE_URL=` (empty) and a `.tdd-bak` sentinel next
+    // to it. Restore the sentinel before we re-read, otherwise `upsert` below
+    // would see only the blanked value and (if `effectiveDbUrl` is also null)
+    // happily persist `DATABASE_URL=` forever.
+    await recoverFromCrashedTddNeutralization(outputRoot).catch(() => {});
     const existingBackendEnv = await fs
       .readFile(backendEnvPath, "utf-8")
       .catch(() => "");
