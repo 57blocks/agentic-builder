@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     screenshotDataUrl?: string;
     cssToken?: Record<string, string>;
     pageHint?: string;
+    projectId?: string;
   };
   try {
     body = await request.json();
@@ -33,6 +34,11 @@ export async function POST(request: NextRequest) {
   }
 
   const { url, screenshotDataUrl, cssToken, pageHint } = body;
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") ||
+    (typeof body.projectId === "string" && body.projectId
+      ? body.projectId
+      : undefined);
 
   if (!screenshotDataUrl || typeof screenshotDataUrl !== "string") {
     return NextResponse.json(
@@ -69,6 +75,7 @@ export async function POST(request: NextRequest) {
     source: "url",
     matchedBy: isManual ? "manual" : "auto",
     cssToken: cssToken && typeof cssToken === "object" ? cssToken : undefined,
+    projectId,
   });
 
   if (!result.ok) {

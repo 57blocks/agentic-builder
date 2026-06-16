@@ -342,7 +342,7 @@ export function IntentUI(props: StepUIProps) {
     const resp = await fetch("/api/agents/intent-recheck", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ brief, conversationHistory: history }),
+      body: JSON.stringify({ brief, conversationHistory: history, projectId: props.projectSlug }),
     });
     if (!resp.ok || !resp.body) return null;
 

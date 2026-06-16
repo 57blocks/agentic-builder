@@ -2,10 +2,8 @@ import {
   chatCompletion,
   resolveModel,
   estimateCost,
-  openRouterVisionChatCompletion,
   type ChatMessage,
 } from "@/lib/openrouter";
-import type { VisionContentPart, VisionChatMessage } from "@/lib/llm-types";
 import { MODEL_CONFIG } from "@/lib/model-config";
 
 import { PRD_DIMENSIONS } from "./gap-checklist";
@@ -145,73 +143,31 @@ interface ParsedIntent {
   extras: ClarificationQuestion[];
 }
 
-/** A reference screenshot of the target UI, fed to the vision pass so the intent
- *  agent can extract functional requirements visible in the image. */
-export interface PrdIntentImage {
-  dataUrl: string;
-  label?: string;
-  pageHint?: string;
-}
-
 export interface GeneratePrdIntentOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
-  /** Optional reference screenshots. When present the intent pass runs on a
-   *  vision-capable model and summarizes functional requirements from them. */
-  images?: PrdIntentImage[];
 }
 
 export async function generatePrdIntent(
   featureBrief: string,
   opts: GeneratePrdIntentOptions = {},
 ): Promise<IntentResult> {
-  const images = opts.images ?? [];
-  const hasImages = images.length > 0;
+  const model = resolveModel(opts.model ?? MODEL_CONFIG.intent);
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: buildUserMessage(featureBrief) },
+  ];
+
   const startMs = Date.now();
-
-  // Larger budget — v2 prompt emits 25+ per-concept drill-down questions
-  // in addition to the coverage pass, so headroom matters.
-  const maxTokens = opts.maxTokens ?? 16384;
-  const temperature = opts.temperature ?? 0.2;
-
-  let response;
-  if (hasImages) {
-    // Vision pass: derive functional requirements from the uploaded screenshots,
-    // on the same vision-capable model the Design stage uses. (The vision
-    // endpoint does not accept response_format, so the prompt enforces JSON and
-    // parseIntentResponse tolerantly extracts it.)
-    const visionModel = resolveModel(opts.model ?? MODEL_CONFIG.design);
-    const parts: VisionContentPart[] = [
-      { type: "text", text: buildUserMessage(featureBrief, images.length) },
-    ];
-    for (const img of images) {
-      const caption = img.label ?? img.pageHint;
-      if (caption) parts.push({ type: "text", text: `Reference screenshot: ${caption}` });
-      parts.push({ type: "image_url", image_url: { url: img.dataUrl, detail: "high" } });
-    }
-    const messages: VisionChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: parts },
-    ];
-    response = await openRouterVisionChatCompletion(messages, {
-      model: visionModel,
-      temperature,
-      max_tokens: maxTokens,
-    });
-  } else {
-    const model = resolveModel(opts.model ?? MODEL_CONFIG.intent);
-    const messages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserMessage(featureBrief) },
-    ];
-    response = await chatCompletion(messages, {
-      model,
-      temperature,
-      max_tokens: maxTokens,
-      response_format: { type: "json_object" },
-    });
-  }
+  const response = await chatCompletion(messages, {
+    model,
+    temperature: opts.temperature ?? 0.2,
+    // Larger budget — v2 prompt emits 25+ per-concept drill-down questions
+    // in addition to the coverage pass, so headroom matters.
+    max_tokens: opts.maxTokens ?? 16384,
+    response_format: { type: "json_object" },
+  });
   const durationMs = Date.now() - startMs;
 
   const raw = response.choices[0]?.message?.content ?? "";
@@ -230,23 +186,14 @@ export async function generatePrdIntent(
   };
 }
 
-function buildUserMessage(featureBrief: string, imageCount = 0): string {
+function buildUserMessage(featureBrief: string): string {
   const dimList = PRD_DIMENSIONS.map(
     (d) => `- ${d.id} (${d.category} → ${d.title}): ${d.llmHint}`,
   ).join("\n");
 
-  const visionBlock =
-    imageCount > 0
-      ? `
-
-## Reference screenshots (${imageCount})
-
-The user attached ${imageCount} screenshot(s) of the target UI. Extract the FUNCTIONAL requirements they reveal — screens/pages, components, fields, actions/buttons, visible states, and any flows implied by navigation between screens — and fold them into your coverage assessment above. Treat the screenshots as evidence to ENRICH and CROSS-CHECK the feature brief; describe only what is visibly present. Do NOT invent flows, fields, or entities that are not shown.`
-      : "";
-
   return `## Feature brief
 
-${featureBrief.trim()}${visionBlock}
+${featureBrief.trim()}
 
 ## Coverage dimensions to evaluate (use these exact ids in "dimensionId")
 

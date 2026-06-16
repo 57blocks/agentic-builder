@@ -8,6 +8,7 @@ import {
 import { detectRequiredServices } from "./detect";
 import { provisionDatabase } from "./database";
 import { provisionRedis } from "./redis";
+import { provisionAppS3, readSharedS3Config } from "./s3";
 import type {
   InfraServiceInfo,
   KickoffInfraFile,
@@ -70,19 +71,7 @@ export async function provisionInfra(
 ): Promise<ProvisionInfraResult> {
   const baseUrl = process.env.DOKPLOY_URL?.trim();
   const token = process.env.DOKPLOY_TOKEN?.trim();
-  if (!baseUrl || !token) {
-    return {
-      ok: false,
-      skipped: true,
-      skipReason: "DOKPLOY_URL / DOKPLOY_TOKEN not set",
-      metadata: null,
-      markdownLines: [
-        "### Infra",
-        "_Skipped — set `DOKPLOY_URL` + `DOKPLOY_TOKEN` to provision per-app Postgres / Redis._",
-        "",
-      ],
-    };
-  }
+  const dokployConfigured = !!baseUrl && !!token;
 
   const detection = await detectRequiredServices(input.designDocs);
   const required = detection.services;
@@ -90,7 +79,8 @@ export async function provisionInfra(
     detection.source === "llm"
       ? `LLM${detection.costUsd ? ` $${detection.costUsd.toFixed(4)}` : ""}`
       : `regex${detection.fallbackReason ? ` (LLM fallback: ${detection.fallbackReason})` : ""}`;
-  if (!required.needsPostgres && !required.needsRedis) {
+
+  if (!required.needsPostgres && !required.needsRedis && !required.needsS3) {
     return {
       ok: true,
       skipped: true,
@@ -98,82 +88,113 @@ export async function provisionInfra(
       metadata: null,
       markdownLines: [
         "### Infra",
-        `_No managed services detected (${detectionTag}) — skipped Dokploy provisioning._`,
+        `_No managed services detected (${detectionTag}) — skipped provisioning._`,
         "",
       ],
     };
   }
 
-  const base: DokployBase = { baseUrl, token };
-  const portBase = Number(process.env.DOKPLOY_PORT_BASE ?? "");
-  const portBaseResolved =
-    Number.isFinite(portBase) && portBase > 0 ? portBase : undefined;
-  const publicHost = derivePublicHost(baseUrl);
-
+  // Postgres/Redis live in a per-app Dokploy project; S3 is a shared bucket and
+  // needs no Dokploy at all. When only S3 is needed (or Dokploy isn't
+  // configured) we still provision S3 and skip the Dokploy services.
+  const needsDokploy = required.needsPostgres || required.needsRedis;
+  const detectedLabel = [
+    required.needsPostgres && "postgres",
+    required.needsRedis && "redis",
+    required.needsS3 && "s3",
+  ]
+    .filter(Boolean)
+    .join(" + ");
   const lines: string[] = [
-    "### Infra (Dokploy managed services)",
-    `- Service detection: ${detectionTag} → ${[
-      required.needsPostgres && "postgres",
-      required.needsRedis && "redis",
-    ]
-      .filter(Boolean)
-      .join(" + ")}`,
+    "### Infra (managed services)",
+    `- Service detection: ${detectionTag} → ${detectedLabel}`,
   ];
 
-  let project;
-  try {
-    project = await createAppDokployProject({ base, appName: input.appName });
-    lines.push(`- Created Dokploy project \`${project.projectName}\` (id: \`${project.projectId}\`)`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return {
-      ok: false,
-      error: msg,
-      metadata: null,
-      markdownLines: [...lines, `- ❌ Failed to create Dokploy project: ${msg}`, ""],
-    };
-  }
-
-  const tasks: Promise<InfraServiceInfo>[] = [];
-  if (required.needsPostgres) {
-    tasks.push(
-      provisionDatabase({
-        base,
-        project,
-        appName: input.appName,
-        publicHost,
-        portBase: portBaseResolved,
-      }),
-    );
-  }
-  if (required.needsRedis) {
-    tasks.push(
-      provisionRedis({
-        base,
-        project,
-        appName: input.appName,
-        publicHost,
-        portBase: portBaseResolved,
-      }),
-    );
-  }
-
-  const settled = await Promise.allSettled(tasks);
   const services: InfraServiceInfo[] = [];
   const errors: string[] = [];
-  for (const r of settled) {
-    if (r.status === "fulfilled") {
-      services.push(r.value);
-    } else {
-      errors.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+
+  // ── S3 (shared bucket, per-app folder) — Dokploy-independent ──────────────
+  if (required.needsS3) {
+    try {
+      if (!readSharedS3Config()) {
+        lines.push(
+          "- ⚠️ S3 detected but skipped — set `BLUEPRINT_S3_BUCKET` (+ credentials) to enable shared-bucket provisioning.",
+        );
+      } else {
+        const s3 = provisionAppS3({ appName: input.appName });
+        services.push(s3);
+        lines.push(`- Provisioned s3 folder \`${s3.publicUrl}\``);
+      }
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
     }
   }
 
-  for (const svc of services) {
-    lines.push(
-      `- Provisioned ${svc.kind} \`${svc.appName}\` on port ${svc.externalPort}`,
-    );
+  // ── Postgres / Redis (per-app Dokploy containers) ─────────────────────────
+  let project: Awaited<ReturnType<typeof createAppDokployProject>> | null = null;
+  if (needsDokploy) {
+    if (!dokployConfigured) {
+      lines.push(
+        "- ⚠️ Postgres/Redis detected but skipped — set `DOKPLOY_URL` + `DOKPLOY_TOKEN` to provision them.",
+      );
+    } else {
+      const base: DokployBase = { baseUrl, token };
+      const portBase = Number(process.env.DOKPLOY_PORT_BASE ?? "");
+      const portBaseResolved =
+        Number.isFinite(portBase) && portBase > 0 ? portBase : undefined;
+      const publicHost = derivePublicHost(baseUrl);
+
+      try {
+        project = await createAppDokployProject({ base, appName: input.appName });
+        lines.push(
+          `- Created Dokploy project \`${project.projectName}\` (id: \`${project.projectId}\`)`,
+        );
+
+        const tasks: Promise<InfraServiceInfo>[] = [];
+        if (required.needsPostgres) {
+          tasks.push(
+            provisionDatabase({
+              base,
+              project,
+              appName: input.appName,
+              publicHost,
+              portBase: portBaseResolved,
+            }),
+          );
+        }
+        if (required.needsRedis) {
+          tasks.push(
+            provisionRedis({
+              base,
+              project,
+              appName: input.appName,
+              publicHost,
+              portBase: portBaseResolved,
+            }),
+          );
+        }
+
+        const settled = await Promise.allSettled(tasks);
+        for (const r of settled) {
+          if (r.status === "fulfilled") {
+            services.push(r.value);
+            lines.push(
+              `- Provisioned ${r.value.kind} \`${r.value.appName}\` on port ${r.value.externalPort}`,
+            );
+          } else {
+            errors.push(
+              r.reason instanceof Error ? r.reason.message : String(r.reason),
+            );
+          }
+        }
+      } catch (e) {
+        errors.push(
+          `Failed to create Dokploy project: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
   }
+
   for (const err of errors) {
     lines.push(`- ❌ Provision failure: ${err}`);
   }
@@ -189,9 +210,12 @@ export async function provisionInfra(
   }
 
   const metadata = await saveKickoffInfraMetadata(input.projectRoot, {
-    dokployProjectId: project.projectId,
-    dokployEnvironmentId: project.environmentId,
-    appName: project.projectName,
+    // S3-only runs have no Dokploy project; empty strings make the deploy
+    // pipeline create a fresh project on first deploy (it treats falsy as
+    // "none yet"), which is exactly the desired behaviour.
+    dokployProjectId: project?.projectId ?? "",
+    dokployEnvironmentId: project?.environmentId ?? "",
+    appName: project?.projectName ?? input.appName,
     services,
   });
   return {
@@ -224,6 +248,19 @@ export function internalRedisUrlFrom(
 ): string | null {
   if (!meta) return null;
   return urlForKind(meta.services, "redis")?.internalUrl ?? null;
+}
+
+/**
+ * The S3 credential bundle (bucket, region, keys, per-app prefix) the generated
+ * app needs in its `.env`. Returns null when no S3 service was provisioned.
+ * S3 access is identical from local dev and inside the deployed container, so
+ * there's no public/internal split like Postgres/Redis have.
+ */
+export function s3EnvFrom(
+  meta: KickoffInfraFile | null,
+): Record<string, string> | null {
+  if (!meta) return null;
+  return urlForKind(meta.services, "s3")?.env ?? null;
 }
 
 /**

@@ -24,6 +24,41 @@ export function resolveScaffoldTier(
   return scopeTier;
 }
 
+/**
+ * Ordered scaffold source directories (relative to `scaffolds/`) for a tier.
+ * Later layers OVERLAY earlier ones (overwrite on conflict).
+ *
+ * L is composed as **M base + L overlay**: the L scaffold is the M scaffold
+ * plus a handful of production layers (background-job queue + workers, pino
+ * logger, request-logger + rate-limit middlewares, redis docker-compose) and
+ * the few wiring files those layers touch (`server.ts`, `app.ts`, `env.ts`,
+ * `errorHandler.ts`, …). Keeping the shared base in ONE place (`m-tier`)
+ * removes the M↔L file drift that two full copies accumulate. `l-tier`
+ * therefore holds only the **delta** over M, not a full copy.
+ */
+export function scaffoldLayerDirsForTier(tier: ScaffoldTier): string[] {
+  if (tier === "L") return ["m-tier", "l-tier"];
+  return [`${tier.toLowerCase()}-tier`];
+}
+
+/**
+ * When a layer is a BASE *under* an overlay (i.e. not the final layer of a
+ * multi-layer tier), these paths are NOT contributed by it — the overlay
+ * layer owns them authoritatively:
+ *   - `_optional/**` — each tier ships its own optional packs authored against
+ *     that tier's base wiring; the overlay's `_optional/` is the correct one.
+ *   - concrete `.env` files — environment-specific and never inherited across
+ *     tiers (the overlay supplies its own `.env.example`).
+ * Applied ONLY to base-under-overlay layers, so single-layer tiers (S/M) keep
+ * their `_optional/` and any `.env` exactly as before.
+ */
+function isExcludedFromBaseLayer(relPath: string): boolean {
+  const rel = relPath.split(path.sep).join("/");
+  if (rel === "_optional" || rel.startsWith("_optional/")) return true;
+  if (rel === "backend/.env" || rel === "frontend/.env") return true;
+  return false;
+}
+
 /** Never copy dependency trees or VCS — pnpm workspace symlinks break fs.copyFile (ENOTSUP). */
 const SKIP_DIR_NAMES = new Set([
   "node_modules",
@@ -132,8 +167,7 @@ export async function copyScaffold(
   },
 ): Promise<CopyScaffoldResult> {
   const forceOverwrite = options?.forceOverwrite ?? false;
-  const tierDir = tier.toLowerCase() + "-tier";
-  const scaffoldRoot = path.resolve(process.cwd(), "scaffolds", tierDir);
+  const layers = scaffoldLayerDirsForTier(tier);
 
   const emptyOptional: CopyOptionalScaffoldsResult = {
     applied: [],
@@ -143,11 +177,18 @@ export async function copyScaffold(
     manifestFound: false,
   };
 
+  // The tier's OWN dir is the final layer; if it's absent the tier has no
+  // scaffold at all (preserves prior "no scaffold for tier" behaviour).
+  const ownRoot = path.resolve(
+    process.cwd(),
+    "scaffolds",
+    layers[layers.length - 1],
+  );
   try {
-    await fs.access(scaffoldRoot);
+    await fs.access(ownRoot);
   } catch {
     console.warn(
-      `[Scaffold] No scaffold found for tier ${tier} at ${scaffoldRoot}, skipping.`,
+      `[Scaffold] No scaffold found for tier ${tier} at ${ownRoot}, skipping.`,
     );
     return { copied: [], skipped: [], optional: emptyOptional };
   }
@@ -155,17 +196,38 @@ export async function copyScaffold(
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  await copyDir(
-    scaffoldRoot,
-    outputDir,
-    scaffoldRoot,
-    copied,
-    skipped,
-    forceOverwrite,
-  );
+  for (let i = 0; i < layers.length; i++) {
+    const layerRoot = path.resolve(process.cwd(), "scaffolds", layers[i]);
+    try {
+      await fs.access(layerRoot);
+    } catch {
+      console.warn(
+        `[Scaffold] Tier ${tier}: layer ${layers[i]} missing at ${layerRoot}, skipping layer.`,
+      );
+      continue;
+    }
+    const isBaseUnderOverlay = i < layers.length - 1;
+    await copyDir(
+      layerRoot,
+      outputDir,
+      layerRoot,
+      copied,
+      skipped,
+      // Overlay layers MUST win over files laid down by earlier layers in this
+      // same call, so they always overwrite regardless of `forceOverwrite`.
+      i === 0 ? forceOverwrite : true,
+      isBaseUnderOverlay ? isExcludedFromBaseLayer : undefined,
+    );
+  }
+
+  // A file written by both the base and the overlay layer appears twice in
+  // `copied`; collapse to the true set of distinct destination files written.
+  const copiedUnique = [...new Set(copied)];
+  copied.length = 0;
+  copied.push(...copiedUnique);
 
   console.log(
-    `[Scaffold] Tier ${tier}: copied ${copied.length} file(s), skipped ${skipped.length} existing file(s).`,
+    `[Scaffold] Tier ${tier} (${layers.join(" + ")}): copied ${copied.length} file(s), skipped ${skipped.length} existing file(s).`,
   );
 
   // ── Phase 2: optional-feature layer (CODEGEN_HARDENING_PLAN.md §4.10) ──
@@ -215,11 +277,18 @@ export async function copyScaffold(
 export async function listScaffoldTemplateRelativePaths(
   tier: ScaffoldTier,
 ): Promise<string[]> {
-  const tierDir = tier.toLowerCase() + "-tier";
-  const scaffoldRoot = path.resolve(process.cwd(), "scaffolds", tierDir);
-  const paths: string[] = [];
+  const layers = scaffoldLayerDirsForTier(tier);
+  // Union across layers (dedupe): a path defined by both the base and the
+  // overlay is the same destination file, listed once. Mirrors the copy
+  // composition so the task-breakdown prompt sees exactly the files the
+  // generated project will contain.
+  const seen = new Set<string>();
 
-  async function walk(srcDir: string, rootDir: string): Promise<void> {
+  async function walk(
+    srcDir: string,
+    rootDir: string,
+    exclude?: (relPath: string) => boolean,
+  ): Promise<void> {
     let entries;
     try {
       entries = await fs.readdir(srcDir, { withFileTypes: true });
@@ -231,6 +300,7 @@ export async function listScaffoldTemplateRelativePaths(
       const relPath = path.relative(rootDir, srcPath);
 
       if (SKIP_DIR_NAMES.has(entry.name)) continue;
+      if (exclude?.(relPath)) continue;
       if (entry.isSymbolicLink()) continue;
       if (
         entry.isBlockDevice?.() ||
@@ -242,26 +312,33 @@ export async function listScaffoldTemplateRelativePaths(
       }
 
       if (entry.isDirectory()) {
-        await walk(srcPath, rootDir);
+        await walk(srcPath, rootDir, exclude);
       } else if (entry.isFile()) {
         const normalizedRel = relPath.split(path.sep).join("/");
         if (UNPROTECTED_SCAFFOLD_PATHS.has(normalizedRel)) {
           continue;
         }
-        paths.push(normalizedRel);
+        seen.add(normalizedRel);
       }
     }
   }
 
-  try {
-    await fs.access(scaffoldRoot);
-  } catch {
-    return [];
+  for (let i = 0; i < layers.length; i++) {
+    const layerRoot = path.resolve(process.cwd(), "scaffolds", layers[i]);
+    try {
+      await fs.access(layerRoot);
+    } catch {
+      continue;
+    }
+    const isBaseUnderOverlay = i < layers.length - 1;
+    await walk(
+      layerRoot,
+      layerRoot,
+      isBaseUnderOverlay ? isExcludedFromBaseLayer : undefined,
+    );
   }
 
-  await walk(scaffoldRoot, scaffoldRoot);
-  paths.sort();
-  return paths;
+  return [...seen].sort();
 }
 
 async function copyDir(
@@ -271,6 +348,7 @@ async function copyDir(
   copied: string[],
   skipped: string[],
   forceOverwrite: boolean,
+  exclude?: (relPath: string) => boolean,
 ): Promise<void> {
   await fs.mkdir(destDir, { recursive: true });
 
@@ -282,6 +360,11 @@ async function copyDir(
     const relPath = path.relative(rootSrcDir, srcPath);
 
     if (SKIP_DIR_NAMES.has(entry.name)) {
+      continue;
+    }
+
+    // Base-under-overlay exclusion (e.g. `_optional/`, concrete `.env`).
+    if (exclude?.(relPath)) {
       continue;
     }
 
@@ -308,6 +391,7 @@ async function copyDir(
         copied,
         skipped,
         forceOverwrite,
+        exclude,
       );
       continue;
     }

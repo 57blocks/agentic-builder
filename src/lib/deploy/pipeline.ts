@@ -5,6 +5,7 @@ import {
   readKickoffInfraMetadata,
   internalDatabaseUrlFrom,
   internalRedisUrlFrom,
+  s3EnvFrom,
   persistComposeOnInfra,
 } from "@/lib/pipeline/kickoff-infra";
 import { createDokployProject, createDokployCompose, createDokployDomain, updateDokployCompose, deployDokployCompose, pollDeployStatus, getDokployCompose } from "./dokploy";
@@ -75,6 +76,7 @@ async function buildDokployEnv(
   generatedCodePath: string,
   databaseUrl: string,
   redisInternalUrl: string | null,
+  s3Env: Record<string, string> | null,
 ): Promise<{ env: string; count: number; sourcedFromBackendEnv: boolean }> {
   const backendEnvPath = path.resolve(generatedCodePath, "backend", ".env");
   const fileEnv = await readEnvFile(backendEnvPath);
@@ -83,6 +85,11 @@ async function buildDokployEnv(
   // local `pnpm dev`); deployed containers must use internal DNS.
   fileEnv.DATABASE_URL = databaseUrl;
   if (redisInternalUrl) fileEnv.REDIS_URL = redisInternalUrl;
+  // S3 is a shared external bucket — same access from local dev and the
+  // deployed container, so the values are identical (no internal/public split).
+  if (s3Env) {
+    for (const [k, v] of Object.entries(s3Env)) fileEnv[k] = v;
+  }
   const lines: string[] = [];
   for (const [k, v] of Object.entries(fileEnv)) {
     // Keep `KEY=VALUE` plain (no quoting) — Dokploy parses the same way
@@ -165,6 +172,7 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
   const infraMeta = await readKickoffInfraMetadata(projectRoot);
   const databaseUrl: string | null = internalDatabaseUrlFrom(infraMeta);
   const redisInternalUrl = internalRedisUrlFrom(infraMeta);
+  const s3Env = s3EnvFrom(infraMeta);
   const reusedDokployProjectId: string | null = infraMeta?.dokployProjectId ?? null;
   const reusedDokployEnvId: string | null = infraMeta?.dokployEnvironmentId ?? null;
   if (!databaseUrl) {
@@ -249,6 +257,7 @@ export async function runDeployPipeline(params: PipelineParams): Promise<void> {
       generatedCodePath,
       databaseUrl,
       redisInternalUrl,
+      s3Env,
     );
     console.log(
       `[deploy] Compose env: ${envBlock.count} key(s) (${envBlock.sourcedFromBackendEnv ? "sourced from backend/.env" : "backend/.env not found — only DATABASE_URL/REDIS_URL"})`,

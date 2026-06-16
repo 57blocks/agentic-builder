@@ -124,23 +124,69 @@ function resolveKindAndMime(
   return null;
 }
 
-export function designReferenceDirAbs(projectRoot: string): string {
-  return path.join(projectRoot, REFERENCE_DIR_REL);
+export function designReferenceDirAbs(
+  projectRoot: string,
+  projectId?: string,
+): string {
+  return projectId
+    ? path.join(projectRoot, ".blueprint", "projects", projectId, "design-references")
+    : path.join(projectRoot, REFERENCE_DIR_REL);
 }
 
-function manifestPathAbs(projectRoot: string): string {
-  return path.join(designReferenceDirAbs(projectRoot), MANIFEST_FILE);
+/** A stored reference image, decoded to a vision-ready data URL. */
+export interface ReferenceImageDataUrl {
+  dataUrl: string;
+  label?: string;
+  pageHint?: string;
 }
 
-async function ensureDir(projectRoot: string): Promise<void> {
-  await fs.mkdir(designReferenceDirAbs(projectRoot), { recursive: true });
+/**
+ * Load this project's stored reference IMAGES as vision-ready data URLs (capped).
+ * Shared by the PRD-intent and intent-recheck vision passes so they read the
+ * same per-project set. Best-effort: returns [] on any failure.
+ */
+export async function loadReferenceImagesAsDataUrls(
+  projectRoot: string,
+  projectId?: string,
+  max = 8,
+): Promise<ReferenceImageDataUrl[]> {
+  try {
+    const refs = await readManifest(projectRoot, projectId);
+    const imageRefs = refs.filter((r) => r.kind === "image").slice(0, max);
+    const dir = designReferenceDirAbs(projectRoot, projectId);
+    const out: ReferenceImageDataUrl[] = [];
+    for (const ref of imageRefs) {
+      try {
+        const bytes = await fs.readFile(path.join(dir, ref.storedFileName));
+        out.push({
+          dataUrl: `data:${ref.mime};base64,${bytes.toString("base64")}`,
+          label: ref.label || ref.fileName,
+          pageHint: ref.pageHint || undefined,
+        });
+      } catch {
+        // skip unreadable file
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function manifestPathAbs(projectRoot: string, projectId?: string): string {
+  return path.join(designReferenceDirAbs(projectRoot, projectId), MANIFEST_FILE);
+}
+
+async function ensureDir(projectRoot: string, projectId?: string): Promise<void> {
+  await fs.mkdir(designReferenceDirAbs(projectRoot, projectId), { recursive: true });
 }
 
 export async function readManifest(
   projectRoot: string,
+  projectId?: string,
 ): Promise<DesignReferenceEntry[]> {
   try {
-    const raw = await fs.readFile(manifestPathAbs(projectRoot), "utf-8");
+    const raw = await fs.readFile(manifestPathAbs(projectRoot, projectId), "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -190,10 +236,11 @@ export async function readManifest(
 async function writeManifest(
   projectRoot: string,
   entries: DesignReferenceEntry[],
+  projectId?: string,
 ): Promise<void> {
-  await ensureDir(projectRoot);
+  await ensureDir(projectRoot, projectId);
   await fs.writeFile(
-    manifestPathAbs(projectRoot),
+    manifestPathAbs(projectRoot, projectId),
     JSON.stringify(entries, null, 2),
     "utf-8",
   );
@@ -209,6 +256,8 @@ export interface AddDesignReferenceInput {
   matchedBy?: "auto" | "manual";
   matchConfidence?: "high" | "medium" | "low";
   cssToken?: Record<string, string>;
+  /** When set, persists under `.blueprint/projects/<projectId>/design-references/`. */
+  projectId?: string;
 }
 
 export interface AddDesignReferenceResult {
@@ -231,6 +280,7 @@ export async function addDesignReference(
   projectRoot: string,
   input: AddDesignReferenceInput,
 ): Promise<AddDesignReferenceResult | AddDesignReferenceFailure> {
+  const projectId = input.projectId;
   const resolved = resolveKindAndMime(input.mime, input.fileName);
   if (!resolved) {
     return {
@@ -250,7 +300,7 @@ export async function addDesignReference(
     };
   }
 
-  const existing = await readManifest(projectRoot);
+  const existing = await readManifest(projectRoot, projectId);
 
   // Dedup by fileName: if the same filename is uploaded again, replace the
   // existing entry in-place so repeated uploads don't eat into the quota.
@@ -286,9 +336,9 @@ export async function addDesignReference(
     ...(input.cssToken !== undefined && { cssToken: input.cssToken }),
   };
 
-  await ensureDir(projectRoot);
+  await ensureDir(projectRoot, projectId);
   await fs.writeFile(
-    path.join(designReferenceDirAbs(projectRoot), storedFileName),
+    path.join(designReferenceDirAbs(projectRoot, projectId), storedFileName),
     input.bytes,
   );
 
@@ -296,7 +346,7 @@ export async function addDesignReference(
   if (dupeIdx >= 0) {
     const oldStored = existing[dupeIdx]!.storedFileName;
     try {
-      await fs.unlink(path.join(designReferenceDirAbs(projectRoot), oldStored));
+      await fs.unlink(path.join(designReferenceDirAbs(projectRoot, projectId), oldStored));
     } catch { /* best-effort */ }
   }
 
@@ -304,7 +354,7 @@ export async function addDesignReference(
     dupeIdx >= 0
       ? existing.map((e, i) => (i === dupeIdx ? entry : e))
       : [...existing, entry];
-  await writeManifest(projectRoot, manifest);
+  await writeManifest(projectRoot, manifest, projectId);
   return { ok: true, entry, manifest };
 }
 
@@ -320,8 +370,9 @@ export async function updateDesignReference(
   projectRoot: string,
   id: string,
   input: UpdateDesignReferenceInput,
+  projectId?: string,
 ): Promise<DesignReferenceEntry | null> {
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   const idx = entries.findIndex((e) => e.id === id);
   if (idx < 0) return null;
   const current = entries[idx]!;
@@ -343,55 +394,58 @@ export async function updateDesignReference(
     cssToken: input.cssToken !== undefined ? input.cssToken : current.cssToken,
   };
   entries[idx] = next;
-  await writeManifest(projectRoot, entries);
+  await writeManifest(projectRoot, entries, projectId);
   return next;
 }
 
 export async function deleteDesignReference(
   projectRoot: string,
   id: string,
+  projectId?: string,
 ): Promise<DesignReferenceEntry[]> {
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   const target = entries.find((e) => e.id === id);
   if (!target) return entries;
   try {
     await fs.unlink(
-      path.join(designReferenceDirAbs(projectRoot), target.storedFileName),
+      path.join(designReferenceDirAbs(projectRoot, projectId), target.storedFileName),
     );
   } catch {
     // best-effort
   }
   const next = entries.filter((e) => e.id !== id);
-  await writeManifest(projectRoot, next);
+  await writeManifest(projectRoot, next, projectId);
   return next;
 }
 
 export async function clearAllDesignReferences(
   projectRoot: string,
+  projectId?: string,
 ): Promise<void> {
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   for (const entry of entries) {
     try {
       await fs.unlink(
-        path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
+        path.join(designReferenceDirAbs(projectRoot, projectId), entry.storedFileName),
       );
     } catch {
       // best-effort
     }
   }
-  await writeManifest(projectRoot, []);
+  await writeManifest(projectRoot, [], projectId);
 }
 
 export async function readDesignReferenceFile(
   projectRoot: string,
   id: string,
+  projectId?: string,
 ): Promise<{ entry: DesignReferenceEntry; data: Buffer } | null> {
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   const entry = entries.find((e) => e.id === id);
   if (!entry) return null;
   try {
     const data = await fs.readFile(
-      path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
+      path.join(designReferenceDirAbs(projectRoot, projectId), entry.storedFileName),
     );
     return { entry, data };
   } catch {
@@ -407,11 +461,12 @@ export async function readDesignReferenceFile(
 export async function copyDesignReferencesToOutput(
   projectRoot: string,
   outputRoot: string,
+  projectId?: string,
 ): Promise<DesignReferenceEntry[]> {
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   if (entries.length === 0) return [];
 
-  const srcDir = designReferenceDirAbs(projectRoot);
+  const srcDir = designReferenceDirAbs(projectRoot, projectId);
   const destDir = path.join(outputRoot, ".design-references");
   await fs.mkdir(destDir, { recursive: true });
 
@@ -666,10 +721,11 @@ export async function autoMatchReferencesToPages(
   projectRoot: string,
   candidates: PageCandidate[],
   options?: { force?: boolean; minConfidence?: "high" | "medium" | "low" },
+  projectId?: string,
 ): Promise<AutoMatchResult[]> {
   if (candidates.length === 0) return [];
 
-  const entries = await readManifest(projectRoot);
+  const entries = await readManifest(projectRoot, projectId);
   const imageEntries = entries.filter(
     (e) =>
       e.kind === "image" &&
@@ -690,7 +746,7 @@ export async function autoMatchReferencesToPages(
     let imageData: Buffer;
     try {
       imageData = await fs.readFile(
-        path.join(designReferenceDirAbs(projectRoot), entry.storedFileName),
+        path.join(designReferenceDirAbs(projectRoot, projectId), entry.storedFileName),
       );
     } catch {
       results.push({

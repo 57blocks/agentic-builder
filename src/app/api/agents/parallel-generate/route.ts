@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import path from "path";
 import fs from "fs/promises";
-import { readManifest } from "@/lib/pipeline/design-references";
+import {
+  readManifest,
+  designReferenceDirAbs,
+} from "@/lib/pipeline/design-references";
 import {
   TRDAgent,
   SysDesignAgent,
@@ -166,6 +169,7 @@ export async function POST(request: NextRequest) {
     useUploadedDesignReferences,
     prdSpec,
     instruction,
+    projectId,
   } = body as {
     prdContent: string;
     selectedDocs: string[];
@@ -182,6 +186,8 @@ export async function POST(request: NextRequest) {
     styleReferenceImages?: string[];
     prdSpec?: PrdSpec | null;
     instruction?: string;
+    /** Project slug — isolates uploaded design references per project. */
+    projectId?: string;
   };
 
   const effectiveTier = (tier ?? "M").toUpperCase() as "S" | "M" | "L";
@@ -284,16 +290,12 @@ export async function POST(request: NextRequest) {
 
     if (useUploadedDesignReferences) {
       try {
-        const refs = await readManifest(process.cwd());
+        const refs = await readManifest(process.cwd(), projectId);
+        const refDir = designReferenceDirAbs(process.cwd(), projectId);
         const imageRefs = refs.filter((r) => r.kind === "image");
         for (const ref of imageRefs) {
           try {
-            const imgPath = path.join(
-              process.cwd(),
-              ".blueprint",
-              "design-references",
-              ref.storedFileName,
-            );
+            const imgPath = path.join(refDir, ref.storedFileName);
             const imgBytes = await fs.readFile(imgPath);
             collected.push({
               dataUrl: `data:${ref.mime};base64,${imgBytes.toString("base64")}`,

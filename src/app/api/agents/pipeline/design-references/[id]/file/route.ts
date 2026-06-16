@@ -11,9 +11,11 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
-  const result = await readDesignReferenceFile(projectRoot(), id);
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
+  const result = await readDesignReferenceFile(projectRoot(), id, projectId);
   if (!result) {
     return NextResponse.json(
       { error: `No reference found with id "${id}".` },

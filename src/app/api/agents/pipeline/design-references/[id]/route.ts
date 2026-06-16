@@ -16,6 +16,8 @@ interface RouteParams {
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
   let body: {
     label?: string;
     pageHint?: string;
@@ -31,13 +33,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       { status: 400 },
     );
   }
-  const updated = await updateDesignReference(projectRoot(), id, {
-    label: body.label,
-    pageHint: body.pageHint,
-    matchedBy: body.matchedBy,
-    matchConfidence: body.matchConfidence ?? undefined,
-    cssToken: body.cssToken,
-  });
+  const updated = await updateDesignReference(
+    projectRoot(),
+    id,
+    {
+      label: body.label,
+      pageHint: body.pageHint,
+      matchedBy: body.matchedBy,
+      matchConfidence: body.matchConfidence ?? undefined,
+      cssToken: body.cssToken,
+    },
+    projectId,
+  );
   if (!updated) {
     return NextResponse.json(
       { error: `No reference found with id "${id}".` },
@@ -47,8 +54,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   return NextResponse.json({ ok: true, reference: updated });
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
-  const references = await deleteDesignReference(projectRoot(), id);
+  const projectId =
+    new URL(request.url).searchParams.get("projectId") || undefined;
+  const references = await deleteDesignReference(projectRoot(), id, projectId);
   return NextResponse.json({ ok: true, references });
 }

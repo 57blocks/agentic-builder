@@ -48,6 +48,8 @@ export const designAgent: StepAgent = createParallelGenerateAgent({
     styleReferenceImages: _pendingStyleRefImages,
     designDirectionPrompt: _pendingDesignDirectionPrompt,
     useUploadedDesignReferences: _pendingUseUploadedDesignReferences || undefined,
+    // Isolate uploaded design references per project (falls back to global when empty).
+    projectId: ctx.projectSlug || undefined,
     ...(ctx.editInstruction?.trim() ? {
       editInstruction: ctx.editInstruction.trim(),
       existingDesign: ctx.previousSteps.design?.content ?? "",

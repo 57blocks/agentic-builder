@@ -47,6 +47,7 @@ import {
   wireRegistrationsIntoIndex,
   computeRelativeImportPath,
 } from "./route-audit-autofix";
+import { repairFrontendRouterWiring } from "./frontend-router-autofix";
 import { computeStagnationReplan } from "@/lib/pipeline/self-heal";
 import {
   chatCompletionWithFallback,
@@ -6019,6 +6020,31 @@ async function integrationVerifyAndFix(
       },
     });
     routeAudit = await auditApiRouteRegistration(state.outputDir);
+  }
+
+  // ── Deterministic frontend router-wiring repair ──────────────────────
+  // The frontend counterpart of the route-registration repair above: when a
+  // real `router.tsx` (AppRouter) exists but `App.tsx` is still the scaffold
+  // placeholder that inlines its own <Routes> and never imports it, rewire
+  // App → AppRouter so `main → App → AppRouter` is closed. Without this an
+  // S-tier app silently renders the scaffold "Welcome" page instead of the
+  // product (the orphaned-router bug).
+  const frontendRouterRepairs = await repairFrontendRouterWiring(
+    state.outputDir,
+  );
+  if (frontendRouterRepairs.changed.length > 0) {
+    console.log(
+      `${label}: rewired orphaned frontend router(s): ${frontendRouterRepairs.changed.map((c) => c.file).join(", ")}.`,
+    );
+    getRepairEmitter(state.sessionId)({
+      stage: "preflight-route-audit",
+      event: "frontend_router_autorepaired",
+      details: {
+        when: "preflight",
+        changed: frontendRouterRepairs.changed,
+        skipped: frontendRouterRepairs.skipped,
+      },
+    });
   }
 
   const initialApiClientUniqueness = await auditFrontendApiClientUniqueness(

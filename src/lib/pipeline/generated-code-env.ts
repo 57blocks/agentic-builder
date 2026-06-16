@@ -143,6 +143,32 @@ export function upsertRedisUrlEnv(
   return `${normalized}${serialized}\n`;
 }
 
+/**
+ * Upsert an arbitrary set of `KEY=value` pairs into an existing .env payload,
+ * preserving every other key. Replaces existing keys in place, appends new
+ * ones. Values are JSON-quoted so special characters survive. Used for the S3
+ * credential bundle (AWS_S3_BUCKET, AWS_S3_PREFIX, AWS_ACCESS_KEY_ID, …) which
+ * — unlike DATABASE_URL/REDIS_URL — is a multi-key set, not a single URL.
+ */
+export function upsertEnvVars(
+  envContent: string,
+  vars: Record<string, string>,
+): string {
+  let result =
+    envContent.endsWith("\n") || envContent === "" ? envContent : `${envContent}\n`;
+  for (const [key, value] of Object.entries(vars)) {
+    if (!key) continue;
+    const serialized = `${key}=${JSON.stringify(value)}`;
+    const re = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=.*$`, "m");
+    if (re.test(result)) {
+      result = result.replace(re, serialized);
+    } else {
+      result = `${result}${serialized}\n`;
+    }
+  }
+  return result;
+}
+
 /** Upsert PORT (and align frontend VITE_API_BASE_URL) into an existing .env. */
 export function upsertBackendPortEnv(
   envContent: string,
