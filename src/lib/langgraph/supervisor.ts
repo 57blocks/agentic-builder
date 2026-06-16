@@ -122,6 +122,17 @@ import {
   decideBackendReadinessRoute,
 } from "@/lib/pipeline/backend-readiness-gate";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
+import { distributeSharedSchema } from "@/lib/pipeline/shared-schema-distributor";
+import {
+  readSchemaChangeRequests,
+  readSchemaChangeDecisions,
+  appendSchemaChangeDecision,
+  pendingRequests,
+  staleTaskIds,
+  acceptedChangedTypes,
+  type SchemaChangeRequest,
+  type SchemaChangeDecision,
+} from "@/lib/pipeline/schema-change-request";
 import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
@@ -3840,6 +3851,242 @@ async function verifyManifestAgainstSource(
  *   2. LLM extraction from BE route files (~$0.01-0.05/run).
  *   3. Regex fallback (path-only, no field info).
  */
+/**
+ * Schema-change arbiter (CODEGEN_HARDENING — P2).
+ *
+ * Runs at the backend→frontend boundary. Backend workers that found the shared
+ * schema genuinely wrong don't edit it (that's what desyncs front/back); they
+ * append a structured request to `.ralph/schema-change-requests.jsonl`. Here we
+ * batch-review those PENDING requests against the PRD, apply the accepted ones
+ * to the SINGLE canonical `.blueprint/shared-schema.ts`, re-distribute the copies
+ * (so FE/BE stay byte-identical), and record which producer/consumer tasks the
+ * change makes stale so the verify loop re-checks them.
+ *
+ * No pending requests ⇒ instant no-op (the overwhelmingly common case — zero LLM
+ * cost). Any failure degrades to a logged warning + recorded unresolved problem;
+ * it never blocks the pipeline.
+ */
+const SCHEMA_ARBITER_SYSTEM_PROMPT = `You are the contract-owner arbiter for a code-generation pipeline. The shared TypeScript \`schema.ts\` is the SINGLE source of truth for every type that crosses the API boundary. Backend workers have filed schema-change-requests claiming the schema is wrong for the PRD.
+
+For EACH request, decide accept or reject, grounded ONLY in the PRD:
+- ACCEPT only when the PRD genuinely requires the change AND the current schema cannot express it. Prefer the smallest edit (add a field / add a type), never gratuitous renames.
+- REJECT when the worker can satisfy the PRD with the schema AS-IS, when the request contradicts the PRD, or when it's speculative.
+
+If you accept ANY request, return the COMPLETE updated schema.ts (the full file, with accepted edits applied and everything else byte-for-byte unchanged). If you accept none, return updatedSchema=null.
+
+Output STRICT JSON only (no markdown):
+{
+  "decisions": [
+    { "taskId": "...", "typeName": "...", "field": "..."|null, "decision": "accepted"|"rejected", "rationale": "PRD-grounded reason", "changedTypes": ["TypeName", ...] }
+  ],
+  "updatedSchema": "<full schema.ts source>" | null
+}
+"changedTypes" lists every exported type whose DEFINITION you altered for that request (empty for rejected).`;
+
+interface ArbiterDecisionRaw {
+  taskId?: string;
+  typeName?: string;
+  field?: string | null;
+  decision?: string;
+  rationale?: string;
+  changedTypes?: string[];
+}
+
+async function schemaArbiter(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  let pending: SchemaChangeRequest[];
+  try {
+    const [requests, decisions] = await Promise.all([
+      readSchemaChangeRequests(state.outputDir),
+      readSchemaChangeDecisions(state.outputDir),
+    ]);
+    pending = pendingRequests(requests, decisions);
+  } catch {
+    return {};
+  }
+  if (pending.length === 0) return {};
+
+  console.log(
+    `[Supervisor] schemaArbiter: ${pending.length} pending schema-change-request(s) — reviewing against PRD.`,
+  );
+
+  const canonical = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
+  if (canonical.startsWith("FILE_NOT_FOUND") || !canonical.trim()) {
+    // No canonical schema to amend — record and move on.
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "schema-arbiter",
+      phase: "backend",
+      category: "contract-coverage",
+      summary: `${pending.length} schema-change-request(s) filed but no .blueprint/shared-schema.ts exists to amend`,
+      evidence: pending.map((p) => `${p.taskId}: ${p.typeName} — ${p.reason}`),
+    }).catch(() => {});
+    return {};
+  }
+
+  const prdContext = state.prdSpec
+    ? JSON.stringify(state.prdSpec).slice(0, 12000)
+    : state.projectContext.slice(0, 8000);
+
+  const requestsBlock = pending
+    .map(
+      (p, i) =>
+        `${i + 1}. taskId=${p.taskId} type=${p.typeName}${p.field ? ` field=${p.field}` : ""} kind=${p.kind} endpoint=${p.endpoint ?? "(n/a)"}\n   reason: ${p.reason}\n   proposedChange: ${p.proposedChange}`,
+    )
+    .join("\n");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: SCHEMA_ARBITER_SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        "## PRD (authority for every decision)",
+        prdContext,
+        "",
+        "## Current shared schema.ts (the single source of truth)",
+        "```typescript",
+        canonical.slice(0, 16000),
+        "```",
+        "",
+        "## Pending schema-change-requests",
+        requestsBlock,
+        "",
+        "Review each request and return the STRICT JSON described.",
+      ].join("\n"),
+    },
+  ];
+
+  const chain = resolveCodingChain(state.codingMode, "taskBreakdown", "gpt-4o");
+  let parsed: { decisions?: ArbiterDecisionRaw[]; updatedSchema?: string | null };
+  try {
+    const response = await chatCompletionWithFallback(messages, chain, {
+      temperature: 0.1,
+      max_tokens: 65536,
+      forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+    });
+    recordSupervisorLlmUsage({
+      sessionId: state.sessionId,
+      stage: "schema_arbiter",
+      model: response.model,
+      usage: response.usage,
+      costUsd: estimateCost(response.model, response.usage),
+    });
+    const raw = (response.choices[0]?.message?.content ?? "").trim();
+    const jsonStr = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    parsed = JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaArbiter: review failed (continuing without schema change): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "schema-arbiter",
+      phase: "backend",
+      category: "contract-coverage",
+      summary: `schema arbiter could not review ${pending.length} schema-change-request(s)`,
+      evidence: pending.map((p) => `${p.taskId}: ${p.typeName} — ${p.reason}`),
+    }).catch(() => {});
+    return {};
+  }
+
+  const decisionsRaw = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+  const byKey = new Map<string, SchemaChangeRequest>();
+  for (const p of pending) byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
+
+  const accepted: SchemaChangeDecision[] = [];
+  const all: SchemaChangeDecision[] = [];
+  const decidedAt = new Date().toISOString();
+  for (const d of decisionsRaw) {
+    const key = `${d.taskId ?? ""}::${d.typeName ?? ""}::${d.field ?? ""}`;
+    const req =
+      byKey.get(key) ??
+      pending.find((p) => p.taskId === d.taskId && p.typeName === d.typeName);
+    if (!req) continue;
+    const decision: SchemaChangeDecision = {
+      request: req,
+      decision: d.decision === "accepted" ? "accepted" : "rejected",
+      rationale: typeof d.rationale === "string" ? d.rationale : "",
+      changedTypes: Array.isArray(d.changedTypes)
+        ? d.changedTypes.filter((t): t is string => typeof t === "string")
+        : [],
+      decidedAt,
+    };
+    all.push(decision);
+    if (decision.decision === "accepted") accepted.push(decision);
+  }
+
+  // Apply the updated schema only when something was accepted and the model
+  // returned a non-trivial replacement.
+  const updated =
+    typeof parsed.updatedSchema === "string" ? parsed.updatedSchema.trim() : "";
+  if (accepted.length > 0 && updated && updated !== canonical.trim()) {
+    await fsWrite(".blueprint/shared-schema.ts", updated, state.outputDir);
+    // Re-distribute from the just-amended canonical (explicit sourceDir so it
+    // reads THIS project's blueprint, not the agentic-builder cwd's).
+    const tier: "S" | "M" | "L" = (await fsRead(
+      "backend/package.json",
+      state.outputDir,
+    ).then((c) => !c.startsWith("FILE_NOT_FOUND")))
+      ? "M"
+      : "S";
+    try {
+      const dist = await distributeSharedSchema(tier, state.outputDir, {
+        sourceDir: state.outputDir,
+      });
+      console.log(
+        `[Supervisor] schemaArbiter: applied ${accepted.length} change(s); re-distributed schema to ${dist.written.join(", ") || "(no targets)"}.`,
+      );
+    } catch (e) {
+      console.warn(
+        `[Supervisor] schemaArbiter: re-distribute failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  } else if (accepted.length > 0) {
+    console.warn(
+      "[Supervisor] schemaArbiter: accepted changes but no usable updatedSchema returned — leaving schema unchanged.",
+    );
+  }
+
+  // Persist every decision to the ledger (idempotent dedupe handled by pending()).
+  for (const d of all) {
+    await appendSchemaChangeDecision(state.outputDir, d).catch(() => {});
+  }
+
+  // Compute + record stale producer/consumer tasks so the verify loop re-checks them.
+  const changedTypes = acceptedChangedTypes(accepted);
+  if (changedTypes.length > 0) {
+    const stale = staleTaskIds(
+      changedTypes,
+      state.tasks.map((t) => ({
+        id: t.id,
+        text: `${t.title} ${t.description}`,
+      })),
+    );
+    if (stale.length > 0) {
+      await recordUnresolvedProblem(state.outputDir, {
+        sessionId: state.sessionId,
+        gate: "schema-arbiter",
+        phase: "backend",
+        category: "contract-coverage",
+        summary: `schema changed (${changedTypes.join(", ")}); ${stale.length} task(s) now reference an amended type and should be re-verified`,
+        evidence: [
+          `Changed types: ${changedTypes.join(", ")}`,
+          `Stale tasks: ${stale.join(", ")}`,
+        ],
+      }).catch(() => {});
+      console.log(
+        `[Supervisor] schemaArbiter: ${stale.length} task(s) flagged stale by schema change: ${stale.join(", ")}`,
+      );
+    }
+  }
+
+  return {};
+}
+
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
@@ -8619,6 +8866,7 @@ export function createSupervisorGraph() {
     )
     .addNode("be_readiness_gate", backendReadinessGate)
     .addNode("extract_real_contracts", extractRealContracts)
+    .addNode("schema_arbiter", schemaArbiter)
     .addNode("fe_dispatch_gate", feDispatchGate)
     .addNode("fe_worker", parallelWorkerNode)
     .addNode("fe_phase_verify", (s) =>
@@ -8656,7 +8904,8 @@ export function createSupervisorGraph() {
       extract_real_contracts: "extract_real_contracts",
       summary: "summary",
     })
-    .addEdge("extract_real_contracts", "fe_dispatch_gate")
+    .addEdge("extract_real_contracts", "schema_arbiter")
+    .addEdge("schema_arbiter", "fe_dispatch_gate")
     .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
     .addEdge("fe_worker", "fe_phase_verify")
     .addEdge("fe_phase_verify", "sync_deps")

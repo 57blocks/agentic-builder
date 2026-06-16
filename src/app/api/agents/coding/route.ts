@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { readBuildFailedMarker } from "@/lib/pipeline/build-quarantine";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
+import { reconcileContractWithSchema } from "@/lib/pipeline/contract-reconcile";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
@@ -19,6 +20,7 @@ import {
 import {
   distributeSharedSchema,
   distributePipelineDag,
+  verifyDistributedSchemaIntact,
 } from "@/lib/pipeline/shared-schema-distributor";
 import {
   getTierScaffoldSpecForCodingContext,
@@ -2522,6 +2524,54 @@ export async function POST(request: NextRequest) {
               ]
                 .filter(Boolean)
                 .join("\n"),
+            );
+          }
+
+          // P0①: shared-schema integrity — the frontend & backend copies of the
+          // contract must still be byte-identical to .blueprint/shared-schema.ts.
+          // Drift = silent frontend↔backend type mismatch (the exact failure mode
+          // this hardening targets). See docs/contract-single-source-of-truth.md.
+          try {
+            const schemaIntegrity = await verifyDistributedSchemaIntact(tier, outputRoot);
+            if (!schemaIntegrity.intact) {
+              blockingFailures.push(
+                `Shared-schema drift: ${schemaIntegrity.drifted
+                  .map((d) => `${d.path} (${d.reason})`)
+                  .join(", ")} no longer matches the canonical .blueprint/shared-schema.ts — frontend/backend types are out of sync.`,
+              );
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] shared-schema integrity check threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+
+          // P0③: contract↔schema reconciliation — WARN (record, don't block) when
+          // API_CONTRACTS.json references a request/response type not defined in
+          // shared/schema.ts. A missing type may be the LLM's MISSING_FROM_SCHEMA
+          // signal for the contract owner, so this is surfaced for analysis rather
+          // than failing the build. See docs/contract-single-source-of-truth.md.
+          try {
+            const reconcile = await reconcileContractWithSchema(outputRoot);
+            if (reconcile.checked && !reconcile.ok) {
+              const detail = reconcile.missing
+                .slice(0, 8)
+                .map((m) => `${m.method} ${m.endpoint} ${m.kind}=${m.type}`);
+              console.warn(
+                `[CodingAPI] contract↔schema: ${reconcile.missing.length} type ref(s) not in schema — ${detail.join("; ")}`,
+              );
+              await recordUnresolvedProblem(outputRoot, {
+                sessionId,
+                category: "contract-coverage",
+                gate: "contract-reconcile",
+                summary: `${reconcile.missing.length} API_CONTRACTS type reference(s) not defined in shared/schema.ts`,
+                evidence: detail,
+                artifacts: ["API_CONTRACTS.json", "backend/src/shared/schema.ts"],
+              });
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] contract reconcile threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
             );
           }
           if (!finalAudit.passed) {

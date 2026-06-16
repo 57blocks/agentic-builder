@@ -34,7 +34,9 @@ import {
   parseContractSchema,
   sampleFromSchema,
   validateShape,
+  type SchemaNode,
 } from "./contract-schema-parse";
+import { indexSchemaTypes, resolveTypeRefToSchema } from "./schema-type-resolve";
 
 const execFileP = promisify(execFile);
 
@@ -76,6 +78,9 @@ interface ContractEntry {
   endpoint: string;
   requestSchema?: string;
   responseSchema?: string;
+  /** P1②: named shared-schema types (preferred over inline *Schema strings). */
+  requestType?: string;
+  responseType?: string;
   auth?: string; // "none" | "bearer" | ...
 }
 
@@ -95,6 +100,8 @@ async function readFullContracts(outputDir: string): Promise<ContractEntry[]> {
         endpoint: normalizePath(c.endpoint),
         requestSchema: typeof c.requestSchema === "string" ? c.requestSchema : undefined,
         responseSchema: typeof c.responseSchema === "string" ? c.responseSchema : undefined,
+        requestType: typeof c.requestType === "string" ? c.requestType : undefined,
+        responseType: typeof c.responseType === "string" ? c.responseType : undefined,
         auth: typeof c.auth === "string" ? c.auth.toLowerCase() : undefined,
       }));
   } catch {
@@ -107,6 +114,46 @@ function normalizePath(p: string): string {
   if (!out.startsWith("/")) out = `/${out}`;
   out = out.replace(/\/+/g, "/");
   return out.length > 1 ? out.replace(/\/$/, "") : out;
+}
+
+const SHARED_SCHEMA_CANDIDATES = [
+  "backend/src/shared/schema.ts",
+  "frontend/src/shared/schema.ts",
+  "src/shared/schema.ts",
+];
+
+/**
+ * Index the shared schema's named types (P1②). Empty map when no schema is
+ * found — callers then rely solely on inline `*Schema` strings (legacy path).
+ */
+async function readSchemaTypeIndex(
+  outputDir: string,
+): Promise<Map<string, string>> {
+  for (const rel of SHARED_SCHEMA_CANDIDATES) {
+    const src = await fsRead(rel, outputDir);
+    if (!src.startsWith("FILE_NOT_FOUND") && !src.startsWith("REJECTED") && src.trim()) {
+      return indexSchemaTypes(src);
+    }
+  }
+  return new Map();
+}
+
+/**
+ * The shape to validate/synthesize for an endpoint side. Prefers the inline
+ * `*Schema` string (legacy/explicit), falling back to resolving the named
+ * `*Type` against the shared schema (P1②ⁱ single-source path).
+ */
+function nodeForSide(
+  inlineSchema: string | undefined,
+  typeName: string | undefined,
+  schemaIndex: Map<string, string>,
+): SchemaNode | null {
+  const inline = parseContractSchema(inlineSchema);
+  if (inline) return inline;
+  if (typeName && schemaIndex.size > 0) {
+    return resolveTypeRefToSchema(schemaIndex, typeName);
+  }
+  return null;
 }
 
 function materializeDynamicPath(routePath: string): string {
@@ -365,6 +412,7 @@ function extractToken(json: unknown): string | null {
 async function establishToken(
   baseUrl: string,
   contracts: ContractEntry[],
+  schemaIndex: Map<string, string>,
 ): Promise<{ token: string | null; createdEmail?: string; createdPassword?: string }> {
   const noAuthPosts = contracts.filter(
     (c) => c.method === "POST" && (!c.auth || c.auth === "none"),
@@ -376,7 +424,9 @@ async function establishToken(
   const password = "Smoke-test-1234";
 
   if (registerEp) {
-    const body = sampleFromSchema(parseContractSchema(registerEp.requestSchema)) as Record<string, unknown>;
+    const body = sampleFromSchema(
+      nodeForSide(registerEp.requestSchema, registerEp.requestType, schemaIndex),
+    ) as Record<string, unknown>;
     // Force known credentials so a subsequent login is deterministic.
     overrideCreds(body, email, password);
     const r = await httpProbe(`${baseUrl}${registerEp.endpoint}`, {
@@ -389,7 +439,9 @@ async function establishToken(
   }
 
   if (loginEp) {
-    const body = sampleFromSchema(parseContractSchema(loginEp.requestSchema)) as Record<string, unknown>;
+    const body = sampleFromSchema(
+      nodeForSide(loginEp.requestSchema, loginEp.requestType, schemaIndex),
+    ) as Record<string, unknown>;
     overrideCreds(body, email, password);
     const r = await httpProbe(`${baseUrl}${loginEp.endpoint}`, {
       method: "POST",
@@ -439,7 +491,8 @@ export async function runDataAssertions(
   const contracts = await readFullContracts(outputDir);
   if (contracts.length === 0) return result;
 
-  const { token } = await establishToken(baseUrl, contracts);
+  const schemaIndex = await readSchemaTypeIndex(outputDir);
+  const { token } = await establishToken(baseUrl, contracts, schemaIndex);
   result.authEstablished = Boolean(token);
   const authHeader = token ? { authorization: `Bearer ${token}` } : undefined;
 
@@ -463,7 +516,9 @@ export async function runDataAssertions(
     let body: string | undefined;
     if (isWrite) {
       headers["content-type"] = "application/json";
-      body = JSON.stringify(sampleFromSchema(parseContractSchema(ep.requestSchema)));
+      body = JSON.stringify(
+        sampleFromSchema(nodeForSide(ep.requestSchema, ep.requestType, schemaIndex)),
+      );
     }
 
     const r = await httpProbe(url, { method: ep.method, headers, body });
@@ -518,14 +573,34 @@ export async function runDataAssertions(
     }
 
     // 2xx — validate response shape for reads (and writes that return a body).
-    const responseNode = parseContractSchema(ep.responseSchema);
+    // Prefer the inline responseSchema; fall back to the named responseType
+    // resolved against the shared schema (P0②). The envelope middleware wraps
+    // success bodies as `{ ok, data }`, so validate against `data` when present.
+    const responseNode = nodeForSide(ep.responseSchema, ep.responseType, schemaIndex);
     if (responseNode && r.json !== undefined) {
-      const mismatches = validateShape(r.json, responseNode);
+      // The named responseType describes the DATA; the responseEnvelope
+      // middleware wraps it as `{ ok, data }`. Inline responseSchema strings,
+      // by contrast, sometimes already include the envelope. To avoid false
+      // positives from that ambiguity, validate against both the raw body and
+      // the unwrapped `data`, and only flag a mismatch when BOTH fail — taking
+      // whichever interpretation is cleaner.
+      const candidates = [r.json];
+      const unwrapped = unwrapEnvelopeData(r.json);
+      if (unwrapped !== undefined) candidates.push(unwrapped);
+      let mismatches = validateShape(candidates[0], responseNode);
+      for (let i = 1; i < candidates.length && mismatches.length > 0; i++) {
+        const alt = validateShape(candidates[i], responseNode);
+        if (alt.length < mismatches.length) mismatches = alt;
+      }
       if (mismatches.length > 0) {
         result.failures.push({
           code: "response_shape_mismatch",
           target,
-          directive: `Response 2xx but its shape diverges from \`responseSchema\` in API_CONTRACTS.json. Align the handler's response with the contract (or fix the contract). Mismatches: ${mismatches
+          directive: `Response 2xx but its shape diverges from the contracted ${
+            ep.responseType ? `\`${ep.responseType}\` (shared schema)` : "`responseSchema`"
+          }. Align the handler's response with the schema type (construct it via \`json<${
+            ep.responseType ?? "ResponseType"
+          }>(ctx, data)\` and a row→type mapper), or file a schema-change-request if the contract is wrong. Mismatches: ${mismatches
             .map((m) => `${m.path}: ${m.reason}`)
             .join("; ")}`,
           evidence: `status=${r.status} body=${r.body}`,
@@ -542,4 +617,21 @@ export async function runDataAssertions(
 
 function isHealth(endpoint: string): boolean {
   return /^\/(?:api\/)?health\/?$/.test(endpoint);
+}
+
+/**
+ * If `json` is a `{ ok, data }` success envelope (responseEnvelope middleware),
+ * return its `data`; otherwise undefined (no envelope to peel).
+ */
+function unwrapEnvelopeData(json: unknown): unknown {
+  if (
+    json &&
+    typeof json === "object" &&
+    !Array.isArray(json) &&
+    "ok" in (json as Record<string, unknown>) &&
+    "data" in (json as Record<string, unknown>)
+  ) {
+    return (json as Record<string, unknown>).data;
+  }
+  return undefined;
 }

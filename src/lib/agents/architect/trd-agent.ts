@@ -206,6 +206,14 @@ export interface Project {
 
 export interface CreateProjectRequest { name: string; }
 export interface CreateProjectResponse { project: Project; }
+
+// Endpoint registry — the SINGLE mapping of "METHOD /path" → request/response
+// type names. API_CONTRACTS.json, the frontend API client, and the backend
+// handlers all DERIVE from this; shapes are never re-authored anywhere else.
+export const ENDPOINTS = {
+  "POST /api/projects": { request: "CreateProjectRequest", response: "CreateProjectResponse", auth: "bearer" },
+  "GET /api/projects": { request: null, response: "Project[]", auth: "bearer" },
+} as const;
 \`\`\`
 
 ### Rules for the schema block
@@ -213,6 +221,11 @@ export interface CreateProjectResponse { project: Project; }
 - **Cover every endpoint** from §3.3 with a Request and Response interface
   named after the operation, e.g. \`CreateTaskRequest\` / \`CreateTaskResponse\`.
   GET endpoints with no body still get a Response interface.
+- **Emit an \`ENDPOINTS\` registry** (\`export const ENDPOINTS = {...} as const\`) mapping
+  every §3.3 endpoint \`"<METHOD> <path>"\` → \`{ request, response, auth }\`, where
+  \`request\`/\`response\` are the EXACT interface names defined above (or \`null\` for no body,
+  or \`"Type[]"\` for a list). This registry is the single source the API contract, the
+  frontend client, and the backend handlers all derive from — so path↔type is authored ONCE.
 - Use **string literal unions** for enum-like fields (\`status: "todo" | "in_progress" | "done"\`).
 - Timestamps are **ISO 8601 strings** (\`createdAt: string\`), not \`Date\`.
 - Optional fields: \`field?: T\`. Nullable fields: \`field: T | null\`. Distinct concepts.

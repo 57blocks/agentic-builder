@@ -604,10 +604,14 @@ export async function buildProjectConventionCard(
     const hasKoa = backendPkg.includes('"koa"');
     const hasExpress = backendPkg.includes('"express"');
     const hasSequelize = backendPkg.includes('"sequelize"');
-    if (hasKoa)
+    if (hasKoa) {
       lines.push(
         "- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation",
       );
+      lines.push(
+        "- **Typed responses (HARD RULE)**: send every success response via `json<ResponseType>(ctx, data)` from `src/utils/respond.ts`, pinning the response type from the shared schema (use its `ENDPOINTS` registry to pick the right `responseType`). The `responseEnvelope` middleware wraps it into `{ ok, data }`. **NEVER `ctx.body = <Sequelize model instance>`** — serialize the row to the schema type first (e.g. a `toCourse(row): Course` mapper). Raw ORM rows (snake_case columns, extra audit fields, missing computed fields) are NOT the contract and silently break the frontend.",
+      );
+    }
     if (hasExpress)
       lines.push(
         "- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`",
@@ -711,6 +715,7 @@ export async function buildProjectConventionCard(
   if (presentSchemas.length > 0) {
     lines.push(
       `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
+      "- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ \"taskId\", \"typeName\", \"field\"?, \"kind\": \"missing-type\"|\"missing-field\"|\"wrong-type\"|\"other\", \"reason\", \"proposedChange\", \"endpoint\"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.",
     );
   }
 
