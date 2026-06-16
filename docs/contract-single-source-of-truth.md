@@ -125,9 +125,18 @@ generation run to validate — roll out behind a flag and compare before/after o
   may be the legit `MISSING_FROM_SCHEMA` signal, so it's surfaced, not fatal.
 - ✅ **P1① TRD `ENDPOINTS` registry** — `trd-agent.ts` §6 now requires
   `export const ENDPOINTS = {...} as const` (path↔type names, authored once).
-- ✅ **P1② generateApiContracts anchored to schema** — `supervisor.ts` injects
-  `shared-schema.ts` as SOURCE OF TRUTH; prompt requires `requestType`/`responseType` =
-  exact schema names, shapes copied verbatim, `MISSING_FROM_SCHEMA` instead of inventing.
+- ✅ **P1② generateApiContracts DERIVES from the schema** — when
+  `.blueprint/shared-schema.ts` contains an `ENDPOINTS` registry (P1①),
+  `generateApiContracts` now parses it (`endpoints-registry.ts`, + 8 tests) and emits
+  one contract record per entry — `{method, endpoint, auth, requestType, responseType}`
+  — with NO LLM call. The LLM-from-PRD+scaffold path is now a FALLBACK, used only when a
+  legacy schema has no registry. This removes the drift AND the `doc_truncated` risk (the
+  registry is parsed from the full file, not a 12k-char prompt slice). The fallback prompt
+  still requires `requestType`/`responseType` = exact schema names, no invented shapes.
+  NOTE: derivation only triggers when the TRD actually authored the registry — a schema
+  generated before P1① has none, so that run falls back to the LLM (this is why an
+  in-flight project still logged "generating from PRD + scaffold"). Regenerate the TRD to
+  get the registry + derivation.
 - ✅ **P1④ backend constructs responses to the schema** — typed `json<T>()` / `created<T>()`
   helper added to m-tier + l-tier scaffolds (`backend/src/utils/respond.ts`); worker
   convention card (Koa) adds the HARD RULE: send via `json<ResponseType>(ctx, data)`,

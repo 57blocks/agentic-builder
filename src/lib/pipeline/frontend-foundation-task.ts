@@ -34,6 +34,7 @@
  */
 
 import type { KickoffWorkItem, TaskFilePlan } from "./types";
+import { ENABLE_FE_ROUTE_CONSOLIDATION } from "@/lib/langgraph/supervisor/config";
 
 const TOKENS_FILE = "frontend/src/styles/tokens.css";
 const UI_BARREL = "frontend/src/components/ui/index.ts";
@@ -76,6 +77,23 @@ const FOUNDATION_CREATES = [
 /** Sentinel used to detect an already-augmented Foundation description. */
 const CONTRACT_MARKER = "DESIGN-SYSTEM CONTRACT";
 
+// Deliverable #4 differs by mode. With route-consolidation ON, the foundation
+// ships only a MINIMAL router shell (App→layout + an index route); per-page
+// routes are registered later by the `fe_route_consolidation` step once the
+// views actually exist (no guessing view paths → no silent 404 / stub views).
+// With it OFF (legacy), the foundation pre-registers every route to a lazy view.
+const ROUTER_DELIVERABLE = ENABLE_FE_ROUTE_CONSOLIDATION
+  ? [
+      "  4. MINIMAL router shell (`router.tsx`): wire BrowserRouter + AppLayout",
+      "     with ONLY an index/landing route. DO NOT enumerate per-page routes —",
+      "     they are registered automatically in a later consolidation step once",
+      "     every view exists. Export a default `AppRouter` so App.tsx can import it.",
+    ]
+  : [
+      "  4. Router skeleton (`router.tsx`) with EVERY route pre-registered to its",
+      "     (lazy) view — a missing view is then a build error, not a silent 404.",
+    ];
+
 const FOUNDATION_DESCRIPTION = [
   "Establish the shared frontend design system as CODE (not a doc) so every",
   "page reuses one visual language instead of re-deriving it.",
@@ -94,8 +112,7 @@ const FOUNDATION_DESCRIPTION = [
   "     Input, Select, Textarea, Badge, Table, Modal, EmptyState, Spinner) that",
   "     consume ONLY the tokens above, re-exported from the `index.ts` barrel.",
   "  3. Layout shell (AppLayout + Sidebar + TopNav) and per-role shells.",
-  "  4. Router skeleton (`router.tsx`) with EVERY route pre-registered to its",
-  "     (lazy) view — a missing view is then a build error, not a silent 404.",
+  ...ROUTER_DELIVERABLE,
   "  5. Shared AuthContext / providers.",
   "",
   "DESIGN-SYSTEM CONTRACT for all downstream page tasks:",

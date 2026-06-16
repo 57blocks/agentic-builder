@@ -24,6 +24,53 @@ export const PARALLEL_CODING_WORKERS_RAW = (
 export const ENABLE_PARALLEL_CODING_WORKERS =
   PARALLEL_CODING_WORKERS_RAW !== "" && PARALLEL_CODING_WORKERS_RAW !== "0";
 
+/**
+ * Foundation / architect-phase parallelism flag (default OFF).
+ *
+ * The architect phase builds the shared foundation (scaffold, data layer, infra,
+ * API contracts) and runs SERIALLY by default — many foundation tasks mutate the
+ * same cross-cutting files (module registry, API_CONTRACTS.json, shared schema),
+ * and downstream parallel workers read them, so a coherent serial substrate is
+ * the safe default. But concern-isolated foundation tasks (docker / models /
+ * api-contracts / e2e harness) touch DISJOINT files and are needlessly
+ * serialized. When this flag is on, the architect phase fans out via
+ * `chunkTasksByFileConflict` — file-coupled or dependency-ordered tasks still
+ * share one chunk (stay serial); only genuinely independent ones run in
+ * parallel. The phase still joins (barrier) before the contract-freeze + domain
+ * phases, so contract completeness is unchanged.
+ */
+export const ENABLE_PARALLEL_FOUNDATION = (() => {
+  const raw = (process.env.CODEGEN_PARALLEL_FOUNDATION ?? "0").trim().toLowerCase();
+  return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
+})();
+
+/**
+ * Frontend route-consolidation + parallel-pages flag (default ON).
+ *
+ * When enabled the frontend phase runs in two stages:
+ *   1. `fe_foundation` — the design-system/shell task(s) run first, alone, so
+ *      tokens + shared UI + layout + a MINIMAL router shell exist before pages.
+ *   2. `fe_worker` — page/view tasks fan out in parallel (they're conflict-free
+ *      once routing is no longer their responsibility), independent of
+ *      BLUEPRINT_PARALLEL_CODING_WORKERS.
+ * Then `fe_route_consolidation` writes the real `router.tsx` ONCE, registering
+ * every view that actually exists (LLM + deterministic guardrails).
+ *
+ * Set BLUEPRINT_FE_ROUTE_CONSOLIDATION=0 to fall back to the legacy single-stage
+ * frontend dispatch (foundation pre-registers all routes; pages serialized).
+ */
+export const ENABLE_FE_ROUTE_CONSOLIDATION =
+  (process.env.BLUEPRINT_FE_ROUTE_CONSOLIDATION ?? "1").trim() !== "0";
+
+/** Upper bound on parallel frontend page workers in the consolidation flow. */
+export function frontendPageWorkerCount(pageTaskCount: number): number {
+  if (pageTaskCount <= 1) return 1;
+  if (pageTaskCount <= 3) return 2;
+  if (pageTaskCount <= 6) return 3;
+  if (pageTaskCount <= 10) return 4;
+  return 5;
+}
+
 export function parsedWorkerLimit(): number | "auto" {
   if (PARALLEL_CODING_WORKERS_RAW === "auto") return "auto";
   const n = Number.parseInt(PARALLEL_CODING_WORKERS_RAW, 10);
@@ -32,7 +79,16 @@ export function parsedWorkerLimit(): number | "auto" {
 }
 
 export function workersForRole(role: CodingAgentRole, count: number): number {
-  if (role === "architect" || role === "test") return 1;
+  if (role === "test") return 1;
+  if (role === "architect") {
+    // Serial by default (shared-substrate safety). Opt-in fan-out: the caller
+    // still routes through chunkTasksByFileConflict, so file-coupled /
+    // dependency-ordered architect tasks collapse into one chunk and only
+    // file-disjoint ones parallelize.
+    if (!ENABLE_PARALLEL_FOUNDATION) return 1;
+    const auto = count <= 3 ? 1 : count <= 8 ? 2 : 3;
+    return Math.min(auto, count);
+  }
   // Strict context mode: keep one worker per coding role so each task sees
   // the latest outputs from previous tasks within the same role.
   // Disabled automatically when the operator opts in to parallel coding.

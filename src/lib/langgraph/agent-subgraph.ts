@@ -34,6 +34,7 @@ import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
 import { classifyFailureMode } from "@/lib/memory/distill/failure-mode";
 import { parseMemoryCites, recordMemoryCites } from "@/lib/memory/cite";
 import { resolveModel } from "@/lib/openrouter";
+import { ENABLE_FE_ROUTE_CONSOLIDATION } from "@/lib/langgraph/supervisor/config";
 import { resolveModelChain } from "@/lib/model-config";
 import type {
   CodingAgentRole,
@@ -581,8 +582,16 @@ export async function buildProjectConventionCard(
     lines.push(
       "- **Frontend framework**: Vite + React + React Router (NOT Next.js)",
       "- **Page views**: `frontend/src/views/` (flat, one file per page). NEVER use `src/pages/`.",
-      "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
     );
+    if (ENABLE_FE_ROUTE_CONSOLIDATION) {
+      lines.push(
+        "- **Routing (DO NOT register routes yourself)**: implement ONLY your own view component(s) under `frontend/src/views/` and export the page as a clear default export (`export default function XPage()`). Do NOT edit `frontend/src/router.tsx` to add your route — a dedicated consolidation step registers EVERY view into the router after all pages exist (page workers run in parallel, so editing the shared router here causes lost/clobbered routes). Just make sure your view is importable.",
+      );
+    } else {
+      lines.push(
+        "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
+      );
+    }
   }
 
   // ── Detect middleware directory ───────────────────────────────────────────
