@@ -151,7 +151,7 @@ import {
   parsedWorkerLimit,
   workersForRole,
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
-  INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+  scaledIntegrationVerifyFixTotalBudget,
   remainingIntegrationVerifyBudget,
 } from "./supervisor/config";
 import { recordSupervisorLlmUsage } from "./supervisor/usage-tracking";
@@ -5937,19 +5937,26 @@ async function integrationVerifyAndFix(
     0,
     state.integrationFixAttempts ?? 0,
   );
+  // Size-scaled cumulative budget: base + perTask × taskCount. A flat budget
+  // starved large projects (more findings → more repair iterations) so they
+  // exhausted the cap mid-repair and never advanced to e2e. See config.ts.
+  const totalBudget = scaledIntegrationVerifyFixTotalBudget(
+    state.tasks?.length ?? 0,
+  );
   const remainingBudget = remainingIntegrationVerifyBudget(
     priorIntegrationAttempts,
+    totalBudget,
   );
   if (remainingBudget <= 0) {
     console.warn(
-      `${label}: cumulative budget exhausted (${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); skipping repair loop and reporting fail so the graph can converge.`,
+      `${label}: cumulative budget exhausted (${priorIntegrationAttempts}/${totalBudget}); skipping repair loop and reporting fail so the graph can converge.`,
     );
     getRepairEmitter(state.sessionId)({
       stage: "integration-gate",
       event: "integration_verify_budget_exhausted",
       details: {
         priorAttempts: priorIntegrationAttempts,
-        totalBudget: INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+        totalBudget,
       },
     });
     await recordUnresolvedProblem(state.outputDir, {
@@ -5958,14 +5965,14 @@ async function integrationVerifyAndFix(
       gate: "integration-verify-fix",
       phase: "integration",
       attempts: priorIntegrationAttempts,
-      summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations without clearing the gate.`,
+      summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${totalBudget} iterations without clearing the gate.`,
       evidence: state.integrationErrors ? [state.integrationErrors.slice(0, 500)] : undefined,
       artifacts: [".ralph/runtime-smoke.json", ".ralph/tdd-review.json"],
     });
     return {
       integrationErrors: [
         state.integrationErrors?.trim(),
-        `IntegrationVerifyFix circuit-breaker: reached the cumulative budget of ${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations across all repair passes without clearing the gate. Stopping to avoid an infinite loop. Inspect .ralph/runtime-smoke.json and .ralph/tdd-review.json for the unresolved blockers.`,
+        `IntegrationVerifyFix circuit-breaker: reached the cumulative budget of ${totalBudget} iterations across all repair passes without clearing the gate. Stopping to avoid an infinite loop. Inspect .ralph/runtime-smoke.json and .ralph/tdd-review.json for the unresolved blockers.`,
       ]
         .filter(Boolean)
         .join("\n")
@@ -5978,7 +5985,7 @@ async function integrationVerifyAndFix(
     `${label}: starting agentic loop (max ${Math.min(
       readIntegrationVerifyFixMaxIterations(),
       remainingBudget,
-    )} iterations this pass; ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} cumulative budget used; one context compression on overflow)...`,
+    )} iterations this pass; ${priorIntegrationAttempts}/${totalBudget} cumulative budget used; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -7351,15 +7358,15 @@ async function integrationVerifyAndFix(
 
     if (iterations > maxIterations) {
       const cumulativeSoFar = priorIntegrationAttempts + iterations - 1;
-      const budgetCapped = cumulativeSoFar >= INTEGRATION_VERIFY_FIX_TOTAL_BUDGET;
+      const budgetCapped = cumulativeSoFar >= totalBudget;
       console.warn(
-        `${label}: reached max iterations for this pass (${maxIterations}; cumulative ${cumulativeSoFar}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); running final scoped validation before stopping.`,
+        `${label}: reached max iterations for this pass (${maxIterations}; cumulative ${cumulativeSoFar}/${totalBudget}); running final scoped validation before stopping.`,
       );
       const maxIterationGate = await runFinalScopedValidationGates();
       finalStatus = maxIterationGate.pass ? "pass" : "fail";
       finalSummary = [
         budgetCapped
-          ? `Stopped after reaching the cumulative INTEGRATION_VERIFY_FIX_TOTAL_BUDGET=${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} across all repair passes.`
+          ? `Stopped after reaching the cumulative integration-verify-fix budget=${totalBudget} across all repair passes.`
           : `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS for this pass (${maxIterations}).`,
         maxIterationGate.summary,
       ].join("\n\n");
@@ -8543,7 +8550,7 @@ async function integrationVerifyAndFix(
 
   const cumulativeIntegrationAttempts = priorIntegrationAttempts + iterations;
   console.log(
-    `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
+    `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${totalBudget}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
   );
 
   // G1: quarantine marker. A FAILED integration must not look runnable to

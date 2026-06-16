@@ -83,6 +83,45 @@ export const INTEGRATION_VERIFY_FIX_TOTAL_BUDGET =
   readIntegrationVerifyFixTotalBudget();
 
 /**
+ * Per coding-task increment added to the integration-verify-fix budget.
+ * Larger projects produce proportionally more integration findings (route
+ * registrations, contract holes, per-file tsc errors, TDD failures), so a
+ * FLAT budget starved them: they burned the cap mid-repair and never advanced
+ * to e2e/summary. Tunable via INTEGRATION_VERIFY_FIX_BUDGET_PER_TASK.
+ */
+export function readIntegrationVerifyFixBudgetPerTask(): number {
+  const raw = Number(
+    process.env.INTEGRATION_VERIFY_FIX_BUDGET_PER_TASK ?? "15",
+  );
+  if (!Number.isFinite(raw)) return 15;
+  return Math.max(0, Math.min(100, Math.floor(raw)));
+}
+
+/** True when the operator pinned an ABSOLUTE budget via env (disables scaling). */
+export function hasExplicitIntegrationVerifyFixTotalBudget(): boolean {
+  return (process.env.INTEGRATION_VERIFY_FIX_TOTAL_BUDGET ?? "").trim() !== "";
+}
+
+/**
+ * Size-scaled cumulative IntegrationVerifyFix budget:
+ *   base + perTask × taskCount, clamped to [20, 2000].
+ *
+ * `base` is the existing flat default (300) — so a small project keeps at
+ * least the historical budget and only larger projects get more. When the
+ * operator sets INTEGRATION_VERIFY_FIX_TOTAL_BUDGET explicitly it is honoured
+ * as an ABSOLUTE ceiling (scaling disabled) for backward compatibility.
+ */
+export function scaledIntegrationVerifyFixTotalBudget(
+  taskCount: number,
+): number {
+  const base = readIntegrationVerifyFixTotalBudget();
+  if (hasExplicitIntegrationVerifyFixTotalBudget()) return base;
+  const n = Number.isFinite(taskCount) ? Math.max(0, Math.floor(taskCount)) : 0;
+  const scaled = base + readIntegrationVerifyFixBudgetPerTask() * n;
+  return Math.max(20, Math.min(2000, scaled));
+}
+
+/**
  * Remaining IntegrationVerifyFix iteration budget for the *next* node entry,
  * given how many cumulative attempts have already been spent. Pure helper so
  * the arithmetic is unit-testable in isolation. Never negative.

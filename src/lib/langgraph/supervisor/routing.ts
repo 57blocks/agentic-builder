@@ -1,8 +1,8 @@
 import type { SupervisorState } from "../state";
 import {
-  INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
   integrationVerifyBudgetExhausted,
+  scaledIntegrationVerifyFixTotalBudget,
 } from "./config";
 
 /**
@@ -36,20 +36,28 @@ export function routeAfterIntegrationVerify(state: SupervisorState): string {
 }
 
 export function routeAfterTddGreenVerify(state: SupervisorState): string {
+  // Size-scaled cumulative budget — must match the value integrationVerifyAndFix
+  // computes from the same task count, so the routing circuit-breaker and the
+  // node agree on when the budget is spent.
+  const totalBudget = scaledIntegrationVerifyFixTotalBudget(
+    state.tasks?.length ?? 0,
+  );
   if (state.integrationErrors?.includes("TDD hard gate failed")) {
     // Circuit-breaker: stop sending control back to integration_verify once
     // the cumulative IntegrationVerifyFix budget is spent, even if the TDD
     // hard gate is still red. Otherwise the gate-fail → re-enter edge loops
     // forever (the node would just short-circuit and re-emit "TDD hard gate
-    // failed" with zero progress). See INTEGRATION_VERIFY_FIX_TOTAL_BUDGET.
-    if (integrationVerifyBudgetExhausted(state.integrationFixAttempts)) {
+    // failed" with zero progress).
+    if (
+      integrationVerifyBudgetExhausted(state.integrationFixAttempts, totalBudget)
+    ) {
       console.warn(
-        `[Supervisor] routeAfterTddGreenVerify: TDD hard gate still red but IntegrationVerifyFix budget exhausted (${state.integrationFixAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) — breaking the loop and proceeding to e2e/summary with errors recorded.`,
+        `[Supervisor] routeAfterTddGreenVerify: TDD hard gate still red but IntegrationVerifyFix budget exhausted (${state.integrationFixAttempts}/${totalBudget}) — breaking the loop and proceeding to e2e/summary with errors recorded.`,
       );
       return routeAfterIntegrationVerify(state);
     }
     console.log(
-      `[Supervisor] routeAfterTddGreenVerify: P0 TDD hard gate failed — returning to integration_verify for another repair pass (${state.integrationFixAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} cumulative iterations used).`,
+      `[Supervisor] routeAfterTddGreenVerify: P0 TDD hard gate failed — returning to integration_verify for another repair pass (${state.integrationFixAttempts}/${totalBudget} cumulative iterations used).`,
     );
     return "integration_verify";
   }
@@ -60,9 +68,14 @@ export function routeAfterTddGreenVerifyRetry(state: SupervisorState): string {
   if (!state.integrationErrors?.includes("TDD hard gate failed")) {
     return "summary";
   }
-  if (integrationVerifyBudgetExhausted(state.integrationFixAttempts)) {
+  const totalBudget = scaledIntegrationVerifyFixTotalBudget(
+    state.tasks?.length ?? 0,
+  );
+  if (
+    integrationVerifyBudgetExhausted(state.integrationFixAttempts, totalBudget)
+  ) {
     console.warn(
-      `[Supervisor] routeAfterTddGreenVerifyRetry: TDD hard gate still red but IntegrationVerifyFix budget exhausted (${state.integrationFixAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) — proceeding to summary.`,
+      `[Supervisor] routeAfterTddGreenVerifyRetry: TDD hard gate still red but IntegrationVerifyFix budget exhausted (${state.integrationFixAttempts}/${totalBudget}) — proceeding to summary.`,
     );
     return "summary";
   }
