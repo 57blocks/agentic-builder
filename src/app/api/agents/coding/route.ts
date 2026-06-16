@@ -2208,6 +2208,38 @@ export async function POST(request: NextRequest) {
       });
       await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
+
+      // Incremental checkpoint. The session checkpoint used to be written ONLY
+      // at stream end, so aborting / killing the dev-server process mid-run lost
+      // ALL coding progress. Persist it as tasks complete (time-debounced) so a
+      // kill loses at most a few seconds of work, and a Retry/Rerun resumes from
+      // the last persisted task instead of from scratch.
+      let lastCheckpointAt = 0;
+      const CHECKPOINT_MIN_INTERVAL_MS = 8000;
+      const persistCheckpoint = async (reason: string): Promise<void> => {
+        try {
+          const checkpointMap = new Map<string, TaskCheckpointEntry>();
+          for (const [id, result] of collectedTaskResults) {
+            checkpointMap.set(id, {
+              status: result.status,
+              generatedFiles: result.generatedFiles,
+            });
+          }
+          await writeSessionCheckpoint(
+            process.cwd(),
+            sessionId,
+            checkpointMap,
+            normalizedTasks.map((t) => t.id),
+          );
+          lastCheckpointAt = Date.now();
+        } catch (cpErr) {
+          console.warn(
+            `[CodingAPI] Checkpoint write failed (${reason}, ignored):`,
+            cpErr instanceof Error ? cpErr.message : cpErr,
+          );
+        }
+      };
+
       // Pre-populate skipped tasks (from previous session) as completed_with_warnings
       // so they appear in audit and scoring reports without being re-generated.
       for (const t of tasksSkipped) {
@@ -2355,6 +2387,12 @@ export async function POST(request: NextRequest) {
             codingTasks,
             collectedTaskResults,
           );
+          // Persist progress incrementally (debounced) so a process kill / abort
+          // mid-run doesn't lose everything. Runs regardless of clientAborted —
+          // the graph keeps executing server-side after a client disconnect.
+          if (Date.now() - lastCheckpointAt >= CHECKPOINT_MIN_INTERVAL_MS) {
+            await persistCheckpoint("incremental");
+          }
           collectWorkerContextFromChunk(
             updates,
             collectedFileRegistry,
@@ -2761,32 +2799,11 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // ── Session checkpoint ─────────────────────────────────────────────
-        // Persist task results so the next run can skip already-completed
-        // tasks via `retryFailedTaskIds`.
-        try {
-          const checkpointMap = new Map<string, TaskCheckpointEntry>();
-          for (const [id, result] of collectedTaskResults) {
-            checkpointMap.set(id, {
-              status: result.status,
-              generatedFiles: result.generatedFiles,
-            });
-          }
-          // Pass the full planned task ID list so tasks that were aborted before
-          // they even started are recorded as unknown/failed in the checkpoint.
-          const allSessionTaskIds = normalizedTasks.map((t) => t.id);
-          await writeSessionCheckpoint(
-            process.cwd(),
-            sessionId,
-            checkpointMap,
-            allSessionTaskIds,
-          );
-        } catch (cpErr) {
-          console.warn(
-            `[CodingAPI] Checkpoint write failed (ignored):`,
-            cpErr instanceof Error ? cpErr.message : cpErr,
-          );
-        }
+        // ── Session checkpoint (final) ─────────────────────────────────────
+        // Final flush of the same checkpoint persisted incrementally during the
+        // run (see `persistCheckpoint`). Lets the next run skip already-completed
+        // tasks via `retryFailedTaskIds`. Tasks never reached stay "unknown".
+        await persistCheckpoint("final");
 
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
