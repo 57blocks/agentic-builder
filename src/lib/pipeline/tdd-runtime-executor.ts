@@ -252,6 +252,14 @@ async function runOneTest(
  * real kickoff Postgres URL to a test. Returns a restore closure to call in a
  * finally. No-op when there is no .env or no DATABASE_URL line.
  *
+ * Crash-safe via atomic rename + sentinel: the real .env is moved to a
+ * `.tdd-bak` sibling (atomic on POSIX) before the blanked version is written,
+ * and restore renames it back. If the process is killed before restore runs,
+ * the next call to `recoverFromCrashedTddNeutralization` (or the next
+ * `neutralize` invocation) puts the file back. This replaces the previous
+ * read→blank→writeback-on-finally pattern which lost the original whenever the
+ * process died mid-TDD (observed: backend/.env left with `DATABASE_URL=`).
+ *
  * Correctly-mocked tests are unaffected: `vi.mock("../db")` replaces the module
  * so db.ts never runs. Tests that DON'T mock it now fail fast with a clear
  * "DATABASE_URL is required" instead of touching (or polluting) the live DB.
@@ -262,11 +270,64 @@ interface DbNeutralization {
   restore: () => Promise<void>;
 }
 
+const TDD_ENV_BACKUP_SUFFIX = ".tdd-bak";
+
+function backendEnvPaths(outputDir: string): {
+  envPath: string;
+  bakPath: string;
+} {
+  const envPath = path.join(outputDir, "backend", ".env");
+  return { envPath, bakPath: envPath + TDD_ENV_BACKUP_SUFFIX };
+}
+
+/**
+ * If a previous TDD run was killed between blanking backend/.env and restoring
+ * it, the `.env.tdd-bak` sentinel will still be on disk next to a neutralized
+ * `.env`. Atomic-rename it back. Idempotent and safe to call at any time —
+ * absence of the sentinel is a no-op.
+ *
+ * Call sites:
+ *   - top of `neutralizeBackendDatabaseUrl` (heals before re-blanking)
+ *   - top of the coding API's backend/.env writer (heals before the next
+ *     `upsertDatabaseUrlEnv` pass, so a stale crash doesn't shadow the real
+ *     kickoff URL when coding restarts)
+ */
+export async function recoverFromCrashedTddNeutralization(
+  outputDir: string,
+): Promise<{ recovered: boolean }> {
+  const { envPath, bakPath } = backendEnvPaths(outputDir);
+  try {
+    await fs.access(bakPath);
+  } catch {
+    return { recovered: false };
+  }
+  try {
+    await fs.rename(bakPath, envPath);
+    console.log(
+      "[tdd-runtime] recovered backend/.env from .tdd-bak (previous TDD run did not finish restore).",
+    );
+    return { recovered: true };
+  } catch (e) {
+    console.warn(
+      `[tdd-runtime] could not recover backend/.env from .tdd-bak: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return { recovered: false };
+  }
+}
+
 async function neutralizeBackendDatabaseUrl(
   outputDir: string,
 ): Promise<DbNeutralization> {
   const noop: DbNeutralization = { neutralized: false, restore: async () => {} };
-  const envPath = path.join(outputDir, "backend", ".env");
+  const { envPath, bakPath } = backendEnvPaths(outputDir);
+
+  // Self-heal first: a `.tdd-bak` from a prior killed run means the real .env
+  // is currently the blanked one. Restore before doing anything else, otherwise
+  // we would back up a blanked file and lose the original forever.
+  await recoverFromCrashedTddNeutralization(outputDir);
+
   let original: string;
   try {
     original = await fs.readFile(envPath, "utf-8");
@@ -278,9 +339,19 @@ async function neutralizeBackendDatabaseUrl(
   }
   const blanked = original.replace(/^([ \t]*DATABASE_URL[ \t]*=).*$/m, "$1");
   try {
-    await fs.writeFile(envPath, blanked, "utf-8");
+    // Atomic rename moves the real file aside; even if the process is killed
+    // between rename and writeFile the sentinel survives and recovery kicks in.
+    await fs.rename(envPath, bakPath);
+    try {
+      await fs.writeFile(envPath, blanked, "utf-8");
+    } catch (writeErr) {
+      // writeFile of the blanked version failed — best-effort put the original
+      // back so we leave the disk in a consistent state.
+      await fs.rename(bakPath, envPath).catch(() => {});
+      throw writeErr;
+    }
     console.log(
-      "[tdd-runtime] neutralized backend/.env DATABASE_URL for the test phase (restored after).",
+      "[tdd-runtime] neutralized backend/.env DATABASE_URL for the test phase (sentinel: .tdd-bak).",
     );
   } catch {
     return noop;
@@ -289,9 +360,11 @@ async function neutralizeBackendDatabaseUrl(
     neutralized: true,
     restore: async () => {
       try {
-        await fs.writeFile(envPath, original, "utf-8");
+        // Atomic restore: rename .tdd-bak back over .env. POSIX rename
+        // guarantees overwrite is atomic, so partial state is impossible.
+        await fs.rename(bakPath, envPath);
       } catch {
-        /* best-effort restore — next real run rewrites .env anyway */
+        /* best-effort restore — recoverFromCrashedTddNeutralization fixes it on the next run */
       }
     },
   };

@@ -68,7 +68,6 @@ import {
 import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
-import { trimProjectContextForTask } from "./worker-context-trim";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
@@ -1523,10 +1522,20 @@ async function runCodegenAgentSession(
   toolOptions?: { fsWriteOptions?: FsWriteOptions; taskId?: string },
   role?: CodingAgentRole,
   codingMode: CodingMode = "normal",
+  hasVisionImage = false,
 ): Promise<CodegenAgentSessionResult> {
-  // Frontend tasks use gpt-5.3-codex as primary for better UI fidelity.
-  const codegenVariant = role === "frontend" ? "codeGenFrontend" : "codeGen";
-    console.log('run task with role', role,'codegenVariant', codegenVariant)
+  // Cost-aware variant selection (mirrors the multi-round loop at L1261).
+  // Only route frontend UI-rendering tasks through the expensive codex chain
+  // (`codeGenFrontend`); pure-logic frontend tasks (hooks/services/types/
+  // stores) go through the cheaper deepseek-led `codeGen` chain.
+  //
+  // The `hasVisionImage` flag is set by `generateCode` only when the task
+  // both renders UI AND matched a design reference, so it's a reliable proxy
+  // for "this task needs UI fidelity". Without this gate every frontend task
+  // — even mock-data factories that write zero .tsx — was burning codex.
+  const codegenVariant =
+    role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
+    console.log('run task with role', role,'codegenVariant', codegenVariant, 'hasVisionImage', hasVisionImage)
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
@@ -2066,6 +2075,95 @@ function formatTaskFileHints(taskFiles: unknown): string {
   if (reads.length > 0)
     lines.push(`Reads:\n${reads.map((f) => `- ${f}`).join("\n")}`);
   return lines.length > 0 ? `\nTask file plan:\n${lines.join("\n")}` : "";
+}
+
+/**
+ * Returns true when a task is going to RENDER UI (pages, components, layouts,
+ * stylesheets) — as opposed to a frontend-domain task that only writes
+ * non-rendering code (hooks, services, stores, types, API clients, utilities).
+ *
+ * Used to gate two cost-sensitive decisions:
+ *   1. Whether to inject a vision image into the user message (vision tokens
+ *      are expensive and useless for a types-only task).
+ *   2. Whether to route through the codex chain (codeGenFrontend, optimised
+ *      for UI fidelity) or the cheaper deepseek-led chain (codeGen).
+ *
+ * Heuristic: at least one planned `creates`/`modifies` file is either
+ *   - a `.tsx`/`.jsx` under `views/`, `components/`, `pages/`, `screens/`,
+ *     `layouts/`, OR
+ *   - a root entry `App.tsx` / `index.tsx`, OR
+ *   - a stylesheet (`.css`/`.scss`/`.sass`/`.less`).
+ *
+ * This matches the conventional file layout the task-breakdown agent emits
+ * and is intentionally NOT based on task.title — titles vary too much and
+ * have already misclassified ("Bill List page with table" vs the actual
+ * design's card-list).
+ */
+function isUiRenderingTask(task: CodingTask): boolean {
+  const files: string[] = Array.isArray(task.files)
+    ? task.files
+    : [
+        ...(task.files?.creates ?? []),
+        ...(task.files?.modifies ?? []),
+      ];
+  if (files.length === 0) return false;
+  const UI_PATTERNS: RegExp[] = [
+    /(^|\/)(views|components|pages|screens|layouts)\/.+\.(tsx|jsx)$/i,
+    /(^|\/)App\.(tsx|jsx)$/,
+    /\.(css|scss|sass|less)$/i,
+  ];
+  return files.some((f) => {
+    const norm = f.replace(/\\/g, "/");
+    return UI_PATTERNS.some((re) => re.test(norm));
+  });
+}
+
+/**
+ * Builds the source-of-truth precedence declaration injected at the TOP of a
+ * frontend UI task's user message. Encodes the agreed weighting:
+ *
+ *   reference screenshot  →  Design Specification  →  CSS tokens (fallback)
+ *   →  sub-steps / task title (file + data-wiring checklist only)
+ *
+ * Why this exact order (learned the hard way on a real run):
+ *   - The CSS tokens scraped from the reference URL can be STALE / mis-scraped
+ *     (observed: token `--bg: #edf3f5` cool-grey while the actual screenshot
+ *     AND the DesignSpec are warm cream `#f6f0e2`). So tokens must be a
+ *     fallback that is IGNORED on conflict — never an authority that overrides
+ *     the screenshot or the DesignSpec.
+ *   - The task `subSteps` emitted by task-breakdown frequently prescribe a
+ *     generic CRUD layout ("sortable table", "Edit/Delete per row", "header
+ *     with New Bill button") that contradicts the design. They must be
+ *     demoted to a file/data checklist so they don't override the visual.
+ *
+ * When `hasImage` is false (no design reference matched) the DesignSpec
+ * becomes the top visual authority.
+ */
+function buildFrontendPriorityNote(opts: {
+  hasImage: boolean;
+  hasTokens: boolean;
+}): string {
+  const { hasImage, hasTokens } = opts;
+  const tokenTier = hasTokens
+    ? `\n${hasImage ? "3" : "2"}. **CSS Design Tokens** (listed below) — FALLBACK ONLY. Use a token's value only for a slot the Design Specification does not cover. If a token CONFLICTS with the ${hasImage ? "screenshot or the " : ""}Design Specification (e.g. a cool-grey \`--bg\` when the design is warm), IGNORE the token — tokens can be stale or mis-scraped from the source page.`
+    : "";
+  const checklistTier = `\n${hasImage ? (hasTokens ? "4" : "3") : hasTokens ? "3" : "2"}. **Sub-steps & task title** — a FILE + DATA-WIRING checklist ONLY, never a visual spec. They tell you WHICH files/components to create and HOW data flows. When a sub-step's UI wording (e.g. "sortable table", "Edit/Delete buttons per row", "header with New Bill button") conflicts with ${hasImage ? "the screenshot" : "the Design Specification"}, ${hasImage ? "the SCREENSHOT" : "the Design Specification"} WINS. Do not let a sub-step's layout phrasing pull you toward a generic CRUD shape.`;
+
+  if (hasImage) {
+    return (
+      `\n\n## Source of truth (read first, apply to every decision)\n` +
+      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative sizing. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
+      `2. **Design Specification** (Project Context → section "Design Specification") — the authoritative source for EXACT quantitative values that match the screenshot: hex colours, font sizes, line-heights, spacing, radii, shadows, gradients. Pull precise numbers from here. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
+      tokenTier +
+      checklistTier
+    );
+  }
+  return (
+    `\n\n## Source of truth (read first, apply to every decision)\n` +
+    `1. **Design Specification** (Project Context → section "Design Specification") — your PRIMARY visual authority since no reference screenshot is attached: layout, component shape, exact hex colours, font sizes, spacing, radii, shadows. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
+    tokenTier +
+    checklistTier
+  );
 }
 
 function getRemainingPlannedCreates(
@@ -2720,6 +2818,20 @@ function findTaskDesignReference(
     .filter(Boolean)
     .join(" ");
 
+  // ── Step C: direct storedFileName mention ────────────────────────────────
+  // task-breakdown-agent receives the design-references block in its prompt
+  // and often writes ".design-references/<storedFileName>.jpg" into the
+  // task description verbatim. This is the strongest possible signal —
+  // the task is EXPLICITLY pointing at this reference — so we check it
+  // before the pageHint heuristics. Without this, a task whose pageHint
+  // ("PAGE-001") doesn't appear in the title/description loses the image
+  // even when the description literally cites the file.
+  for (const r of imageRefs) {
+    if (r.storedFileName && taskText.includes(r.storedFileName)) {
+      return r;
+    }
+  }
+
   // ── Step A: precise PAGE-id match ────────────────────────────────────────
   const pageIdMatches = taskText.match(/\bPAGE-\d+\b/gi);
   const taskPageIds = new Set(
@@ -2804,24 +2916,21 @@ async function generateCode(state: WorkerState) {
     }
 
     if (state.projectContext) {
-      // Trim the (potentially huge) projectContext down to a task-relevant
-      // subset. Protections against info loss:
-      //   1. Always-keep whitelist (shared/common/conventions/…)
-      //   2. Force-include sections that mention task's FR/AC IDs
-      //   3. Trim-marker at the bottom telling the worker to use
-      //      read_file / grep if it needs details it doesn't see
-      // See: src/lib/langgraph/worker-context-trim.ts
-      const trimmed = trimProjectContextForTask(state.projectContext, {
-        task,
-        sessionId: state.sessionId,
-        label: state.workerLabel,
-      });
-      contextParts.push(trimmed.content);
-      if (trimmed.trimmed) {
-        console.log(
-          `[Worker:${state.workerLabel}] projectContext trimmed: ${trimmed.originalChars.toLocaleString()} -> ${trimmed.usedChars.toLocaleString()} chars (task=${task.id} "${task.title}")`,
-        );
-      }
+      // Pass the full projectContext through verbatim — no trimming.
+      // The trim step (`trimProjectContextForTask`) was silently stripping
+      // out the Design Specification, Design references, PRD pages/components/
+      // user-flow/acceptance-criteria sections, which is exactly what every
+      // frontend UI task needs. Modern coding models (codex / deepseek-v4)
+      // handle 100K+ context windows comfortably; the trim's original size-
+      // protection was historical. If a later run starts hitting model
+      // context limits we'll re-introduce a slimmer, role-aware filter —
+      // for now the full document goes in. See:
+      // src/lib/langgraph/worker-context-trim.ts for the legacy logic
+      // (still exported, no longer called from here).
+      contextParts.push(state.projectContext);
+      console.log(
+        `[Worker:${state.workerLabel}] projectContext passed through (no trim): ${state.projectContext.length.toLocaleString()} chars (task=${task.id} "${task.title}")`,
+      );
     }
     // PrdSpec (PAGE-*/CMP-*) entries for this task — only useful for
     // frontend/test workers, but cheap to include for others too when the
@@ -3006,7 +3115,20 @@ async function generateCode(state: WorkerState) {
           pageHint: string;
         }
       | undefined;
-    if (state.role === "frontend") {
+    // Cost gate: only UI-rendering frontend tasks (pages / components /
+    // layouts / stylesheets) attempt vision injection. Pure-logic tasks
+    // (hooks/services/types/stores) don't need the image — sending one
+    // would burn ~75% more tokens AND would push the call onto the
+    // expensive codex chain via the variant-selection downstream. See
+    // `isUiRenderingTask` for the heuristic.
+    const isUiTask =
+      state.role === "frontend" && isUiRenderingTask(task);
+    if (state.role === "frontend" && !isUiTask) {
+      console.log(
+        `[Worker:${state.workerLabel}] Skipping vision injection for non-UI frontend task "${task.title}" — routing through cheaper codeGen chain.`,
+      );
+    }
+    if (isUiTask) {
       try {
         const refs = await readDesignReferencesFromOutput(state.outputDir);
         const matchedRef = findTaskDesignReference(task, refs);
@@ -3027,31 +3149,32 @@ async function generateCode(state: WorkerState) {
             pageHint: matchedRef.pageHint,
           };
 
-          // Append CSS tokens to the task text when the matched reference has them.
-          // Tokens are extracted from the source URL and represent the exact design-system
-          // values (colours, spacing, fonts, radii) the user expects to be replicated.
+          // CSS tokens are a FALLBACK reference, not an authority. They were
+          // scraped from the source URL and can be stale / mis-mapped
+          // (observed: a cool-grey `--bg` while the real screenshot + DesignSpec
+          // are warm). The precedence note (built above) tells the model to
+          // ignore any token that conflicts with the screenshot / DesignSpec.
           const cssTokenEntries = matchedRef.cssToken
             ? Object.entries(matchedRef.cssToken)
             : [];
           const cssTokenNote =
             cssTokenEntries.length > 0
-              ? `\n\n## CSS Design Tokens for this page\nThe following tokens were extracted from the reference URL. Replicate every value exactly — use Tailwind arbitrary values (e.g. \`bg-[#6366f1]\`, \`gap-[8px]\`) or CSS custom properties. Do not approximate.\n\n## Token-to-slot semantics (HARD RULE)\nA token name encodes its intended slot. Do NOT swap roles:\n- \`--bg\`, \`--bg-elevated\`, \`--bg-subtle\`, \`--bg-muted\` → page / surface / card backgrounds. NEVER use \`--accent\`/\`--primary\`/\`--warning\`/status colours as the page background — those are call-to-action / status pill / icon colours.\n- \`--primary\` (+ \`-hover\`/\`-active\`/\`-soft\`) → primary action buttons, active nav, focused borders.\n- \`--accent\` (+ \`-soft\`) → accent CTA / highlight only; usually a small surface, not a fill of the whole viewport.\n- \`--text\`, \`--text-muted\`, \`--text-subtle\`, \`--text-inverse\` → text on light / on dark surfaces, respectively.\n- \`--border\`, \`--border-strong\`, \`--border-focus\` → card/input borders and focus rings.\n- \`--status-*-bg\` / \`--status-*-text\` → status pills (one matched pair per state). Match the state name (paid/approved/pending/rejected/waitlist) to the pill.\n- \`--shadow-*\` → card / modal elevation, in ascending intensity (xs → lg).\nIf the reference image's overall background looks pale/cream/neutral, the page background MUST come from \`--bg\` (or \`--bg-elevated\`), never from \`--accent\` or \`--warning\`.\n\n${cssTokenEntries.map(([k, v]) => `- \`${k}\`: \`${v}\``).join("\n")}`
+              ? `\n\n## CSS Design Tokens (fallback reference — see Source of truth above)\nThese were scraped from the reference page and may be stale or mis-mapped. Use a value ONLY for a slot the Design Specification does not cover, and ONLY when it agrees with the screenshot. If a token disagrees with the screenshot or the Design Specification, IGNORE it. Token name hints the slot — \`--bg*\` background, \`--primary*\` primary action, \`--accent*\` small accent (never the page background), \`--text*\` text, \`--border*\` borders, \`--status-*-bg\`/\`--status-*-text\` status pill pairs, \`--shadow-*\` elevation.\n\n${cssTokenEntries.map(([k, v]) => `- \`${k}\`: \`${v}\``).join("\n")}`
               : "";
 
-          // ── Visual contract: image overrides any UI noun in the task text ──
-          // Task titles emitted by task-breakdown often hardcode a UI primitive
-          // (e.g. "with table", "as a list", "form-based") that may disagree
-          // with what the reference image actually shows. When that happens
-          // the IMAGE wins — match the reference's component type, density,
-          // and visual hierarchy. Treat the title's noun as data-domain hint
-          // only, never as a layout directive.
-          const visualPriorityNote = `\n\n## Visual contract (HARD RULE — applies because a reference image is attached)\nThe image attached to this message is the **highest-priority visual contract** for this task. It overrides any UI primitive named in the task title or description (e.g. words like "table", "list", "grid", "form", "card", "dashboard"). When the text and the image disagree on structure, the IMAGE WINS.\n\nConcretely:\n- **Component type / layout**: replicate exactly what the image shows — if the image shows a vertical stack of rich cards (thumbnail + multi-line content + actions), build CARDS, not a \`<table>\`, even if the title says "table". If the image shows a data table, build a table even if the title says "list".\n- **Visual hierarchy**: match the heading + subtitle pattern, the filter row position, the per-row content density (thumbnail / multi-line text / right-aligned price + buttons / status badge placement), and any floating widgets (role switcher, FAB, etc.) visible in the image.\n- **Page chrome**: if the image clearly shows brand header / global nav / user menu / cart, surface those — DON'T render an isolated CRUD viewport when the design embeds the page inside a product shell. (If those belong to a separate scaffold task, still render the matching slot inside the layout — never leave the page rootless.)\n- **Action set**: copy the buttons and labels shown (e.g. "VIEW RECEIPT", "DOWNLOAD RECEIPT", "REQUEST REFUND", "CONTINUE PAYMENT"). Do NOT default to generic "Edit" / "Delete" if the design shows domain-specific actions.\n- **Empty / sparse states**: if the image shows ≥N richly-populated rows, ensure the mock/seed data renders at least that many items covering the same status variety (Paid / Pending Payment / Refund Under Review / Refunded / etc.); a one-row demo is not acceptable when the design demonstrates a populated screen.\n- **Typography & density**: follow the image's heading style (serif vs sans), price formatting (e.g. monospace large numerals), gutter widths, card radii, and shadow depth.\n\nUse the task title only as a hint about what data domain to fetch (bills, courses, lessons, …). Use the image as the layout contract.`;
+          const priorityNote = buildFrontendPriorityNote({
+            hasImage: true,
+            hasTokens: cssTokenEntries.length > 0,
+          });
 
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
-              { type: "text", text: userTaskText + visualPriorityNote + cssTokenNote },
+              {
+                type: "text",
+                text: priorityNote + cssTokenNote + "\n\n" + userTaskText,
+              },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
@@ -3068,7 +3191,22 @@ async function generateCode(state: WorkerState) {
       }
     }
     if (!injectedVisionImage) {
-      messages.push({ role: "user", content: userTaskText });
+      // A UI-rendering frontend task that did NOT match a design reference
+      // still needs the source-of-truth precedence so it defers to the
+      // Design Specification (not the sub-steps' CRUD wording). Non-UI / non-
+      // frontend tasks get the task text verbatim.
+      if (isUiTask) {
+        const priorityNote = buildFrontendPriorityNote({
+          hasImage: false,
+          hasTokens: false,
+        });
+        messages.push({
+          role: "user",
+          content: priorityNote + "\n\n" + userTaskText,
+        });
+      } else {
+        messages.push({ role: "user", content: userTaskText });
+      }
     }
 
     // ── Per-task context dump (all roles) ─────────────────────────────────
@@ -3160,6 +3298,7 @@ async function generateCode(state: WorkerState) {
         { fsWriteOptions: fsOpts, taskId: task.id },
         state.role,
         state.codingMode,
+        injectedVisionImage,
       );
       const content = response.content;
       totalCostUsd += response.costUsd;
