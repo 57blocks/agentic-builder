@@ -974,11 +974,46 @@ export function DesignUI(props: StepUIProps) {
     [],
   );
 
+  const handleUploadToRoute = useCallback(
+    async (file: File, pageHint: string) => {
+      // Exclusivity: a route holds at most one screenshot — clear the old
+      // owner's pageHint (keeps the image in the list, just unassigned).
+      const currentRefs = usePipelineStore.getState().designReferences;
+      // Tolerate enriched auto-match hints like "PAGE-002 monitor dashboard"
+      // (leading token is the canonical route id).
+      const existingOwner = currentRefs.find(
+        (r) => r.pageHint === pageHint || r.pageHint.split(/\s+/)[0] === pageHint,
+      );
+      if (existingOwner) {
+        await usePipelineStore
+          .getState()
+          .updateDesignReferenceMeta(existingOwner.id, { pageHint: "" });
+      }
+      const result = await usePipelineStore
+        .getState()
+        .uploadDesignReferences([file], [""], [pageHint]);
+      // Mark as a manual match so it renders violet and auto-match won't
+      // override it later.
+      const added = result?.added?.[0];
+      if (added) {
+        await usePipelineStore
+          .getState()
+          .updateDesignReferenceMeta(added.id, {
+            matchedBy: "manual",
+            matchConfidence: null,
+          });
+      }
+    },
+    [],
+  );
+
   const handleDropToRoute = useCallback(
     async (referenceId: string, pageHint: string) => {
       const currentRefs = usePipelineStore.getState().designReferences;
       const existingOwner = currentRefs.find(
-        (r) => r.pageHint === pageHint && r.id !== referenceId,
+        (r) =>
+          (r.pageHint === pageHint || r.pageHint.split(/\s+/)[0] === pageHint) &&
+          r.id !== referenceId,
       );
       if (existingOwner) {
         await usePipelineStore
@@ -1363,6 +1398,7 @@ export function DesignUI(props: StepUIProps) {
                   prdContent={prdContent}
                   references={designReferences}
                   isMatching={isMatching}
+                  projectSlug={props.projectSlug}
                   onUpload={handleUploadToGrid}
                   onFetchUrls={handleFetchUrlsToGrid}
                   onFetchRouteUrl={handleFetchRouteUrl}
@@ -1370,6 +1406,7 @@ export function DesignUI(props: StepUIProps) {
                     await usePipelineStore.getState().deleteDesignReference(id);
                   }}
                   onDropToRoute={handleDropToRoute}
+                  onUploadToRoute={handleUploadToRoute}
                 />
 
               )}

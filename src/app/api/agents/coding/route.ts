@@ -120,7 +120,6 @@ import {
 } from "@/lib/pipeline/model-scoring";
 import {
   writeSessionCheckpoint,
-  readSessionCheckpoint,
   clearSessionCheckpoint,
   type TaskCheckpointEntry,
 } from "@/lib/pipeline/session-checkpoint";
@@ -947,138 +946,15 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds && retryFailedTaskIds.length > 0
       ? new Set(retryFailedTaskIds)
       : null;
-  // In retry mode, expand the retry set to include any dependency tasks whose
-  // output files do not yet exist on disk. This prevents a scenario where a
-  // retry task (e.g. T-006 Integration) depends on pages created by T-003/T-004
-  // but those tasks were never completed — the worker would spin trying to find
-  // absent files. We include missing-dependency tasks silently so the retry
-  // remains targeted but self-healing.
-  let expandedRetrySet = retrySet;
-  if (retrySet) {
-    const expandedIds = new Set(retrySet);
-    const taskMap = new Map(tasksAfterStrip.map((t) => [t.id, t]));
-
-    const addMissingDeps = (taskId: string, visited = new Set<string>()) => {
-      if (visited.has(taskId)) return;
-      visited.add(taskId);
-      const task = taskMap.get(taskId);
-      if (!task) return;
-      for (const depId of task.dependencies ?? []) {
-        addMissingDeps(depId, visited);
-        const depTask = taskMap.get(depId);
-        if (!depTask) continue;
-        // Check if every "creates" file from the dep task exists on disk
-        const depCreates = Array.isArray(depTask.files)
-          ? depTask.files
-          : depTask.files?.creates ?? [];
-        const allCreatesExist = depCreates.every((f: string) => {
-          try {
-            require("fs").accessSync(path.join(outputRoot, f));
-            return true;
-          } catch {
-            return false;
-          }
-        });
-        if (!allCreatesExist) {
-          expandedIds.add(depId);
-        }
-      }
-    };
-
-    for (const id of retrySet) {
-      addMissingDeps(id);
-    }
-
-    if (expandedIds.size > retrySet.size) {
-      const added = [...expandedIds].filter((id) => !retrySet.has(id));
-      console.log(
-        `[CodingAPI] Retry mode: expanded retry set with missing-dependency tasks: ${added.join(", ")}`,
-      );
-      expandedRetrySet = expandedIds;
-    }
-  }
-
-  // Resume hygiene: never re-run a task the checkpoint marks completed when
-  // it was only pulled in by dependency expansion. Without this, a
-  // "Retry Failed" was re-running finished foundation tasks (e.g. T-002
-  // scaffold) from scratch, i.e. "starting from the top".
-  //
-  // Carve-out: tasks the user EXPLICITLY picked (`retrySet`) are never dropped
-  // here — if the user hand-picked an already-completed task to re-run, the
-  // checkpoint must NOT silently filter it out. Otherwise the request 400s
-  // with "None of the retryFailedTaskIds matched any known task" and the UI
-  // is left with optimistic-pending status but no execution. (Mirrors the
-  // same carve-out in the on-disk built filter below.)
-  if (expandedRetrySet && retrySet) {
-    try {
-      const cp = await readSessionCheckpoint(process.cwd());
-      if (cp) {
-        const completed = new Set(
-          Object.entries(cp.taskResults)
-            .filter(
-              ([, r]) =>
-                r.status === "completed" ||
-                r.status === "completed_with_warnings",
-            )
-            .map(([id]) => id),
-        );
-        const before = expandedRetrySet.size;
-        expandedRetrySet = new Set(
-          [...expandedRetrySet].filter(
-            (id) => retrySet.has(id) || !completed.has(id),
-          ),
-        );
-        if (expandedRetrySet.size < before) {
-          console.log(
-            `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-completed dependency task(s) from the retry set (checkpoint); explicitly-selected tasks were preserved.`,
-          );
-        }
-      }
-    } catch {
-      /* no/unreadable checkpoint → nothing to exclude */
-    }
-  }
-
-  // After a crash there is often no checkpoint, so the dependency-expansion
-  // above re-pulls a selected unfinished task's ALREADY-BUILT dependencies and
-  // the run re-does finished work (the user's complaint: "it's re-running tasks
-  // I already built"). Drop any dependency-pulled task whose `creates` files all
-  // exist on disk. Explicitly-selected tasks (in `retrySet`) are NEVER dropped —
-  // if the user hand-picked a built task to re-fix it, honour that.
-  if (expandedRetrySet && retrySet) {
-    const outputRootForCheck = resolveCodeOutputRoot(
-      process.cwd(),
-      codeOutputDir,
-    );
-    const taskById = new Map(tasksAfterStrip.map((t) => [t.id, t]));
-    const isBuiltOnDisk = (id: string): boolean => {
-      const t = taskById.get(id);
-      if (!t) return false;
-      const creates = Array.isArray(t.files)
-        ? t.files
-        : t.files?.creates ?? [];
-      if (creates.length === 0) return false; // can't prove built → keep it
-      return creates.every((f: string) => {
-        try {
-          require("fs").accessSync(path.join(outputRootForCheck, f));
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    };
-    const before = expandedRetrySet.size;
-    expandedRetrySet = new Set(
-      [...expandedRetrySet].filter(
-        (id) => retrySet.has(id) || !isBuiltOnDisk(id),
-      ),
-    );
-    if (expandedRetrySet.size < before) {
-      console.log(
-        `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-built dependency task(s) from the run set (on-disk); only unbuilt deps + explicitly-selected tasks run.`,
-      );
-    }
-  }
+  // Hand-picked rerun contract: run EXACTLY the tasks the user selected — no
+  // dependency expansion, no checkpoint/on-disk reconciliation. Selecting T-003
+  // runs only T-003, regardless of whether its upstream dependencies are built.
+  // This is the explicit, predictable behaviour the user asked for: "选什么就只
+  // 跑什么". Trade-off: if a selected task's upstream output is genuinely missing
+  // the worker may not find the files it expects — that is on the caller, who
+  // chose the targeted set. All other tasks are left untouched (they're simply
+  // absent from the run set and pre-populated as already-completed downstream).
+  const expandedRetrySet = retrySet;
 
   const tasksToRun = expandedRetrySet
     ? tasksAfterStrip.filter((t) => expandedRetrySet!.has(t.id))

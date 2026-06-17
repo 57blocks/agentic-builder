@@ -166,7 +166,7 @@ export function TaskRerunPicker({
               选择任务重跑
             </h3>
             <p className="text-[11px] text-slate-500">
-              勾选要重新执行的任务，已完成的依赖会被自动跳过。
+              勾选要重新执行的任务，仅运行所选任务，不会自动重跑其依赖。
             </p>
           </div>
           <button

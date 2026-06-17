@@ -26,6 +26,7 @@ import {
 } from "@/lib/openrouter";
 import {
   readDesignReferencesFromOutput,
+  extractReferenceLayoutBlueprint,
   type DesignReferenceEntry,
 } from "@/lib/pipeline/design-references";
 import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
@@ -3136,20 +3137,54 @@ async function generateCode(state: WorkerState) {
             hasTokens: cssTokenEntries.length > 0,
           });
 
+          // Parse the screenshot into a BINDING layout blueprint (cached per
+          // image). This gives the codegen model a concrete, image-derived
+          // spec that is as specific as the task's CRUD sub-steps and is
+          // declared to OVERRIDE them — the only way to beat a task whose
+          // title/file-names/sub-steps/TDD all assume a generic table.
+          let blueprintNote = "";
+          try {
+            const blueprint = await extractReferenceLayoutBlueprint({
+              cacheDir: path.join(state.outputDir, ".design-references"),
+              storedFileName: matchedRef.storedFileName,
+              bytes: imgBytes.byteLength,
+              imageDataUrl: dataUrl,
+              label: matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
+            });
+            if (blueprint) {
+              blueprintNote =
+                `\n\n## Reference layout blueprint (image-derived — AUTHORITATIVE layout contract)\n` +
+                `This blueprint was parsed directly from the attached screenshot. It OVERRIDES the task title, the planned file names, and the sub-steps. Where a sub-step says "table / Edit-Delete / New Bill" but this blueprint says otherwise (e.g. a card list with receipt actions), FOLLOW THE BLUEPRINT. Reproduce the component type, per-item anatomy, button labels, and states exactly as described here.\n\n${blueprint}`;
+              console.log(
+                `[Worker:${state.workerLabel}] Layout blueprint extracted for "${task.title}" (${blueprint.length} chars).`,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[Worker:${state.workerLabel}] Layout blueprint extraction failed (ignored):`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
               {
                 type: "text",
-                text: priorityNote + cssTokenNote + "\n\n" + userTaskText,
+                text:
+                  priorityNote +
+                  blueprintNote +
+                  cssTokenNote +
+                  "\n\n" +
+                  userTaskText,
               },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
           injectedVisionImage = true;
           console.log(
-            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""})`,
+            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""}${blueprintNote ? ", +layout blueprint" : ""})`,
           );
         }
       } catch (err) {

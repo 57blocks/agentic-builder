@@ -441,7 +441,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Same plumbing as "Retry Failed" (retryFailedTasks → retryFailedTaskIds),
   // but the user chooses the task ids in the picker instead of it defaulting to
   // the failed set. Lets you re-run never-run / specific tasks without a full
-  // rerun. Already-completed dependencies are skipped server-side.
+  // rerun. Server-side runs EXACTLY the picked tasks — dependencies are never
+  // auto-expanded or re-run, even if unbuilt.
   const [pickerOpen, setPickerOpen] = useState(false);
   const handleRunSelected = useCallback(
     (taskIds: string[]) => {
