@@ -152,7 +152,7 @@ function normalizeScenario(
   };
 }
 
-function parsePrdE2eSpec(raw: string): PrdE2eSpec | null {
+export function parsePrdE2eSpec(raw: string): PrdE2eSpec | null {
   let cleaned = raw.trim();
   const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) cleaned = fence[1].trim();
@@ -487,4 +487,100 @@ export function deriveFallbackE2eTasks(
   };
 
   return [harnessTask, scenarioTask];
+}
+
+// ─── Per-page / per-flow E2E generation planning (Part 2) ───────────────────
+//
+// The e2e_verify node used to generate ALL Playwright specs in ONE LLM call from
+// a truncated PRD_E2E_SPEC.md — for a large app that one-shot is capped by output
+// tokens and silently under-covers. Instead we group the STRUCTURED scenarios by
+// route (≈ page / flow) and generate ONE focused spec file per group, so coverage
+// scales with the app instead of with a single response's token budget.
+
+export interface E2eTestFileGroup {
+  /** Project-relative path for the generated spec, e.g. frontend/e2e/board.spec.ts. */
+  fileName: string;
+  /** Human label for the top-level describe block. */
+  label: string;
+  /** Scenarios this file must cover. */
+  scenarios: PrdE2eScenario[];
+}
+
+/** Slugify a route ("/projects/:id" → "projects") into a stable spec basename. */
+export function routeToSpecSlug(route: string): string {
+  const cleaned = (route || "").trim().replace(/^https?:\/\/[^/]+/i, "");
+  const segments = cleaned
+    .split("/")
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith(":") && !s.startsWith("{") && s !== "*");
+  if (segments.length === 0) return "home";
+  return (
+    segments
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "home"
+  );
+}
+
+/**
+ * Group a spec's scenarios into per-route test files, splitting any route with
+ * more than `maxPerFile` scenarios into numbered chunks so no single LLM call is
+ * asked to emit too much at once. Pure + deterministic (stable order).
+ */
+export function planE2eTestFiles(
+  spec: PrdE2eSpec,
+  opts: { maxPerFile?: number } = {},
+): E2eTestFileGroup[] {
+  const maxPerFile = opts.maxPerFile && opts.maxPerFile > 0 ? opts.maxPerFile : 6;
+  const bySlug = new Map<string, PrdE2eScenario[]>();
+  const order: string[] = [];
+  for (const s of spec.scenarios) {
+    const slug = routeToSpecSlug(s.route) || "app";
+    if (!bySlug.has(slug)) {
+      bySlug.set(slug, []);
+      order.push(slug);
+    }
+    bySlug.get(slug)!.push(s);
+  }
+
+  const groups: E2eTestFileGroup[] = [];
+  for (const slug of order) {
+    const scenarios = bySlug.get(slug)!;
+    const chunks = Math.ceil(scenarios.length / maxPerFile);
+    for (let i = 0; i < scenarios.length; i += maxPerFile) {
+      const chunk = scenarios.slice(i, i + maxPerFile);
+      const suffix = chunks > 1 ? `-${Math.floor(i / maxPerFile) + 1}` : "";
+      groups.push({
+        fileName: `frontend/e2e/${slug}${suffix}.spec.ts`,
+        label: `${slug}${suffix}`,
+        scenarios: chunk,
+      });
+    }
+  }
+  return groups;
+}
+
+/** Render one scenario as a compact, generation-ready block. */
+export function formatScenarioForGeneration(scenario: PrdE2eScenario): string {
+  const lines: string[] = [
+    `### ${scenario.id}: ${scenario.title} [${scenario.priority}]`,
+    `- Route: ${scenario.route || "(unspecified)"}`,
+    `- Persona: ${scenario.persona || "(any)"}`,
+  ];
+  if (scenario.preconditions.length) {
+    lines.push(`- Preconditions: ${scenario.preconditions.join("; ")}`);
+  }
+  lines.push("- Steps:");
+  scenario.steps.forEach((step, i) => {
+    lines.push(
+      `  ${i + 1}. ${step.action} → ${step.target} ⇒ assert: ${step.assertion}`,
+    );
+  });
+  lines.push(`- Expected outcome: ${scenario.expectedOutcome}`);
+  if (scenario.coversRequirementIds.length) {
+    lines.push(`- Covers: ${scenario.coversRequirementIds.join(", ")}`);
+  }
+  return lines.join("\n");
 }

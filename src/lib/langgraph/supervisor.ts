@@ -142,6 +142,11 @@ import {
 import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
+  parsePrdE2eSpec,
+  planE2eTestFiles,
+  formatScenarioForGeneration,
+} from "@/lib/e2e/prd-e2e-spec";
+import {
   triageE2eFailures,
   hasInfraSignal,
   type FailedTestRecord,
@@ -2031,94 +2036,175 @@ async function e2eVerifyAndFix(
           "e2eGen",
           "gpt-4o",
         );
-        const genMessages: ChatMessage[] = [
-          {
-            role: "system",
-            content: [
-              "You are an expert Playwright E2E test author.",
-              "Generate complete Playwright TypeScript test files that cover every scenario in the PRD E2E spec.",
-              "",
-              "## Structure requirements",
-              "- One spec file per PRD section/route group (e.g. frontend/e2e/auth.spec.ts, frontend/e2e/dashboard.spec.ts).",
-              "- Use `test.describe` blocks matching section headings.",
-              "- Each `test()` maps 1-to-1 with a PRD E2E step sequence.",
-              "- Use `page.goto()`, `page.locator()`, `page.fill()`, `page.click()`, `expect()` from @playwright/test.",
-              "- Do NOT import anything outside @playwright/test.",
-              "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
-              "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
-              "- Do not re-generate smoke.spec.ts.",
-              "",
-              "## Skip tests for features with missing env keys",
-              "- If the user message contains a `## Env keys NOT configured` block,",
-              "  every test whose flow depends on one of those keys MUST start with",
-              "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
-              "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
-              "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
-              "  a hard failure the fix-loop has to keep chewing.",
-              "",
-              "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
-              "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
-              "  Always add `{ level: N }` or `{ name: 'exact text' }` so only ONE element matches.",
-              "  Example: `page.getByRole('heading', { level: 1 })` or `page.getByRole('heading', { name: 'Welcome' })`.",
-              "- NEVER use `page.getByRole('button')` alone — always add `{ name: '...' }`.",
-              "- NEVER use `page.getByText('...')` without `.first()` when the text may appear more than once.",
-              "- NEVER use `page.locator('text=...')` in `expect(...).toBeVisible()` without `.first()` unless the selector is guaranteed unique.",
-              "- Prefer `page.getByRole(...)` with unique qualifiers > `page.getByTestId(...)` > `page.locator('text=...')` > CSS selectors.",
-              "- When using `page.locator(css)` that could match multiple elements, always append `.first()` or `.nth(N)` before assertions.",
-              "- Text in selectors must match the EXACT case rendered in the DOM.",
-              "  If the UI shows 'SIGN UP' (uppercase), use `page.getByRole('link', { name: 'SIGN UP' })` — not 'Sign Up'.",
-              "- Avoid deprecated `page.click('text=...')` — use `page.locator('text=...').click()` or `page.getByRole(...).click()`.",
-              "- For form inputs always prefer `page.getByLabel('...')` or `page.getByPlaceholder('...')`.",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: [
-              `Project output dir: ${state.outputDir}`,
-              "",
-              "## PRD E2E Specification",
-              e2eSpecDoc.slice(0, 12000),
-              "",
-              unfilledKeysBlock,
-              state.projectContext
-                ? `## Project context\n${state.projectContext.slice(0, 4000)}`
-                : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          },
-        ];
-        const genResponse = await chatCompletionWithFallback(
-          genMessages,
-          genModelChain,
-          {
-            temperature: 0.1,
-            max_tokens: 16000,
-            forceOpenRouter: forceOpenRouterForMode(state.codingMode),
-          },
-        );
-        const genContent = genResponse.choices[0]?.message?.content ?? "";
-        recordSupervisorLlmUsage({
-          sessionId: state.sessionId,
-          stage: "e2e_generate_tests",
-          model: genResponse.model,
-          usage: genResponse.usage,
-          costUsd: estimateCost(genResponse.model, genResponse.usage),
-        });
-        const genFileBlocks = parseFileBlocksFromContent(genContent);
-        if (genFileBlocks.length > 0) {
-          for (const file of genFileBlocks) {
+        const E2E_GEN_SYSTEM = [
+          "You are an expert Playwright E2E test author.",
+          "Generate complete Playwright TypeScript test files for the scenarios you are given.",
+          "",
+          "## Structure requirements",
+          "- Use `test.describe` blocks; each `test()` maps 1-to-1 with one scenario's step sequence.",
+          "- Use `page.goto()`, `page.locator()`, `page.fill()`, `page.click()`, `expect()` from @playwright/test.",
+          "- Do NOT import anything outside @playwright/test.",
+          "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
+          "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
+          "- Do not re-generate smoke.spec.ts.",
+          "",
+          "## Skip tests for features with missing env keys",
+          "- If the user message contains a `## Env keys NOT configured` block,",
+          "  every test whose flow depends on one of those keys MUST start with",
+          "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
+          "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
+          "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
+          "  a hard failure the fix-loop has to keep chewing.",
+          "",
+          "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
+          "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
+          "  Always add `{ level: N }` or `{ name: 'exact text' }` so only ONE element matches.",
+          "  Example: `page.getByRole('heading', { level: 1 })` or `page.getByRole('heading', { name: 'Welcome' })`.",
+          "- NEVER use `page.getByRole('button')` alone — always add `{ name: '...' }`.",
+          "- NEVER use `page.getByText('...')` without `.first()` when the text may appear more than once.",
+          "- NEVER use `page.locator('text=...')` in `expect(...).toBeVisible()` without `.first()` unless the selector is guaranteed unique.",
+          "- Prefer `page.getByRole(...)` with unique qualifiers > `page.getByTestId(...)` > `page.locator('text=...')` > CSS selectors.",
+          "- When using `page.locator(css)` that could match multiple elements, always append `.first()` or `.nth(N)` before assertions.",
+          "- Text in selectors must match the EXACT case rendered in the DOM.",
+          "  If the UI shows 'SIGN UP' (uppercase), use `page.getByRole('link', { name: 'SIGN UP' })` — not 'Sign Up'.",
+          "- Avoid deprecated `page.click('text=...')` — use `page.locator('text=...').click()` or `page.getByRole(...).click()`.",
+          "- For form inputs always prefer `page.getByLabel('...')` or `page.getByPlaceholder('...')`.",
+        ].join("\n");
+
+        const writeBlocks = async (content: string): Promise<string[]> => {
+          const blocks = parseFileBlocksFromContent(content);
+          for (const file of blocks) {
             await fsWrite(file.filePath, file.fileContent, state.outputDir, {
               scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
             });
           }
+          return blocks.map((b) => b.filePath);
+        };
+
+        // Prefer PER-FLOW generation from the STRUCTURED spec (PRD_E2E_SPEC.json):
+        // group scenarios by route and emit ONE focused spec file per group, so
+        // coverage scales with the app instead of being capped by a single
+        // 16k-token response (the old one-shot under-covered large apps).
+        const specJsonRaw = await fsRead("PRD_E2E_SPEC.json", state.outputDir);
+        const structuredSpec =
+          !specJsonRaw.startsWith("FILE_NOT_FOUND") &&
+          !specJsonRaw.startsWith("REJECTED")
+            ? parsePrdE2eSpec(specJsonRaw)
+            : null;
+
+        if (structuredSpec && structuredSpec.scenarios.length > 0) {
+          const groups = planE2eTestFiles(structuredSpec);
           console.log(
-            `[Supervisor] e2eVerify: generated ${genFileBlocks.length} PRD-based test file(s): ${genFileBlocks.map((f) => f.filePath).join(", ")}`,
+            `[Supervisor] e2eVerify: per-flow generation — ${structuredSpec.scenarios.length} scenario(s) → ${groups.length} spec file(s).`,
+          );
+          const written: string[] = [];
+          for (const group of groups) {
+            const scenarioBlock = group.scenarios
+              .map((s) => formatScenarioForGeneration(s))
+              .join("\n\n");
+            const groupMessages: ChatMessage[] = [
+              { role: "system", content: E2E_GEN_SYSTEM },
+              {
+                role: "user",
+                content: [
+                  `Project output dir: ${state.outputDir}`,
+                  `Generate EXACTLY ONE spec file at \`${group.fileName}\` covering ONLY the scenarios below — one \`test()\` per scenario, inside a single \`test.describe('${group.label}', …)\`.`,
+                  "",
+                  "## Scenarios to cover",
+                  scenarioBlock,
+                  "",
+                  unfilledKeysBlock,
+                  state.projectContext
+                    ? `## Project context\n${state.projectContext.slice(0, 4000)}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ];
+            try {
+              const groupResp = await chatCompletionWithFallback(
+                groupMessages,
+                genModelChain,
+                {
+                  temperature: 0.1,
+                  max_tokens: 8000,
+                  forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+                },
+              );
+              recordSupervisorLlmUsage({
+                sessionId: state.sessionId,
+                stage: "e2e_generate_tests",
+                model: groupResp.model,
+                usage: groupResp.usage,
+                costUsd: estimateCost(groupResp.model, groupResp.usage),
+              });
+              const paths = await writeBlocks(
+                groupResp.choices[0]?.message?.content ?? "",
+              );
+              written.push(...paths);
+              console.log(
+                `[Supervisor] e2eVerify: ${group.fileName} ← ${group.scenarios.length} scenario(s), wrote ${paths.length} file block(s).`,
+              );
+            } catch (groupErr) {
+              console.warn(
+                `[Supervisor] e2eVerify: generation for ${group.fileName} failed: ${groupErr instanceof Error ? groupErr.message : String(groupErr)}`,
+              );
+            }
+          }
+          console.log(
+            `[Supervisor] e2eVerify: per-flow generation wrote ${written.length} spec file(s) across ${groups.length} flow group(s).`,
           );
         } else {
-          console.warn(
-            "[Supervisor] e2eVerify: LLM returned no test file blocks during generation.",
+          // Fallback: no structured spec on disk — one-shot from the markdown.
+          const genMessages: ChatMessage[] = [
+            { role: "system", content: E2E_GEN_SYSTEM },
+            {
+              role: "user",
+              content: [
+                `Project output dir: ${state.outputDir}`,
+                "Generate one spec file per PRD section/route group (e.g. frontend/e2e/auth.spec.ts).",
+                "",
+                "## PRD E2E Specification",
+                e2eSpecDoc.slice(0, 12000),
+                "",
+                unfilledKeysBlock,
+                state.projectContext
+                  ? `## Project context\n${state.projectContext.slice(0, 4000)}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          ];
+          const genResponse = await chatCompletionWithFallback(
+            genMessages,
+            genModelChain,
+            {
+              temperature: 0.1,
+              max_tokens: 16000,
+              forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+            },
           );
+          recordSupervisorLlmUsage({
+            sessionId: state.sessionId,
+            stage: "e2e_generate_tests",
+            model: genResponse.model,
+            usage: genResponse.usage,
+            costUsd: estimateCost(genResponse.model, genResponse.usage),
+          });
+          const paths = await writeBlocks(
+            genResponse.choices[0]?.message?.content ?? "",
+          );
+          if (paths.length > 0) {
+            console.log(
+              `[Supervisor] e2eVerify: generated ${paths.length} PRD-based test file(s) (one-shot fallback): ${paths.join(", ")}`,
+            );
+          } else {
+            console.warn(
+              "[Supervisor] e2eVerify: LLM returned no test file blocks during generation.",
+            );
+          }
         }
       } catch (genErr) {
         console.warn(
