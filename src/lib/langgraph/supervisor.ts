@@ -491,6 +491,64 @@ async function buildPrebuiltScaffoldRegistryAndDoc(
   return [...registry, docEntry];
 }
 
+/**
+ * Run the architect/foundation tasks. Serial by default (single worker invoke);
+ * when CODEGEN_PARALLEL_FOUNDATION is on, `workersForRole("architect")` allows
+ * >1 and we fan out via `chunkTasksByFileConflict` — file-coupled or
+ * dependency-ordered tasks collapse into one chunk (stay serial), only
+ * file-disjoint foundation tasks (docker / models / api-contracts / e2e harness)
+ * run concurrently. The Promise.all is a barrier: every chunk completes before
+ * this returns, so the shared contract/schema is whole before the contract-freeze
+ * + domain phases read it. Results merge as if one worker ran them all.
+ */
+async function invokeArchitectWorkers(
+  input: Parameters<typeof workerGraph.invoke>[0],
+): Promise<{
+  taskResults: TaskResult[];
+  generatedFiles: GeneratedFile[];
+  workerCostUsd: number;
+}> {
+  const tasks = ((input as { tasks?: CodingTask[] }).tasks ?? []) as CodingTask[];
+  const merge = (rs: WorkerState[]) => ({
+    taskResults: rs.flatMap((r) => r.taskResults ?? []),
+    generatedFiles: rs.flatMap((r) => r.generatedFiles ?? []),
+    workerCostUsd: rs.reduce((s, r) => s + (r.workerCostUsd ?? 0), 0),
+  });
+
+  const count = workersForRole("architect", tasks.length);
+  if (count <= 1 || tasks.length <= 1) {
+    const r = (await workerGraph.invoke(input, {
+      recursionLimit: workerRecursionLimit(tasks.length),
+    })) as WorkerState;
+    return merge([r]);
+  }
+
+  const chunks = chunkTasksByFileConflict(tasks, count);
+  if (chunks.length <= 1) {
+    const r = (await workerGraph.invoke(input, {
+      recursionLimit: workerRecursionLimit(tasks.length),
+    })) as WorkerState;
+    return merge([r]);
+  }
+  console.log(
+    `[Supervisor] Architect phase: ${tasks.length} task(s) → ${chunks.length} file-disjoint chunk(s) running in parallel.`,
+  );
+  const results = (await Promise.all(
+    chunks.map((chunk, i) =>
+      workerGraph.invoke(
+        {
+          ...input,
+          tasks: chunk,
+          currentTaskIndex: 0,
+          workerLabel: `Architect #${i + 1}`,
+        },
+        { recursionLimit: workerRecursionLimit(chunk.length) },
+      ),
+    ),
+  )) as WorkerState[];
+  return merge(results);
+}
+
 async function runArchitectPhase(state: SupervisorState) {
   if (state.architectTasks.length === 0) {
     console.log("[Supervisor] Architect phase: no tasks, skipping.");
@@ -566,77 +624,69 @@ async function runArchitectPhase(state: SupervisorState) {
     console.log(
       `[Supervisor] Architect phase: running LLM for ${mustRunTasks.length} non-scaffold task(s)...`,
     );
-    const result = await workerGraph.invoke(
-      {
-        role: "architect" as CodingAgentRole,
-        workerLabel: "Architect",
-        tasks: mustRunTasks.map((t) => t.task),
-        outputDir: state.outputDir,
-        projectContext: state.projectContext,
-        codingMode: state.codingMode,
-        fileRegistrySnapshot: registry,
-        apiContractsSnapshot: state.apiContracts,
-        scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
-        currentTaskIndex: 0,
-        ralphConfig: state.ralphConfig,
-        sessionId: state.sessionId,
-      },
-      { recursionLimit: workerRecursionLimit(mustRunTasks.length) },
-    );
+    const archOut = await invokeArchitectWorkers({
+      role: "architect" as CodingAgentRole,
+      workerLabel: "Architect",
+      tasks: mustRunTasks.map((t) => t.task),
+      outputDir: state.outputDir,
+      projectContext: state.projectContext,
+      codingMode: state.codingMode,
+      fileRegistrySnapshot: registry,
+      apiContractsSnapshot: state.apiContracts,
+      scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+      currentTaskIndex: 0,
+      ralphConfig: state.ralphConfig,
+      sessionId: state.sessionId,
+    });
 
-    const workerState = result as WorkerState;
-    const combinedTaskResults = [...noopResults, ...workerState.taskResults];
+    const combinedTaskResults = [...noopResults, ...archOut.taskResults];
     const phaseResult: PhaseResult = {
       role: "architect",
       workerLabel: "Architect",
       taskResults: combinedTaskResults,
-      totalCostUsd: workerState.workerCostUsd,
+      totalCostUsd: archOut.workerCostUsd,
     };
     return {
       phaseResults: [phaseResult],
-      fileRegistry: [...registry, ...workerState.generatedFiles],
-      totalCostUsd: workerState.workerCostUsd,
+      fileRegistry: [...registry, ...archOut.generatedFiles],
+      totalCostUsd: archOut.workerCostUsd,
     };
   }
 
   console.log(
     `[Supervisor] Architect phase: starting ${state.architectTasks.length} tasks...`,
   );
-  const result = await workerGraph.invoke(
-    {
-      role: "architect" as CodingAgentRole,
-      workerLabel: "Architect",
-      tasks: state.architectTasks,
-      outputDir: state.outputDir,
-      projectContext: state.projectContext,
-      codingMode: state.codingMode,
-      fileRegistrySnapshot: state.fileRegistry,
-      apiContractsSnapshot: state.apiContracts,
-      scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
-      currentTaskIndex: 0,
-      ralphConfig: state.ralphConfig,
-      sessionId: state.sessionId,
-      prdSpec: state.prdSpec,
-    },
-    { recursionLimit: workerRecursionLimit(state.architectTasks.length) },
-  );
+  const archOut = await invokeArchitectWorkers({
+    role: "architect" as CodingAgentRole,
+    workerLabel: "Architect",
+    tasks: state.architectTasks,
+    outputDir: state.outputDir,
+    projectContext: state.projectContext,
+    codingMode: state.codingMode,
+    fileRegistrySnapshot: state.fileRegistry,
+    apiContractsSnapshot: state.apiContracts,
+    scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+    currentTaskIndex: 0,
+    ralphConfig: state.ralphConfig,
+    sessionId: state.sessionId,
+    prdSpec: state.prdSpec,
+  });
 
-  const workerState = result as WorkerState;
   const phaseResult: PhaseResult = {
     role: "architect",
     workerLabel: "Architect",
-    taskResults: workerState.taskResults,
-    totalCostUsd: workerState.workerCostUsd,
+    taskResults: archOut.taskResults,
+    totalCostUsd: archOut.workerCostUsd,
   };
 
   console.log(
-    `[Supervisor] Architect phase done: ${workerState.taskResults.length} task results, ${workerState.generatedFiles.length} files.`,
+    `[Supervisor] Architect phase done: ${archOut.taskResults.length} task results, ${archOut.generatedFiles.length} files.`,
   );
 
   return {
     phaseResults: [phaseResult],
-    fileRegistry: workerState.generatedFiles,
-    totalCostUsd: workerState.workerCostUsd,
+    fileRegistry: archOut.generatedFiles,
+    totalCostUsd: archOut.workerCostUsd,
   };
 }
 
