@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseEndpointsRegistry,
   serviceFromEndpoint,
+  summarizeEndpointsRegistry,
 } from "../endpoints-registry";
 
 const SCHEMA = `
@@ -65,6 +66,27 @@ describe("parseEndpointsRegistry", () => {
       "GET /api/a": { request: null, response: "A2", auth: "none" },
     } as const;`;
     expect(parseEndpointsRegistry(src)!).toHaveLength(1);
+  });
+});
+
+describe("summarizeEndpointsRegistry", () => {
+  it("reports no registry when the block is absent (defective TRD)", () => {
+    expect(
+      summarizeEndpointsRegistry("export interface Foo { a: string }"),
+    ).toEqual({ hasRegistry: false, count: 0 });
+  });
+
+  it("reports a present-but-empty registry (legitimate API-less backend)", () => {
+    expect(
+      summarizeEndpointsRegistry("export const ENDPOINTS = {} as const;"),
+    ).toEqual({ hasRegistry: true, count: 0 });
+  });
+
+  it("reports a populated registry with its endpoint count", () => {
+    expect(summarizeEndpointsRegistry(SCHEMA)).toEqual({
+      hasRegistry: true,
+      count: 3,
+    });
   });
 });
 

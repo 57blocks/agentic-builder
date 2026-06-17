@@ -221,11 +221,14 @@ export const ENDPOINTS = {
 - **Cover every endpoint** from §3.3 with a Request and Response interface
   named after the operation, e.g. \`CreateTaskRequest\` / \`CreateTaskResponse\`.
   GET endpoints with no body still get a Response interface.
-- **Emit an \`ENDPOINTS\` registry** (\`export const ENDPOINTS = {...} as const\`) mapping
-  every §3.3 endpoint \`"<METHOD> <path>"\` → \`{ request, response, auth }\`, where
+- **Emit an \`ENDPOINTS\` registry — MANDATORY** (\`export const ENDPOINTS = {...} as const\`)
+  mapping every §3.3 endpoint \`"<METHOD> <path>"\` → \`{ request, response, auth }\`, where
   \`request\`/\`response\` are the EXACT interface names defined above (or \`null\` for no body,
   or \`"Type[]"\` for a list). This registry is the single source the API contract, the
   frontend client, and the backend handlers all derive from — so path↔type is authored ONCE.
+  Downstream codegen DERIVES \`API_CONTRACTS.json\` from this block and does NOT re-read the
+  PRD; if the schema has any endpoints but omits \`export const ENDPOINTS\`, the build HARD-FAILS.
+  A backend with genuinely no HTTP endpoints (worker-only) may emit \`export const ENDPOINTS = {} as const\`.
 - Use **string literal unions** for enum-like fields (\`status: "todo" | "in_progress" | "done"\`).
 - Timestamps are **ISO 8601 strings** (\`createdAt: string\`), not \`Date\`.
 - Optional fields: \`field?: T\`. Nullable fields: \`field: T | null\`. Distinct concepts.

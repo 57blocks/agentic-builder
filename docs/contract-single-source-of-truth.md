@@ -125,18 +125,24 @@ generation run to validate — roll out behind a flag and compare before/after o
   may be the legit `MISSING_FROM_SCHEMA` signal, so it's surfaced, not fatal.
 - ✅ **P1① TRD `ENDPOINTS` registry** — `trd-agent.ts` §6 now requires
   `export const ENDPOINTS = {...} as const` (path↔type names, authored once).
-- ✅ **P1② generateApiContracts DERIVES from the schema** — when
-  `.blueprint/shared-schema.ts` contains an `ENDPOINTS` registry (P1①),
-  `generateApiContracts` now parses it (`endpoints-registry.ts`, + 8 tests) and emits
-  one contract record per entry — `{method, endpoint, auth, requestType, responseType}`
-  — with NO LLM call. The LLM-from-PRD+scaffold path is now a FALLBACK, used only when a
-  legacy schema has no registry. This removes the drift AND the `doc_truncated` risk (the
-  registry is parsed from the full file, not a 12k-char prompt slice). The fallback prompt
-  still requires `requestType`/`responseType` = exact schema names, no invented shapes.
-  NOTE: derivation only triggers when the TRD actually authored the registry — a schema
-  generated before P1① has none, so that run falls back to the LLM (this is why an
-  in-flight project still logged "generating from PRD + scaffold"). Regenerate the TRD to
-  get the registry + derivation.
+- ✅ **P1② generateApiContracts DERIVES from the schema — derive-ONLY (option A)** —
+  `generateApiContracts` parses the `ENDPOINTS` registry from
+  `.blueprint/shared-schema.ts` (`endpoints-registry.ts`) and emits one contract record
+  per entry — `{method, endpoint, auth, requestType, responseType}` — with NO LLM call and
+  **without ever re-reading the PRD**. This removes the drift AND the `doc_truncated` risk
+  (the registry is parsed from the full file, not a 12k-char prompt slice).
+  - **The LLM-from-PRD+scaffold fallback was REMOVED.** Re-authoring shapes from the PRD is
+    the #1 cause of FE↔BE drift, so when backend endpoints exist but the schema has no
+    `export const ENDPOINTS` block (`parseEndpointsRegistry` → `null`),
+    `generateApiContracts` now **hard-fails** with a clear error instead of silently
+    falling back. An *empty* registry (`{}` → `[]`) is valid and means "no HTTP endpoints".
+  - **Registry gate at TRD-generation time** keeps that hard-fail rare: after the TRD is
+    persisted (`persist-trd-artifacts.ts` returns `schemaRegistry`), both the
+    parallel-generate route and `PipelineEngine.persistTrdArtifacts` **regenerate the TRD
+    once** when a schema was authored but the registry block is missing. Still missing after
+    the retry → the contract phase hard-fails (the TRD must be fixed).
+  - NOTE: a schema generated before P1① has no registry; regenerate the TRD (the gate now
+    does this automatically on the first run) to get the registry + derivation.
 - ✅ **P1④ backend constructs responses to the schema** — typed `json<T>()` / `created<T>()`
   helper added to m-tier + l-tier scaffolds (`backend/src/utils/respond.ts`); worker
   convention card (Koa) adds the HARD RULE: send via `json<ResponseType>(ctx, data)`,

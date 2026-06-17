@@ -89,6 +89,21 @@ export function parseEndpointsRegistry(
   return out;
 }
 
+/**
+ * Cheap presence/shape summary of the `ENDPOINTS` registry in a schema source.
+ * `hasRegistry` distinguishes "no `export const ENDPOINTS` block at all" (a
+ * defective TRD — the registry was never authored) from "block present but
+ * empty" (a legitimate API-less backend). Callers gate on `hasRegistry`:
+ * absent ⇒ regenerate the TRD / hard-fail; empty ⇒ no endpoints, not an error.
+ */
+export function summarizeEndpointsRegistry(schemaSrc: string): {
+  hasRegistry: boolean;
+  count: number;
+} {
+  const reg = parseEndpointsRegistry(schemaSrc);
+  return { hasRegistry: reg != null, count: reg?.length ?? 0 };
+}
+
 function normalizePath(p: string): string {
   let out = p.trim();
   if (!out.startsWith("/")) out = `/${out}`;
