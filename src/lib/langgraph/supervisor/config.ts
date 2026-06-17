@@ -189,8 +189,21 @@ export function workersForRole(role: CodingAgentRole, count: number): number {
 
 // ─── Phase-level retry budgets ──────────────────────────────────────────
 
-/** Max number of automated fix attempts inside the e2e_verify node. */
-export const MAX_E2E_VERIFY_FIX_ATTEMPTS = 10;
+/**
+ * Max number of automated fix attempts inside the e2e_verify node for
+ * DETERMINISTIC failures (real code bugs). The loop keeps fixing + re-running
+ * until the suite is green or this cap is hit; hitting the cap with failures
+ * still present HARD-FAILS the session (see e2eVerifyAndFix → e2eDeterministicUnresolved).
+ * Flaky/infra failures exit the loop immediately and do NOT count against this.
+ * Raise via E2E_VERIFY_FIX_ATTEMPTS to push harder toward all-green.
+ */
+export const MAX_E2E_VERIFY_FIX_ATTEMPTS = (() => {
+  const raw = Number.parseInt(
+    (process.env.E2E_VERIFY_FIX_ATTEMPTS ?? "10").trim(),
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 10;
+})();
 
 /**
  * Hard circuit-breaker: the TOTAL number of IntegrationVerifyFix iterations

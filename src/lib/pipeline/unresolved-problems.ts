@@ -31,6 +31,7 @@ export type UnresolvedCategory =
   | "circuit-breaker" // a verify-fix loop exhausted its iteration budget
   | "stagnation" // repeated iterations with no progress
   | "backend-not-green" // backend phase ended not-green before frontend
+  | "e2e" // E2E suite had non-deterministic (flaky/infra) failures — isolated, not blocking
   | "other";
 
 export interface UnresolvedProblem {

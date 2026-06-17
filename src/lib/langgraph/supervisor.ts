@@ -2155,10 +2155,15 @@ async function e2eVerifyAndFix(
     `[Supervisor] e2eVerify: output (last 800 chars):\n${output.slice(-800)}`,
   );
   if (attempt > MAX_E2E_VERIFY_FIX_ATTEMPTS) {
-    console.warn("[Supervisor] e2eVerify: max attempts reached.");
+    console.warn(
+      "[Supervisor] e2eVerify: max attempts reached with DETERMINISTIC failures still unresolved — this hard-fails the session.",
+    );
     return {
       e2eVerifyAttempts: attempt,
       e2eVerifyErrors: failureSummary,
+      // The loop only ever continues on deterministic failures (flaky/infra exit
+      // immediately), so reaching the cap means a real, unfixed code bug remains.
+      e2eDeterministicUnresolved: true,
     };
   }
 
