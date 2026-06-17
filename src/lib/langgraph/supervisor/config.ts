@@ -45,6 +45,21 @@ export const ENABLE_PARALLEL_FOUNDATION = (() => {
 })();
 
 /**
+ * Upper bound on concurrent architect/foundation workers when
+ * CODEGEN_PARALLEL_FOUNDATION is on. The REAL limiter is
+ * `chunkTasksByFileConflict` (file-disjoint tasks → separate chunks, coupled
+ * ones collapse) — this cap just bounds fan-out so a huge foundation can't spawn
+ * dozens of concurrent LLM workers. Override via CODEGEN_FOUNDATION_MAX_WORKERS.
+ */
+export const FOUNDATION_WORKER_CAP = (() => {
+  const raw = Number.parseInt(
+    (process.env.CODEGEN_FOUNDATION_MAX_WORKERS ?? "6").trim(),
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 6;
+})();
+
+/**
  * Frontend route-consolidation + parallel-pages flag (default ON).
  *
  * When enabled the frontend phase runs in two stages:
@@ -81,13 +96,15 @@ export function parsedWorkerLimit(): number | "auto" {
 export function workersForRole(role: CodingAgentRole, count: number): number {
   if (role === "test") return 1;
   if (role === "architect") {
-    // Serial by default (shared-substrate safety). Opt-in fan-out: the caller
-    // still routes through chunkTasksByFileConflict, so file-coupled /
-    // dependency-ordered architect tasks collapse into one chunk and only
-    // file-disjoint ones parallelize.
+    // Serial by default (shared-substrate safety). Opt-in fan-out: hand the raw
+    // task count (capped) to the caller, which routes through
+    // chunkTasksByFileConflict — THAT decides real parallelism (file-disjoint →
+    // separate chunks; file-coupled / dependency-ordered → one chunk, serial).
+    // We deliberately do NOT throttle by task count here: the old `≤3 → 1`
+    // heuristic kept small foundations (e.g. 3 disjoint tasks: docker / models /
+    // api-contracts) serial, defeating the purpose.
     if (!ENABLE_PARALLEL_FOUNDATION) return 1;
-    const auto = count <= 3 ? 1 : count <= 8 ? 2 : 3;
-    return Math.min(auto, count);
+    return Math.min(count, FOUNDATION_WORKER_CAP);
   }
   // Strict context mode: keep one worker per coding role so each task sees
   // the latest outputs from previous tasks within the same role.
