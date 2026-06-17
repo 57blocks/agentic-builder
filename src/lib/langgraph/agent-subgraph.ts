@@ -69,6 +69,7 @@ import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
+import { loadCodingSkillsBlock } from "./coding-skills";
 import { logTaskContext } from "./task-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
@@ -3010,6 +3011,14 @@ async function generateCode(state: WorkerState) {
         content: buildRolePrompt(state.role, promptContext),
       },
     ];
+
+    // Inject Engineering-sourced skills matched to this role + project shape.
+    // Cached per (outputDir, role) so trigger eval runs at most once per role.
+    const skillsBlock = await loadCodingSkillsBlock(state.role, state.outputDir);
+    if (skillsBlock) {
+      messages.push({ role: "system", content: skillsBlock });
+    }
+
     if (contextParts.length > 0) {
       messages.push({
         role: "system",
