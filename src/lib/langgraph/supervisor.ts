@@ -152,6 +152,8 @@ import {
 import {
   ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC,
   ENABLE_PARALLEL_CODING_WORKERS,
+  ENABLE_PARALLEL_FOUNDATION,
+  ENABLE_PARALLEL_FE_BE,
   ENABLE_FE_ROUTE_CONSOLIDATION,
   frontendPageWorkerCount,
   parsedWorkerLimit,
@@ -524,15 +526,16 @@ async function invokeArchitectWorkers(
   }
 
   const chunks = chunkTasksByFileConflict(tasks, count);
+  logChunkPlan(
+    `Architect/foundation phase (${ENABLE_PARALLEL_FOUNDATION ? "parallel" : "serial"})`,
+    chunks,
+  );
   if (chunks.length <= 1) {
     const r = (await workerGraph.invoke(input, {
       recursionLimit: workerRecursionLimit(tasks.length),
     })) as WorkerState;
     return merge([r]);
   }
-  console.log(
-    `[Supervisor] Architect phase: ${tasks.length} task(s) → ${chunks.length} file-disjoint chunk(s) running in parallel.`,
-  );
   const results = (await Promise.all(
     chunks.map((chunk, i) =>
       workerGraph.invoke(
@@ -2547,102 +2550,6 @@ async function e2eVerifyAndFix(
 
 // ─── API Contract generation ───
 
-const API_CONTRACT_SYSTEM_PROMPT = `You are a Senior API Architect.
-Your job is to produce a precise, machine-readable API contract based on the PRD and scaffolding.
-This contract will be used by BOTH the backend (to implement) and frontend (to consume).
-Everyone must follow this contract exactly.
-
-Output a JSON array only — no markdown, no explanation, no code fences.
-Each element has this shape:
-{
-  "service": "string (service or module name, e.g. auth, orders, users)",
-  "endpoint": "string (path with leading slash, e.g. /api/users/:id)",
-  "method": "GET|POST|PUT|PATCH|DELETE",
-  "requestType": "string (EXACT request interface name from the Shared schema, or 'none')",
-  "responseType": "string (EXACT success-response interface name from the Shared schema)",
-  "requestSchema": "string (the body of the named request type, copied VERBATIM from the Shared schema, or 'none')",
-  "responseSchema": "string (the body of the named response type, copied VERBATIM from the Shared schema)",
-  "auth": "none|bearer|session",
-  "description": "string (one sentence)",
-  "prdJustification": "string (verbatim PRD line/section that justifies this endpoint)",
-  "audience": "user|admin"
-}
-
-## CRITICAL: shapes come from the Shared schema (HARD RULE — read first)
-
-A "## Shared schema (SOURCE OF TRUTH)" section is provided in the context (the TRD's
-\`shared-schema.ts\`, including an \`ENDPOINTS\` registry mapping "METHOD /path" → type names).
-The schema is the ONLY authority for request/response SHAPES. For every endpoint:
-  - Set \`requestType\` / \`responseType\` to the EXACT interface name from that schema
-    (use its \`ENDPOINTS\` registry to pick the right names).
-  - \`requestSchema\` / \`responseSchema\` MUST be the body of that named interface copied
-    VERBATIM from the schema — do NOT invent, paraphrase, rename fields, or change casing.
-  - If an endpoint needs a type that is MISSING from the schema, still set \`responseType\`
-    to the name it SHOULD have and put "MISSING_FROM_SCHEMA" at the start of \`description\`
-    (so the contract-owner can add it to the schema) — never fabricate a shape inline.
-
-## CRITICAL: Contract scope rule (HARD RULE — read first)
-
-The PRD is the ONLY source of truth. An endpoint belongs in this contract ONLY if
-AT LEAST ONE of the following is true, and you can quote the PRD line that justifies it
-in the \`prdJustification\` field:
-
-  (a) A "User flow" / "User journey" step in the PRD describes a user action
-      that requires it (e.g. "user marks a story as read"
-      → PATCH /api/feed-items/:id/read).
-  (b) A "UX / Pages" section names a page or component that needs the data
-      (e.g. "Onboarding Style page" → POST /api/users/me/style-assessment).
-  (c) An "Admin / Integration features" section names an internal consumer
-      (admin dashboard, webhook, cron). Mark these with \`"audience": "admin"\`
-      so the usage audit knows to skip them.
-
-DO NOT default-enumerate "GET /list, GET /:id, POST, PATCH, DELETE" for every
-ORM model. The ORM model existing is NOT evidence that a REST endpoint is required.
-Most apps need <5 endpoints per model; many models need 0 (they only feed inner
-joins or are populated by background jobs).
-
-For each endpoint you DO emit:
-  - \`prdJustification\` MUST be non-empty AND verbatim from the PRD context provided.
-    If you cannot quote the PRD, OMIT the endpoint.
-  - \`audience\` MUST be \`"user"\` (called by the consumer-facing frontend) or
-    \`"admin"\` (internal / admin UI / system).
-
-When in doubt: OMIT. A missing endpoint is cheap to add later (the
-contract-usage-coverage audit + frontend-api-uniqueness audit will surface it).
-A surplus endpoint poisons the integration gate, makes the backend worker chase
-impossible repairs, and burns LLM budget — that is what we are explicitly
-preventing here.
-
-## Nested resource endpoints (relationship-driven, NOT default CRUD)
-
-When the PRD or supplied ORM model definitions describe a one-to-many relationship
-between two resources (e.g. Project hasMany Tasks, User hasMany Posts):
-
-  1. **Flat endpoints on the child resource** — emit ONLY the verbs the PRD
-     actually describes for that resource. NEVER default-enumerate all 5
-     CRUD verbs. Examples:
-       - PRD says "users create and view posts" → emit POST /api/posts and
-         GET /api/posts/:id only. Do NOT emit PATCH/DELETE unless PRD describes
-         "users edit their post" or "users delete their post".
-       - PRD says "feed items are populated by a background aggregator and the
-         user only reads them" → emit GET /api/feed-items only. No POST,
-         no PATCH, no DELETE.
-
-  2. **Scoped-list endpoint under the parent** (this one IS relationship-driven
-     and SHOULD be inferred when the PRD describes a parent-detail page that
-     lists children):
-       GET /api/{parents}/:id/{children}
-       Examples:
-         "Project detail page shows its tasks"   → GET /api/projects/:id/tasks
-         "User profile page shows their posts"   → GET /api/users/:id/posts
-       Do NOT emit the scoped-list endpoint when the PRD never describes a
-       parent-detail UI that lists the children.
-
-A separate post-generation gate will audit ORM models for hasMany/belongsTo
-relations and warn about missing scoped-list endpoints — but only when the
-parent-detail UI is actually described in the PRD. Speculative scoped lists
-(no PRD page) are AS BAD as speculative flat CRUD.`;
-
 async function generateApiContracts(state: SupervisorState) {
   if (state.backendTasks.length === 0) {
     console.log(
@@ -2652,83 +2559,47 @@ async function generateApiContracts(state: SupervisorState) {
   }
 
   console.log(
-    "[Supervisor] generateApiContracts: building API contract (preferring the TRD schema ENDPOINTS registry; LLM fallback only when absent)...",
+    "[Supervisor] generateApiContracts: deriving API contract from the TRD shared-schema ENDPOINTS registry (single source of truth — no PRD re-read, no LLM authoring)...",
   );
 
-  const contextParts: string[] = [];
+  // The TRD shared schema is the SOURCE OF TRUTH. Its `ENDPOINTS` registry
+  // (authored once in §6) is the single map of "METHOD /path" → request/response
+  // type names that API_CONTRACTS.json, the FE client and the BE handlers all
+  // derive from. See docs/contract-single-source-of-truth.md.
+  const canonicalSchema = await fsRead(
+    ".blueprint/shared-schema.ts",
+    state.outputDir,
+  );
 
-  if (state.projectContext) {
-    // Replace legacy `slice(0, 8000)` truncation with a relevance-aware
-    // section picker. We're looking for API contract material: endpoints,
-    // routes, request/response shapes, auth, data types.
-    const apiContractHint = {
-      keywords: [
-        "api",
-        "endpoint",
-        "route",
-        "request",
-        "response",
-        "schema",
-        "auth",
-        "token",
-        "controller",
-        "service",
-      ],
-    };
-    const trimmed = pickRelevantSections(
-      state.projectContext,
-      apiContractHint,
-      {
-        budget: 12_000,
-        label: "api-contract-generation",
-        stage: "worker-context",
-        emitter: getRepairEmitter(state.sessionId),
+  // Parse the registry + run the HARD GATE *before* the try below: that try
+  // soft-swallows errors ("continuing without contracts"), but under option A a
+  // missing registry is fatal and must propagate. `parseEndpointsRegistry`
+  // returns `null` when there is no `export const ENDPOINTS` block at all
+  // (a defective TRD) and `[]` when the block exists but declares no endpoints
+  // (a legitimate API-less backend).
+  const registry =
+    !canonicalSchema.startsWith("FILE_NOT_FOUND") && canonicalSchema.trim()
+      ? parseEndpointsRegistry(canonicalSchema)
+      : null;
+  if (registry == null) {
+    // We already passed the "no backend tasks → skip" guard above, so backend
+    // endpoints are expected. There is no single source to derive the contract
+    // from, and we deliberately do NOT re-author shapes from the PRD (the
+    // removed fallback) because that silently reintroduces FE↔BE drift.
+    getRepairEmitter(state.sessionId)({
+      stage: "generate_api_contracts",
+      event: "endpoints_registry_missing",
+      details: {
+        schemaPresent: !canonicalSchema.startsWith("FILE_NOT_FOUND"),
       },
-    );
-    contextParts.push(`## Project Context (PRD / TRD)\n${trimmed}`);
-  }
-
-  const typeFiles = state.fileRegistry
-    .filter(
-      (f) =>
-        f.role === "architect" &&
-        (f.path.includes("type") ||
-          f.path.includes("model") ||
-          f.path.includes("schema")) &&
-        /\.(ts|tsx)$/.test(f.path),
-    )
-    .slice(0, 5);
-
-  for (const tf of typeFiles) {
-    const content = await fsRead(tf.path, state.outputDir);
-    if (!content.startsWith("FILE_NOT_FOUND")) {
-      contextParts.push(
-        `## Type definitions: ${tf.path}\n\`\`\`typescript\n${content.slice(0, 2000)}\n\`\`\``,
-      );
-    }
-  }
-
-  const taskList = state.backendTasks
-    .map((t) => `- ${t.title}: ${t.description.slice(0, 200)}`)
-    .join("\n");
-  contextParts.push(`## Backend tasks to implement\n${taskList}`);
-
-  // The TRD shared schema is the SOURCE OF TRUTH for shapes. Inject it so the
-  // contract REFERENCES its exact type names (via the ENDPOINTS registry) instead
-  // of independently re-authoring request/response shapes (the #1 cause of
-  // frontend↔backend contract drift). See docs/contract-single-source-of-truth.md.
-  const canonicalSchema = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
-  if (!canonicalSchema.startsWith("FILE_NOT_FOUND") && canonicalSchema.trim()) {
-    contextParts.push(
-      `## Shared schema (SOURCE OF TRUTH — reference these EXACT type names; do NOT re-author shapes)\n\`\`\`typescript\n${canonicalSchema.slice(0, 12000)}\n\`\`\``,
+    });
+    throw new Error(
+      "generateApiContracts: the TRD shared-schema (.blueprint/shared-schema.ts) has no " +
+        "`ENDPOINTS` registry, so API_CONTRACTS cannot be derived from a single source. " +
+        "The PRD fallback was removed (option A) to prevent contract drift. Regenerate the " +
+        "TRD so its §6 schema authors `export const ENDPOINTS = {...} as const`.",
     );
   }
-
-  const contractModelChain = resolveCodingChain(
-    state.codingMode,
-    "taskBreakdown",
-    "gpt-4o",
-  );
 
   type ParsedContract = {
     service: string;
@@ -2746,100 +2617,38 @@ async function generateApiContracts(state: SupervisorState) {
   };
 
   try {
-    let parsed: ParsedContract[] = [];
-    let costUsd = 0;
-    let modelLabel = "trd-endpoints-registry";
+    const costUsd = 0;
+    const modelLabel = "trd-endpoints-registry";
 
-    // ── PREFERRED PATH: DERIVE from the schema's ENDPOINTS registry ──────────
-    // When the TRD authored an `ENDPOINTS` registry (path↔type map), the
-    // contract is DERIVED from it — not re-authored by an LLM reading the PRD +
-    // scaffold (which drifts from the schema and can truncate). Shapes live in
-    // schema.ts; the contract carries the type NAMES. See
-    // docs/contract-single-source-of-truth.md (lifecycle stage 2).
-    const registry =
-      !canonicalSchema.startsWith("FILE_NOT_FOUND") && canonicalSchema.trim()
-        ? parseEndpointsRegistry(canonicalSchema)
-        : null;
-
-    if (registry && registry.length > 0) {
-      console.log(
-        `[Supervisor] generateApiContracts: DERIVING ${registry.length} contract(s) from the TRD ENDPOINTS registry (single source of truth — no LLM authoring).`,
-      );
-      const normAuth = (a: string | null): string => {
-        const v = (a ?? "").trim().toLowerCase();
-        if (!v || v === "public" || v === "none") return "none";
-        return v; // "bearer", "admin", etc. preserved
-      };
-      parsed = registry.map((e) => ({
-        service: serviceFromEndpoint(e.endpoint),
-        endpoint: e.endpoint,
-        method: e.method,
-        // Inline shape strings stay EMPTY — the named type is the contract; its
-        // shape is resolved from schema.ts (verify-time + worker context).
-        requestType: e.request ?? undefined,
-        responseType: e.response ?? undefined,
-        auth: normAuth(e.auth),
-        prdJustification:
-          "Declared in the TRD shared-schema ENDPOINTS registry (authored source of truth).",
-      }));
-      getRepairEmitter(state.sessionId)({
-        stage: "generate_api_contracts",
-        event: "contracts_derived_from_schema",
-        details: { count: parsed.length },
-      });
-    } else {
-      // ── FALLBACK: legacy schemas with no registry → LLM from PRD+scaffold ──
-      console.log(
-        "[Supervisor] generateApiContracts: no ENDPOINTS registry in schema — falling back to LLM generation from PRD + scaffold.",
-      );
-      const messages: ChatMessage[] = [
-        { role: "system", content: API_CONTRACT_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            ...contextParts,
-            "",
-            "Generate the complete API contract for this project.",
-            "Output a JSON array only. No markdown fences, no explanation.",
-          ].join("\n\n"),
-        },
-      ];
-      const response = await chatCompletionWithFallback(
-        messages,
-        contractModelChain,
-        {
-          temperature: 0.1,
-          max_tokens: 65536,
-          forceOpenRouter: forceOpenRouterForMode(state.codingMode),
-        },
-      );
-
-      const raw = (response.choices[0]?.message?.content ?? "").trim();
-      costUsd = estimateCost(response.model, response.usage);
-      modelLabel = response.model;
-      recordSupervisorLlmUsage({
-        sessionId: state.sessionId,
-        stage: "generate_api_contracts",
-        model: response.model,
-        usage: response.usage,
-        costUsd,
-      });
-
-      try {
-        const cleaned = raw
-          .replace(/^```json\s*/i, "")
-          .replace(/^```\s*/i, "")
-          .replace(/```\s*$/i, "")
-          .trim();
-        parsed = JSON.parse(cleaned);
-        if (!Array.isArray(parsed)) parsed = [];
-      } catch {
-        console.warn(
-          "[Supervisor] generateApiContracts: failed to parse LLM output as JSON, skipping.",
-        );
-        return { totalCostUsd: costUsd };
-      }
-    }
+    // ── DERIVE from the schema's ENDPOINTS registry (the only path) ──────────
+    // Shapes live in schema.ts; the contract carries the type NAMES. An empty
+    // registry (`[]`) is valid — an API-less backend — and yields no derived
+    // contracts (baseline injection below may still add implicit auth routes).
+    console.log(
+      `[Supervisor] generateApiContracts: DERIVING ${registry.length} contract(s) from the TRD ENDPOINTS registry (single source of truth — no LLM authoring).`,
+    );
+    const normAuth = (a: string | null): string => {
+      const v = (a ?? "").trim().toLowerCase();
+      if (!v || v === "public" || v === "none") return "none";
+      return v; // "bearer", "admin", etc. preserved
+    };
+    let parsed: ParsedContract[] = registry.map((e) => ({
+      service: serviceFromEndpoint(e.endpoint),
+      endpoint: e.endpoint,
+      method: e.method,
+      // Inline shape strings stay EMPTY — the named type is the contract; its
+      // shape is resolved from schema.ts (verify-time + worker context).
+      requestType: e.request ?? undefined,
+      responseType: e.response ?? undefined,
+      auth: normAuth(e.auth),
+      prdJustification:
+        "Declared in the TRD shared-schema ENDPOINTS registry (authored source of truth).",
+    }));
+    getRepairEmitter(state.sessionId)({
+      stage: "generate_api_contracts",
+      event: "contracts_derived_from_schema",
+      details: { count: parsed.length },
+    });
 
     // ── v2 scope-rule telemetry ────────────────────────────────────────────
     // CODEGEN_HARDENING_PLAN.md §7.1 requires every emitted endpoint to carry
@@ -3555,6 +3364,28 @@ function extractExports(source: string): string[] {
 // ─── Phased dispatch (BE first, then FE) ───
 
 /**
+ * Logs the parallelism plan for a phase: how many workers will run concurrently,
+ * and which tasks each worker runs serially. Tasks land in the same worker when
+ * they share a dependency edge or a file (`chunkTasksByFileConflict`) — i.e.
+ * "same path → serial within a worker; different path → parallel workers".
+ */
+function logChunkPlan(label: string, chunks: CodingTask[][]): void {
+  const taskCount = chunks.reduce((n, c) => n + c.length, 0);
+  console.log(
+    `[Supervisor] ${label}: ${taskCount} task(s) → ${chunks.length} parallel worker(s) ` +
+      `(file/dependency-coupled tasks serialized within a worker).`,
+  );
+  chunks.forEach((c, i) => {
+    const serial = c
+      .map((t) => `${t.id ?? "?"}:${(t.title ?? "").slice(0, 40)}`)
+      .join("  →  ");
+    console.log(
+      `[Supervisor]   worker #${i + 1} — ${c.length} task(s) serial: ${serial}`,
+    );
+  });
+}
+
+/**
  * Phase 1 dispatch: only Backend and Test Workers.
  * Frontend waits for BE to complete so it can see BE's real output.
  */
@@ -3565,9 +3396,13 @@ export function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
   const beChunks = ENABLE_PARALLEL_CODING_WORKERS
     ? chunkTasksByFileConflict(state.backendTasks, beCount)
     : chunkTasks(state.backendTasks, beCount);
-  if (ENABLE_PARALLEL_CODING_WORKERS) {
+  logChunkPlan(
+    `Backend dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"})`,
+    beChunks,
+  );
+  if (state.testTasks.length > 0) {
     console.log(
-      `[Supervisor] Backend dispatch (parallel): ${state.backendTasks.length} tasks → ${beChunks.length} conflict-free chunk(s).`,
+      `[Supervisor]   + Test Engineer worker (${state.testTasks.length} task(s)) runs in parallel with the ${beChunks.length} backend worker(s).`,
     );
   }
   beChunks.forEach((tasks, i) => {
@@ -3624,11 +3459,10 @@ export function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
     const fsChunks = ENABLE_PARALLEL_CODING_WORKERS
       ? chunkTasksByFileConflict(state.fullstackTasks, fsCount)
       : chunkTasks(state.fullstackTasks, fsCount);
-    if (ENABLE_PARALLEL_CODING_WORKERS) {
-      console.log(
-        `[Supervisor] Fullstack dispatch (parallel, BE phase): ${state.fullstackTasks.length} tasks → ${fsChunks.length} conflict-free chunk(s).`,
-      );
-    }
+    logChunkPlan(
+      `Fullstack dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"}, BE phase)`,
+      fsChunks,
+    );
     fsChunks.forEach((tasks, i) => {
       sends.push(
         new Send("be_worker", {
@@ -3720,19 +3554,19 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     }
     const pageCount = frontendPageWorkerCount(dispatchTasks.length);
     feChunks = chunkTasksByFileConflict(dispatchTasks, pageCount);
-    console.log(
-      `[Supervisor] Frontend dispatch (consolidation): ${dispatchTasks.length} page task(s) → ${feChunks.length} parallel chunk(s) (foundation already ran).`,
+    logChunkPlan(
+      "Frontend dispatch (consolidation — foundation already ran)",
+      feChunks,
     );
   } else {
     const feCount = workersForRole("frontend", state.frontendTasks.length);
     feChunks = ENABLE_PARALLEL_CODING_WORKERS
       ? chunkTasksByFileConflict(state.frontendTasks, feCount)
       : chunkTasks(state.frontendTasks, feCount);
-    if (ENABLE_PARALLEL_CODING_WORKERS) {
-      console.log(
-        `[Supervisor] Frontend dispatch (parallel): ${state.frontendTasks.length} tasks → ${feChunks.length} conflict-free chunk(s).`,
-      );
-    }
+    logChunkPlan(
+      `Frontend dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"})`,
+      feChunks,
+    );
   }
   // No page tasks (foundation-only project) — single no-op Send to resolve the barrier.
   if (ENABLE_FE_ROUTE_CONSOLIDATION && feChunks.length === 0) {
@@ -3790,11 +3624,30 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   // fall back to the full set so FE isn't completely blind. Log this — it
   // means BE's route shape didn't match either extractor and likely needs
   // attention.
-  const feContracts =
-    realContracts.length > 0 ? realContracts : state.apiContracts;
-  if (realContracts.length === 0 && state.apiContracts.length > 0) {
+  // Contract source for the FE prompt:
+  //  - Parallel mode (CODEGEN_PARALLEL_FE_BE): the backend hasn't been extracted
+  //    yet (it runs concurrently), so FE binds the AUTHORITATIVE upfront ENDPOINTS
+  //    contract (option-A guarantees BE implements it). Drift is caught post-join
+  //    by extract_real_contracts + integration tests, not by FE-waits-for-BE.
+  //  - Sequential mode: prefer the BE-extracted contracts (what BE actually
+  //    wrote); fall back to the upfront set if extraction yielded nothing.
+  const feContracts = ENABLE_PARALLEL_FE_BE
+    ? state.apiContracts
+    : realContracts.length > 0
+      ? realContracts
+      : state.apiContracts;
+  if (
+    !ENABLE_PARALLEL_FE_BE &&
+    realContracts.length === 0 &&
+    state.apiContracts.length > 0
+  ) {
     console.warn(
       `[Supervisor] dispatchFrontendWorkers: no BE-extracted contracts available; falling back to ${state.apiContracts.length} TRD-derived contracts for FE prompt.`,
+    );
+  }
+  if (ENABLE_PARALLEL_FE_BE) {
+    console.log(
+      `[Supervisor] dispatchFrontendWorkers: parallel mode — FE binds ${state.apiContracts.length} authoritative upfront ENDPOINTS contracts.`,
     );
   }
 
@@ -9258,7 +9111,168 @@ export function routeAfterBackendReadiness(state: SupervisorState): string {
   return decision === "stop" ? "summary" : "extract_real_contracts";
 }
 
+// ─── Route B: parallel BACKEND + FRONTEND codegen (CODEGEN_PARALLEL_FE_BE) ───
+// Two phase subgraphs run CONCURRENTLY inside one `parallel_codegen` node via
+// Promise.all. This deliberately avoids graph-topology diamond fan-in (which is
+// NOT a barrier for unequal-length branches — see parallel-fanin-feasibility.test)
+// and never runs the two phaseVerifyAndFix nodes concurrently (they share OVERWRITE
+// channels and would collide). Verify + contract-extraction run sequentially
+// post-join in the main graph.
+function buildBackendPhaseSubgraph() {
+  return new StateGraph(SupervisorStateAnnotation)
+    .addNode("be_worker", parallelWorkerNode)
+    .addConditionalEdges(START, dispatchBackendAndTestWorkers)
+    .addEdge("be_worker", END)
+    .compile();
+}
+
+function buildFrontendPhaseSubgraph() {
+  const feDispatchGate = (_state: SupervisorState) => ({});
+  return new StateGraph(SupervisorStateAnnotation)
+    .addNode("fe_foundation", feFoundation)
+    .addNode("fe_dispatch_gate", feDispatchGate)
+    .addNode("fe_worker", parallelWorkerNode)
+    .addNode("fe_route_consolidation", feRouteConsolidation)
+    .addEdge(START, "fe_foundation")
+    .addEdge("fe_foundation", "fe_dispatch_gate")
+    .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
+    .addEdge("fe_worker", "fe_route_consolidation")
+    .addEdge("fe_route_consolidation", END)
+    .compile();
+}
+
+let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null = null;
+let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null = null;
+
+async function parallelCodegenPhase(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  _bePhaseSubgraph ??= buildBackendPhaseSubgraph();
+  _fePhaseSubgraph ??= buildFrontendPhaseSubgraph();
+
+  // Snapshot the shared base so we can return only each branch's DELTA below.
+  const basePhase = state.phaseResults.length;
+  const baseContracts = state.apiContracts.length;
+  const baseCost = state.totalCostUsd;
+
+  console.log(
+    "[Supervisor] parallel_codegen: running BACKEND + FRONTEND phases concurrently (CODEGEN_PARALLEL_FE_BE)…",
+  );
+
+  const [beOut, feOut] = (await Promise.all([
+    _bePhaseSubgraph.invoke(state, { recursionLimit: 200 }),
+    _fePhaseSubgraph.invoke(state, { recursionLimit: 200 }),
+  ])) as [SupervisorState, SupervisorState];
+
+  // fileRegistry uses a merge-by-path (idempotent) reducer, so returning the
+  // UNION of both subgraphs' registries is safe — the main-graph reducer re-merges
+  // against the (identical) base without duplication.
+  const filesByPath = new Map<string, (typeof beOut.fileRegistry)[number]>();
+  for (const f of beOut.fileRegistry ?? []) filesByPath.set(f.path, f);
+  for (const f of feOut.fileRegistry ?? []) filesByPath.set(f.path, f);
+
+  const merged: Partial<SupervisorState> = {
+    // Additive (concat) channels: return ONLY each branch's delta (entries appended
+    // after the shared base) so the main-graph reducer doesn't double-count the base
+    // entries both subgraphs were seeded with.
+    phaseResults: [
+      ...beOut.phaseResults.slice(basePhase),
+      ...feOut.phaseResults.slice(basePhase),
+    ],
+    apiContracts: [
+      ...beOut.apiContracts.slice(baseContracts),
+      ...feOut.apiContracts.slice(baseContracts),
+    ],
+    // Summed channel: return the combined delta; the main-graph reducer adds it to
+    // the base exactly once.
+    totalCostUsd: beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
+    fileRegistry: [...filesByPath.values()],
+  };
+
+  console.log(
+    `[Supervisor] parallel_codegen done: +${merged.phaseResults!.length} phase results, ` +
+      `${merged.fileRegistry!.length} files in union, +$${(merged.totalCostUsd ?? 0).toFixed(4)}.`,
+  );
+
+  return merged;
+}
+
 export function createSupervisorGraph() {
+  // ─── Route B (flag ON): BE + FE phases run concurrently in parallel_codegen,
+  // then verify + extract run sequentially post-join. Built as a separate chain so
+  // the flag-OFF path below stays byte-identical (zero regression).
+  if (ENABLE_PARALLEL_FE_BE) {
+    const parallelGraph = new StateGraph(SupervisorStateAnnotation)
+      .addNode("classify_tasks", classifyTasks)
+      .addNode("architect_phase", runArchitectPhase)
+      .addNode("scaffold_verify", scaffoldVerify)
+      .addNode("scaffold_fix", scaffoldFix)
+      .addNode("dispatch_gate", dispatchGate)
+      .addNode("dependency_baseline", dependencyBaseline)
+      .addNode("generate_api_contracts", generateApiContracts)
+      .addNode("contract_task_coverage", contractTaskCoverage)
+      .addNode("page_task_coverage", pageTaskCoverage)
+      .addNode("tdd_test_writer", tddTestWriterAndRed)
+      .addNode("parallel_codegen", parallelCodegenPhase)
+      .addNode("be_phase_verify", (s) =>
+        phaseVerifyAndFix(s, { workerHintRoles: ["backend", "test"] }),
+      )
+      .addNode("fe_phase_verify", (s) =>
+        phaseVerifyAndFix(s, { workerHintRoles: ["frontend"] }),
+      )
+      .addNode("be_readiness_gate", backendReadinessGate)
+      .addNode("extract_real_contracts", extractRealContracts)
+      .addNode("schema_arbiter", schemaArbiter)
+      .addNode("sync_deps", syncDeps)
+      .addNode("integration_verify", integrationVerifyAndFix)
+      .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+      .addNode("e2e_verify", e2eVerifyAndFix)
+      .addNode("summary", summary)
+
+      .addEdge(START, "classify_tasks")
+      .addEdge("classify_tasks", "architect_phase")
+      .addEdge("architect_phase", "scaffold_verify")
+      .addConditionalEdges("scaffold_verify", shouldFixScaffoldOrContinue, {
+        dispatch: "dispatch_gate",
+        scaffold_fix: "scaffold_fix",
+      })
+      .addEdge("scaffold_fix", "scaffold_verify")
+      .addEdge("dispatch_gate", "dependency_baseline")
+      .addEdge("dependency_baseline", "generate_api_contracts")
+      .addEdge("generate_api_contracts", "contract_task_coverage")
+      .addEdge("contract_task_coverage", "page_task_coverage")
+      .addEdge("page_task_coverage", "tdd_test_writer")
+      // BE + FE built concurrently inside this single node…
+      .addEdge("tdd_test_writer", "parallel_codegen")
+      // …then verify each phase SEQUENTIALLY post-join (phaseVerifyAndFix uses
+      // overwrite channels and must never run concurrently).
+      .addEdge("parallel_codegen", "be_phase_verify")
+      .addEdge("be_phase_verify", "fe_phase_verify")
+      .addEdge("fe_phase_verify", "be_readiness_gate")
+      // extract_real_contracts is now a post-hoc DRIFT CHECK (FE already bound the
+      // authoritative upfront contract); routeAfterBackendReadiness behaves the same.
+      .addConditionalEdges("be_readiness_gate", routeAfterBackendReadiness, {
+        extract_real_contracts: "extract_real_contracts",
+        summary: "summary",
+      })
+      .addEdge("extract_real_contracts", "schema_arbiter")
+      .addEdge("schema_arbiter", "sync_deps")
+      .addEdge("sync_deps", "integration_verify")
+      .addEdge("integration_verify", "tdd_green_verify")
+      .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
+        integration_verify: "integration_verify",
+        e2e_verify: "e2e_verify",
+        summary: "summary",
+      })
+      .addConditionalEdges("e2e_verify", routeAfterE2eVerify, {
+        e2e_verify: "e2e_verify",
+        summary: "summary",
+      })
+      .addEdge("summary", END);
+
+    return parallelGraph.compile();
+  }
+
   const feDispatchGate = (_state: SupervisorState) => ({});
 
   const graph = new StateGraph(SupervisorStateAnnotation)

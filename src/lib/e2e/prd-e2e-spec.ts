@@ -383,7 +383,7 @@ export function deriveFallbackE2eTasks(
     .slice(0, 6)
     .map(
       (scenario) =>
-        `frontend/tests/e2e/generated/${scenario.id.toLowerCase()}-${slugify(scenario.title)}.spec.ts`,
+        `frontend/e2e/generated/${scenario.id.toLowerCase()}-${slugify(scenario.title)}.spec.ts`,
     );
   const topRequirementIds = uniq(
     spec.scenarios.flatMap((scenario) => scenario.coversRequirementIds),
@@ -400,8 +400,8 @@ export function deriveFallbackE2eTasks(
     files: {
       creates: [
         "frontend/playwright.config.ts",
-        "frontend/tests/e2e/fixtures.ts",
-        "frontend/tests/e2e/utils.ts",
+        "frontend/e2e/fixtures.ts",
+        "frontend/e2e/utils.ts",
       ],
       modifies: ["frontend/package.json"],
       reads: ["PRD_E2E_SPEC.md", "E2E_COVERAGE.md"],
@@ -413,7 +413,7 @@ export function deriveFallbackE2eTasks(
         step: 1,
         action: "Create Playwright config",
         detail:
-          "CREATE new file frontend/playwright.config.ts with baseURL, webServer, trace, screenshot, and retry settings aligned to the generated frontend stack.",
+          "The scaffold already ships frontend/playwright.config.ts with `testDir: \"./e2e\"` — KEEP that testDir (all specs live under frontend/e2e/, never frontend/tests/). Only adjust baseURL, webServer, trace, screenshot, and retry settings to match the generated frontend stack; do not relocate testDir.",
       },
       {
         step: 2,
@@ -425,7 +425,7 @@ export function deriveFallbackE2eTasks(
         step: 3,
         action: "Add shared fixtures",
         detail:
-          "CREATE new files under frontend/tests/e2e for reusable login/navigation/test data helpers that later scenario specs can import.",
+          "CREATE new files under frontend/e2e for reusable login/navigation/test data helpers that later scenario specs can import.",
       },
     ],
     acceptanceCriteria: [
@@ -463,7 +463,7 @@ export function deriveFallbackE2eTasks(
         step: 1,
         action: "Map scenarios to specs",
         detail:
-          "CREATE new Playwright spec files under frontend/tests/e2e/generated and map each PRD E2E scenario to a concrete browser flow with readable test names.",
+          "CREATE new Playwright spec files under frontend/e2e/generated and map each PRD E2E scenario to a concrete browser flow with readable test names.",
       },
       {
         step: 2,

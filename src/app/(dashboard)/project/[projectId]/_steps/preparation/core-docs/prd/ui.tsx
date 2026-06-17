@@ -363,9 +363,15 @@ export function PrdUI(props: StepUIProps) {
     ? preFixContentRef.current
     : (streamingContent || (!isThisRunning ? step?.content : "") || lastContentRef.current);
   // A large / multi-domain PRD: recommend running Validation + Subsystem Split
-  // before continuing (and gate Next Step until both have run).
+  // before continuing (and gate Next Step until both have run). This is an
+  // L-tier capability only — subsystem split is meaningless for M/S projects,
+  // which build as a single domain. The tier badge is authoritative (synced to
+  // `tier` from the PRD's `**Project Tier**` line), so gate on it FIRST; the
+  // size heuristic alone was tier-blind and wrongly tripped on any M PRD with
+  // ≥8 sections.
   const isLargePrd =
     !!content &&
+    tier === "L" &&
     (content.split("\n").length >= 1500 ||
       (content.match(/^##\s+\S/gm)?.length ?? 0) >= 8);
   // Goal-mode plan (milestones + acceptance commands): coding routes to the

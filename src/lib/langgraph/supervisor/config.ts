@@ -12,17 +12,36 @@ export const ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC =
   process.env.BLUEPRINT_INCREMENTAL_CONTEXT_SYNC !== "0";
 
 // P0 parallel-coding flag.
-//   "0" or unset → legacy single-worker behaviour (default; preserves the
-//                  strict incremental-context guarantee for in-flight runs).
-//   "auto"       → derive worker count from task count via the heuristic
-//                  below, but still respect file-conflict groups.
+//   "auto"       → DEFAULT. Fan out one worker per file/dependency-disjoint task
+//                  group (capped by CODING_WORKER_CAP). `chunkTasksByFileConflict`
+//                  is the real limiter: tasks sharing a dependency edge or a
+//                  file (creates↔reads/modifies, modifies↔modifies) collapse into
+//                  ONE chunk and run serially in a single worker; disjoint groups
+//                  run in parallel. I.e. "same path → serial, different path →
+//                  parallel".
+//   "0"          → legacy single-worker behaviour (each role strictly serial).
 //   <integer>    → explicit upper bound on workers per coding role.
 export const PARALLEL_CODING_WORKERS_RAW = (
-  process.env.BLUEPRINT_PARALLEL_CODING_WORKERS ?? "0"
+  process.env.BLUEPRINT_PARALLEL_CODING_WORKERS ?? "auto"
 ).trim();
 
 export const ENABLE_PARALLEL_CODING_WORKERS =
   PARALLEL_CODING_WORKERS_RAW !== "" && PARALLEL_CODING_WORKERS_RAW !== "0";
+
+/**
+ * Upper bound on concurrent backend/frontend/fullstack coding workers when
+ * BLUEPRINT_PARALLEL_CODING_WORKERS="auto". The REAL limiter is
+ * `chunkTasksByFileConflict` (disjoint task groups → separate workers; coupled
+ * ones collapse) — this cap just stops a huge phase from spawning dozens of
+ * concurrent LLM workers. Override via BLUEPRINT_CODING_MAX_WORKERS.
+ */
+export const CODING_WORKER_CAP = (() => {
+  const raw = Number.parseInt(
+    (process.env.BLUEPRINT_CODING_MAX_WORKERS ?? "8").trim(),
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 8;
+})();
 
 /**
  * Foundation / architect-phase parallelism flag (default OFF).
@@ -57,6 +76,25 @@ export const FOUNDATION_WORKER_CAP = (() => {
     10,
   );
   return Number.isFinite(raw) && raw > 0 ? raw : 6;
+})();
+
+/**
+ * Parallel BACKEND+FRONTEND codegen flag (default OFF).
+ *
+ * When on, the BE phase and FE phase (foundation→pages→route-consolidation) run
+ * CONCURRENTLY inside one `parallel_codegen` node (Promise.all over two phase
+ * subgraphs), then verify + contract-extraction run post-join. This requires FE
+ * to trust the AUTHORITATIVE upfront ENDPOINTS contract (option-A) rather than
+ * waiting to see what the backend actually wrote — `dispatchFrontendWorkers`
+ * uses the upfront contract when this is on. Drift between BE's implementation
+ * and the contract is caught post-join by `extract_real_contracts` (now a
+ * verify) + integration tests, not by FE-waits-for-BE.
+ *
+ * Default OFF → the graph is wired exactly as before (BE→extract→FE sequential).
+ */
+export const ENABLE_PARALLEL_FE_BE = (() => {
+  const raw = (process.env.CODEGEN_PARALLEL_FE_BE ?? "0").trim().toLowerCase();
+  return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
 })();
 
 /**
@@ -118,8 +156,12 @@ export function workersForRole(role: CodingAgentRole, count: number): number {
   }
   if (ENABLE_PARALLEL_CODING_WORKERS) {
     const limit = parsedWorkerLimit();
-    const auto = count <= 3 ? 1 : count <= 8 ? 2 : 3;
-    if (limit === "auto") return Math.min(auto, count);
+    // "auto": allow up to one worker per task (capped), and let
+    // chunkTasksByFileConflict collapse same-path tasks into shared chunks.
+    // We deliberately do NOT throttle by task count (the old `≤3 → 1` heuristic
+    // re-serialized small sets of genuinely independent tasks, defeating the
+    // "different path → parallel" guarantee).
+    if (limit === "auto") return Math.min(count, CODING_WORKER_CAP);
     return Math.min(limit, count);
   }
   if (count <= 3) return 1;
