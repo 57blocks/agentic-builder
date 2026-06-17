@@ -2079,6 +2079,8 @@ export async function POST(request: NextRequest) {
     designSpecDoc,
     pencilDesignDoc,
     stitchMeta ?? undefined,
+    process.cwd(),
+    projectId ?? undefined,
   );
 
   const normalizedTasks = [...tasksToRun, ...preparedE2e.extraTasks];
