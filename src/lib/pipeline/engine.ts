@@ -716,7 +716,7 @@ export class PipelineEngine {
         // domain instead of inventing its own split. Absent on a first fresh
         // run (decompose happens later in kickoff) → monolithic TRD as before.
         const subsystemManifest = await readSubsystemManifest(outputRoot);
-        run = await this.executeStep(run, "trd", () =>
+        const genTrd = () =>
           this.trdAgent.generateTRD(
             prdContent,
             tier,
@@ -726,10 +726,10 @@ export class PipelineEngine {
             undefined,
             authDecision,
             subsystemManifest,
-          ),
-        );
+          );
+        run = await this.executeStep(run, "trd", genTrd);
         if (run.status === "failed") return run;
-        await this.persistTrdArtifacts(run);
+        await this.persistTrdArtifacts(run, async () => (await genTrd()).content);
       } else {
         run = this.emitStubCompleted(
           run,
@@ -1975,12 +1975,26 @@ export class PipelineEngine {
    * (downstream codegen falls back to per-worker types) rather than
    * failing the step.
    */
-  private async persistTrdArtifacts(run: PipelineRun): Promise<void> {
+  private async persistTrdArtifacts(
+    run: PipelineRun,
+    /**
+     * Re-runs TRD generation, returning fresh markdown. When provided, the
+     * registry gate (P1①, option A) uses it to regenerate the TRD ONCE if the
+     * authored schema is missing its `ENDPOINTS` registry — the single source
+     * generateApiContracts derives API_CONTRACTS from. Still absent after the
+     * retry → the contract phase hard-fails (no silent PRD fallback).
+     */
+    regenerate?: () => Promise<string>,
+  ): Promise<void> {
     const trd = run.steps.trd;
     if (!trd?.content || trd.status !== "completed") return;
     if (trd.metadata?.skipped) return;
 
-    const blueprintDir = path.resolve(process.cwd(), ".blueprint");
+    // Project's .blueprint (this.projectRoot defaults to process.cwd(), so this
+    // is a no-op for the in-project legacy flow but correct when projectRoot is
+    // set elsewhere) — the coding phase reads <project>/.blueprint/shared-schema.ts
+    // to derive API_CONTRACTS, so the schema MUST land in the project dir.
+    const blueprintDir = path.resolve(this.projectRoot, ".blueprint");
 
     let result;
     try {
@@ -1991,6 +2005,39 @@ export class PipelineEngine {
         err instanceof Error ? err.message : err,
       );
       return;
+    }
+
+    if (
+      regenerate &&
+      result.schemaRegistry.schemaPresent &&
+      !result.schemaRegistry.hasRegistry
+    ) {
+      console.warn(
+        "[Pipeline] TRD schema has no ENDPOINTS registry — regenerating TRD once.",
+      );
+      try {
+        const freshContent = await regenerate();
+        const retry = await persistTrdArtifactsFromContent(
+          freshContent,
+          blueprintDir,
+        );
+        if (retry.schemaRegistry.hasRegistry) {
+          trd.content = freshContent;
+          result = retry;
+          console.log(
+            `[Pipeline] TRD regenerated WITH ENDPOINTS registry (${retry.schemaRegistry.count} endpoint(s)).`,
+          );
+        } else {
+          console.warn(
+            "[Pipeline] TRD retry STILL has no ENDPOINTS registry — the contract phase will hard-fail if backend endpoints exist.",
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[Pipeline] TRD registry-gate regeneration failed:",
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
 
     const writtenRel: {
@@ -2421,7 +2468,7 @@ export class PipelineEngine {
       // Re-generating after a PRD edit: pick up the subsystem manifest so the
       // refreshed TRD stays domain-shaped (matches the initial-run behavior).
       const subsystemManifest = await readSubsystemManifest(outputRoot);
-      run = await this.executeStep(run, "trd", () =>
+      const genTrd = () =>
         this.trdAgent.generateTRD(
           canonicalPrd,
           tier,
@@ -2431,10 +2478,10 @@ export class PipelineEngine {
           undefined,
           authDecision,
           subsystemManifest,
-        ),
-      );
+        );
+      run = await this.executeStep(run, "trd", genTrd);
       if (run.status === "failed") return run;
-      await this.persistTrdArtifacts(run);
+      await this.persistTrdArtifacts(run, async () => (await genTrd()).content);
     }
 
     const trdContent = run.steps.trd?.content ?? previousSnapshot.docs.trd ?? "";
