@@ -52,6 +52,17 @@ describe("context trigger", () => {
     expect(r.result.matched).toBe(false);
   });
 
+  it("fires UNCONDITIONALLY when always:true (ignores empty config)", async () => {
+    const alwaysTrigger: ContextTrigger = { type: "context", always: true };
+    const r = await evaluateTrigger(
+      alwaysTrigger,
+      baseCtx({ appliedOptionalFeatures: [], declaredEnvKeys: [], flags: {} }),
+      offline,
+    );
+    expect(r.result.matched).toBe(true);
+    expect(r.costUsd).toBe(0);
+  });
+
   it("matches env keys and requires ALL flags", async () => {
     const envTrigger: ContextTrigger = {
       type: "context",
@@ -110,6 +121,36 @@ describe("auth-password-rbac-login-page skill", () => {
     );
     expect(privy.applied.map((a) => a.skill.id)).not.toContain(
       "auth-password-rbac-login-page",
+    );
+  });
+});
+
+describe("model-fields-match-schema skill (backend, always-on)", () => {
+  const skillPath = path.join(
+    SKILLS_ROOT,
+    "backend",
+    "model-fields-match-schema.md",
+  );
+
+  it("parses with an always:true context trigger", () => {
+    const skill = parseSkillFile(skillPath);
+    expect(skill.id).toBe("model-fields-match-schema");
+    expect(skill.agent).toBe("backend");
+    expect(skill.trigger.type).toBe("context");
+    expect((skill.trigger as ContextTrigger).always).toBe(true);
+    // Body must call out the two hallucinated fields and the source of truth.
+    expect(skill.body).toMatch(/status/);
+    expect(skill.body).toMatch(/isDeleted|deletedAt/);
+    expect(skill.body).toMatch(/single source of truth/i);
+  });
+
+  it("is applied for ANY backend project (no features/env/flags needed)", async () => {
+    const applied = await loadSkillsForAgent(
+      baseCtx({ agent: "backend" }),
+      { skillsRoot: SKILLS_ROOT, enableLlmConfirm: false },
+    );
+    expect(applied.applied.map((a) => a.skill.id)).toContain(
+      "model-fields-match-schema",
     );
   });
 });

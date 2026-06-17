@@ -54,6 +54,10 @@ export interface CompositeTrigger {
  *  in the PRD text. A skill fires when ANY of the provided conditions hold. */
 export interface ContextTrigger {
   type: "context";
+  /** Fires UNCONDITIONALLY. Use for invariants that apply to every project for
+   *  this agent (e.g. "backend model fields must match the shared schema"). When
+   *  true, the other context conditions are ignored. */
+  always?: boolean;
   /** Fires when `appliedOptionalFeatures` contains a feature matching ANY of
    *  these (case-insensitive substring, e.g. "auth-password-rbac"). */
   any_of_features?: string[];

@@ -166,6 +166,10 @@ function evaluateContext(
   trigger: ContextTrigger,
   ctx: LoaderContext,
 ): { matched: boolean; evidence?: string } {
+  if (trigger.always) {
+    return { matched: true, evidence: "always-on (unconditional)" };
+  }
+
   const features = ctx.appliedOptionalFeatures ?? [];
   const envKeys = ctx.declaredEnvKeys ?? [];
   const flags = ctx.flags ?? {};

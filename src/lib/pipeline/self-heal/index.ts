@@ -25,6 +25,8 @@ export {
   runFeatureChecklistAudit,
 } from "./feature-checklist-audit";
 export { auditFrontendWiring } from "./wiring-audit";
+export { auditModelSchemaAlignment } from "./model-schema-audit";
+export type { ModelSchemaAuditInput } from "./model-schema-audit";
 export type {
   AuditEntry,
   AuditTaskSummary,

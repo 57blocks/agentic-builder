@@ -90,6 +90,7 @@ import {
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
   auditFrontendWiring,
+  auditModelSchemaAlignment,
   dispatchAuditRepair,
   AttemptTracker,
   escalateRepairCircuit,
@@ -2453,6 +2454,31 @@ export async function POST(request: NextRequest) {
           if (wiringFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
             const fresh = wiringFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
+
+          // Backend model ↔ shared-schema field-alignment audit. Flags models
+          // that invented scalar columns the schema doesn't declare (e.g. a
+          // `status` enum or `isDeleted` boolean). `MODEL-<Entity>` ids are
+          // non-frontend, so the dispatcher routes them to a scoped BACKEND
+          // repair. Like wiring, these are `partial` verdicts (never flip
+          // `passed`), so a false positive costs at most one bounded repair pass.
+          const modelSchemaFindings = await auditModelSchemaAlignment({
+            tasks: codingTasks,
+            taskResults: auditTaskResults,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+          });
+          if (modelSchemaFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = modelSchemaFindings.filter(
+              (e) => !existingIds.has(e.id),
+            );
             if (fresh.length > 0) {
               finalAudit = {
                 ...finalAudit,

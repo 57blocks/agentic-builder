@@ -73,8 +73,10 @@ export interface AuditEntry {
    * instructions. "coverage" (default/undefined) = the requirement may be
    * missing entirely → backfill. "wiring" = the control EXISTS but its
    * behaviour is dead/unwired → wire the existing control's handler.
+   * "schema-drift" = a backend model declares columns the shared schema doesn't
+   * → reconcile the model to the schema (single source of truth).
    */
-  category?: "coverage" | "wiring";
+  category?: "coverage" | "wiring" | "schema-drift";
 }
 
 export interface FeatureChecklistAuditInput {
