@@ -479,7 +479,7 @@ function buildBackendPrompt(ctx: PromptContext): string {
     `- Validate body with Joi before consuming. Typed context: import \`AppKoaContext\` from \`backend/src/types/koa.ts\`.`,
     `- \`validateBody(schema)\` only on POST/PUT/PATCH/DELETE — NEVER on GET routes.`,
     `- JWT helpers: \`signJwt\` / \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Never call \`jsonwebtoken\` directly in feature code.`,
-    `- Every endpoint in \`API_CONTRACTS.json\` for this domain must be implemented and registered.`,
+    `- The shared schema's \`ENDPOINTS\` registry (\`shared/schema.ts\`, also at \`.blueprint/shared-schema.ts\`) is the single source of truth: every endpoint it declares for this domain must be implemented and registered, using the request/response types named there.`,
     ``,
     BACKEND_OPERATIONAL_INVARIANTS_RULE,
     ``,

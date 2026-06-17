@@ -2254,7 +2254,10 @@ function scoreGeneratedFileForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md"
   ) {
     score += 140;
@@ -2342,7 +2345,10 @@ function scoreCandidatePathForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md" ||
     normalizedPath === "DEPENDENCY_PLAN.md"
   ) {
@@ -2426,7 +2432,10 @@ async function buildRelevantFileContext(
     "apps/web/src/lib/apiClient.ts",
     "apps/web/lib/api/auth.client.ts",
     "apps/api/src/routes/auth.ts",
-    "API_CONTRACTS.json",
+    "src/shared/schema.ts",
+    "frontend/src/shared/schema.ts",
+    "backend/src/shared/schema.ts",
+    ".blueprint/shared-schema.ts",
     "SCAFFOLD_SPEC.md",
     "DEPENDENCY_PLAN.md",
   ].forEach((p) => candidates.add(p));
