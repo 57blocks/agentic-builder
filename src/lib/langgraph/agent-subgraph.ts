@@ -1,6 +1,7 @@
 import path from "path";
 import * as nodeFs from "fs/promises";
 import { StateGraph, START, END } from "@langchain/langgraph";
+import type { TranspileDiagnostic } from "./per-task-transpile-check";
 import {
   WorkerStateAnnotation,
   type WorkerState,
@@ -3897,8 +3898,58 @@ async function verifyCode(state: WorkerState) {
     return { verifyErrors: "", fixAttempts: state.fixAttempts };
   }
 
+  // Per-task single-file transpile check. Catches SYNTAX-level errors
+  // (truncated/malformed output, invalid tokens, bad JSX) in the task's own
+  // files at generation time — without resolving imports, so there are no
+  // false "cannot find module" findings for symbols a later task will create.
+  // Genuine cross-file type/resolution errors still defer to the project-wide
+  // tsc in supervisor integration-verify. Disable with
+  // BLUEPRINT_PER_TASK_TRANSPILE_CHECK=0. Fail-open: a checker error never
+  // blocks the task.
+  if (process.env.BLUEPRINT_PER_TASK_TRANSPILE_CHECK !== "0") {
+    try {
+      const { transpileCheckSource, formatTranspileDiagnostics } = await import(
+        "./per-task-transpile-check"
+      );
+      const diags: TranspileDiagnostic[] = [];
+      for (const filePath of tsFiles) {
+        const content = await fsRead(filePath, state.outputDir);
+        if (
+          content.startsWith("FILE_NOT_FOUND") ||
+          content.startsWith("REJECTED")
+        ) {
+          continue;
+        }
+        diags.push(...transpileCheckSource(filePath, content));
+      }
+      if (diags.length > 0) {
+        const detail = formatTranspileDiagnostics(diags);
+        console.log(
+          `[Worker:${state.workerLabel}] Per-task transpile check FAILED for "${task.title}": ${diags.length} syntax error(s) across ${new Set(diags.map((d) => d.file)).size} file(s).`,
+        );
+        getRepairEmitter(state.sessionId)({
+          stage: "worker-verify",
+          event: "task_transpile_errors",
+          taskId: task.id,
+          files: [...new Set(diags.map((d) => d.file))],
+          details: { count: diags.length },
+        });
+        // Reuse the tsc-verify prefix so the existing per-task fix loop
+        // (isWorkerTscVerifyError → routeAfterVerify → task_fix) repairs it.
+        return {
+          verifyErrors: `${WORKER_TSC_VERIFY_PREFIX}\n${detail}`,
+          fixAttempts: state.fixAttempts,
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[Worker:${state.workerLabel}] Per-task transpile check skipped (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   console.log(
-    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task tsc disabled; project-wide tsc runs in supervisor verify.`,
+    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task transpile check passed; project-wide tsc runs in supervisor verify.`,
   );
 
   return { verifyErrors: "", fixAttempts: state.fixAttempts };
