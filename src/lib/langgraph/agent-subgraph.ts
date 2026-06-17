@@ -2144,20 +2144,39 @@ function buildFrontendPriorityNote(opts: {
     : "";
   const checklistTier = `\n${hasImage ? (hasTokens ? "4" : "3") : hasTokens ? "3" : "2"}. **Sub-steps & task title** — a FILE + DATA-WIRING checklist ONLY, never a visual spec. They tell you WHICH files/components to create and HOW data flows. When a sub-step's UI wording (e.g. "sortable table", "Edit/Delete buttons per row", "header with New Bill button") conflicts with ${hasImage ? "the screenshot" : "the Design Specification"}, ${hasImage ? "the SCREENSHOT" : "the Design Specification"} WINS. Do not let a sub-step's layout phrasing pull you toward a generic CRUD shape.`;
 
+  // Typography guardrail. The model CANNOT reliably estimate pixel sizes from a
+  // screenshot — a full-page capture (≈1440px wide) makes text look far larger
+  // than its real px, and the model consistently overshoots (observed: body
+  // text emitted at text-[28px], H1 at text-[56px]). So forbid arbitrary px
+  // font sizes and pin a sane default scale unless a token / DesignSpec value
+  // explicitly says otherwise.
+  const typographyGuardrail =
+    `\n\n## Typography guardrail (HARD RULE)\n` +
+    `Do NOT estimate font sizes from the screenshot — full-page captures distort apparent size and you WILL overshoot. Do NOT emit arbitrary pixel font sizes (\`text-[28px]\`, \`text-[34px]\`, \`text-[56px]\` are all WRONG for body/headings here).\n` +
+    `Use a \`--computed-*-font-size\` token or an explicit Design Specification value when one exists for the element. Otherwise use this default scale:\n` +
+    `- Secondary / metadata / labels / status pills: \`text-xs\` (12px) – \`text-sm\` (14px)\n` +
+    `- Body text, card subtitle/metadata, table cells: \`text-sm\` (14px) – \`text-base\` (16px)\n` +
+    `- Card / list-item title: \`text-base\` (16px) – \`text-lg\` (18px)\n` +
+    `- Emphasised number (price/amount), section heading: \`text-xl\` (20px) – \`text-2xl\` (24px)\n` +
+    `- Page H1 only: \`text-3xl\` (30px) – \`text-4xl\` (36px)\n` +
+    `Body / label / metadata text must NEVER exceed ~16px. The screenshot governs LAYOUT and relative hierarchy; this scale governs absolute size.`;
+
   if (hasImage) {
     return (
       `\n\n## Source of truth (read first, apply to every decision)\n` +
-      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative sizing. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
+      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative hierarchy (which text is bigger than which). It does NOT define absolute pixel sizes — see the Typography guardrail below. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
       `2. **Design Specification** (Project Context → section "Design Specification") — the authoritative source for EXACT quantitative values that match the screenshot: hex colours, font sizes, line-heights, spacing, radii, shadows, gradients. Pull precise numbers from here. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
       tokenTier +
-      checklistTier
+      checklistTier +
+      typographyGuardrail
     );
   }
   return (
     `\n\n## Source of truth (read first, apply to every decision)\n` +
     `1. **Design Specification** (Project Context → section "Design Specification") — your PRIMARY visual authority since no reference screenshot is attached: layout, component shape, exact hex colours, font sizes, spacing, radii, shadows. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
     tokenTier +
-    checklistTier
+    checklistTier +
+    typographyGuardrail
   );
 }
 

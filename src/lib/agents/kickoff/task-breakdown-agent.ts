@@ -456,6 +456,7 @@ Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in eac
 - Page/route tasks MUST include at least one \`route-smoke\` test that (a) proves the route renders the real page (not a placeholder) AND (b) simulates the page's PRIMARY interaction (click the main button / submit the form) and asserts its effect — the API client method called with the expected payload, navigation to the target route, or the declared state change. \`expectedGreen\` MUST name the interaction and its effect (e.g. "clicking Pay calls paymentsApi.create with the cart payload and navigates to /confirmation"). Author the interaction-flow assertion at priority **P1** (it should surface and drive repair, not hard-block the gate) unless it guards a critical auth/payment flow.
 - Runtime/dependency tasks MUST include at least one \`runtime-smoke\` test for local startup/fallback behavior.
 - Each test MUST state the exact test file path, command, expected RED failure, and expected GREEN result.
+- **Test file extension (HARD RULE):** any test that renders a React component (imports a \`.tsx\` and uses \`render(<Component />)\` / JSX) MUST use a \`.test.tsx\` extension — NEVER \`.test.ts\`. esbuild cannot parse JSX inside a \`.ts\` file, so a \`.ts\` React test fails to transform and permanently breaks the TDD gate. Use \`.test.ts\` only for pure-logic tests (hooks/services/utils with no JSX).
 
 Example \`tddPlan\`:
 \`\`\`json
