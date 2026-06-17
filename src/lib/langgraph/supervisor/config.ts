@@ -98,6 +98,24 @@ export const ENABLE_PARALLEL_FE_BE = (() => {
 })();
 
 /**
+ * Schema reconciliation flag (default OFF).
+ *
+ * When on, a `schema_reconcile` node runs AFTER the frontend phase: it applies
+ * any FRONTEND-discovered schema-change-requests (filed during the FE phase) to
+ * the shared schema, re-derives API_CONTRACTS, and runs a backend repair pass to
+ * IMPLEMENT any endpoint the amendment added but no task produces — closing the
+ * "FE needs an endpoint the backend never built" gap that today only gets filed
+ * to .ralph/schema-change-requests.jsonl and then ignored.
+ *
+ * Default OFF → `schema_reconcile` is a passthrough no-op (zero behaviour change).
+ * Runs LLM workers, so it must be validated on a real run before defaulting on.
+ */
+export const ENABLE_SCHEMA_RECONCILE = (() => {
+  const raw = (process.env.CODEGEN_SCHEMA_RECONCILE ?? "0").trim().toLowerCase();
+  return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
+})();
+
+/**
  * Frontend route-consolidation + parallel-pages flag (default ON).
  *
  * When enabled the frontend phase runs in two stages:

@@ -73,6 +73,8 @@ import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { triagePrebuiltArchitectTasks } from "./architect-triage";
 import {
   getRepairEmitter,
+  dispatchAuditRepair,
+  type AuditEntry,
   runContractUsageCoverage,
   runRuntimeIntegrationAudit,
   formatRuntimeAuditBlock,
@@ -154,6 +156,7 @@ import {
   ENABLE_PARALLEL_CODING_WORKERS,
   ENABLE_PARALLEL_FOUNDATION,
   ENABLE_PARALLEL_FE_BE,
+  ENABLE_SCHEMA_RECONCILE,
   ENABLE_FE_ROUTE_CONSOLIDATION,
   frontendPageWorkerCount,
   parsedWorkerLimit,
@@ -9111,6 +9114,129 @@ export function routeAfterBackendReadiness(state: SupervisorState): string {
   return decision === "stop" ? "summary" : "extract_real_contracts";
 }
 
+/**
+ * schema_reconcile (Part B) — runs AFTER the frontend phase.
+ *
+ * The frontend phase can surface schema-change-requests (FE needs an endpoint the
+ * backend never built — the taskflow `GET /users` gap). The pre-FE schema_arbiter
+ * already handled BACKEND-discovered requests; this closes the FE→BE direction:
+ *   1. apply the now-pending (FE-discovered) requests to the shared schema (reuse
+ *      schemaArbiter — it amends schema.ts + records decisions);
+ *   2. re-derive API_CONTRACTS.json from the amended ENDPOINTS registry;
+ *   3. find endpoints the amendment ADDED that no task produces, and run a scoped
+ *      BACKEND repair pass to implement them (reuse dispatchAuditRepair — `ENDPOINT
+ *      …` ids are non-frontend, so they route to a backend worker).
+ *
+ * Flag-gated (CODEGEN_SCHEMA_RECONCILE, default OFF) → passthrough no-op. Gated
+ * again on "are there pending requests" so a clean build pays nothing. Runs LLM
+ * workers; validate on a real run before defaulting on.
+ */
+async function schemaReconcile(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  if (!ENABLE_SCHEMA_RECONCILE) return {};
+
+  const emit = getRepairEmitter(state.sessionId);
+  let pending: SchemaChangeRequest[];
+  try {
+    const [requests, decisions] = await Promise.all([
+      readSchemaChangeRequests(state.outputDir),
+      readSchemaChangeDecisions(state.outputDir),
+    ]);
+    pending = pendingRequests(requests, decisions);
+  } catch {
+    return {};
+  }
+  if (pending.length === 0) return {};
+
+  console.log(
+    `[Supervisor] schemaReconcile: ${pending.length} pending schema-change-request(s) after FE phase — amending schema + backfilling implementation.`,
+  );
+
+  // 1. Apply the FE-discovered amendments to the shared schema (disk side-effect).
+  const arbiterDelta = await schemaArbiter(state);
+  const afterArbiter: SupervisorState = { ...state, ...arbiterDelta };
+
+  // 2. Re-derive API_CONTRACTS.json from the amended ENDPOINTS (disk side-effect).
+  try {
+    await generateApiContracts(afterArbiter);
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaReconcile: contract re-derivation failed (${err instanceof Error ? err.message : err}); skipping backfill.`,
+    );
+    return arbiterDelta;
+  }
+
+  // 3. Which endpoints does the amended contract now declare that no task builds?
+  const contractsRaw = await fsRead("API_CONTRACTS.json", state.outputDir);
+  let contracts: ContractEntryLike[] = [];
+  try {
+    const parsed = JSON.parse(contractsRaw);
+    if (Array.isArray(parsed)) contracts = parsed as ContractEntryLike[];
+  } catch {
+    return arbiterDelta;
+  }
+  if (contracts.length === 0 || state.tasks.length === 0) return arbiterDelta;
+
+  const gate = runContractCoverageGate(contracts, state.tasks);
+  if (gate.passed || gate.missingIds.length === 0) return arbiterDelta;
+
+  // 4. Implement the newly-added, unbuilt endpoints via a scoped backend repair.
+  const entries: AuditEntry[] = gate.missingIds.map((ep) => ({
+    id: `ENDPOINT ${ep}`,
+    verdict: "partial",
+    layer: "l2",
+    reason:
+      `The shared schema was amended (FE→BE reconciliation) to add endpoint \`${ep}\`, ` +
+      `but no backend code implements it. Implement this route per the amended shared ` +
+      `schema — use the request/response types named in its ENDPOINTS registry entry.`,
+    coveringTaskIds: [],
+    evidence: [],
+    category: "coverage",
+  }));
+  emit({
+    stage: "post-gen-audit",
+    event: "schema_reconcile_backfill",
+    missingIds: entries.map((e) => e.id),
+    details: { count: entries.length },
+  });
+
+  let disp;
+  try {
+    disp = await dispatchAuditRepair({
+      uncovered: entries,
+      outputDir: state.outputDir,
+      projectContext: state.projectContext,
+      fileRegistrySnapshot: state.fileRegistry,
+      apiContractsSnapshot: state.apiContracts,
+      scaffoldProtectedPaths: state.scaffoldProtectedPaths,
+      ralphConfig: state.ralphConfig,
+      sessionId: state.sessionId,
+      emitter: emit,
+    });
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaReconcile: backend backfill dispatch failed (${err instanceof Error ? err.message : err}).`,
+    );
+    return arbiterDelta;
+  }
+
+  const newFiles: GeneratedFile[] = disp.backendGeneratedFiles.map((p) => ({
+    path: p,
+    role: "backend",
+    summary: "schema-reconcile: compensating endpoint implementation",
+  }));
+  console.log(
+    `[Supervisor] schemaReconcile: backfilled ${gate.missingIds.length} endpoint(s); +${newFiles.length} file(s), +$${disp.costUsd.toFixed(4)}.`,
+  );
+
+  return {
+    ...arbiterDelta,
+    fileRegistry: newFiles,
+    totalCostUsd: disp.costUsd,
+  };
+}
+
 // ─── Route B: parallel BACKEND + FRONTEND codegen (CODEGEN_PARALLEL_FE_BE) ───
 // Two phase subgraphs run CONCURRENTLY inside one `parallel_codegen` node via
 // Promise.all. This deliberately avoids graph-topology diamond fan-in (which is
@@ -9223,6 +9349,7 @@ export function createSupervisorGraph() {
       .addNode("be_readiness_gate", backendReadinessGate)
       .addNode("extract_real_contracts", extractRealContracts)
       .addNode("schema_arbiter", schemaArbiter)
+      .addNode("schema_reconcile", schemaReconcile)
       .addNode("sync_deps", syncDeps)
       .addNode("integration_verify", integrationVerifyAndFix)
       .addNode("tdd_green_verify", tddGreenVerifyAndReview)
@@ -9256,7 +9383,8 @@ export function createSupervisorGraph() {
         summary: "summary",
       })
       .addEdge("extract_real_contracts", "schema_arbiter")
-      .addEdge("schema_arbiter", "sync_deps")
+      .addEdge("schema_arbiter", "schema_reconcile")
+      .addEdge("schema_reconcile", "sync_deps")
       .addEdge("sync_deps", "integration_verify")
       .addEdge("integration_verify", "tdd_green_verify")
       .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
@@ -9293,6 +9421,7 @@ export function createSupervisorGraph() {
     .addNode("be_readiness_gate", backendReadinessGate)
     .addNode("extract_real_contracts", extractRealContracts)
     .addNode("schema_arbiter", schemaArbiter)
+    .addNode("schema_reconcile", schemaReconcile)
     .addNode("fe_foundation", feFoundation)
     .addNode("fe_dispatch_gate", feDispatchGate)
     .addNode("fe_worker", parallelWorkerNode)
@@ -9338,7 +9467,8 @@ export function createSupervisorGraph() {
     .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
     .addEdge("fe_worker", "fe_route_consolidation")
     .addEdge("fe_route_consolidation", "fe_phase_verify")
-    .addEdge("fe_phase_verify", "sync_deps")
+    .addEdge("fe_phase_verify", "schema_reconcile")
+    .addEdge("schema_reconcile", "sync_deps")
     .addEdge("sync_deps", "integration_verify")
     .addEdge("integration_verify", "tdd_green_verify")
     .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
