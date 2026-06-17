@@ -2,6 +2,7 @@ import path from "path";
 import * as nodeFs from "fs/promises";
 import { StateGraph, START, END } from "@langchain/langgraph";
 import type { TranspileDiagnostic } from "./per-task-transpile-check";
+import { supersedeStaleReadResults } from "./worker-tool-history-compaction";
 import {
   WorkerStateAnnotation,
   type WorkerState,
@@ -1565,6 +1566,18 @@ async function runCodegenAgentSession(
   let didSecondaryRecall = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
+    // Cheap, lossless context compaction: drop stale repeated read-only tool
+    // results (same file read again later → earlier copy is superseded) before
+    // each call, so re-reads during a fix don't bloat the prompt. Disable with
+    // BLUEPRINT_WORKER_READ_DEDUP=0.
+    if (process.env.BLUEPRINT_WORKER_READ_DEDUP !== "0") {
+      const dedup = supersedeStaleReadResults(messages);
+      if (dedup.superseded > 0) {
+        console.log(
+          `[Worker:${workerLabel}] read-dedup: superseded ${dedup.superseded} stale read result(s) (loop ${i + 1}).`,
+        );
+      }
+    }
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
