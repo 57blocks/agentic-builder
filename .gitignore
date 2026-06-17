@@ -17,7 +17,7 @@ example
 !.yarn/versions
 
 *.zip
-Engineering
+/Engineering
 # next.js
 /.next/
 /.next-*/
