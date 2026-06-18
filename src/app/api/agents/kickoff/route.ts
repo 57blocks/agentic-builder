@@ -36,9 +36,14 @@ export async function POST(request: NextRequest) {
     stitchProjectId,
     stitchScreenId,
     forceFull,
+    projectId,
   } = body as {
     featureBrief: string;
     codeOutputDir?: string;
+    /** Per-project design-reference isolation key — lets the kickoff engine
+     *  read THIS project's uploaded screenshots when building the breakdown
+     *  design digests, rather than the legacy global location. */
+    projectId?: string;
     prd: string;
     trd?: string;
     sysdesign?: string;
@@ -93,7 +98,11 @@ export async function POST(request: NextRequest) {
             ? sessionId
             : undefined,
       });
-      const engine = new PipelineEngine(memoryAwareSend, projectRoot);
+      const engine = new PipelineEngine(
+        memoryAwareSend,
+        projectRoot,
+        typeof projectId === "string" ? projectId : undefined,
+      );
       const run = engine.createRun(featureBrief || "PRD-driven code generation.");
 
       const now = new Date().toISOString();
