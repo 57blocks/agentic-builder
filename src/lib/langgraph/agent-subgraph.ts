@@ -1537,6 +1537,12 @@ async function runCodegenAgentSession(
   let totalTokens = 0;
   let llmCalls = 0;
   let readOnlyRounds = 0;
+  // Consecutive read-only rounds (reset on any write). Drives the anti-spiral
+  // guard below: this agentic-tools loop previously had NO breaker (unlike the
+  // multi-round loop), so a model that kept calling read_file/list_files/grep
+  // could spin to CODEGEN_AGENT_MAX_ITERATIONS (300) without ever writing —
+  // observed as a ~75-min hang on a vision task over a 200-file project.
+  let consecutiveReadRounds = 0;
   let writeToolCalls = 0;
   let lastModel = "unknown";
   let lastContent = "";
@@ -1550,6 +1556,26 @@ async function runCodegenAgentSession(
   let didSecondaryRecall = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
+    // ── Anti read-only spiral ─────────────────────────────────────────────
+    // After N consecutive read-only rounds, nudge once; after M, force
+    // `tool_choice:"none"` so the model MUST emit file output instead of yet
+    // another read. Mirrors the multi-round loop's guard.
+    const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
+      messages.push({
+        role: "system",
+        content:
+          "You now have enough context. STOP calling read-only tools (read_file/read_many_files/list_files/grep). Write the required file(s) THIS round via write_file (or output ```file:<path>``` blocks). Do not inspect anything further.",
+      });
+      console.log(
+        `[Worker] read-stall nudge after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
+    if (forceWrite) {
+      console.log(
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
@@ -1565,7 +1591,7 @@ async function runCodegenAgentSession(
           openRouterVariant: codegenVariant,
           codingMode,
           tools: WORKER_TOOLS,
-          tool_choice: "auto",
+          tool_choice: forceWrite ? "none" : "auto",
           contextDump: {
             taskId: toolOptions?.taskId ?? task.id,
             iteration: i,
@@ -1661,7 +1687,12 @@ async function runCodegenAgentSession(
         toolResultTexts.push(result.content);
       }
 
-      if (!hadWriteTool) readOnlyRounds++;
+      if (!hadWriteTool) {
+        readOnlyRounds++;
+        consecutiveReadRounds++;
+      } else {
+        consecutiveReadRounds = 0;
+      }
 
       if (recallCtx && !didSecondaryRecall) {
         const errorSignal = detectErrorSignalForRecall(
@@ -1705,6 +1736,7 @@ async function runCodegenAgentSession(
     validateCodegenFileOutput(content);
     const parsedFiles = parseFileOutput(content);
     const parsedEntries = Object.entries(parsedFiles);
+    if (parsedEntries.length > 0) consecutiveReadRounds = 0;
     for (const [fp, fc] of parsedEntries) {
       const msg = await fsWrite(fp, fc, outputDir, toolOptions?.fsWriteOptions);
       if (msg.startsWith("SKIPPED_PROTECTED") || msg.startsWith("REJECTED")) {
