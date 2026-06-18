@@ -157,6 +157,9 @@ function buildFlowGraph(
       style: { width: boxW, height: LABEL_H + laneBodyH + LANE_PAD },
       selectable: false,
       draggable: false,
+      // Explicit stacking: lane background (0) < edges (1) < task nodes (2),
+      // so dependency lines always tuck behind the boxes they cross.
+      zIndex: 0,
     });
 
     for (const [lvl, levelIds] of byLevel) {
@@ -171,6 +174,8 @@ function buildFlowGraph(
           selected: id === selectedId,
           data: { task: taskMap.get(id)! } satisfies TaskNodeData,
           style: { width: NODE_W, height: NODE_H },
+          // Above edges (1) and the lane background (0) — see domainBox note.
+          zIndex: 2,
         });
       });
     }
@@ -218,6 +223,9 @@ function buildFlowGraph(
         target: task.id,
         // "default" = cubic bezier in React Flow
         type: "default",
+        // Between the lane background (0) and the task nodes (2), so the curves
+        // tuck behind the boxes they cross instead of arcing over their faces.
+        zIndex: 1,
         animated: flowing,
         style: {
           stroke: edgeColor,
