@@ -54,6 +54,11 @@ export interface PromptContext {
     hasBackgroundJobs?: boolean;
     hasAggregationPipeline?: boolean;
   };
+  /** Pre-formatted Markdown block of codegen-role skills auto-applied to this
+   *  project (from `formatAppliedSkills()`). Appended verbatim to the role
+   *  prompt. Empty / undefined when no skill applied. Conditional codegen rules
+   *  live as skills under `.blueprint/skills/<role>/` rather than inline here. */
+  skillsBlock?: string;
 }
 
 const EMPTY_CONTEXT: PromptContext = {
@@ -65,6 +70,17 @@ const EMPTY_CONTEXT: PromptContext = {
 
 function hasAuthScaffold(ctx: PromptContext): boolean {
   return ctx.appliedOptionalFeatures.some((f) => /^auth[-_]/i.test(f));
+}
+
+/** The DEFAULT auth mode: local email+password + RBAC. Its scaffold
+ *  (`auth-password-rbac`) ships `views/LoginPage.tsx` + an auth-store and owns
+ *  the `/login` route — distinct from the OAuth/Privy scaffold which ships a
+ *  `LoginModal`. Keyed specifically so password-rbac does NOT inherit the
+ *  Privy/OAuth guidance (which references files it never ships). */
+function hasPasswordRbacAuth(ctx: PromptContext): boolean {
+  return ctx.appliedOptionalFeatures.some((f) =>
+    /^auth[-_]password[-_]rbac/i.test(f),
+  );
 }
 
 function hasLlmBundle(ctx: PromptContext): boolean {
@@ -407,7 +423,15 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `- The backend is the source of truth for both fields. On \`/api/users/me\` response, set local state from the response.`,
     `- \`AuthContext\` / auth store: read token from localStorage on mount, expose \`login(token, user?)\` / \`logout()\`. Never ship a no-op stub. When using a custom store + \`useSyncExternalStore\`, follow the snapshot caching pitfall above.`,
     ``,
-    hasAuthScaffold(ctx) ? FRONTEND_OAUTH_RULE : FRONTEND_EMAIL_AUTH_RULE,
+    // password-rbac auth guidance now lives as a codegen skill
+    // (.blueprint/skills/frontend/auth-password-rbac-login-page.md), injected
+    // via ctx.skillsBlock — so emit nothing inline for it here. OAuth / plain
+    // email fallbacks stay inline until they are migrated to skills too.
+    hasPasswordRbacAuth(ctx)
+      ? ""
+      : hasAuthScaffold(ctx)
+        ? FRONTEND_OAUTH_RULE
+        : FRONTEND_EMAIL_AUTH_RULE,
     ``,
     FRONTEND_IMPORT_RULES,
     TESTID_CONTRACT_RULES,
@@ -419,7 +443,9 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildBackendPrompt(ctx: PromptContext): string {
@@ -454,7 +480,7 @@ function buildBackendPrompt(ctx: PromptContext): string {
     `- Validate body with Joi before consuming. Typed context: import \`AppKoaContext\` from \`backend/src/types/koa.ts\`.`,
     `- \`validateBody(schema)\` only on POST/PUT/PATCH/DELETE — NEVER on GET routes.`,
     `- JWT helpers: \`signJwt\` / \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Never call \`jsonwebtoken\` directly in feature code.`,
-    `- Every endpoint in \`API_CONTRACTS.json\` for this domain must be implemented and registered.`,
+    `- The shared schema's \`ENDPOINTS\` registry (\`shared/schema.ts\`, also at \`.blueprint/shared-schema.ts\`) is the single source of truth: every endpoint it declares for this domain must be implemented and registered, using the request/response types named there.`,
     ``,
     BACKEND_OPERATIONAL_INVARIANTS_RULE,
     ``,
@@ -469,7 +495,9 @@ function buildBackendPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -513,7 +541,15 @@ function buildFullstackPrompt(ctx: PromptContext): string {
     ``,
     HOOK_RETURN_TYPE_RULE,
     ``,
-    hasAuthScaffold(ctx) ? FRONTEND_OAUTH_RULE : FRONTEND_EMAIL_AUTH_RULE,
+    // password-rbac auth guidance now lives as a codegen skill
+    // (.blueprint/skills/frontend/auth-password-rbac-login-page.md), injected
+    // via ctx.skillsBlock — so emit nothing inline for it here. OAuth / plain
+    // email fallbacks stay inline until they are migrated to skills too.
+    hasPasswordRbacAuth(ctx)
+      ? ""
+      : hasAuthScaffold(ctx)
+        ? FRONTEND_OAUTH_RULE
+        : FRONTEND_EMAIL_AUTH_RULE,
     ``,
     FRONTEND_IMPORT_RULES,
     TESTID_CONTRACT_RULES,
@@ -548,7 +584,9 @@ function buildFullstackPrompt(ctx: PromptContext): string {
     `When done: ${RALPH_COMPLETE_TOKEN}`,
     `On failure: <promise>TASK_FAILED: <reason></promise>`,
   ];
-  return sections.join("\n");
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildTestPrompt(): string {

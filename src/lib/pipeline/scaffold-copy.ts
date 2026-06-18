@@ -42,19 +42,34 @@ export function scaffoldLayerDirsForTier(tier: ScaffoldTier): string[] {
 }
 
 /**
- * When a layer is a BASE *under* an overlay (i.e. not the final layer of a
- * multi-layer tier), these paths are NOT contributed by it — the overlay
- * layer owns them authoritatively:
- *   - `_optional/**` — each tier ships its own optional packs authored against
- *     that tier's base wiring; the overlay's `_optional/` is the correct one.
- *   - concrete `.env` files — environment-specific and never inherited across
- *     tiers (the overlay supplies its own `.env.example`).
- * Applied ONLY to base-under-overlay layers, so single-layer tiers (S/M) keep
- * their `_optional/` and any `.env` exactly as before.
+ * `_optional/` is scaffold-AUTHORING metadata, NEVER part of a generated
+ * project. `copyOptionalScaffolds()` applies the triggered features by reading
+ * the SOURCE `scaffolds/<tier>/_optional/<feature>/` tree and writing its files
+ * to canonical paths (`frontend/`, `backend/`); nothing ever reads an
+ * output-side `_optional/`. So it must be excluded from EVERY layer.
+ *
+ * A leftover `outputDir/_optional/<feature>/frontend/` tree is a phantom
+ * duplicate of the real frontend (views/components/hooks) that misleads coding
+ * agents into treating it as the project root and writing foundation files
+ * (e.g. tokens.css) INTO it — the canonical `frontend/src/...` then never
+ * receives the work and the FE-foundation phase loops forever. That's why
+ * `_optional/` is dropped unconditionally, not just on base-under-overlay
+ * layers (the previous behaviour leaked the final layer's `_optional/`).
+ */
+function isOptionalPath(relPath: string): boolean {
+  const rel = relPath.split(path.sep).join("/");
+  return rel === "_optional" || rel.startsWith("_optional/");
+}
+
+/**
+ * Base-under-overlay layers (not the final layer of a multi-layer tier) ALSO
+ * drop concrete `.env` files — environment-specific and never inherited across
+ * tiers (the overlay supplies its own `.env.example`). `_optional/` exclusion
+ * is inherited from `isOptionalPath` so it applies on every layer.
  */
 function isExcludedFromBaseLayer(relPath: string): boolean {
+  if (isOptionalPath(relPath)) return true;
   const rel = relPath.split(path.sep).join("/");
-  if (rel === "_optional" || rel.startsWith("_optional/")) return true;
   if (rel === "backend/.env" || rel === "frontend/.env") return true;
   return false;
 }
@@ -216,7 +231,9 @@ export async function copyScaffold(
       // Overlay layers MUST win over files laid down by earlier layers in this
       // same call, so they always overwrite regardless of `forceOverwrite`.
       i === 0 ? forceOverwrite : true,
-      isBaseUnderOverlay ? isExcludedFromBaseLayer : undefined,
+      // `_optional/` is dropped on EVERY layer (final/only layer included);
+      // base-under-overlay layers additionally drop concrete `.env`.
+      isBaseUnderOverlay ? isExcludedFromBaseLayer : isOptionalPath,
     );
   }
 
@@ -334,7 +351,10 @@ export async function listScaffoldTemplateRelativePaths(
     await walk(
       layerRoot,
       layerRoot,
-      isBaseUnderOverlay ? isExcludedFromBaseLayer : undefined,
+      // Mirror copy composition: drop `_optional/` on EVERY layer so the
+      // task-breakdown prompt never sees the phantom `_optional/<feature>/`
+      // tree as real project files (base-under-overlay also drops `.env`).
+      isBaseUnderOverlay ? isExcludedFromBaseLayer : isOptionalPath,
     );
   }
 

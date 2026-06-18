@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Search, Play, X, CheckSquare, Square } from "lucide-react";
 
@@ -45,9 +45,10 @@ export function TaskRerunPicker({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("incomplete");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const searchRef = useRef<HTMLInputElement>(null);
   // Tasks proven built on disk (creates files all exist). Lets us show real
   // completion even with no live session/checkpoint (post-crash/restart), so
-  // "未完成" lists only genuinely-unbuilt tasks instead of everything.
+  // "Incomplete" lists only genuinely-unbuilt tasks instead of everything.
   const [builtIds, setBuiltIds] = useState<Set<string> | null>(null);
 
   useEffect(() => {
@@ -85,6 +86,28 @@ export function TaskRerunPicker({
     return (t as CodingTask).codingStatus ?? "pending";
   };
   const scanning = builtIds === null;
+
+  // Autofocus the search box on open so users can filter immediately.
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  // Keyboard affordances: Esc closes, Enter runs the current selection (when
+  // the run is actually enabled — i.e. something is selected and the disk scan
+  // has settled). Mirrors the footer's "Run selected" button.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "Enter" && selected.size > 0 && !scanning) {
+        e.preventDefault();
+        onRun([...selected]);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected, scanning, onRun, onClose]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -131,20 +154,22 @@ export function TaskRerunPicker({
   const counts = useMemo(() => {
     let failed = 0;
     let incomplete = 0;
+    let completed = 0;
     for (const t of tasks) {
       const s = statusOf(t);
       if (s === "failed") failed += 1;
       if (isIncomplete(s)) incomplete += 1;
+      else completed += 1;
     }
-    return { failed, incomplete, total: tasks.length };
+    return { failed, incomplete, completed, total: tasks.length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, builtIds]);
 
   const FILTER_TABS: { key: StatusFilter; label: string }[] = [
-    { key: "incomplete", label: `未完成 (${counts.incomplete})` },
-    { key: "failed", label: `失败 (${counts.failed})` },
-    { key: "completed", label: "已完成" },
-    { key: "all", label: `全部 (${counts.total})` },
+    { key: "incomplete", label: `Incomplete (${counts.incomplete})` },
+    { key: "failed", label: `Failed (${counts.failed})` },
+    { key: "completed", label: `Completed (${counts.completed})` },
+    { key: "all", label: `All (${counts.total})` },
   ];
 
   return (
@@ -153,6 +178,9 @@ export function TaskRerunPicker({
       onClick={onClose}
     >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rerun-picker-title"
         initial={{ opacity: 0, scale: 0.97, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.15 }}
@@ -162,11 +190,14 @@ export function TaskRerunPicker({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
           <div>
-            <h3 className="text-[14px] font-bold text-slate-800">
-              选择任务重跑
+            <h3
+              id="rerun-picker-title"
+              className="text-[14px] font-bold text-slate-800"
+            >
+              Pick tasks to re-run
             </h3>
             <p className="text-[11px] text-slate-500">
-              勾选要重新执行的任务，仅运行所选任务，不会自动重跑其依赖。
+              Select the tasks to re-run; completed dependencies are skipped automatically.
             </p>
           </div>
           <button
@@ -185,9 +216,11 @@ export function TaskRerunPicker({
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
+              ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="按 ID / 标题 / 域 搜索…"
+              aria-label="Search tasks"
+              placeholder="Search by ID / title / subsystem…"
               className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[12px] text-slate-700 outline-none focus:border-violet-300"
             />
           </div>
@@ -216,7 +249,7 @@ export function TaskRerunPicker({
               ) : (
                 <Square size={13} />
               )}
-              {allVisibleSelected ? "取消全选" : `全选当前 (${visibleIds.length})`}
+              {allVisibleSelected ? "Deselect all" : `Select all (${visibleIds.length})`}
             </button>
           </div>
         </div>
@@ -225,7 +258,7 @@ export function TaskRerunPicker({
         <div className="flex-1 overflow-y-auto px-2.5 py-2">
           {visible.length === 0 ? (
             <div className="flex h-full items-center justify-center text-[12px] text-slate-400">
-              没有匹配的任务
+              No matching tasks
             </div>
           ) : (
             <ul className="flex flex-col gap-0.5">
@@ -281,12 +314,11 @@ export function TaskRerunPicker({
         <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
           <span className="text-[12px] text-slate-500">
             {scanning ? (
-              <span className="text-amber-600">扫描磁盘已建任务中…</span>
+              <span className="text-amber-600">Scanning disk for built tasks…</span>
             ) : (
               <>
-                已选{" "}
                 <span className="font-bold text-slate-700">{selected.size}</span>{" "}
-                个任务
+                task{selected.size === 1 ? "" : "s"} selected
               </>
             )}
           </span>
@@ -295,7 +327,7 @@ export function TaskRerunPicker({
               onClick={onClose}
               className="rounded-lg border border-slate-200 px-4 py-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
             >
-              取消
+              Cancel
             </button>
             <button
               onClick={() => onRun([...selected])}
@@ -303,7 +335,7 @@ export function TaskRerunPicker({
               className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-[12px] font-bold text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Play size={13} />
-              运行选中 ({selected.size})
+              Run selected ({selected.size})
             </button>
           </div>
         </div>

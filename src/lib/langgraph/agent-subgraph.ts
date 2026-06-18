@@ -1,6 +1,8 @@
 import path from "path";
 import * as nodeFs from "fs/promises";
 import { StateGraph, START, END } from "@langchain/langgraph";
+import type { TranspileDiagnostic } from "./per-task-transpile-check";
+import { supersedeStaleReadResults } from "./worker-tool-history-compaction";
 import {
   WorkerStateAnnotation,
   type WorkerState,
@@ -35,6 +37,7 @@ import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
 import { classifyFailureMode } from "@/lib/memory/distill/failure-mode";
 import { parseMemoryCites, recordMemoryCites } from "@/lib/memory/cite";
 import { resolveModel } from "@/lib/openrouter";
+import { ENABLE_FE_ROUTE_CONSOLIDATION } from "@/lib/langgraph/supervisor/config";
 import { resolveModelChain } from "@/lib/model-config";
 import type {
   CodingAgentRole,
@@ -70,6 +73,7 @@ import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
+import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
@@ -581,8 +585,16 @@ export async function buildProjectConventionCard(
     lines.push(
       "- **Frontend framework**: Vite + React + React Router (NOT Next.js)",
       "- **Page views**: `frontend/src/views/` (flat, one file per page). NEVER use `src/pages/`.",
-      "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
     );
+    if (ENABLE_FE_ROUTE_CONSOLIDATION) {
+      lines.push(
+        "- **Routing (DO NOT register routes yourself)**: implement ONLY your own view component(s) under `frontend/src/views/` and export the page as a clear default export (`export default function XPage()`). Do NOT edit `frontend/src/router.tsx` to add your route — a dedicated consolidation step registers EVERY view into the router after all pages exist (page workers run in parallel, so editing the shared router here causes lost/clobbered routes). Just make sure your view is importable.",
+      );
+    } else {
+      lines.push(
+        "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
+      );
+    }
   }
 
   // ── Detect middleware directory ───────────────────────────────────────────
@@ -603,10 +615,14 @@ export async function buildProjectConventionCard(
     const hasKoa = backendPkg.includes('"koa"');
     const hasExpress = backendPkg.includes('"express"');
     const hasSequelize = backendPkg.includes('"sequelize"');
-    if (hasKoa)
+    if (hasKoa) {
       lines.push(
         "- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation",
       );
+      lines.push(
+        "- **Typed responses (HARD RULE)**: send every success response via `json<ResponseType>(ctx, data)` from `src/utils/respond.ts`, pinning the response type from the shared schema (use its `ENDPOINTS` registry to pick the right `responseType`). The `responseEnvelope` middleware wraps it into `{ ok, data }`. **NEVER `ctx.body = <Sequelize model instance>`** — serialize the row to the schema type first (e.g. a `toCourse(row): Course` mapper). Raw ORM rows (snake_case columns, extra audit fields, missing computed fields) are NOT the contract and silently break the frontend.",
+      );
+    }
     if (hasExpress)
       lines.push(
         "- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`",
@@ -710,6 +726,7 @@ export async function buildProjectConventionCard(
   if (presentSchemas.length > 0) {
     lines.push(
       `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
+      "- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ \"taskId\", \"typeName\", \"field\"?, \"kind\": \"missing-type\"|\"missing-field\"|\"wrong-type\"|\"other\", \"reason\", \"proposedChange\", \"endpoint\"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.",
     );
   }
 
@@ -1576,6 +1593,18 @@ async function runCodegenAgentSession(
         `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
       );
     }
+    // Cheap, lossless context compaction: drop stale repeated read-only tool
+    // results (same file read again later → earlier copy is superseded) before
+    // each call, so re-reads during a fix don't bloat the prompt. Disable with
+    // BLUEPRINT_WORKER_READ_DEDUP=0.
+    if (process.env.BLUEPRINT_WORKER_READ_DEDUP !== "0") {
+      const dedup = supersedeStaleReadResults(messages);
+      if (dedup.superseded > 0) {
+        console.log(
+          `[Worker:${workerLabel}] read-dedup: superseded ${dedup.superseded} stale read result(s) (loop ${i + 1}).`,
+        );
+      }
+    }
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
@@ -2277,7 +2306,10 @@ function scoreGeneratedFileForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md"
   ) {
     score += 140;
@@ -2365,7 +2397,10 @@ function scoreCandidatePathForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md" ||
     normalizedPath === "DEPENDENCY_PLAN.md"
   ) {
@@ -2449,7 +2484,10 @@ async function buildRelevantFileContext(
     "apps/web/src/lib/apiClient.ts",
     "apps/web/lib/api/auth.client.ts",
     "apps/api/src/routes/auth.ts",
-    "API_CONTRACTS.json",
+    "src/shared/schema.ts",
+    "frontend/src/shared/schema.ts",
+    "backend/src/shared/schema.ts",
+    ".blueprint/shared-schema.ts",
     "SCAFFOLD_SPEC.md",
     "DEPENDENCY_PLAN.md",
   ].forEach((p) => candidates.add(p));
@@ -3056,10 +3094,35 @@ async function generateCode(state: WorkerState) {
     const fileHint = formatTaskFileHints(task.files);
 
     const promptContext = await loadPromptContext(state.outputDir);
+    // Codegen-role skills (.blueprint/skills/<role>/) — conditional guidance
+    // selected by project config (context triggers), injected via skillsBlock.
+    // Deterministic only (no LLM confirm) since this runs per worker invoke.
+    // NOTE: `promptContext` is cached per outputDir & shared across roles —
+    // never mutate it; build a per-role copy carrying this role's skillsBlock.
+    let roleContext = promptContext;
+    try {
+      const skillsLoaded = await loadSkillsForAgent(
+        {
+          agent: state.role,
+          prdContent: "",
+          trdContent: "",
+          appliedOptionalFeatures: promptContext.appliedOptionalFeatures,
+          declaredEnvKeys: promptContext.declaredEnvKeys,
+          flags: promptContext.flags,
+        },
+        { enableLlmConfirm: false },
+      );
+      const skillsBlock = formatAppliedSkills(skillsLoaded);
+      if (skillsBlock) roleContext = { ...promptContext, skillsBlock };
+    } catch (err) {
+      console.warn(
+        `[AgentSubgraph] skill load failed for role ${state.role} (ignored): ${err instanceof Error ? err.message : err}`,
+      );
+    }
     const messages: ChatMessage[] = [
       {
         role: "system",
-        content: buildRolePrompt(state.role, promptContext),
+        content: buildRolePrompt(state.role, roleContext),
       },
     ];
     if (contextParts.length > 0) {
@@ -3943,8 +4006,58 @@ async function verifyCode(state: WorkerState) {
     return { verifyErrors: "", fixAttempts: state.fixAttempts };
   }
 
+  // Per-task single-file transpile check. Catches SYNTAX-level errors
+  // (truncated/malformed output, invalid tokens, bad JSX) in the task's own
+  // files at generation time — without resolving imports, so there are no
+  // false "cannot find module" findings for symbols a later task will create.
+  // Genuine cross-file type/resolution errors still defer to the project-wide
+  // tsc in supervisor integration-verify. Disable with
+  // BLUEPRINT_PER_TASK_TRANSPILE_CHECK=0. Fail-open: a checker error never
+  // blocks the task.
+  if (process.env.BLUEPRINT_PER_TASK_TRANSPILE_CHECK !== "0") {
+    try {
+      const { transpileCheckSource, formatTranspileDiagnostics } = await import(
+        "./per-task-transpile-check"
+      );
+      const diags: TranspileDiagnostic[] = [];
+      for (const filePath of tsFiles) {
+        const content = await fsRead(filePath, state.outputDir);
+        if (
+          content.startsWith("FILE_NOT_FOUND") ||
+          content.startsWith("REJECTED")
+        ) {
+          continue;
+        }
+        diags.push(...transpileCheckSource(filePath, content));
+      }
+      if (diags.length > 0) {
+        const detail = formatTranspileDiagnostics(diags);
+        console.log(
+          `[Worker:${state.workerLabel}] Per-task transpile check FAILED for "${task.title}": ${diags.length} syntax error(s) across ${new Set(diags.map((d) => d.file)).size} file(s).`,
+        );
+        getRepairEmitter(state.sessionId)({
+          stage: "worker-verify",
+          event: "task_transpile_errors",
+          taskId: task.id,
+          files: [...new Set(diags.map((d) => d.file))],
+          details: { count: diags.length },
+        });
+        // Reuse the tsc-verify prefix so the existing per-task fix loop
+        // (isWorkerTscVerifyError → routeAfterVerify → task_fix) repairs it.
+        return {
+          verifyErrors: `${WORKER_TSC_VERIFY_PREFIX}\n${detail}`,
+          fixAttempts: state.fixAttempts,
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[Worker:${state.workerLabel}] Per-task transpile check skipped (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   console.log(
-    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task tsc disabled; project-wide tsc runs in supervisor verify.`,
+    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task transpile check passed; project-wide tsc runs in supervisor verify.`,
   );
 
   return { verifyErrors: "", fixAttempts: state.fixAttempts };

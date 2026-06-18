@@ -122,6 +122,21 @@ import {
   decideBackendReadinessRoute,
 } from "@/lib/pipeline/backend-readiness-gate";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
+import { distributeSharedSchema } from "@/lib/pipeline/shared-schema-distributor";
+import {
+  parseEndpointsRegistry,
+  serviceFromEndpoint,
+} from "@/lib/pipeline/endpoints-registry";
+import {
+  readSchemaChangeRequests,
+  readSchemaChangeDecisions,
+  appendSchemaChangeDecision,
+  pendingRequests,
+  staleTaskIds,
+  acceptedChangedTypes,
+  type SchemaChangeRequest,
+  type SchemaChangeDecision,
+} from "@/lib/pipeline/schema-change-request";
 import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
@@ -137,12 +152,23 @@ import {
 import {
   ENABLE_PHASE_INCREMENTAL_CONTEXT_SYNC,
   ENABLE_PARALLEL_CODING_WORKERS,
+  ENABLE_PARALLEL_FOUNDATION,
+  ENABLE_PARALLEL_FE_BE,
+  ENABLE_FE_ROUTE_CONSOLIDATION,
+  frontendPageWorkerCount,
   parsedWorkerLimit,
   workersForRole,
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
-  INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+  scaledIntegrationVerifyFixTotalBudget,
   remainingIntegrationVerifyBudget,
 } from "./supervisor/config";
+import {
+  splitFrontendTasks,
+  detectViewExport,
+  viewImportSpecifier,
+  validateConsolidatedRouter,
+  type ViewModule,
+} from "./supervisor/frontend-phase-split";
 import { recordSupervisorLlmUsage } from "./supervisor/usage-tracking";
 import {
   PHASE_TO_ROLE,
@@ -467,6 +493,65 @@ async function buildPrebuiltScaffoldRegistryAndDoc(
   return [...registry, docEntry];
 }
 
+/**
+ * Run the architect/foundation tasks. Serial by default (single worker invoke);
+ * when CODEGEN_PARALLEL_FOUNDATION is on, `workersForRole("architect")` allows
+ * >1 and we fan out via `chunkTasksByFileConflict` — file-coupled or
+ * dependency-ordered tasks collapse into one chunk (stay serial), only
+ * file-disjoint foundation tasks (docker / models / api-contracts / e2e harness)
+ * run concurrently. The Promise.all is a barrier: every chunk completes before
+ * this returns, so the shared contract/schema is whole before the contract-freeze
+ * + domain phases read it. Results merge as if one worker ran them all.
+ */
+async function invokeArchitectWorkers(
+  input: Parameters<typeof workerGraph.invoke>[0],
+): Promise<{
+  taskResults: TaskResult[];
+  generatedFiles: GeneratedFile[];
+  workerCostUsd: number;
+}> {
+  const tasks = ((input as { tasks?: CodingTask[] }).tasks ?? []) as CodingTask[];
+  const merge = (rs: WorkerState[]) => ({
+    taskResults: rs.flatMap((r) => r.taskResults ?? []),
+    generatedFiles: rs.flatMap((r) => r.generatedFiles ?? []),
+    workerCostUsd: rs.reduce((s, r) => s + (r.workerCostUsd ?? 0), 0),
+  });
+
+  const count = workersForRole("architect", tasks.length);
+  if (count <= 1 || tasks.length <= 1) {
+    const r = (await workerGraph.invoke(input, {
+      recursionLimit: workerRecursionLimit(tasks.length),
+    })) as WorkerState;
+    return merge([r]);
+  }
+
+  const chunks = chunkTasksByFileConflict(tasks, count);
+  logChunkPlan(
+    `Architect/foundation phase (${ENABLE_PARALLEL_FOUNDATION ? "parallel" : "serial"})`,
+    chunks,
+  );
+  if (chunks.length <= 1) {
+    const r = (await workerGraph.invoke(input, {
+      recursionLimit: workerRecursionLimit(tasks.length),
+    })) as WorkerState;
+    return merge([r]);
+  }
+  const results = (await Promise.all(
+    chunks.map((chunk, i) =>
+      workerGraph.invoke(
+        {
+          ...input,
+          tasks: chunk,
+          currentTaskIndex: 0,
+          workerLabel: `Architect #${i + 1}`,
+        },
+        { recursionLimit: workerRecursionLimit(chunk.length) },
+      ),
+    ),
+  )) as WorkerState[];
+  return merge(results);
+}
+
 async function runArchitectPhase(state: SupervisorState) {
   if (state.architectTasks.length === 0) {
     console.log("[Supervisor] Architect phase: no tasks, skipping.");
@@ -542,77 +627,69 @@ async function runArchitectPhase(state: SupervisorState) {
     console.log(
       `[Supervisor] Architect phase: running LLM for ${mustRunTasks.length} non-scaffold task(s)...`,
     );
-    const result = await workerGraph.invoke(
-      {
-        role: "architect" as CodingAgentRole,
-        workerLabel: "Architect",
-        tasks: mustRunTasks.map((t) => t.task),
-        outputDir: state.outputDir,
-        projectContext: state.projectContext,
-        codingMode: state.codingMode,
-        fileRegistrySnapshot: registry,
-        apiContractsSnapshot: state.apiContracts,
-        scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
-        currentTaskIndex: 0,
-        ralphConfig: state.ralphConfig,
-        sessionId: state.sessionId,
-      },
-      { recursionLimit: workerRecursionLimit(mustRunTasks.length) },
-    );
+    const archOut = await invokeArchitectWorkers({
+      role: "architect" as CodingAgentRole,
+      workerLabel: "Architect",
+      tasks: mustRunTasks.map((t) => t.task),
+      outputDir: state.outputDir,
+      projectContext: state.projectContext,
+      codingMode: state.codingMode,
+      fileRegistrySnapshot: registry,
+      apiContractsSnapshot: state.apiContracts,
+      scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+      currentTaskIndex: 0,
+      ralphConfig: state.ralphConfig,
+      sessionId: state.sessionId,
+    });
 
-    const workerState = result as WorkerState;
-    const combinedTaskResults = [...noopResults, ...workerState.taskResults];
+    const combinedTaskResults = [...noopResults, ...archOut.taskResults];
     const phaseResult: PhaseResult = {
       role: "architect",
       workerLabel: "Architect",
       taskResults: combinedTaskResults,
-      totalCostUsd: workerState.workerCostUsd,
+      totalCostUsd: archOut.workerCostUsd,
     };
     return {
       phaseResults: [phaseResult],
-      fileRegistry: [...registry, ...workerState.generatedFiles],
-      totalCostUsd: workerState.workerCostUsd,
+      fileRegistry: [...registry, ...archOut.generatedFiles],
+      totalCostUsd: archOut.workerCostUsd,
     };
   }
 
   console.log(
     `[Supervisor] Architect phase: starting ${state.architectTasks.length} tasks...`,
   );
-  const result = await workerGraph.invoke(
-    {
-      role: "architect" as CodingAgentRole,
-      workerLabel: "Architect",
-      tasks: state.architectTasks,
-      outputDir: state.outputDir,
-      projectContext: state.projectContext,
-      codingMode: state.codingMode,
-      fileRegistrySnapshot: state.fileRegistry,
-      apiContractsSnapshot: state.apiContracts,
-      scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
-      currentTaskIndex: 0,
-      ralphConfig: state.ralphConfig,
-      sessionId: state.sessionId,
-      prdSpec: state.prdSpec,
-    },
-    { recursionLimit: workerRecursionLimit(state.architectTasks.length) },
-  );
+  const archOut = await invokeArchitectWorkers({
+    role: "architect" as CodingAgentRole,
+    workerLabel: "Architect",
+    tasks: state.architectTasks,
+    outputDir: state.outputDir,
+    projectContext: state.projectContext,
+    codingMode: state.codingMode,
+    fileRegistrySnapshot: state.fileRegistry,
+    apiContractsSnapshot: state.apiContracts,
+    scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+    currentTaskIndex: 0,
+    ralphConfig: state.ralphConfig,
+    sessionId: state.sessionId,
+    prdSpec: state.prdSpec,
+  });
 
-  const workerState = result as WorkerState;
   const phaseResult: PhaseResult = {
     role: "architect",
     workerLabel: "Architect",
-    taskResults: workerState.taskResults,
-    totalCostUsd: workerState.workerCostUsd,
+    taskResults: archOut.taskResults,
+    totalCostUsd: archOut.workerCostUsd,
   };
 
   console.log(
-    `[Supervisor] Architect phase done: ${workerState.taskResults.length} task results, ${workerState.generatedFiles.length} files.`,
+    `[Supervisor] Architect phase done: ${archOut.taskResults.length} task results, ${archOut.generatedFiles.length} files.`,
   );
 
   return {
     phaseResults: [phaseResult],
-    fileRegistry: workerState.generatedFiles,
-    totalCostUsd: workerState.workerCostUsd,
+    fileRegistry: archOut.generatedFiles,
+    totalCostUsd: archOut.workerCostUsd,
   };
 }
 
@@ -1788,14 +1865,27 @@ async function detectE2eCommand(
 
   const frontendDir = path.join(outputDir, "frontend");
   const pm = await detectPackageManager(frontendDir);
+  // Playwright browser binaries are NOT guaranteed present in the run env, and
+  // a missing browser fails EVERY test at launch with
+  // "browserType.launch: Executable doesn't exist" — an environment gap the
+  // e2e auto-fix can't repair, so the session stalls at e2e forever. Always
+  // install first. `playwright install` (no browser arg) is idempotent and
+  // covers ALL browsers the config's `projects` may use (chromium/firefox/
+  // webkit) — the scaffold's own `e2e` script only installs chromium, so a
+  // config that also runs firefox still fails without this.
+  const installBrowsers = "npx playwright install";
   if (scripts.e2e) {
-    const command =
+    const runE2e =
       pm === "pnpm"
-        ? "pnpm run e2e 2>&1"
+        ? "pnpm run e2e"
         : pm === "yarn"
-          ? "yarn run e2e 2>&1"
-          : "npm run e2e 2>&1";
-    return { command, cwd: frontendDir, label: "frontend:e2e-script" };
+          ? "yarn run e2e"
+          : "npm run e2e";
+    return {
+      command: `${installBrowsers} && ${runE2e} 2>&1`,
+      cwd: frontendDir,
+      label: "frontend:e2e-script",
+    };
   }
 
   const hasPlaywrightConfig = !(
@@ -1803,7 +1893,7 @@ async function detectE2eCommand(
   ).startsWith("FILE_NOT_FOUND");
   if (hasPlaywrightConfig) {
     return {
-      command: "npx playwright test 2>&1",
+      command: `${installBrowsers} && npx playwright test 2>&1`,
       cwd: frontendDir,
       label: "frontend:playwright",
     };
@@ -2460,87 +2550,6 @@ async function e2eVerifyAndFix(
 
 // ─── API Contract generation ───
 
-const API_CONTRACT_SYSTEM_PROMPT = `You are a Senior API Architect.
-Your job is to produce a precise, machine-readable API contract based on the PRD and scaffolding.
-This contract will be used by BOTH the backend (to implement) and frontend (to consume).
-Everyone must follow this contract exactly.
-
-Output a JSON array only — no markdown, no explanation, no code fences.
-Each element has this shape:
-{
-  "service": "string (service or module name, e.g. auth, orders, users)",
-  "endpoint": "string (path with leading slash, e.g. /api/users/:id)",
-  "method": "GET|POST|PUT|PATCH|DELETE",
-  "requestSchema": "string (TypeScript type literal for request body/params, or 'none')",
-  "responseSchema": "string (TypeScript type literal for success response body)",
-  "auth": "none|bearer|session",
-  "description": "string (one sentence)",
-  "prdJustification": "string (verbatim PRD line/section that justifies this endpoint)",
-  "audience": "user|admin"
-}
-
-## CRITICAL: Contract scope rule (HARD RULE — read first)
-
-The PRD is the ONLY source of truth. An endpoint belongs in this contract ONLY if
-AT LEAST ONE of the following is true, and you can quote the PRD line that justifies it
-in the \`prdJustification\` field:
-
-  (a) A "User flow" / "User journey" step in the PRD describes a user action
-      that requires it (e.g. "user marks a story as read"
-      → PATCH /api/feed-items/:id/read).
-  (b) A "UX / Pages" section names a page or component that needs the data
-      (e.g. "Onboarding Style page" → POST /api/users/me/style-assessment).
-  (c) An "Admin / Integration features" section names an internal consumer
-      (admin dashboard, webhook, cron). Mark these with \`"audience": "admin"\`
-      so the usage audit knows to skip them.
-
-DO NOT default-enumerate "GET /list, GET /:id, POST, PATCH, DELETE" for every
-ORM model. The ORM model existing is NOT evidence that a REST endpoint is required.
-Most apps need <5 endpoints per model; many models need 0 (they only feed inner
-joins or are populated by background jobs).
-
-For each endpoint you DO emit:
-  - \`prdJustification\` MUST be non-empty AND verbatim from the PRD context provided.
-    If you cannot quote the PRD, OMIT the endpoint.
-  - \`audience\` MUST be \`"user"\` (called by the consumer-facing frontend) or
-    \`"admin"\` (internal / admin UI / system).
-
-When in doubt: OMIT. A missing endpoint is cheap to add later (the
-contract-usage-coverage audit + frontend-api-uniqueness audit will surface it).
-A surplus endpoint poisons the integration gate, makes the backend worker chase
-impossible repairs, and burns LLM budget — that is what we are explicitly
-preventing here.
-
-## Nested resource endpoints (relationship-driven, NOT default CRUD)
-
-When the PRD or supplied ORM model definitions describe a one-to-many relationship
-between two resources (e.g. Project hasMany Tasks, User hasMany Posts):
-
-  1. **Flat endpoints on the child resource** — emit ONLY the verbs the PRD
-     actually describes for that resource. NEVER default-enumerate all 5
-     CRUD verbs. Examples:
-       - PRD says "users create and view posts" → emit POST /api/posts and
-         GET /api/posts/:id only. Do NOT emit PATCH/DELETE unless PRD describes
-         "users edit their post" or "users delete their post".
-       - PRD says "feed items are populated by a background aggregator and the
-         user only reads them" → emit GET /api/feed-items only. No POST,
-         no PATCH, no DELETE.
-
-  2. **Scoped-list endpoint under the parent** (this one IS relationship-driven
-     and SHOULD be inferred when the PRD describes a parent-detail page that
-     lists children):
-       GET /api/{parents}/:id/{children}
-       Examples:
-         "Project detail page shows its tasks"   → GET /api/projects/:id/tasks
-         "User profile page shows their posts"   → GET /api/users/:id/posts
-       Do NOT emit the scoped-list endpoint when the PRD never describes a
-       parent-detail UI that lists the children.
-
-A separate post-generation gate will audit ORM models for hasMany/belongsTo
-relations and warn about missing scoped-list endpoints — but only when the
-parent-detail UI is actually described in the PRD. Speculative scoped lists
-(no PRD page) are AS BAD as speculative flat CRUD.`;
-
 async function generateApiContracts(state: SupervisorState) {
   if (state.backendTasks.length === 0) {
     console.log(
@@ -2550,132 +2559,96 @@ async function generateApiContracts(state: SupervisorState) {
   }
 
   console.log(
-    "[Supervisor] generateApiContracts: generating API contract from PRD + scaffold...",
+    "[Supervisor] generateApiContracts: deriving API contract from the TRD shared-schema ENDPOINTS registry (single source of truth — no PRD re-read, no LLM authoring)...",
   );
 
-  const contextParts: string[] = [];
+  // The TRD shared schema is the SOURCE OF TRUTH. Its `ENDPOINTS` registry
+  // (authored once in §6) is the single map of "METHOD /path" → request/response
+  // type names that API_CONTRACTS.json, the FE client and the BE handlers all
+  // derive from. See docs/contract-single-source-of-truth.md.
+  const canonicalSchema = await fsRead(
+    ".blueprint/shared-schema.ts",
+    state.outputDir,
+  );
 
-  if (state.projectContext) {
-    // Replace legacy `slice(0, 8000)` truncation with a relevance-aware
-    // section picker. We're looking for API contract material: endpoints,
-    // routes, request/response shapes, auth, data types.
-    const apiContractHint = {
-      keywords: [
-        "api",
-        "endpoint",
-        "route",
-        "request",
-        "response",
-        "schema",
-        "auth",
-        "token",
-        "controller",
-        "service",
-      ],
-    };
-    const trimmed = pickRelevantSections(
-      state.projectContext,
-      apiContractHint,
-      {
-        budget: 12_000,
-        label: "api-contract-generation",
-        stage: "worker-context",
-        emitter: getRepairEmitter(state.sessionId),
+  // Parse the registry + run the HARD GATE *before* the try below: that try
+  // soft-swallows errors ("continuing without contracts"), but under option A a
+  // missing registry is fatal and must propagate. `parseEndpointsRegistry`
+  // returns `null` when there is no `export const ENDPOINTS` block at all
+  // (a defective TRD) and `[]` when the block exists but declares no endpoints
+  // (a legitimate API-less backend).
+  const registry =
+    !canonicalSchema.startsWith("FILE_NOT_FOUND") && canonicalSchema.trim()
+      ? parseEndpointsRegistry(canonicalSchema)
+      : null;
+  if (registry == null) {
+    // We already passed the "no backend tasks → skip" guard above, so backend
+    // endpoints are expected. There is no single source to derive the contract
+    // from, and we deliberately do NOT re-author shapes from the PRD (the
+    // removed fallback) because that silently reintroduces FE↔BE drift.
+    getRepairEmitter(state.sessionId)({
+      stage: "generate_api_contracts",
+      event: "endpoints_registry_missing",
+      details: {
+        schemaPresent: !canonicalSchema.startsWith("FILE_NOT_FOUND"),
       },
+    });
+    throw new Error(
+      "generateApiContracts: the TRD shared-schema (.blueprint/shared-schema.ts) has no " +
+        "`ENDPOINTS` registry, so API_CONTRACTS cannot be derived from a single source. " +
+        "The PRD fallback was removed (option A) to prevent contract drift. Regenerate the " +
+        "TRD so its §6 schema authors `export const ENDPOINTS = {...} as const`.",
     );
-    contextParts.push(`## Project Context (PRD / TRD)\n${trimmed}`);
   }
 
-  const typeFiles = state.fileRegistry
-    .filter(
-      (f) =>
-        f.role === "architect" &&
-        (f.path.includes("type") ||
-          f.path.includes("model") ||
-          f.path.includes("schema")) &&
-        /\.(ts|tsx)$/.test(f.path),
-    )
-    .slice(0, 5);
-
-  for (const tf of typeFiles) {
-    const content = await fsRead(tf.path, state.outputDir);
-    if (!content.startsWith("FILE_NOT_FOUND")) {
-      contextParts.push(
-        `## Type definitions: ${tf.path}\n\`\`\`typescript\n${content.slice(0, 2000)}\n\`\`\``,
-      );
-    }
-  }
-
-  const taskList = state.backendTasks
-    .map((t) => `- ${t.title}: ${t.description.slice(0, 200)}`)
-    .join("\n");
-  contextParts.push(`## Backend tasks to implement\n${taskList}`);
-
-  const contractModelChain = resolveCodingChain(
-    state.codingMode,
-    "taskBreakdown",
-    "gpt-4o",
-  );
-  const messages: ChatMessage[] = [
-    { role: "system", content: API_CONTRACT_SYSTEM_PROMPT },
-    {
-      role: "user",
-      content: [
-        ...contextParts,
-        "",
-        "Generate the complete API contract for this project.",
-        "Output a JSON array only. No markdown fences, no explanation.",
-      ].join("\n\n"),
-    },
-  ];
+  type ParsedContract = {
+    service: string;
+    endpoint: string;
+    method: string;
+    requestSchema?: string;
+    responseSchema?: string;
+    /** P1②: named shared-schema types (the single source of truth for shapes). */
+    requestType?: string;
+    responseType?: string;
+    auth?: string;
+    description?: string;
+    prdJustification?: string;
+    audience?: string;
+  };
 
   try {
-    const response = await chatCompletionWithFallback(
-      messages,
-      contractModelChain,
-      {
-        temperature: 0.1,
-        max_tokens: 65536,
-        forceOpenRouter: forceOpenRouterForMode(state.codingMode),
-      },
+    const costUsd = 0;
+    const modelLabel = "trd-endpoints-registry";
+
+    // ── DERIVE from the schema's ENDPOINTS registry (the only path) ──────────
+    // Shapes live in schema.ts; the contract carries the type NAMES. An empty
+    // registry (`[]`) is valid — an API-less backend — and yields no derived
+    // contracts (baseline injection below may still add implicit auth routes).
+    console.log(
+      `[Supervisor] generateApiContracts: DERIVING ${registry.length} contract(s) from the TRD ENDPOINTS registry (single source of truth — no LLM authoring).`,
     );
-
-    const raw = (response.choices[0]?.message?.content ?? "").trim();
-    const costUsd = estimateCost(response.model, response.usage);
-    recordSupervisorLlmUsage({
-      sessionId: state.sessionId,
+    const normAuth = (a: string | null): string => {
+      const v = (a ?? "").trim().toLowerCase();
+      if (!v || v === "public" || v === "none") return "none";
+      return v; // "bearer", "admin", etc. preserved
+    };
+    let parsed: ParsedContract[] = registry.map((e) => ({
+      service: serviceFromEndpoint(e.endpoint),
+      endpoint: e.endpoint,
+      method: e.method,
+      // Inline shape strings stay EMPTY — the named type is the contract; its
+      // shape is resolved from schema.ts (verify-time + worker context).
+      requestType: e.request ?? undefined,
+      responseType: e.response ?? undefined,
+      auth: normAuth(e.auth),
+      prdJustification:
+        "Declared in the TRD shared-schema ENDPOINTS registry (authored source of truth).",
+    }));
+    getRepairEmitter(state.sessionId)({
       stage: "generate_api_contracts",
-      model: response.model,
-      usage: response.usage,
-      costUsd,
+      event: "contracts_derived_from_schema",
+      details: { count: parsed.length },
     });
-
-    let parsed: Array<{
-      service: string;
-      endpoint: string;
-      method: string;
-      requestSchema?: string;
-      responseSchema?: string;
-      auth?: string;
-      description?: string;
-      prdJustification?: string;
-      audience?: string;
-    }> = [];
-
-    try {
-      const cleaned = raw
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
-      parsed = JSON.parse(cleaned);
-      if (!Array.isArray(parsed)) parsed = [];
-    } catch {
-      console.warn(
-        "[Supervisor] generateApiContracts: failed to parse LLM output as JSON, skipping.",
-      );
-      return { totalCostUsd: costUsd };
-    }
 
     // ── v2 scope-rule telemetry ────────────────────────────────────────────
     // CODEGEN_HARDENING_PLAN.md §7.1 requires every emitted endpoint to carry
@@ -2745,13 +2718,19 @@ async function generateApiContracts(state: SupervisorState) {
       service: item.service ?? "unknown",
       endpoint: item.endpoint ?? "/",
       method: (item.method ?? "GET").toUpperCase(),
-      requestFields: item.requestSchema ?? undefined,
-      responseFields: item.responseSchema ?? undefined,
+      // Prefer the inline shape string (legacy); else show the named type so the
+      // FE API-reference block still points at the contract (shape is in schema.ts).
+      requestFields: item.requestSchema ?? item.requestType ?? undefined,
+      responseFields: item.responseSchema ?? item.responseType ?? undefined,
       authType: item.auth ?? "none",
       description: item.description ?? undefined,
       schema: [
-        item.requestSchema ? `request: ${item.requestSchema}` : "",
-        item.responseSchema ? `response: ${item.responseSchema}` : "",
+        item.requestSchema || item.requestType
+          ? `request: ${item.requestSchema ?? item.requestType}`
+          : "",
+        item.responseSchema || item.responseType
+          ? `response: ${item.responseSchema ?? item.responseType}`
+          : "",
       ]
         .filter(Boolean)
         .join(" | "),
@@ -2773,7 +2752,7 @@ async function generateApiContracts(state: SupervisorState) {
     await fsWrite("API_CONTRACTS.json", contractJson, state.outputDir);
 
     console.log(
-      `[Supervisor] generateApiContracts: generated ${contracts.length} contracts (${contracts.length - missingJustification.length} with PRD justification), written to API_CONTRACTS.json (model=${response.model}, cost: $${costUsd.toFixed(4)})`,
+      `[Supervisor] generateApiContracts: generated ${contracts.length} contracts (${contracts.length - missingJustification.length} with PRD justification), written to API_CONTRACTS.json (source=${modelLabel}, cost: $${costUsd.toFixed(4)})`,
     );
 
     // ── Contract-vs-models completeness audit + auto-append ────────────────
@@ -3385,6 +3364,28 @@ function extractExports(source: string): string[] {
 // ─── Phased dispatch (BE first, then FE) ───
 
 /**
+ * Logs the parallelism plan for a phase: how many workers will run concurrently,
+ * and which tasks each worker runs serially. Tasks land in the same worker when
+ * they share a dependency edge or a file (`chunkTasksByFileConflict`) — i.e.
+ * "same path → serial within a worker; different path → parallel workers".
+ */
+function logChunkPlan(label: string, chunks: CodingTask[][]): void {
+  const taskCount = chunks.reduce((n, c) => n + c.length, 0);
+  console.log(
+    `[Supervisor] ${label}: ${taskCount} task(s) → ${chunks.length} parallel worker(s) ` +
+      `(file/dependency-coupled tasks serialized within a worker).`,
+  );
+  chunks.forEach((c, i) => {
+    const serial = c
+      .map((t) => `${t.id ?? "?"}:${(t.title ?? "").slice(0, 40)}`)
+      .join("  →  ");
+    console.log(
+      `[Supervisor]   worker #${i + 1} — ${c.length} task(s) serial: ${serial}`,
+    );
+  });
+}
+
+/**
  * Phase 1 dispatch: only Backend and Test Workers.
  * Frontend waits for BE to complete so it can see BE's real output.
  */
@@ -3395,9 +3396,13 @@ export function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
   const beChunks = ENABLE_PARALLEL_CODING_WORKERS
     ? chunkTasksByFileConflict(state.backendTasks, beCount)
     : chunkTasks(state.backendTasks, beCount);
-  if (ENABLE_PARALLEL_CODING_WORKERS) {
+  logChunkPlan(
+    `Backend dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"})`,
+    beChunks,
+  );
+  if (state.testTasks.length > 0) {
     console.log(
-      `[Supervisor] Backend dispatch (parallel): ${state.backendTasks.length} tasks → ${beChunks.length} conflict-free chunk(s).`,
+      `[Supervisor]   + Test Engineer worker (${state.testTasks.length} task(s)) runs in parallel with the ${beChunks.length} backend worker(s).`,
     );
   }
   beChunks.forEach((tasks, i) => {
@@ -3454,11 +3459,10 @@ export function dispatchBackendAndTestWorkers(state: SupervisorState): Send[] {
     const fsChunks = ENABLE_PARALLEL_CODING_WORKERS
       ? chunkTasksByFileConflict(state.fullstackTasks, fsCount)
       : chunkTasks(state.fullstackTasks, fsCount);
-    if (ENABLE_PARALLEL_CODING_WORKERS) {
-      console.log(
-        `[Supervisor] Fullstack dispatch (parallel, BE phase): ${state.fullstackTasks.length} tasks → ${fsChunks.length} conflict-free chunk(s).`,
-      );
-    }
+    logChunkPlan(
+      `Fullstack dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"}, BE phase)`,
+      fsChunks,
+    );
     fsChunks.forEach((tasks, i) => {
       sends.push(
         new Send("be_worker", {
@@ -3535,14 +3539,54 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     ];
   }
 
-  const feCount = workersForRole("frontend", state.frontendTasks.length);
-  const feChunks = ENABLE_PARALLEL_CODING_WORKERS
-    ? chunkTasksByFileConflict(state.frontendTasks, feCount)
-    : chunkTasks(state.frontendTasks, feCount);
-  if (ENABLE_PARALLEL_CODING_WORKERS) {
-    console.log(
-      `[Supervisor] Frontend dispatch (parallel): ${state.frontendTasks.length} tasks → ${feChunks.length} conflict-free chunk(s).`,
+  // Route-consolidation flow: the foundation already ran in `fe_foundation`, so
+  // here we fan out ONLY the page/view tasks. With routing removed from their
+  // responsibility (consolidated later in `fe_route_consolidation`), pages are
+  // file-disjoint and dependency-satisfied, so they parallelize freely —
+  // independent of the BLUEPRINT_PARALLEL_CODING_WORKERS gate.
+  let dispatchTasks = state.frontendTasks;
+  let feChunks: CodingTask[][];
+  if (ENABLE_FE_ROUTE_CONSOLIDATION) {
+    dispatchTasks = splitFrontendTasks(state.frontendTasks).pages;
+    if (dispatchTasks.length === 0) {
+      // Nothing but foundation — emit a single no-op so the barrier resolves.
+      dispatchTasks = [];
+    }
+    const pageCount = frontendPageWorkerCount(dispatchTasks.length);
+    feChunks = chunkTasksByFileConflict(dispatchTasks, pageCount);
+    logChunkPlan(
+      "Frontend dispatch (consolidation — foundation already ran)",
+      feChunks,
     );
+  } else {
+    const feCount = workersForRole("frontend", state.frontendTasks.length);
+    feChunks = ENABLE_PARALLEL_CODING_WORKERS
+      ? chunkTasksByFileConflict(state.frontendTasks, feCount)
+      : chunkTasks(state.frontendTasks, feCount);
+    logChunkPlan(
+      `Frontend dispatch (${ENABLE_PARALLEL_CODING_WORKERS ? "parallel" : "serial"})`,
+      feChunks,
+    );
+  }
+  // No page tasks (foundation-only project) — single no-op Send to resolve the barrier.
+  if (ENABLE_FE_ROUTE_CONSOLIDATION && feChunks.length === 0) {
+    return [
+      new Send("fe_worker", {
+        role: "frontend" as CodingAgentRole,
+        workerLabel: "No-op",
+        tasks: [],
+        outputDir: state.outputDir,
+        projectContext: "",
+        codingMode: state.codingMode,
+        fileRegistrySnapshot: [],
+        apiContractsSnapshot: [],
+        scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+        currentTaskIndex: 0,
+        ralphConfig: state.ralphConfig,
+        sessionId: state.sessionId,
+        prdSpec: state.prdSpec,
+      }),
+    ];
   }
 
   // state.apiContracts is the append-merged union of:
@@ -3580,11 +3624,30 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
   // fall back to the full set so FE isn't completely blind. Log this — it
   // means BE's route shape didn't match either extractor and likely needs
   // attention.
-  const feContracts =
-    realContracts.length > 0 ? realContracts : state.apiContracts;
-  if (realContracts.length === 0 && state.apiContracts.length > 0) {
+  // Contract source for the FE prompt:
+  //  - Parallel mode (CODEGEN_PARALLEL_FE_BE): the backend hasn't been extracted
+  //    yet (it runs concurrently), so FE binds the AUTHORITATIVE upfront ENDPOINTS
+  //    contract (option-A guarantees BE implements it). Drift is caught post-join
+  //    by extract_real_contracts + integration tests, not by FE-waits-for-BE.
+  //  - Sequential mode: prefer the BE-extracted contracts (what BE actually
+  //    wrote); fall back to the upfront set if extraction yielded nothing.
+  const feContracts = ENABLE_PARALLEL_FE_BE
+    ? state.apiContracts
+    : realContracts.length > 0
+      ? realContracts
+      : state.apiContracts;
+  if (
+    !ENABLE_PARALLEL_FE_BE &&
+    realContracts.length === 0 &&
+    state.apiContracts.length > 0
+  ) {
     console.warn(
       `[Supervisor] dispatchFrontendWorkers: no BE-extracted contracts available; falling back to ${state.apiContracts.length} TRD-derived contracts for FE prompt.`,
+    );
+  }
+  if (ENABLE_PARALLEL_FE_BE) {
+    console.log(
+      `[Supervisor] dispatchFrontendWorkers: parallel mode — FE binds ${state.apiContracts.length} authoritative upfront ENDPOINTS contracts.`,
     );
   }
 
@@ -3633,11 +3696,12 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     console.warn("[Supervisor] feContext write failed:", e);
   }
 
+  const feWorkerCount = feChunks.length;
   const sends: Send[] = feChunks.map(
     (tasks, i) =>
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
-        workerLabel: feCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
+        workerLabel: feWorkerCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
         tasks,
         outputDir: state.outputDir,
         projectContext: feContext,
@@ -3801,6 +3865,242 @@ async function verifyManifestAgainstSource(
  *   2. LLM extraction from BE route files (~$0.01-0.05/run).
  *   3. Regex fallback (path-only, no field info).
  */
+/**
+ * Schema-change arbiter (CODEGEN_HARDENING — P2).
+ *
+ * Runs at the backend→frontend boundary. Backend workers that found the shared
+ * schema genuinely wrong don't edit it (that's what desyncs front/back); they
+ * append a structured request to `.ralph/schema-change-requests.jsonl`. Here we
+ * batch-review those PENDING requests against the PRD, apply the accepted ones
+ * to the SINGLE canonical `.blueprint/shared-schema.ts`, re-distribute the copies
+ * (so FE/BE stay byte-identical), and record which producer/consumer tasks the
+ * change makes stale so the verify loop re-checks them.
+ *
+ * No pending requests ⇒ instant no-op (the overwhelmingly common case — zero LLM
+ * cost). Any failure degrades to a logged warning + recorded unresolved problem;
+ * it never blocks the pipeline.
+ */
+const SCHEMA_ARBITER_SYSTEM_PROMPT = `You are the contract-owner arbiter for a code-generation pipeline. The shared TypeScript \`schema.ts\` is the SINGLE source of truth for every type that crosses the API boundary. Backend workers have filed schema-change-requests claiming the schema is wrong for the PRD.
+
+For EACH request, decide accept or reject, grounded ONLY in the PRD:
+- ACCEPT only when the PRD genuinely requires the change AND the current schema cannot express it. Prefer the smallest edit (add a field / add a type), never gratuitous renames.
+- REJECT when the worker can satisfy the PRD with the schema AS-IS, when the request contradicts the PRD, or when it's speculative.
+
+If you accept ANY request, return the COMPLETE updated schema.ts (the full file, with accepted edits applied and everything else byte-for-byte unchanged). If you accept none, return updatedSchema=null.
+
+Output STRICT JSON only (no markdown):
+{
+  "decisions": [
+    { "taskId": "...", "typeName": "...", "field": "..."|null, "decision": "accepted"|"rejected", "rationale": "PRD-grounded reason", "changedTypes": ["TypeName", ...] }
+  ],
+  "updatedSchema": "<full schema.ts source>" | null
+}
+"changedTypes" lists every exported type whose DEFINITION you altered for that request (empty for rejected).`;
+
+interface ArbiterDecisionRaw {
+  taskId?: string;
+  typeName?: string;
+  field?: string | null;
+  decision?: string;
+  rationale?: string;
+  changedTypes?: string[];
+}
+
+async function schemaArbiter(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  let pending: SchemaChangeRequest[];
+  try {
+    const [requests, decisions] = await Promise.all([
+      readSchemaChangeRequests(state.outputDir),
+      readSchemaChangeDecisions(state.outputDir),
+    ]);
+    pending = pendingRequests(requests, decisions);
+  } catch {
+    return {};
+  }
+  if (pending.length === 0) return {};
+
+  console.log(
+    `[Supervisor] schemaArbiter: ${pending.length} pending schema-change-request(s) — reviewing against PRD.`,
+  );
+
+  const canonical = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
+  if (canonical.startsWith("FILE_NOT_FOUND") || !canonical.trim()) {
+    // No canonical schema to amend — record and move on.
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "schema-arbiter",
+      phase: "backend",
+      category: "contract-coverage",
+      summary: `${pending.length} schema-change-request(s) filed but no .blueprint/shared-schema.ts exists to amend`,
+      evidence: pending.map((p) => `${p.taskId}: ${p.typeName} — ${p.reason}`),
+    }).catch(() => {});
+    return {};
+  }
+
+  const prdContext = state.prdSpec
+    ? JSON.stringify(state.prdSpec).slice(0, 12000)
+    : state.projectContext.slice(0, 8000);
+
+  const requestsBlock = pending
+    .map(
+      (p, i) =>
+        `${i + 1}. taskId=${p.taskId} type=${p.typeName}${p.field ? ` field=${p.field}` : ""} kind=${p.kind} endpoint=${p.endpoint ?? "(n/a)"}\n   reason: ${p.reason}\n   proposedChange: ${p.proposedChange}`,
+    )
+    .join("\n");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: SCHEMA_ARBITER_SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        "## PRD (authority for every decision)",
+        prdContext,
+        "",
+        "## Current shared schema.ts (the single source of truth)",
+        "```typescript",
+        canonical.slice(0, 16000),
+        "```",
+        "",
+        "## Pending schema-change-requests",
+        requestsBlock,
+        "",
+        "Review each request and return the STRICT JSON described.",
+      ].join("\n"),
+    },
+  ];
+
+  const chain = resolveCodingChain(state.codingMode, "taskBreakdown", "gpt-4o");
+  let parsed: { decisions?: ArbiterDecisionRaw[]; updatedSchema?: string | null };
+  try {
+    const response = await chatCompletionWithFallback(messages, chain, {
+      temperature: 0.1,
+      max_tokens: 65536,
+      forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+    });
+    recordSupervisorLlmUsage({
+      sessionId: state.sessionId,
+      stage: "schema_arbiter",
+      model: response.model,
+      usage: response.usage,
+      costUsd: estimateCost(response.model, response.usage),
+    });
+    const raw = (response.choices[0]?.message?.content ?? "").trim();
+    const jsonStr = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    parsed = JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaArbiter: review failed (continuing without schema change): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "schema-arbiter",
+      phase: "backend",
+      category: "contract-coverage",
+      summary: `schema arbiter could not review ${pending.length} schema-change-request(s)`,
+      evidence: pending.map((p) => `${p.taskId}: ${p.typeName} — ${p.reason}`),
+    }).catch(() => {});
+    return {};
+  }
+
+  const decisionsRaw = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+  const byKey = new Map<string, SchemaChangeRequest>();
+  for (const p of pending) byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
+
+  const accepted: SchemaChangeDecision[] = [];
+  const all: SchemaChangeDecision[] = [];
+  const decidedAt = new Date().toISOString();
+  for (const d of decisionsRaw) {
+    const key = `${d.taskId ?? ""}::${d.typeName ?? ""}::${d.field ?? ""}`;
+    const req =
+      byKey.get(key) ??
+      pending.find((p) => p.taskId === d.taskId && p.typeName === d.typeName);
+    if (!req) continue;
+    const decision: SchemaChangeDecision = {
+      request: req,
+      decision: d.decision === "accepted" ? "accepted" : "rejected",
+      rationale: typeof d.rationale === "string" ? d.rationale : "",
+      changedTypes: Array.isArray(d.changedTypes)
+        ? d.changedTypes.filter((t): t is string => typeof t === "string")
+        : [],
+      decidedAt,
+    };
+    all.push(decision);
+    if (decision.decision === "accepted") accepted.push(decision);
+  }
+
+  // Apply the updated schema only when something was accepted and the model
+  // returned a non-trivial replacement.
+  const updated =
+    typeof parsed.updatedSchema === "string" ? parsed.updatedSchema.trim() : "";
+  if (accepted.length > 0 && updated && updated !== canonical.trim()) {
+    await fsWrite(".blueprint/shared-schema.ts", updated, state.outputDir);
+    // Re-distribute from the just-amended canonical (explicit sourceDir so it
+    // reads THIS project's blueprint, not the agentic-builder cwd's).
+    const tier: "S" | "M" | "L" = (await fsRead(
+      "backend/package.json",
+      state.outputDir,
+    ).then((c) => !c.startsWith("FILE_NOT_FOUND")))
+      ? "M"
+      : "S";
+    try {
+      const dist = await distributeSharedSchema(tier, state.outputDir, {
+        sourceDir: state.outputDir,
+      });
+      console.log(
+        `[Supervisor] schemaArbiter: applied ${accepted.length} change(s); re-distributed schema to ${dist.written.join(", ") || "(no targets)"}.`,
+      );
+    } catch (e) {
+      console.warn(
+        `[Supervisor] schemaArbiter: re-distribute failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  } else if (accepted.length > 0) {
+    console.warn(
+      "[Supervisor] schemaArbiter: accepted changes but no usable updatedSchema returned — leaving schema unchanged.",
+    );
+  }
+
+  // Persist every decision to the ledger (idempotent dedupe handled by pending()).
+  for (const d of all) {
+    await appendSchemaChangeDecision(state.outputDir, d).catch(() => {});
+  }
+
+  // Compute + record stale producer/consumer tasks so the verify loop re-checks them.
+  const changedTypes = acceptedChangedTypes(accepted);
+  if (changedTypes.length > 0) {
+    const stale = staleTaskIds(
+      changedTypes,
+      state.tasks.map((t) => ({
+        id: t.id,
+        text: `${t.title} ${t.description}`,
+      })),
+    );
+    if (stale.length > 0) {
+      await recordUnresolvedProblem(state.outputDir, {
+        sessionId: state.sessionId,
+        gate: "schema-arbiter",
+        phase: "backend",
+        category: "contract-coverage",
+        summary: `schema changed (${changedTypes.join(", ")}); ${stale.length} task(s) now reference an amended type and should be re-verified`,
+        evidence: [
+          `Changed types: ${changedTypes.join(", ")}`,
+          `Stale tasks: ${stale.join(", ")}`,
+        ],
+      }).catch(() => {});
+      console.log(
+        `[Supervisor] schemaArbiter: ${stale.length} task(s) flagged stale by schema change: ${stale.join(", ")}`,
+      );
+    }
+  }
+
+  return {};
+}
+
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
@@ -5162,6 +5462,250 @@ async function parallelWorkerNode(
   };
 }
 
+/**
+ * Frontend foundation stage (BLUEPRINT_FE_ROUTE_CONSOLIDATION).
+ *
+ * Runs the design-system/shell task(s) ALONE, before page workers fan out, so
+ * tokens + shared UI + layout + AuthContext + a minimal router shell exist when
+ * the parallel page tasks start (they import these). No-op when the flag is off
+ * or there are no foundation tasks (legacy single-stage dispatch handles them).
+ */
+async function feFoundation(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  if (!ENABLE_FE_ROUTE_CONSOLIDATION) return {};
+  const { foundation } = splitFrontendTasks(state.frontendTasks);
+  if (foundation.length === 0) return {};
+
+  console.log(
+    `[Supervisor] feFoundation: running ${foundation.length} foundation task(s) before parallel pages.`,
+  );
+  const feContext = state.frontendDesignContext
+    ? `${state.projectContext}\n\n---\n\n${state.frontendDesignContext}`
+    : state.projectContext;
+
+  const workerState = await invokeWorkerBatched({
+    role: "frontend" as CodingAgentRole,
+    workerLabel: "Frontend Foundation",
+    tasks: foundation,
+    outputDir: state.outputDir,
+    projectContext: feContext,
+    codingMode: state.codingMode,
+    fileRegistrySnapshot: state.fileRegistry,
+    apiContractsSnapshot: state.apiContracts,
+    scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
+    currentTaskIndex: 0,
+    ralphConfig: state.ralphConfig,
+    sessionId: state.sessionId,
+    prdSpec: state.prdSpec,
+  } as WorkerState);
+
+  return {
+    phaseResults: [
+      {
+        role: "frontend",
+        workerLabel: "Frontend Foundation",
+        taskResults: workerState.taskResults,
+        totalCostUsd: workerState.workerCostUsd,
+      },
+    ],
+    fileRegistry: workerState.generatedFiles,
+    totalCostUsd: workerState.workerCostUsd,
+  };
+}
+
+const ROUTE_CONSOLIDATION_SYSTEM_PROMPT = `You write the SINGLE React Router registry for a frontend app, AFTER all page/view components already exist. Your job is to wire every real view into the router with sensible paths.
+
+Hard rules:
+- Import and register EVERY view in the provided list — a view with no route is a bug.
+- Use the EXACT import specifiers given (they resolve via the "@/" alias).
+- Wire real React Router (BrowserRouter + Routes/Route, or createBrowserRouter + RouterProvider) inside the existing AppLayout shell when one exists.
+- Choose paths from the PRD's navigation intent + the view names: a Home/Landing/Dashboard view is the index route; auth views go under /login, /register, etc.
+- NEVER emit an antd <Result> placeholder or a "coming soon" stub — these are forbidden.
+- Keep the module's existing default/named export name if one is given, so App.tsx's import keeps working.
+
+Output ONLY the complete contents of router.tsx as a single TypeScript code block. No prose.`;
+
+/**
+ * Frontend route consolidation (BLUEPRINT_FE_ROUTE_CONSOLIDATION).
+ *
+ * After the parallel page workers finish, write `frontend/src/router.tsx` ONCE,
+ * registering every view that actually exists on disk. LLM-authored, then
+ * checked by a deterministic guardrail (must import every view, wire a real
+ * router, no scaffold placeholder). One corrective retry; on persistent gaps the
+ * best attempt is written and the shortfall recorded so the integration repair
+ * loop + tsc catch the remainder. Finally re-wire App → router. No-op when the
+ * flag is off or no views exist.
+ */
+async function feRouteConsolidation(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  if (!ENABLE_FE_ROUTE_CONSOLIDATION) return {};
+
+  const allFiles = await listFiles("frontend/src", state.outputDir).catch(
+    () => [] as string[],
+  );
+  const viewFiles = allFiles.filter(
+    (f) =>
+      /^frontend\/src\/(views|pages)\/.*\.(tsx|jsx)$/.test(f) &&
+      !/\.(test|spec|stories)\./.test(f),
+  );
+  if (viewFiles.length === 0) {
+    console.log(
+      "[Supervisor] feRouteConsolidation: no view files found — skipping.",
+    );
+    return {};
+  }
+
+  const views: ViewModule[] = [];
+  for (const f of viewFiles) {
+    const src = await fsRead(f, state.outputDir);
+    if (src.startsWith("FILE_NOT_FOUND") || src.startsWith("REJECTED")) continue;
+    const exp = detectViewExport(src);
+    if (!exp) continue;
+    views.push({
+      file: f,
+      importPath: viewImportSpecifier(f),
+      exportName: exp.exportName,
+      isDefault: exp.isDefault,
+    });
+  }
+  if (views.length === 0) {
+    console.log(
+      "[Supervisor] feRouteConsolidation: view files exist but none export a component — skipping.",
+    );
+    return {};
+  }
+
+  const routerPath = "frontend/src/router.tsx";
+  const existingRouter = await fsRead(routerPath, state.outputDir);
+  const existingRouterSrc =
+    existingRouter.startsWith("FILE_NOT_FOUND") ||
+    existingRouter.startsWith("REJECTED")
+      ? ""
+      : existingRouter;
+
+  const viewList = views
+    .map(
+      (v) =>
+        `- ${v.importPath} — ${v.isDefault ? `default export \`${v.exportName}\`` : `named export \`{ ${v.exportName} }\``} (from ${v.file})`,
+    )
+    .join("\n");
+
+  const prdContext = state.prdSpec
+    ? JSON.stringify(state.prdSpec).slice(0, 8000)
+    : state.projectContext.slice(0, 6000);
+
+  const buildMessages = (corrective?: string): ChatMessage[] => [
+    { role: "system", content: ROUTE_CONSOLIDATION_SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        "## Views that exist and MUST each get a route",
+        viewList,
+        "",
+        existingRouterSrc
+          ? `## Current router.tsx (shell — replace it, KEEP its export name)\n\`\`\`tsx\n${existingRouter.slice(0, 4000)}\n\`\`\``
+          : "## No router.tsx yet — create one exporting a default `AppRouter` component.",
+        "",
+        "## PRD (navigation intent)",
+        prdContext,
+        corrective ? `\n## FIX REQUIRED\n${corrective}` : "",
+        "",
+        "Write the complete router.tsx now.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ];
+
+  const chain = resolveCodingChain(state.codingMode, "codeFix", "gpt-4o");
+  const extractCode = (raw: string): string => {
+    const fenced = raw.match(/```(?:tsx?|typescript|jsx?)?\s*([\s\S]*?)```/i);
+    return (fenced ? fenced[1] : raw).trim();
+  };
+
+  let routerSrc = "";
+  let guard = { ok: false, missingViews: [] as string[], hasPlaceholder: false, wiresRouter: false };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const corrective =
+      attempt === 0
+        ? undefined
+        : `Your previous router did not import these views: ${guard.missingViews.join(", ")}.${guard.hasPlaceholder ? " It also still contained a forbidden <Result> placeholder." : ""}${!guard.wiresRouter ? " It also did not wire a real React Router." : ""} Fix all of this.`;
+    try {
+      const response = await chatCompletionWithFallback(
+        buildMessages(corrective),
+        chain,
+        {
+          temperature: 0.1,
+          max_tokens: 16384,
+          forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+        },
+      );
+      recordSupervisorLlmUsage({
+        sessionId: state.sessionId,
+        stage: "fe_route_consolidation",
+        model: response.model,
+        usage: response.usage,
+        costUsd: estimateCost(response.model, response.usage),
+      });
+      routerSrc = extractCode(response.choices[0]?.message?.content ?? "");
+    } catch (err) {
+      console.warn(
+        `[Supervisor] feRouteConsolidation: LLM call failed (attempt ${attempt + 1}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      break;
+    }
+    if (!routerSrc) break;
+    guard = validateConsolidatedRouter(routerSrc, views);
+    if (guard.ok) break;
+  }
+
+  if (!routerSrc) {
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "fe-route-consolidation",
+      phase: "frontend",
+      category: "other",
+      summary: `route consolidation produced no router for ${views.length} view(s)`,
+      evidence: views.map((v) => v.importPath),
+    }).catch(() => {});
+    return {};
+  }
+
+  await fsWrite(routerPath, routerSrc, state.outputDir);
+  console.log(
+    `[Supervisor] feRouteConsolidation: wrote ${routerPath} registering ${views.length} view(s)${guard.ok ? "" : ` (guard: ${guard.missingViews.length} unreferenced, placeholder=${guard.hasPlaceholder}, wired=${guard.wiresRouter})`}.`,
+  );
+
+  if (!guard.ok) {
+    await recordUnresolvedProblem(state.outputDir, {
+      sessionId: state.sessionId,
+      gate: "fe-route-consolidation",
+      phase: "frontend",
+      category: "other",
+      summary: `consolidated router left ${guard.missingViews.length} view(s) unrouted${guard.hasPlaceholder ? " and kept a placeholder" : ""}`,
+      evidence: guard.missingViews,
+    }).catch(() => {});
+  }
+
+  // Close main → App → router wiring (reuses the deterministic autofix).
+  try {
+    const repairs = await repairFrontendRouterWiring(state.outputDir);
+    if (repairs.changed.length > 0) {
+      console.log(
+        `[Supervisor] feRouteConsolidation: rewired App → router (${repairs.changed.map((c) => c.file).join(", ")}).`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[Supervisor] feRouteConsolidation: App rewire failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return {};
+}
+
 // ─── Dependency sync: scan imports → install missing packages ───
 
 const NODE_BUILTINS = new Set([
@@ -5651,19 +6195,26 @@ async function integrationVerifyAndFix(
     0,
     state.integrationFixAttempts ?? 0,
   );
+  // Size-scaled cumulative budget: base + perTask × taskCount. A flat budget
+  // starved large projects (more findings → more repair iterations) so they
+  // exhausted the cap mid-repair and never advanced to e2e. See config.ts.
+  const totalBudget = scaledIntegrationVerifyFixTotalBudget(
+    state.tasks?.length ?? 0,
+  );
   const remainingBudget = remainingIntegrationVerifyBudget(
     priorIntegrationAttempts,
+    totalBudget,
   );
   if (remainingBudget <= 0) {
     console.warn(
-      `${label}: cumulative budget exhausted (${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); skipping repair loop and reporting fail so the graph can converge.`,
+      `${label}: cumulative budget exhausted (${priorIntegrationAttempts}/${totalBudget}); skipping repair loop and reporting fail so the graph can converge.`,
     );
     getRepairEmitter(state.sessionId)({
       stage: "integration-gate",
       event: "integration_verify_budget_exhausted",
       details: {
         priorAttempts: priorIntegrationAttempts,
-        totalBudget: INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+        totalBudget,
       },
     });
     await recordUnresolvedProblem(state.outputDir, {
@@ -5672,14 +6223,14 @@ async function integrationVerifyAndFix(
       gate: "integration-verify-fix",
       phase: "integration",
       attempts: priorIntegrationAttempts,
-      summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations without clearing the gate.`,
+      summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${totalBudget} iterations without clearing the gate.`,
       evidence: state.integrationErrors ? [state.integrationErrors.slice(0, 500)] : undefined,
       artifacts: [".ralph/runtime-smoke.json", ".ralph/tdd-review.json"],
     });
     return {
       integrationErrors: [
         state.integrationErrors?.trim(),
-        `IntegrationVerifyFix circuit-breaker: reached the cumulative budget of ${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} iterations across all repair passes without clearing the gate. Stopping to avoid an infinite loop. Inspect .ralph/runtime-smoke.json and .ralph/tdd-review.json for the unresolved blockers.`,
+        `IntegrationVerifyFix circuit-breaker: reached the cumulative budget of ${totalBudget} iterations across all repair passes without clearing the gate. Stopping to avoid an infinite loop. Inspect .ralph/runtime-smoke.json and .ralph/tdd-review.json for the unresolved blockers.`,
       ]
         .filter(Boolean)
         .join("\n")
@@ -5692,7 +6243,7 @@ async function integrationVerifyAndFix(
     `${label}: starting agentic loop (max ${Math.min(
       readIntegrationVerifyFixMaxIterations(),
       remainingBudget,
-    )} iterations this pass; ${priorIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} cumulative budget used; one context compression on overflow)...`,
+    )} iterations this pass; ${priorIntegrationAttempts}/${totalBudget} cumulative budget used; one context compression on overflow)...`,
   );
 
   // ── Pre-flight: workspace normalisation + dep install + DB setup ─────────
@@ -7065,15 +7616,15 @@ async function integrationVerifyAndFix(
 
     if (iterations > maxIterations) {
       const cumulativeSoFar = priorIntegrationAttempts + iterations - 1;
-      const budgetCapped = cumulativeSoFar >= INTEGRATION_VERIFY_FIX_TOTAL_BUDGET;
+      const budgetCapped = cumulativeSoFar >= totalBudget;
       console.warn(
-        `${label}: reached max iterations for this pass (${maxIterations}; cumulative ${cumulativeSoFar}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}); running final scoped validation before stopping.`,
+        `${label}: reached max iterations for this pass (${maxIterations}; cumulative ${cumulativeSoFar}/${totalBudget}); running final scoped validation before stopping.`,
       );
       const maxIterationGate = await runFinalScopedValidationGates();
       finalStatus = maxIterationGate.pass ? "pass" : "fail";
       finalSummary = [
         budgetCapped
-          ? `Stopped after reaching the cumulative INTEGRATION_VERIFY_FIX_TOTAL_BUDGET=${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET} across all repair passes.`
+          ? `Stopped after reaching the cumulative integration-verify-fix budget=${totalBudget} across all repair passes.`
           : `Stopped after reaching INTEGRATION_VERIFY_FIX_MAX_ITERATIONS for this pass (${maxIterations}).`,
         maxIterationGate.summary,
       ].join("\n\n");
@@ -8257,7 +8808,7 @@ async function integrationVerifyAndFix(
 
   const cumulativeIntegrationAttempts = priorIntegrationAttempts + iterations;
   console.log(
-    `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${INTEGRATION_VERIFY_FIX_TOTAL_BUDGET}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
+    `${label}: done — status=${finalStatus} iterations=${iterations} (cumulative ${cumulativeIntegrationAttempts}/${totalBudget}) cost=$${totalCostUsd.toFixed(4)} lastMutationAt=${lastMutationAt ?? "never"} lastFullValidationAt=${lastFullValidationAt ?? "never"}`,
   );
 
   // G1: quarantine marker. A FAILED integration must not look runnable to
@@ -8560,7 +9111,168 @@ export function routeAfterBackendReadiness(state: SupervisorState): string {
   return decision === "stop" ? "summary" : "extract_real_contracts";
 }
 
+// ─── Route B: parallel BACKEND + FRONTEND codegen (CODEGEN_PARALLEL_FE_BE) ───
+// Two phase subgraphs run CONCURRENTLY inside one `parallel_codegen` node via
+// Promise.all. This deliberately avoids graph-topology diamond fan-in (which is
+// NOT a barrier for unequal-length branches — see parallel-fanin-feasibility.test)
+// and never runs the two phaseVerifyAndFix nodes concurrently (they share OVERWRITE
+// channels and would collide). Verify + contract-extraction run sequentially
+// post-join in the main graph.
+function buildBackendPhaseSubgraph() {
+  return new StateGraph(SupervisorStateAnnotation)
+    .addNode("be_worker", parallelWorkerNode)
+    .addConditionalEdges(START, dispatchBackendAndTestWorkers)
+    .addEdge("be_worker", END)
+    .compile();
+}
+
+function buildFrontendPhaseSubgraph() {
+  const feDispatchGate = (_state: SupervisorState) => ({});
+  return new StateGraph(SupervisorStateAnnotation)
+    .addNode("fe_foundation", feFoundation)
+    .addNode("fe_dispatch_gate", feDispatchGate)
+    .addNode("fe_worker", parallelWorkerNode)
+    .addNode("fe_route_consolidation", feRouteConsolidation)
+    .addEdge(START, "fe_foundation")
+    .addEdge("fe_foundation", "fe_dispatch_gate")
+    .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
+    .addEdge("fe_worker", "fe_route_consolidation")
+    .addEdge("fe_route_consolidation", END)
+    .compile();
+}
+
+let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null = null;
+let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null = null;
+
+async function parallelCodegenPhase(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  _bePhaseSubgraph ??= buildBackendPhaseSubgraph();
+  _fePhaseSubgraph ??= buildFrontendPhaseSubgraph();
+
+  // Snapshot the shared base so we can return only each branch's DELTA below.
+  const basePhase = state.phaseResults.length;
+  const baseContracts = state.apiContracts.length;
+  const baseCost = state.totalCostUsd;
+
+  console.log(
+    "[Supervisor] parallel_codegen: running BACKEND + FRONTEND phases concurrently (CODEGEN_PARALLEL_FE_BE)…",
+  );
+
+  const [beOut, feOut] = (await Promise.all([
+    _bePhaseSubgraph.invoke(state, { recursionLimit: 200 }),
+    _fePhaseSubgraph.invoke(state, { recursionLimit: 200 }),
+  ])) as [SupervisorState, SupervisorState];
+
+  // fileRegistry uses a merge-by-path (idempotent) reducer, so returning the
+  // UNION of both subgraphs' registries is safe — the main-graph reducer re-merges
+  // against the (identical) base without duplication.
+  const filesByPath = new Map<string, (typeof beOut.fileRegistry)[number]>();
+  for (const f of beOut.fileRegistry ?? []) filesByPath.set(f.path, f);
+  for (const f of feOut.fileRegistry ?? []) filesByPath.set(f.path, f);
+
+  const merged: Partial<SupervisorState> = {
+    // Additive (concat) channels: return ONLY each branch's delta (entries appended
+    // after the shared base) so the main-graph reducer doesn't double-count the base
+    // entries both subgraphs were seeded with.
+    phaseResults: [
+      ...beOut.phaseResults.slice(basePhase),
+      ...feOut.phaseResults.slice(basePhase),
+    ],
+    apiContracts: [
+      ...beOut.apiContracts.slice(baseContracts),
+      ...feOut.apiContracts.slice(baseContracts),
+    ],
+    // Summed channel: return the combined delta; the main-graph reducer adds it to
+    // the base exactly once.
+    totalCostUsd: beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
+    fileRegistry: [...filesByPath.values()],
+  };
+
+  console.log(
+    `[Supervisor] parallel_codegen done: +${merged.phaseResults!.length} phase results, ` +
+      `${merged.fileRegistry!.length} files in union, +$${(merged.totalCostUsd ?? 0).toFixed(4)}.`,
+  );
+
+  return merged;
+}
+
 export function createSupervisorGraph() {
+  // ─── Route B (flag ON): BE + FE phases run concurrently in parallel_codegen,
+  // then verify + extract run sequentially post-join. Built as a separate chain so
+  // the flag-OFF path below stays byte-identical (zero regression).
+  if (ENABLE_PARALLEL_FE_BE) {
+    const parallelGraph = new StateGraph(SupervisorStateAnnotation)
+      .addNode("classify_tasks", classifyTasks)
+      .addNode("architect_phase", runArchitectPhase)
+      .addNode("scaffold_verify", scaffoldVerify)
+      .addNode("scaffold_fix", scaffoldFix)
+      .addNode("dispatch_gate", dispatchGate)
+      .addNode("dependency_baseline", dependencyBaseline)
+      .addNode("generate_api_contracts", generateApiContracts)
+      .addNode("contract_task_coverage", contractTaskCoverage)
+      .addNode("page_task_coverage", pageTaskCoverage)
+      .addNode("tdd_test_writer", tddTestWriterAndRed)
+      .addNode("parallel_codegen", parallelCodegenPhase)
+      .addNode("be_phase_verify", (s) =>
+        phaseVerifyAndFix(s, { workerHintRoles: ["backend", "test"] }),
+      )
+      .addNode("fe_phase_verify", (s) =>
+        phaseVerifyAndFix(s, { workerHintRoles: ["frontend"] }),
+      )
+      .addNode("be_readiness_gate", backendReadinessGate)
+      .addNode("extract_real_contracts", extractRealContracts)
+      .addNode("schema_arbiter", schemaArbiter)
+      .addNode("sync_deps", syncDeps)
+      .addNode("integration_verify", integrationVerifyAndFix)
+      .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+      .addNode("e2e_verify", e2eVerifyAndFix)
+      .addNode("summary", summary)
+
+      .addEdge(START, "classify_tasks")
+      .addEdge("classify_tasks", "architect_phase")
+      .addEdge("architect_phase", "scaffold_verify")
+      .addConditionalEdges("scaffold_verify", shouldFixScaffoldOrContinue, {
+        dispatch: "dispatch_gate",
+        scaffold_fix: "scaffold_fix",
+      })
+      .addEdge("scaffold_fix", "scaffold_verify")
+      .addEdge("dispatch_gate", "dependency_baseline")
+      .addEdge("dependency_baseline", "generate_api_contracts")
+      .addEdge("generate_api_contracts", "contract_task_coverage")
+      .addEdge("contract_task_coverage", "page_task_coverage")
+      .addEdge("page_task_coverage", "tdd_test_writer")
+      // BE + FE built concurrently inside this single node…
+      .addEdge("tdd_test_writer", "parallel_codegen")
+      // …then verify each phase SEQUENTIALLY post-join (phaseVerifyAndFix uses
+      // overwrite channels and must never run concurrently).
+      .addEdge("parallel_codegen", "be_phase_verify")
+      .addEdge("be_phase_verify", "fe_phase_verify")
+      .addEdge("fe_phase_verify", "be_readiness_gate")
+      // extract_real_contracts is now a post-hoc DRIFT CHECK (FE already bound the
+      // authoritative upfront contract); routeAfterBackendReadiness behaves the same.
+      .addConditionalEdges("be_readiness_gate", routeAfterBackendReadiness, {
+        extract_real_contracts: "extract_real_contracts",
+        summary: "summary",
+      })
+      .addEdge("extract_real_contracts", "schema_arbiter")
+      .addEdge("schema_arbiter", "sync_deps")
+      .addEdge("sync_deps", "integration_verify")
+      .addEdge("integration_verify", "tdd_green_verify")
+      .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
+        integration_verify: "integration_verify",
+        e2e_verify: "e2e_verify",
+        summary: "summary",
+      })
+      .addConditionalEdges("e2e_verify", routeAfterE2eVerify, {
+        e2e_verify: "e2e_verify",
+        summary: "summary",
+      })
+      .addEdge("summary", END);
+
+    return parallelGraph.compile();
+  }
+
   const feDispatchGate = (_state: SupervisorState) => ({});
 
   const graph = new StateGraph(SupervisorStateAnnotation)
@@ -8580,8 +9292,11 @@ export function createSupervisorGraph() {
     )
     .addNode("be_readiness_gate", backendReadinessGate)
     .addNode("extract_real_contracts", extractRealContracts)
+    .addNode("schema_arbiter", schemaArbiter)
+    .addNode("fe_foundation", feFoundation)
     .addNode("fe_dispatch_gate", feDispatchGate)
     .addNode("fe_worker", parallelWorkerNode)
+    .addNode("fe_route_consolidation", feRouteConsolidation)
     .addNode("fe_phase_verify", (s) =>
       phaseVerifyAndFix(s, { workerHintRoles: ["frontend"] }),
     )
@@ -8617,9 +9332,12 @@ export function createSupervisorGraph() {
       extract_real_contracts: "extract_real_contracts",
       summary: "summary",
     })
-    .addEdge("extract_real_contracts", "fe_dispatch_gate")
+    .addEdge("extract_real_contracts", "schema_arbiter")
+    .addEdge("schema_arbiter", "fe_foundation")
+    .addEdge("fe_foundation", "fe_dispatch_gate")
     .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
-    .addEdge("fe_worker", "fe_phase_verify")
+    .addEdge("fe_worker", "fe_route_consolidation")
+    .addEdge("fe_route_consolidation", "fe_phase_verify")
     .addEdge("fe_phase_verify", "sync_deps")
     .addEdge("sync_deps", "integration_verify")
     .addEdge("integration_verify", "tdd_green_verify")

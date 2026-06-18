@@ -122,6 +122,24 @@ function parseTrigger(raw: unknown, filePath: string): SkillTrigger {
       },
     };
   }
+  if (type === "context") {
+    const always = obj.always === true;
+    const anyFeatures = asStringArray(obj.any_of_features, "trigger.any_of_features", []);
+    const anyEnv = asStringArray(obj.any_of_env_keys, "trigger.any_of_env_keys", []);
+    const allFlags = asStringArray(obj.all_of_flags, "trigger.all_of_flags", []);
+    if (!always && anyFeatures.length === 0 && anyEnv.length === 0 && allFlags.length === 0) {
+      throw new Error(
+        `${filePath}: context trigger requires "always: true" or at least one of "any_of_features", "any_of_env_keys", "all_of_flags".`,
+      );
+    }
+    return {
+      type: "context",
+      ...(always ? { always: true } : {}),
+      ...(anyFeatures.length ? { any_of_features: anyFeatures } : {}),
+      ...(anyEnv.length ? { any_of_env_keys: anyEnv } : {}),
+      ...(allFlags.length ? { all_of_flags: allFlags } : {}),
+    };
+  }
   throw new Error(`${filePath}: unknown trigger.type "${type}".`);
 }
 

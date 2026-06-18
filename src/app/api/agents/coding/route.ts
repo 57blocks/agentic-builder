@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { readBuildFailedMarker } from "@/lib/pipeline/build-quarantine";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
+import { reconcileContractWithSchema } from "@/lib/pipeline/contract-reconcile";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
@@ -19,6 +20,7 @@ import {
 import {
   distributeSharedSchema,
   distributePipelineDag,
+  verifyDistributedSchemaIntact,
 } from "@/lib/pipeline/shared-schema-distributor";
 import {
   getTierScaffoldSpecForCodingContext,
@@ -88,6 +90,7 @@ import {
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
   auditFrontendWiring,
+  auditModelSchemaAlignment,
   dispatchAuditRepair,
   AttemptTracker,
   escalateRepairCircuit,
@@ -2082,6 +2085,38 @@ export async function POST(request: NextRequest) {
       });
       await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
+
+      // Incremental checkpoint. The session checkpoint used to be written ONLY
+      // at stream end, so aborting / killing the dev-server process mid-run lost
+      // ALL coding progress. Persist it as tasks complete (time-debounced) so a
+      // kill loses at most a few seconds of work, and a Retry/Rerun resumes from
+      // the last persisted task instead of from scratch.
+      let lastCheckpointAt = 0;
+      const CHECKPOINT_MIN_INTERVAL_MS = 8000;
+      const persistCheckpoint = async (reason: string): Promise<void> => {
+        try {
+          const checkpointMap = new Map<string, TaskCheckpointEntry>();
+          for (const [id, result] of collectedTaskResults) {
+            checkpointMap.set(id, {
+              status: result.status,
+              generatedFiles: result.generatedFiles,
+            });
+          }
+          await writeSessionCheckpoint(
+            process.cwd(),
+            sessionId,
+            checkpointMap,
+            normalizedTasks.map((t) => t.id),
+          );
+          lastCheckpointAt = Date.now();
+        } catch (cpErr) {
+          console.warn(
+            `[CodingAPI] Checkpoint write failed (${reason}, ignored):`,
+            cpErr instanceof Error ? cpErr.message : cpErr,
+          );
+        }
+      };
+
       // Pre-populate skipped tasks (from previous session) as completed_with_warnings
       // so they appear in audit and scoring reports without being re-generated.
       for (const t of tasksSkipped) {
@@ -2229,6 +2264,12 @@ export async function POST(request: NextRequest) {
             codingTasks,
             collectedTaskResults,
           );
+          // Persist progress incrementally (debounced) so a process kill / abort
+          // mid-run doesn't lose everything. Runs regardless of clientAborted —
+          // the graph keeps executing server-side after a client disconnect.
+          if (Date.now() - lastCheckpointAt >= CHECKPOINT_MIN_INTERVAL_MS) {
+            await persistCheckpoint("incremental");
+          }
           collectWorkerContextFromChunk(
             updates,
             collectedFileRegistry,
@@ -2289,6 +2330,31 @@ export async function POST(request: NextRequest) {
           if (wiringFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
             const fresh = wiringFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
+
+          // Backend model ↔ shared-schema field-alignment audit. Flags models
+          // that invented scalar columns the schema doesn't declare (e.g. a
+          // `status` enum or `isDeleted` boolean). `MODEL-<Entity>` ids are
+          // non-frontend, so the dispatcher routes them to a scoped BACKEND
+          // repair. Like wiring, these are `partial` verdicts (never flip
+          // `passed`), so a false positive costs at most one bounded repair pass.
+          const modelSchemaFindings = await auditModelSchemaAlignment({
+            tasks: codingTasks,
+            taskResults: auditTaskResults,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+          });
+          if (modelSchemaFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = modelSchemaFindings.filter(
+              (e) => !existingIds.has(e.id),
+            );
             if (fresh.length > 0) {
               finalAudit = {
                 ...finalAudit,
@@ -2405,6 +2471,54 @@ export async function POST(request: NextRequest) {
               ]
                 .filter(Boolean)
                 .join("\n"),
+            );
+          }
+
+          // P0①: shared-schema integrity — the frontend & backend copies of the
+          // contract must still be byte-identical to .blueprint/shared-schema.ts.
+          // Drift = silent frontend↔backend type mismatch (the exact failure mode
+          // this hardening targets). See docs/contract-single-source-of-truth.md.
+          try {
+            const schemaIntegrity = await verifyDistributedSchemaIntact(tier, outputRoot);
+            if (!schemaIntegrity.intact) {
+              blockingFailures.push(
+                `Shared-schema drift: ${schemaIntegrity.drifted
+                  .map((d) => `${d.path} (${d.reason})`)
+                  .join(", ")} no longer matches the canonical .blueprint/shared-schema.ts — frontend/backend types are out of sync.`,
+              );
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] shared-schema integrity check threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+
+          // P0③: contract↔schema reconciliation — WARN (record, don't block) when
+          // API_CONTRACTS.json references a request/response type not defined in
+          // shared/schema.ts. A missing type may be the LLM's MISSING_FROM_SCHEMA
+          // signal for the contract owner, so this is surfaced for analysis rather
+          // than failing the build. See docs/contract-single-source-of-truth.md.
+          try {
+            const reconcile = await reconcileContractWithSchema(outputRoot);
+            if (reconcile.checked && !reconcile.ok) {
+              const detail = reconcile.missing
+                .slice(0, 8)
+                .map((m) => `${m.method} ${m.endpoint} ${m.kind}=${m.type}`);
+              console.warn(
+                `[CodingAPI] contract↔schema: ${reconcile.missing.length} type ref(s) not in schema — ${detail.join("; ")}`,
+              );
+              await recordUnresolvedProblem(outputRoot, {
+                sessionId,
+                category: "contract-coverage",
+                gate: "contract-reconcile",
+                summary: `${reconcile.missing.length} API_CONTRACTS type reference(s) not defined in shared/schema.ts`,
+                evidence: detail,
+                artifacts: ["API_CONTRACTS.json", "backend/src/shared/schema.ts"],
+              });
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] contract reconcile threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
             );
           }
           if (!finalAudit.passed) {
@@ -2587,32 +2701,11 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // ── Session checkpoint ─────────────────────────────────────────────
-        // Persist task results so the next run can skip already-completed
-        // tasks via `retryFailedTaskIds`.
-        try {
-          const checkpointMap = new Map<string, TaskCheckpointEntry>();
-          for (const [id, result] of collectedTaskResults) {
-            checkpointMap.set(id, {
-              status: result.status,
-              generatedFiles: result.generatedFiles,
-            });
-          }
-          // Pass the full planned task ID list so tasks that were aborted before
-          // they even started are recorded as unknown/failed in the checkpoint.
-          const allSessionTaskIds = normalizedTasks.map((t) => t.id);
-          await writeSessionCheckpoint(
-            process.cwd(),
-            sessionId,
-            checkpointMap,
-            allSessionTaskIds,
-          );
-        } catch (cpErr) {
-          console.warn(
-            `[CodingAPI] Checkpoint write failed (ignored):`,
-            cpErr instanceof Error ? cpErr.message : cpErr,
-          );
-        }
+        // ── Session checkpoint (final) ─────────────────────────────────────
+        // Final flush of the same checkpoint persisted incrementally during the
+        // run (see `persistCheckpoint`). Lets the next run skip already-completed
+        // tasks via `retryFailedTaskIds`. Tasks never reached stay "unknown".
+        await persistCheckpoint("final");
 
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);

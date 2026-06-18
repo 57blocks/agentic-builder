@@ -90,6 +90,14 @@ const INFRA_PATTERNS: ReadonlyArray<RegExp> = [
   /getaddrinfo ENOTFOUND/i,
   /Browser closed unexpectedly/i,
   /Target page, context or browser has been closed/i,
+  // Playwright browser binaries not installed — every test fails at launch.
+  // An environment-setup gap, never an application bug; the e2e plan now
+  // prepends `playwright install`, but classify it as infra as a backstop so
+  // auto-repair never wastes fix attempts rewriting code over a missing browser.
+  /Executable doesn't exist at/i,
+  /Please run the following command to download new browsers/i,
+  /playwright install/i,
+  /browserType\.launch:/i,
 ];
 
 /**

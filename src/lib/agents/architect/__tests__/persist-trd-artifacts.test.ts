@@ -85,6 +85,44 @@ rules:
     expect(r.rulesValidation).toBeUndefined();
   });
 
+  it("reports schemaRegistry.hasRegistry=true with count when §6 authors ENDPOINTS", async () => {
+    const content = `\`\`\`typescript file:shared/schema.ts
+export interface LoginRequest { email: string }
+export interface LoginResponse { token: string }
+export const ENDPOINTS = {
+  "POST /api/auth/login": { request: "LoginRequest", response: "LoginResponse", auth: "public" },
+  "GET /api/me": { request: null, response: "LoginResponse", auth: "bearer" },
+} as const;
+\`\`\``;
+    const r = await persistTrdArtifactsFromContent(content, blueprintDir);
+    expect(r.schemaRegistry).toEqual({
+      schemaPresent: true,
+      hasRegistry: true,
+      count: 2,
+    });
+  });
+
+  it("reports schemaRegistry.hasRegistry=false when §6 schema omits ENDPOINTS (defective TRD)", async () => {
+    const content = `\`\`\`typescript file:shared/schema.ts
+export interface Project { id: string; name: string; }
+\`\`\``;
+    const r = await persistTrdArtifactsFromContent(content, blueprintDir);
+    expect(r.schemaRegistry).toEqual({
+      schemaPresent: true,
+      hasRegistry: false,
+      count: 0,
+    });
+  });
+
+  it("reports schemaPresent=false when there is no §6 schema block", async () => {
+    const r = await persistTrdArtifactsFromContent("# prose only", blueprintDir);
+    expect(r.schemaRegistry).toEqual({
+      schemaPresent: false,
+      hasRegistry: false,
+      count: 0,
+    });
+  });
+
   it("rulesValidation flags warnings for unsupported rule type", async () => {
     const content = `\`\`\`yaml file:business-rules.dsl.yaml
 version: 1

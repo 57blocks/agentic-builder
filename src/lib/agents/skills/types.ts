@@ -46,7 +46,32 @@ export interface CompositeTrigger {
   confirm: LlmConfirmTrigger;
 }
 
-export type SkillTrigger = RegexTrigger | LlmConfirmTrigger | CompositeTrigger;
+/** Project-config trigger — matches the project's resolved configuration
+ *  (applied scaffold features / declared env keys / runtime flags) rather than
+ *  PRD/TRD prose. Deterministic, no LLM. Used by CODEGEN-role skills whose
+ *  applicability depends on the build's shape (e.g. which auth scaffold is
+ *  applied) — information that lives in `.blueprint/scaffold-applied.json`, not
+ *  in the PRD text. A skill fires when ANY of the provided conditions hold. */
+export interface ContextTrigger {
+  type: "context";
+  /** Fires UNCONDITIONALLY. Use for invariants that apply to every project for
+   *  this agent (e.g. "backend model fields must match the shared schema"). When
+   *  true, the other context conditions are ignored. */
+  always?: boolean;
+  /** Fires when `appliedOptionalFeatures` contains a feature matching ANY of
+   *  these (case-insensitive substring, e.g. "auth-password-rbac"). */
+  any_of_features?: string[];
+  /** Fires when `declaredEnvKeys` contains ANY of these (exact match). */
+  any_of_env_keys?: string[];
+  /** Fires when EVERY one of these runtime flags is truthy in `ctx.flags`. */
+  all_of_flags?: string[];
+}
+
+export type SkillTrigger =
+  | RegexTrigger
+  | LlmConfirmTrigger
+  | CompositeTrigger
+  | ContextTrigger;
 
 /** Parsed skill — frontmatter + Markdown body. */
 export interface Skill {
@@ -157,6 +182,14 @@ export interface LoaderContext {
   prdContent: string;
   /** TRD markdown — usually `steps.trd.content`. May be empty. */
   trdContent: string;
+  /** Applied scaffold features (from `.blueprint/scaffold-applied.json`), e.g.
+   *  `["auth-password-rbac"]`. Read by `context` triggers. */
+  appliedOptionalFeatures?: string[];
+  /** Declared env keys (from `.blueprint/resource-requirements.json`). Read by
+   *  `context` triggers. */
+  declaredEnvKeys?: string[];
+  /** Resolved runtime flags. Read by `context` triggers. */
+  flags?: Record<string, boolean | undefined>;
   /** Skip the LLM confirm step entirely (for offline/test mode). */
   skipLlmConfirm?: boolean;
   /** Optional cache key — if two loads have the same key, the LLM confirm

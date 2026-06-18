@@ -51,6 +51,13 @@ Engineering
 .blueprint/resource-requirements.json
 .blueprint/auth-decision.json
 
+# per-run orchestration/session runtime state + generated project workspaces
+# (regenerated each run; not source — and often carry another project's content
+# since .blueprint is shared across projects)
+.blueprint/orchestration-status.json
+.blueprint/last-coding-session.json
+.blueprint/projects/
+
 # misc
 *.pem
 .DS_Store
@@ -70,6 +77,7 @@ CLAUDE.md
 .blueprint/kickoff-infra.json
 .blueprint/kickoff-database.json
 .claude/settings.json
+.claude/scheduled_tasks.lock
 
 # AI
 .trae/

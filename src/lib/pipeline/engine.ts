@@ -30,6 +30,7 @@ import {
   normalizeProjectTier,
 } from "@/lib/agents";
 import { persistTrdArtifactsFromContent } from "@/lib/agents/architect/persist-trd-artifacts";
+import { auditEndpointCompleteness } from "@/lib/agents/architect/endpoint-completeness";
 import { ensureAuthDecisionAfterPrd } from "./ensure-auth-decision";
 import { readAuthDecision } from "./auth-decision-io";
 import type { AgentResult } from "@/lib/agents";
@@ -724,20 +725,24 @@ export class PipelineEngine {
         // domain instead of inventing its own split. Absent on a first fresh
         // run (decompose happens later in kickoff) → monolithic TRD as before.
         const subsystemManifest = await readSubsystemManifest(outputRoot);
-        run = await this.executeStep(run, "trd", () =>
+        const genTrd = (extraGuidance?: string) =>
           this.trdAgent.generateTRD(
             prdContent,
             tier,
-            undefined,
+            extraGuidance,
             run.sessionId,
             prdSpec,
             undefined,
             authDecision,
             subsystemManifest,
-          ),
-        );
+          );
+        run = await this.executeStep(run, "trd", () => genTrd());
         if (run.status === "failed") return run;
-        await this.persistTrdArtifacts(run);
+        await this.persistTrdArtifacts(
+          run,
+          async (extra) => (await genTrd(extra)).content,
+          prdSpec,
+        );
       } else {
         run = this.emitStubCompleted(
           run,
@@ -2011,12 +2016,33 @@ export class PipelineEngine {
    * (downstream codegen falls back to per-worker types) rather than
    * failing the step.
    */
-  private async persistTrdArtifacts(run: PipelineRun): Promise<void> {
+  private async persistTrdArtifacts(
+    run: PipelineRun,
+    /**
+     * Re-runs TRD generation, returning fresh markdown. When provided, the
+     * registry gate (P1①, option A) uses it to regenerate the TRD ONCE if the
+     * authored schema is missing its `ENDPOINTS` registry — the single source
+     * generateApiContracts derives API_CONTRACTS from. Still absent after the
+     * retry → the contract phase hard-fails (no silent PRD fallback).
+     *
+     * Also used by the consumer-endpoint-completeness gate (Part A): when a
+     * data-needing UI control has no backing GET endpoint, the gaps are fed back
+     * as `extraGuidance` and the TRD is regenerated ONCE.
+     */
+    regenerate?: (extraGuidance?: string) => Promise<string>,
+    /** Structured PRD spec — enables the consumer-endpoint-completeness gate
+     *  (cross-checks data-needing controls against the ENDPOINTS registry). */
+    prdSpec?: PrdSpec | null,
+  ): Promise<void> {
     const trd = run.steps.trd;
     if (!trd?.content || trd.status !== "completed") return;
     if (trd.metadata?.skipped) return;
 
-    const blueprintDir = path.resolve(process.cwd(), ".blueprint");
+    // Project's .blueprint (this.projectRoot defaults to process.cwd(), so this
+    // is a no-op for the in-project legacy flow but correct when projectRoot is
+    // set elsewhere) — the coding phase reads <project>/.blueprint/shared-schema.ts
+    // to derive API_CONTRACTS, so the schema MUST land in the project dir.
+    const blueprintDir = path.resolve(this.projectRoot, ".blueprint");
 
     let result;
     try {
@@ -2027,6 +2053,99 @@ export class PipelineEngine {
         err instanceof Error ? err.message : err,
       );
       return;
+    }
+
+    if (
+      regenerate &&
+      result.schemaRegistry.schemaPresent &&
+      !result.schemaRegistry.hasRegistry
+    ) {
+      console.warn(
+        "[Pipeline] TRD schema has no ENDPOINTS registry — regenerating TRD once.",
+      );
+      try {
+        const freshContent = await regenerate();
+        const retry = await persistTrdArtifactsFromContent(
+          freshContent,
+          blueprintDir,
+        );
+        if (retry.schemaRegistry.hasRegistry) {
+          trd.content = freshContent;
+          result = retry;
+          console.log(
+            `[Pipeline] TRD regenerated WITH ENDPOINTS registry (${retry.schemaRegistry.count} endpoint(s)).`,
+          );
+        } else {
+          console.warn(
+            "[Pipeline] TRD retry STILL has no ENDPOINTS registry — the contract phase will hard-fail if backend endpoints exist.",
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[Pipeline] TRD registry-gate regeneration failed:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    // ── Consumer-endpoint-completeness gate (Part A) ──
+    // Cross-check the PRD's data-needing controls (assignee dropdowns, member
+    // lists, filters) against the TRD's ENDPOINTS registry. A control that needs
+    // to FETCH data with no backing GET endpoint = a contract gap the frontend
+    // can't satisfy (the taskflow `GET /users` omission). Feed the gaps back and
+    // regenerate the TRD ONCE so the missing read endpoints are authored upfront.
+    if (
+      regenerate &&
+      prdSpec &&
+      result.schemaRegistry.schemaPresent &&
+      result.artifacts.schemaTs
+    ) {
+      const report = auditEndpointCompleteness(prdSpec, result.artifacts.schemaTs);
+      if (report.findings.length > 0) {
+        const gapGuidance = [
+          "## CONTRACT COMPLETENESS FIX (mandatory)",
+          "The previous TRD's `ENDPOINTS` registry is MISSING read endpoints that",
+          "PRD UI controls need to fetch data. Add the following to §3.3 and the §6",
+          "`ENDPOINTS` registry (with proper list Response types in shared-schema.ts):",
+          ...report.findings.map((f) => `- ${f.message}`),
+          "",
+          "Keep every existing endpoint; only ADD the missing read endpoints.",
+        ].join("\n");
+        console.warn(
+          `[Pipeline] TRD consumer-completeness gate: ${report.findings.length} missing read endpoint(s) ` +
+            `(${report.findings.map((f) => f.resource).join(", ")}) — regenerating TRD once.`,
+        );
+        try {
+          const freshContent = await regenerate(gapGuidance);
+          const retry = await persistTrdArtifactsFromContent(
+            freshContent,
+            blueprintDir,
+          );
+          const retryReport = retry.artifacts.schemaTs
+            ? auditEndpointCompleteness(prdSpec, retry.artifacts.schemaTs)
+            : report;
+          // Accept the retry only if it strictly reduced the gap set.
+          if (retryReport.findings.length < report.findings.length) {
+            trd.content = freshContent;
+            result = retry;
+            console.log(
+              `[Pipeline] TRD regenerated; consumer-completeness gaps ${report.findings.length} → ${retryReport.findings.length}.`,
+            );
+          }
+          if (retryReport.findings.length > 0) {
+            console.warn(
+              `[Pipeline] TRD still missing read endpoint(s) after retry: ` +
+                retryReport.findings.map((f) => f.resource).join(", ") +
+                " — the runtime schema-arbiter reconciliation will backfill them.",
+            );
+          }
+        } catch (err) {
+          console.warn(
+            "[Pipeline] TRD completeness-gate regeneration failed:",
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
     }
 
     const writtenRel: {
@@ -2457,7 +2576,7 @@ export class PipelineEngine {
       // Re-generating after a PRD edit: pick up the subsystem manifest so the
       // refreshed TRD stays domain-shaped (matches the initial-run behavior).
       const subsystemManifest = await readSubsystemManifest(outputRoot);
-      run = await this.executeStep(run, "trd", () =>
+      const genTrd = () =>
         this.trdAgent.generateTRD(
           canonicalPrd,
           tier,
@@ -2467,10 +2586,10 @@ export class PipelineEngine {
           undefined,
           authDecision,
           subsystemManifest,
-        ),
-      );
+        );
+      run = await this.executeStep(run, "trd", genTrd);
       if (run.status === "failed") return run;
-      await this.persistTrdArtifacts(run);
+      await this.persistTrdArtifacts(run, async () => (await genTrd()).content);
     }
 
     const trdContent = run.steps.trd?.content ?? previousSnapshot.docs.trd ?? "";

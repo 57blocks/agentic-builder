@@ -12,18 +12,23 @@ import {
   INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
   remainingIntegrationVerifyBudget,
   integrationVerifyBudgetExhausted,
+  scaledIntegrationVerifyFixTotalBudget,
 } from "../supervisor/config";
 import {
   routeAfterTddGreenVerify,
   routeAfterTddGreenVerifyRetry,
 } from "../supervisor/routing";
-import type { SupervisorState } from "../state";
+import type { CodingTask, SupervisorState } from "../state";
 
 function stateWith(
   integrationErrors: string,
   integrationFixAttempts: number,
+  taskCount = 0,
 ): SupervisorState {
-  return { integrationErrors, integrationFixAttempts } as SupervisorState;
+  const tasks = Array.from({ length: taskCount }, (_, i) => ({
+    id: `T-${i}`,
+  })) as CodingTask[];
+  return { integrationErrors, integrationFixAttempts, tasks } as SupervisorState;
 }
 
 describe("remainingIntegrationVerifyBudget", () => {
@@ -60,6 +65,48 @@ describe("integrationVerifyBudgetExhausted", () => {
   });
   it("is true past the budget", () => {
     expect(integrationVerifyBudgetExhausted(305, 300)).toBe(true);
+  });
+});
+
+describe("scaledIntegrationVerifyFixTotalBudget", () => {
+  // These assume defaults (base 300, perTask 15) — i.e. env override unset.
+  it("returns the flat base for a zero/tiny project (no regression)", () => {
+    expect(scaledIntegrationVerifyFixTotalBudget(0)).toBe(
+      INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+    );
+  });
+
+  it("grows with task count", () => {
+    expect(scaledIntegrationVerifyFixTotalBudget(40)).toBe(300 + 15 * 40);
+    expect(scaledIntegrationVerifyFixTotalBudget(40)).toBeGreaterThan(
+      scaledIntegrationVerifyFixTotalBudget(10),
+    );
+  });
+
+  it("clamps very large projects to the 2000 ceiling", () => {
+    expect(scaledIntegrationVerifyFixTotalBudget(100000)).toBe(2000);
+  });
+
+  it("treats non-finite task counts as zero", () => {
+    expect(scaledIntegrationVerifyFixTotalBudget(Number.NaN)).toBe(300);
+  });
+});
+
+describe("routing uses the size-scaled budget", () => {
+  it("a large project keeps repairing past the old flat 300 cap", () => {
+    // 305 cumulative attempts would be EXHAUSTED under the old flat 300, but a
+    // 40-task project's budget is 900, so it must still re-enter to repair.
+    const s = stateWith("TDD hard gate failed: P0 ...", 305, 40);
+    expect(routeAfterTddGreenVerify(s)).toBe("integration_verify");
+  });
+
+  it("a tiny project still breaks out at the base budget", () => {
+    const s = stateWith(
+      "TDD hard gate failed: P0 ...",
+      INTEGRATION_VERIFY_FIX_TOTAL_BUDGET,
+      0,
+    );
+    expect(routeAfterTddGreenVerify(s)).toBe("e2e_verify");
   });
 });
 
