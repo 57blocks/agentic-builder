@@ -118,6 +118,73 @@ export default App;
 `;
 }
 
+/**
+ * Does the router already give the root path `/` a destination? True when a
+ * `<Route path="/">` exists OR an `index` route is declared. Either means a
+ * user landing on `/` sees a page rather than the catch-all NotFound.
+ */
+export function routerHasRootRoute(routerSrc: string): boolean {
+  if (/<Route\b[^>]*\bpath\s*=\s*["']\/["']/.test(routerSrc)) return true;
+  if (/<Route\b[^>]*\bindex\b/.test(routerSrc)) return true;
+  return false;
+}
+
+/**
+ * Find the first concrete named route path in a `<Routes>` tree — the natural
+ * redirect target for `/`. Skips the catch-all `*` and an existing `/`.
+ * Returns a leading-slash-normalised path, or null if none found.
+ */
+export function detectFirstNamedRoutePath(routerSrc: string): string | null {
+  const re = /<Route\b[^>]*\bpath\s*=\s*["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(routerSrc))) {
+    const p = m[1].trim();
+    if (p === "/" || p === "*" || p === "") continue;
+    return p.startsWith("/") ? p : `/${p}`;
+  }
+  return null;
+}
+
+/**
+ * Ensure the router covers the root path `/`. When a `<Routes>` tree has named
+ * routes but no `/` (and no index route), inject a redirect from `/` to the
+ * first named route so the site doesn't 404 at its own root. Adds the
+ * `Navigate` import if missing. Returns the rewritten source, or null when no
+ * change is needed/possible (not a route tree, already covered, or no named
+ * route to target).
+ */
+export function ensureRootRouteCovered(routerSrc: string): string | null {
+  if (!/<Routes\b[^>]*>/.test(routerSrc)) return null; // not a real route tree
+  if (routerHasRootRoute(routerSrc)) return null; // already resolves
+  const target = detectFirstNamedRoutePath(routerSrc);
+  if (!target) return null; // nothing to redirect to
+
+  let out = routerSrc;
+
+  // Ensure `Navigate` is imported from react-router-dom.
+  if (!/\bNavigate\b/.test(out)) {
+    const namedImport = out.match(
+      /import\s*\{([^}]*)\}\s*from\s*["']react-router-dom["']/,
+    );
+    if (namedImport) {
+      const names = namedImport[1].trim().replace(/,\s*$/, "");
+      out = out.replace(
+        namedImport[0],
+        `import { ${names}, Navigate } from "react-router-dom"`,
+      );
+    } else {
+      out = `import { Navigate } from "react-router-dom";\n${out}`;
+    }
+  }
+
+  // Inject the root redirect immediately after the opening <Routes> tag.
+  out = out.replace(
+    /(<Routes\b[^>]*>)/,
+    `$1\n      <Route path="/" element={<Navigate to="${target}" replace />} />`,
+  );
+  return out;
+}
+
 export interface FrontendRouterRepairResult {
   /** Files rewritten (relative to outputDir) with a short reason. */
   changed: Array<{ file: string; reason: string }>;
@@ -163,6 +230,31 @@ export async function repairFrontendRouterWiring(
   for (const root of FRONTEND_ROOTS) {
     const app = await resolveEntryFile(outputDir, root, "App");
     const router = await resolveEntryFile(outputDir, root, "router");
+
+    // ── Root-route coverage (independent of app↔router wiring) ──────────────
+    // Pick whichever file owns the <Routes> tree and SURVIVES the wiring fix:
+    // prefer router.tsx (App may get rewritten to a thin wrapper below); else
+    // App.tsx for the S-tier inline-routes case (no router module). Inject a
+    // `/` → first-named-page redirect when the root path is uncovered, so the
+    // running app never 404s at its own root.
+    const routeHost =
+      router && /<Routes\b[^>]*>/.test(router.src)
+        ? router
+        : app && /<Routes\b[^>]*>/.test(app.src)
+          ? app
+          : null;
+    if (routeHost) {
+      const fixed = ensureRootRouteCovered(routeHost.src);
+      if (fixed && fixed !== routeHost.src) {
+        await fs.writeFile(routeHost.abs, fixed, "utf-8");
+        routeHost.src = fixed; // keep in-memory copy fresh for the wiring step
+        changed.push({
+          file: routeHost.rel,
+          reason:
+            "added root '/' route (redirect to first named page) — was falling through to NotFound",
+        });
+      }
+    }
 
     if (!app || !router) continue; // no App+router pair here
 
