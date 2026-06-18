@@ -6,6 +6,7 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
+import { TDD_REVIEW_STALL_LIMIT } from "../config";
 
 export async function syncDeps(_state: SupervisorState) {
   console.log(
@@ -100,17 +101,57 @@ export async function tddGreenVerifyAndReview(
     emitter,
   });
 
+  const greenP0 = green.p0Failures.length;
+  const reviewP0 = review.p0Errors.length;
+
+  // ── TDD-review P0 deadlock detection ──────────────────────────────────────
+  // Track whether the STATIC review's P0 count is improving across GREEN
+  // passes. We only count a "stall" when runtime execution fully passes
+  // (greenP0 === 0) and the sole remaining blocker is review-only P0s. A
+  // runtime failure resets the tracker — those must keep blocking. Once the
+  // review P0 count fails to decrease for TDD_REVIEW_STALL_LIMIT consecutive
+  // passes, we stop treating review-only P0s as a hard gate and let the graph
+  // proceed (errors are still recorded as warnings), instead of churning to
+  // the full integration budget.
+  const prevReviewP0 = state.tddReviewP0Count ?? -1;
+  let stallRounds = state.tddReviewStallRounds ?? 0;
+  if (greenP0 === 0 && reviewP0 > 0) {
+    stallRounds = prevReviewP0 >= 0 && reviewP0 >= prevReviewP0 ? stallRounds + 1 : 0;
+  } else {
+    stallRounds = 0;
+  }
+  const reviewDeadlock =
+    greenP0 === 0 && reviewP0 > 0 && stallRounds >= TDD_REVIEW_STALL_LIMIT;
+
   const blockers: string[] = [];
-  if (green.p0Failures.length > 0) {
+  if (greenP0 > 0) {
     blockers.push(`P0 TDD GREEN failures: ${green.p0Failures.join(", ")}`);
   }
-  if (review.p0Errors.length > 0) {
+  if (reviewP0 > 0 && !reviewDeadlock) {
     blockers.push(
       `P0 TDD review errors: ${review.p0Errors
         .slice(0, 10)
         .map((finding) => `${finding.testId}: ${finding.message}`)
         .join("; ")}`,
     );
+  }
+
+  if (reviewDeadlock) {
+    console.warn(
+      `[Supervisor] TDD GREEN gate: deadlock escape — GREEN execution passes (0 runtime failures) but ${reviewP0} review-only P0(s) have not decreased for ${stallRounds} pass(es) (limit ${TDD_REVIEW_STALL_LIMIT}). Recording them as non-blocking warnings and proceeding instead of looping the integration budget.`,
+    );
+    emitter?.({
+      stage: "tdd-review",
+      event: "tdd_review_p0_deadlock_escape",
+      details: {
+        reviewP0,
+        stallRounds,
+        limit: TDD_REVIEW_STALL_LIMIT,
+        findings: review.p0Errors
+          .slice(0, 10)
+          .map((f) => `${f.testId}: ${f.message}`),
+      },
+    });
   }
 
   const existing = state.integrationErrors?.trim();
@@ -128,5 +169,7 @@ export async function tddGreenVerifyAndReview(
 
   return {
     integrationErrors,
+    tddReviewP0Count: reviewP0,
+    tddReviewStallRounds: stallRounds,
   };
 }

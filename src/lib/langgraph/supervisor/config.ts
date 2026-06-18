@@ -83,6 +83,24 @@ export const INTEGRATION_VERIFY_FIX_TOTAL_BUDGET =
   readIntegrationVerifyFixTotalBudget();
 
 /**
+ * TDD-review P0 deadlock escape. When GREEN execution passes (0 runtime test
+ * failures) but the STATIC TDD review keeps reporting the same (or higher) P0
+ * count for this many consecutive GREEN passes, the gate stops treating the
+ * review-only P0s as a hard blocker: it records them as warnings and lets the
+ * graph proceed to e2e/summary instead of churning to the full integration
+ * budget. Runtime-failing tests (`green.p0Failures`) are NEVER subject to this
+ * escape — only static review-only P0s that the repair loop cannot clear.
+ *
+ * 2 = allow one genuine repair pass (establish baseline), then escape on the
+ * next pass that shows no improvement. Override via TDD_REVIEW_STALL_LIMIT.
+ */
+export const TDD_REVIEW_STALL_LIMIT = (() => {
+  const raw = Number(process.env.TDD_REVIEW_STALL_LIMIT ?? "2");
+  if (!Number.isFinite(raw)) return 2;
+  return Math.max(1, Math.min(10, Math.floor(raw)));
+})();
+
+/**
  * Remaining IntegrationVerifyFix iteration budget for the *next* node entry,
  * given how many cumulative attempts have already been spent. Pure helper so
  * the arithmetic is unit-testable in isolation. Never negative.
