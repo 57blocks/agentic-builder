@@ -34,6 +34,7 @@ import { motion, AnimatePresence } from "motion/react";
 
 import { useCodingStore } from "@/store/coding-store";
 import type { CodingSessionSnapshot } from "@/store/coding-store";
+import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
 import { useStepStore } from "@/store/step-store";
 import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
@@ -282,8 +283,13 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   const setStepResult = useStepStore((s) => s.setStepResult);
 
   const codingState = useCodingStore();
-  const { startCoding, retryFailedTasks, rerunCoding, hydrateFromSnapshot } =
-    useCodingStore();
+  const {
+    startCoding,
+    retryFailedTasks,
+    rerunCoding,
+    hydrateFromSnapshot,
+    hydrateFromCheckpoint,
+  } = useCodingStore();
   const projectId = useStageStore((s) => s.projectId);
 
   // Track whether this mount is a "return visit" (component unmounted and remounted)
@@ -364,14 +370,40 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           `/api/projects/${projectId}/project-step-snapshot?stepId=coding-session`,
           { cache: "no-store" },
         );
-        if (!res.ok) return;
-        const data = (await res.json()) as { snapshot: CodingSessionSnapshot | null };
-        if (!data.snapshot?.sessionId) return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            snapshot: CodingSessionSnapshot | null;
+          };
+          if (data.snapshot?.sessionId) {
+            // hydrateFromSnapshot correctly includes E2E / server-injected extra
+            // tasks that live in the DB snapshot but are absent from kickoffTasks.
+            hydrateFromSnapshot(data.snapshot, kickoffTasks);
+            return;
+          }
+        }
 
-        const snap = data.snapshot;
-        // hydrateFromSnapshot correctly includes E2E / server-injected extra
-        // tasks that live in the DB snapshot but are absent from kickoffTasks.
-        hydrateFromSnapshot(snap, kickoffTasks);
+        // Fallback: no DB snapshot. The coding-session snapshot is persisted ONLY
+        // when a session reaches completed/failed (see coding-store
+        // persistSessionSnapshot), so a run that was KILLED mid-flight leaves no
+        // snapshot and the UI would show 0 progress. Rehydrate per-task status
+        // from the durable file checkpoint (returned by orchestration-status) so
+        // the UI reflects what actually got built.
+        const cpRes = await fetch("/api/agents/coding/orchestration-status", {
+          cache: "no-store",
+        });
+        if (!cpRes.ok) return;
+        const cpData = (await cpRes.json()) as {
+          checkpoint: SessionCheckpoint | null;
+        };
+        const results = cpData.checkpoint?.taskResults;
+        if (!results) return;
+        // Guard against the shared (process.cwd()) checkpoint belonging to a
+        // DIFFERENT project: only rehydrate when its task ids overlap this
+        // project's kickoff tasks.
+        const cpIds = new Set(Object.keys(results));
+        if (kickoffTasks.some((t) => cpIds.has(t.id))) {
+          hydrateFromCheckpoint(cpData.checkpoint!, kickoffTasks);
+        }
       } catch {
         // silently ignore — user can still start fresh
       }
