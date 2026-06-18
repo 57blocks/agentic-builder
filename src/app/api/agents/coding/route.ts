@@ -2242,12 +2242,24 @@ export async function POST(request: NextRequest) {
               generatedFiles: result.generatedFiles,
             });
           }
-          await writeSessionCheckpoint(
-            process.cwd(),
-            sessionId,
-            checkpointMap,
-            normalizedTasks.map((t) => t.id),
+          // Dual-write: process.cwd() is the canonical location every existing
+          // reader uses (resume hygiene, the checkpoint/orchestration-status UI
+          // routes, retry-failed) — keep it so nothing regresses. ALSO write a
+          // copy into the BUILD's own output tree so progress is visible from the
+          // project itself and survives a process kill where the user looks in the
+          // project dir (the original "progress wasn't saved" symptom — it was, but
+          // under agentic-builder/.blueprint, not the project's).
+          const checkpointRoots = Array.from(
+            new Set([process.cwd(), outputRoot]),
           );
+          for (const root of checkpointRoots) {
+            await writeSessionCheckpoint(
+              root,
+              sessionId,
+              checkpointMap,
+              normalizedTasks.map((t) => t.id),
+            );
+          }
           lastCheckpointAt = Date.now();
         } catch (cpErr) {
           console.warn(
@@ -2273,7 +2285,11 @@ export async function POST(request: NextRequest) {
           `[CodingAPI] Retry mode: running ${tasksToRun.length} task(s), skipping ${tasksSkipped.length} previously-completed task(s).`,
         );
         // Clear the checkpoint since we're retrying — will be re-written on completion.
-        await clearSessionCheckpoint(process.cwd());
+        await Promise.all(
+          Array.from(new Set([process.cwd(), outputRoot])).map((root) =>
+            clearSessionCheckpoint(root),
+          ),
+        );
       }
       const collectedFileRegistry = new Map<string, GeneratedFile>();
       const collectedApiContracts = new Map<string, ApiContract>();
