@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { ArrowRight, Loader2, GitBranch, Zap, User, Rocket, Eye, EyeOff, CheckSquare, Square, Plus, RefreshCw, ExternalLink } from "lucide-react";
 import { useStepStore } from "@/store/step-store";
 import { getNextStep } from "@/_config/pipeline-flow";
@@ -86,6 +87,13 @@ function phaseColor(phase: string) {
 }
 
 export function SummaryUI({ onNavigate }: StepUIProps) {
+  const routeParams = useParams();
+  const projectId =
+    typeof routeParams?.projectId === "string"
+      ? routeParams.projectId
+      : Array.isArray(routeParams?.projectId)
+        ? routeParams.projectId[0]
+        : undefined;
   const featureBrief = useStepStore((s) => s.featureBrief);
   const codeOutputDir = useStepStore((s) => s.codeOutputDir);
   const steps = useStepStore((s) => s.steps);
@@ -298,6 +306,7 @@ export function SummaryUI({ onNavigate }: StepUIProps) {
           pencil: steps.pencil?.content ?? "",
           qa: steps.qa?.content ?? "",
           sessionId: useStepStore.getState().kickoffSessionId ?? "",
+          projectId,
           ...(forceFull ? { forceFull: true } : {}),
         }),
       });

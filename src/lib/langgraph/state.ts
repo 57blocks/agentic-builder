@@ -188,6 +188,28 @@ export const SupervisorStateAnnotation = Annotation.Root({
     default: () => 0,
   }),
 
+  /**
+   * TDD-review P0 deadlock tracking. When GREEN execution fully passes but the
+   * static TDD review keeps reporting the SAME P0 count across repair passes
+   * (e.g. an un-fixable "no assertion" false-positive, or the repair agent is
+   * blocked by the anti-tampering guard), the gate would otherwise loop to the
+   * full integration budget (~300 iterations / ~80 min). These two fields let
+   * `tddGreenVerifyAndReview` detect "review P0s not decreasing" and break out
+   * early — see TDD_REVIEW_STALL_LIMIT.
+   *   - `tddReviewP0Count`: review P0 count observed on the previous GREEN pass
+   *     (-1 = not yet observed).
+   *   - `tddReviewStallRounds`: consecutive GREEN passes where execution passed
+   *     but the review P0 count did not improve.
+   */
+  tddReviewP0Count: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => -1,
+  }),
+  tddReviewStallRounds: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => 0,
+  }),
+
   runtimeVerifyErrors: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",

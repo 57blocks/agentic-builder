@@ -34,7 +34,18 @@ function normalizeRelPath(file: string): string {
 }
 
 function hasAssertion(content: string): boolean {
-  return /\bexpect\s*\(|\bassert\.|\bshould\b|\btoEqual\b|\btoBe\b/.test(content);
+  // Recognise the common assertion styles:
+  //   - vitest/jest:           expect(…)  (covers every .toXxx matcher)
+  //   - node:assert method:    assert.equal(…)
+  //   - node:assert / custom:  assert(cond, …)   ← function-call form, used by
+  //     hand-rolled HTML test harnesses. Without this branch a harness with
+  //     `assert(x === y, "label")` is falsely flagged "no assertion" (P0),
+  //     which hard-blocks the TDD gate forever even though the test passes.
+  //   - chai:                  x.should.…
+  //   - bare matchers:         toEqual / toBe
+  return /\bexpect\s*\(|\bassert\s*[.(]|\bshould\b|\btoEqual\b|\btoBe\b/.test(
+    content,
+  );
 }
 
 function hasSkippedTest(content: string): boolean {

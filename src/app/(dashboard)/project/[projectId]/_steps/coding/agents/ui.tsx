@@ -47,6 +47,7 @@ import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
 import { StatusBar } from "./components/StatusBar";
+import { TaskSearchBox } from "./components/TaskSearchBox";
 import { useElapsedTimer } from "./use-elapsed-timer";
 
 // ─── React Flow node type registry ───────────────────────────────────────────
@@ -449,7 +450,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Same plumbing as "Retry Failed" (retryFailedTasks → retryFailedTaskIds),
   // but the user chooses the task ids in the picker instead of it defaulting to
   // the failed set. Lets you re-run never-run / specific tasks without a full
-  // rerun. Already-completed dependencies are skipped server-side.
+  // rerun. Server-side runs EXACTLY the picked tasks — dependencies are never
+  // auto-expanded or re-run, even if unbuilt.
   const [pickerOpen, setPickerOpen] = useState(false);
   const handleRunSelected = useCallback(
     (taskIds: string[]) => {
@@ -709,7 +711,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
         {/* Active agents */}
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-2.5">
             ACTIVE AGENTS
           </p>
           <AgentBubbles agents={codingState.agents} placeholderRoles={placeholderRoles} />
@@ -825,6 +827,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* React Flow canvas */}
         <div className="flex-1 relative overflow-hidden">
+          {/* Floating task search/locator — sits above the flow layer */}
+          {mergedTasks.length > 0 && (
+            <TaskSearchBox tasks={mergedTasks} onLocate={focusTask} />
+          )}
           <ReactFlow
             nodes={nodes}
             edges={edges}

@@ -5,6 +5,7 @@ import {
 } from "@/lib/agents/project-classifier";
 import type { PrdSpec } from "@/lib/requirements/prd-spec-types";
 import { buildTaskBreakdownFromDocuments } from "@/lib/pipeline/kickoff-task-breakdown.server";
+import { buildBreakdownDesignReferencesBlock } from "@/lib/pipeline/design-references";
 import { extractPrdInventory } from "@/lib/pipeline/subsystems/inventory";
 import { decomposePrdIntoSubsystems } from "@/lib/pipeline/subsystems/decompose";
 import { shouldSplitIntoSubsystems } from "@/lib/pipeline/subsystems/split-decision";
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
     tier,
     improvementNotes,
     subsystemMode,
+    projectId,
   } = body as {
     prd?: string;
     trd?: string;
@@ -42,6 +44,10 @@ export async function POST(request: NextRequest) {
     sessionId?: string;
     tier?: string;
     improvementNotes?: string[];
+    /** Per-project design-reference isolation key. Lets the breakdown read THIS
+     *  project's uploaded screenshots (`.blueprint/projects/<id>/...`) rather
+     *  than the legacy global location. */
+    projectId?: string;
     /** Opt-in: decompose into business-domain subsystems and break down each
      *  domain separately (tasks tagged with `subsystem`). Default off — normal
      *  whole-system breakdown. */
@@ -72,6 +78,15 @@ export async function POST(request: NextRequest) {
     ((tier ?? "M").toUpperCase() as ProjectTier) ?? "M",
   );
 
+  // Per-page design digests (image-derived, cached, text-only) so the
+  // standalone regenerate path decomposes against the REAL designs instead of
+  // inventing dashboard/summary/table components from PRD prose. "" when there
+  // are no uploaded references — no behavioural change. Shared cache with the
+  // coding stage; each screenshot is parsed at most once.
+  const designReferencesBlock =
+    (await buildBreakdownDesignReferencesBlock(process.cwd(), projectId)) ||
+    undefined;
+
   // ── Subsystem mode (opt-in) ────────────────────────────────────────────────
   if (subsystemMode) {
     const inventory = extractPrdInventory(prd);
@@ -92,6 +107,7 @@ export async function POST(request: NextRequest) {
           sysDesign: input.sysDesign,
           implGuide: input.implGuide,
           designSpec: input.designSpec,
+          designReferencesBlock,
           prdSpec: prdSpec ?? null,
           sessionId: input.sessionId,
           tier: input.tier,
@@ -136,6 +152,7 @@ export async function POST(request: NextRequest) {
       sysDesign: sysdesign || undefined,
       implGuide: implguide || undefined,
       designSpec: design || undefined,
+      designReferencesBlock,
       prdSpec: prdSpec ?? null,
       sessionId,
       tier: resolvedTier,
@@ -158,6 +175,7 @@ export async function POST(request: NextRequest) {
     sysDesign: sysdesign || undefined,
     implGuide: implguide || undefined,
     designSpec: design || undefined,
+    designReferencesBlock,
     prdSpec: prdSpec ?? null,
     sessionId,
     tier: resolvedTier,

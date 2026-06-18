@@ -57,6 +57,7 @@ import { stampDomainMdPaths, writeDomainFiles } from "./subsystems/domain-files"
 import {
   copyDesignReferencesToOutput,
   formatDesignReferencesPromptBlock,
+  buildLayoutDigestBlock,
 } from "./design-references";
 import {
   createRepairEmitter,
@@ -243,10 +244,17 @@ export class PipelineEngine {
   private verifierAgent = new VerifierAgent();
   private onEvent?: EventHandler;
   private projectRoot: string;
+  /** Per-project design-reference isolation key (optional). When set, the
+   *  engine reads this project's uploaded screenshots from
+   *  `.blueprint/projects/<projectId>/design-references` instead of the
+   *  legacy global location — so the breakdown design digests match the
+   *  project the user is actually working on. */
+  private projectId?: string;
 
-  constructor(onEvent?: EventHandler, projectRoot?: string) {
+  constructor(onEvent?: EventHandler, projectRoot?: string, projectId?: string) {
     this.onEvent = onEvent;
     this.projectRoot = projectRoot ?? process.cwd();
+    this.projectId = projectId;
   }
 
   createRun(featureBrief: string, sessionId?: string): PipelineRun {
@@ -1366,6 +1374,7 @@ export class PipelineEngine {
         designReferenceEntries = await copyDesignReferencesToOutput(
           process.cwd(),
           outputRoot,
+          this.projectId,
         );
         if (designReferenceEntries.length > 0) {
           console.log(
@@ -1378,8 +1387,35 @@ export class PipelineEngine {
           e instanceof Error ? e.message : e,
         );
       }
-      const designReferencesBlock = formatDesignReferencesPromptBlock(
+      const designReferencesFileBlock = formatDesignReferencesPromptBlock(
         designReferenceEntries,
+      );
+      // Parse each uploaded screenshot into a compact TEXT digest (cached,
+      // shared with the coding stage) so task-breakdown decomposes against the
+      // REAL design instead of inventing dashboard/summary/table components
+      // from PRD prose. No images are sent to the breakdown LLM — only text.
+      // Returns "" when there are no image references (no behavioural change).
+      let designDigestBlock = "";
+      try {
+        designDigestBlock = await buildLayoutDigestBlock(
+          path.join(outputRoot, ".design-references"),
+          designReferenceEntries,
+        );
+      } catch (e) {
+        console.warn(
+          "[Engine] Failed to build per-page design digests (ignored):",
+          e instanceof Error ? e.message : e,
+        );
+      }
+      const designReferencesBlock =
+        [designDigestBlock, designReferencesFileBlock]
+          .filter(Boolean)
+          .join("\n\n---\n\n") || "";
+      console.log(
+        `[Engine] task-breakdown design context: projectId=${this.projectId ?? "(none/global)"} ` +
+          `digestChars=${designDigestBlock.length} fileBlockChars=${designReferencesFileBlock.length} ` +
+          `→ injecting ${designReferencesBlock.length} chars into breakdown ` +
+          `${designDigestBlock ? "(image-derived digest PRESENT)" : "(NO digest — breakdown is PRD-text only)"}`,
       );
 
       // Safety net: a manifest the PRD step already split & persisted to
