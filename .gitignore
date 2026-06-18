@@ -82,3 +82,7 @@ agentic-builds/
 
 # Per-task frontend context dumps written by frontend-context-logger.ts
 /.logs/
+# Per-project runtime design references (uploaded screenshots + blueprint cache)
+.blueprint/projects/
+# Ad-hoc comparison screenshots dropped at the repo root (PixPin exports, scratch shots)
+/*.png
