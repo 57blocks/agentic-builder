@@ -47,3 +47,40 @@ describe("e2e triage — missing Playwright browser classifies as infra", () => 
     expect(r.infra.length).toBe(0);
   });
 });
+
+/**
+ * Regression (CSMA): this stack has NO migrations — tables come from
+ * `sequelize.sync()` at boot. A missing table in TESTS (`no such table`) means
+ * the test harness never synced the schema; docker-compose absent / missing
+ * test-runner deps are environment gaps. All are infra, not code bugs, and must
+ * NOT quarantine an otherwise-compiling multi-domain build.
+ */
+import { hasInfraSignal } from "../e2e-triage";
+
+describe("hasInfraSignal — test-harness / environment infra", () => {
+  it("classifies an unsynced test DB (no such table) as infra", () => {
+    expect(
+      hasInfraSignal("SQLITE_ERROR: no such table: sessions"),
+    ).toBe(true);
+    expect(hasInfraSignal('relation "users" does not exist')).toBe(true);
+  });
+
+  it("classifies absent docker-compose + test-setup gaps as infra", () => {
+    expect(hasInfraSignal("docker-compose: command not found")).toBe(true);
+    expect(
+      hasInfraSignal("blocked by systemic test infrastructure issues"),
+    ).toBe(true);
+    expect(hasInfraSignal("the test database setup does not sync")).toBe(true);
+  });
+
+  it("does NOT misclassify a real code bug as infra", () => {
+    expect(
+      hasInfraSignal(
+        "TypeError: Cannot read properties of undefined (reading 'id') at task.controller.ts:42",
+      ),
+    ).toBe(false);
+    expect(
+      hasInfraSignal("Expected 200 but received 500 — handler threw"),
+    ).toBe(false);
+  });
+});

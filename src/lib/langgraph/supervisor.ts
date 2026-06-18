@@ -8913,7 +8913,17 @@ async function integrationVerifyAndFix(
   // surface) MUST refuse to present the output as ready when it is present.
   try {
     const markerRel = BUILD_FAILED_MARKER_REL;
-    if (finalStatus === "fail") {
+    // An infra / test-harness failure (a missing table from an unsynced TEST db,
+    // absent docker-compose, a missing test-runner dep, …) is NOT a broken build:
+    // the scoped compile + runtime-smoke gates already prove the app boots and
+    // creates its tables. Quarantining on it would mark an otherwise-correct build
+    // broken and — under subsystem orchestration — halt every remaining domain.
+    // So we do NOT quarantine on infra-class failures; we record them for
+    // visibility instead. (Root fix for the test-db case: the scaffolded backend
+    // test setup that syncs the schema — scaffolds/*/backend/src/test/setup.ts.)
+    const infraDominated =
+      finalStatus === "fail" && hasInfraSignal(finalSummary);
+    if (finalStatus === "fail" && !infraDominated) {
       await fsWrite(
         markerRel,
         JSON.stringify(
@@ -8930,6 +8940,20 @@ async function integrationVerifyAndFix(
       );
     } else {
       await fs.rm(path.join(state.outputDir, markerRel), { force: true });
+      if (infraDominated) {
+        console.warn(
+          `${label}: integration FAILED but the failure is infra/test-harness class — NOT quarantining so domain builds can proceed; recording it for visibility.`,
+        );
+        await recordUnresolvedProblem(state.outputDir, {
+          sessionId: state.sessionId,
+          category: "other",
+          gate: "integration-infra",
+          phase: "integration",
+          summary:
+            "Integration gate failed on infra / test-harness issues (not application code) — build NOT quarantined.",
+          evidence: [finalSummary.slice(0, 800)],
+        }).catch(() => {});
+      }
     }
   } catch (markerErr) {
     console.warn(

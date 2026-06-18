@@ -10,6 +10,7 @@ import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
 import { reconcileContractWithSchema } from "@/lib/pipeline/contract-reconcile";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
+import { hasInfraSignal } from "@/lib/langgraph/e2e-triage";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
 import {
   copyScaffold,
@@ -420,7 +421,15 @@ function summarizeBlockingGateErrors(
   snapshot: SupervisorGateSnapshot,
 ): string[] {
   const failures: string[] = [];
-  if (snapshot.integrationErrors.trim()) {
+  // Integration blocks the session UNLESS the failure is infra / test-harness
+  // class (unsynced test DB → "no such table", absent docker-compose, missing
+  // test-runner dep). Those can't be fixed by editing app code and must not fail
+  // an otherwise-compiling build (the supervisor already declines to quarantine
+  // them). Real code-level integration failures still block.
+  if (
+    snapshot.integrationErrors.trim() &&
+    !hasInfraSignal(snapshot.integrationErrors)
+  ) {
     failures.push(
       [
         "Integration verify gate failed.",
