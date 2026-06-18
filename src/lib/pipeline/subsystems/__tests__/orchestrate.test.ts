@@ -123,14 +123,43 @@ describe("runSubsystemBuilds", () => {
     ]);
   });
 
-  it("stops dependent layers when a subsystem fails", async () => {
+  it("blocks only the failed domain's transitive dependents (not the whole run)", async () => {
     const ran: string[] = [];
     const results = await runSubsystemBuilds(plan, async (step) => {
       ran.push(step.subsystemId);
       return { ok: step.subsystemId !== "enrollment" };
     });
-    expect(ran).toEqual(["auth", "enrollment"]); // billing NOT attempted
-    expect(results.find((r) => r.subsystemId === "enrollment")!.status).toBe("failed");
-    expect(results.some((r) => r.subsystemId === "billing")).toBe(false);
+    // enrollment failed → billing (depends on enrollment) is blocked, NOT run.
+    expect(ran).toEqual(["auth", "enrollment"]); // billing never attempted
+    const byId = new Map(results.map((r) => [r.subsystemId, r.status]));
+    expect(byId.get("auth")).toBe("completed");
+    expect(byId.get("enrollment")).toBe("failed");
+    expect(byId.get("billing")).toBe("blocked"); // recorded, not silently dropped
+  });
+
+  it("still builds INDEPENDENT domains when an unrelated domain fails", async () => {
+    // auth fails; reports (depends only on auth → blocked) but messaging
+    // (independent) must still build.
+    const independentPlan: SubsystemBuildPlan = {
+      layers: [
+        [{ layer: 0, subsystemId: "auth", taskIds: ["a"], dependsOn: [], scopeEndpoints: [] }],
+        [
+          { layer: 1, subsystemId: "reports", taskIds: ["r"], dependsOn: ["auth"], scopeEndpoints: [] },
+          { layer: 1, subsystemId: "messaging", taskIds: ["m"], dependsOn: [], scopeEndpoints: [] },
+        ],
+      ],
+      unassignedTaskIds: [],
+      errors: [],
+    };
+    const ran: string[] = [];
+    const results = await runSubsystemBuilds(independentPlan, async (step) => {
+      ran.push(step.subsystemId);
+      return { ok: step.subsystemId !== "auth" };
+    });
+    expect(ran).toContain("messaging"); // independent domain still built
+    const byId = new Map(results.map((r) => [r.subsystemId, r.status]));
+    expect(byId.get("auth")).toBe("failed");
+    expect(byId.get("reports")).toBe("blocked"); // depends on failed auth
+    expect(byId.get("messaging")).toBe("completed"); // independent → built
   });
 });
