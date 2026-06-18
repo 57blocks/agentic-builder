@@ -785,7 +785,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
             className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
           >
             <ListChecks size={13} />
-            选择重跑
+            Pick to re-run
           </button>
         )}
 
