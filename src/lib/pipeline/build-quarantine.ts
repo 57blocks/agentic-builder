@@ -28,6 +28,38 @@ export interface BuildFailedMarker {
   summary: string;
 }
 
+/**
+ * Decide whether a FAILED integration build is "infra-dominated" — i.e. the
+ * failure is purely test-harness / environment class (missing test-db schema,
+ * absent docker-compose, missing test-runner dep, …) rather than a real
+ * application defect. An infra-dominated failure must NOT be quarantined:
+ * quarantining would mark an otherwise-correct build broken and, under
+ * subsystem orchestration, halt every remaining domain.
+ *
+ * Precision guard: it is NOT enough for the summary to merely CONTAIN an infra
+ * signal — the summary concatenates every gate's failure text, so a genuinely
+ * broken build (e.g. a route-registration / contract / tsc/build failure) that
+ * ALSO happens to mention "no such table" in its TDD section would otherwise
+ * escape quarantine. We therefore require that every REAL code/structural gate
+ * PASSED, so the only remaining failure sources are infra-class.
+ *
+ * `realCodeGatesPass` intentionally EXCLUDES the runtime-smoke gate (its
+ * pass/fail classification is owned elsewhere) and the dependency-consistency
+ * gate (a missing *test* dep like vitest is itself infra; a missing *runtime*
+ * dep is already caught by the build gate inside `realCodeGatesPass`).
+ */
+export function isInfraDominatedFailure(opts: {
+  finalStatusFail: boolean;
+  infraSignalPresent: boolean;
+  realCodeGatesPass: boolean;
+}): boolean {
+  return (
+    opts.finalStatusFail &&
+    opts.infraSignalPresent &&
+    opts.realCodeGatesPass
+  );
+}
+
 /** Read the quarantine marker for a generated project, or null when not quarantined. */
 export async function readBuildFailedMarker(
   outputDir: string,

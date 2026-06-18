@@ -118,7 +118,10 @@ import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
 import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
 import { formatRuntimeSmokeBlock } from "@/lib/pipeline/runtime-smoke-block";
-import { BUILD_FAILED_MARKER_REL } from "@/lib/pipeline/build-quarantine";
+import {
+  BUILD_FAILED_MARKER_REL,
+  isInfraDominatedFailure,
+} from "@/lib/pipeline/build-quarantine";
 import {
   runBackendTscGate,
   decideBackendReadinessRoute,
@@ -8921,8 +8924,24 @@ async function integrationVerifyAndFix(
     // So we do NOT quarantine on infra-class failures; we record them for
     // visibility instead. (Root fix for the test-db case: the scaffolded backend
     // test setup that syncs the schema — scaffolds/*/backend/src/test/setup.ts.)
-    const infraDominated =
-      finalStatus === "fail" && hasInfraSignal(finalSummary);
+    // Precision guard: only treat the failure as infra-dominated (→ don't
+    // quarantine) when an infra signal is present AND every real code/
+    // structural gate passed — otherwise a genuinely broken build whose
+    // summary merely also mentions a test-infra signal would escape
+    // quarantine. Runtime-smoke is deliberately excluded (owned elsewhere);
+    // dependency-consistency too (a missing test dep is itself infra; a
+    // missing runtime dep already fails the build gate below).
+    const realCodeGatesPass =
+      finalGateResult.pass &&
+      !finalRouteAuditHardFail &&
+      !finalContractCompletenessHardFail &&
+      !finalApiClientUniquenessHardFail &&
+      runtimeAuditErrorFindings.length === 0;
+    const infraDominated = isInfraDominatedFailure({
+      finalStatusFail: finalStatus === "fail",
+      infraSignalPresent: hasInfraSignal(finalSummary),
+      realCodeGatesPass,
+    });
     if (finalStatus === "fail" && !infraDominated) {
       await fsWrite(
         markerRel,
