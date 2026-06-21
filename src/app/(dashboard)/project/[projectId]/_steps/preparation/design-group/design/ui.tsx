@@ -11,6 +11,10 @@ import StageInputBar from "@/components/StageInputBar";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Loading from "@/components/Loading";
 import { RouteReferenceGrid } from "@/components/RouteReferenceGrid";
+import { pageHintOwnsRoute } from "@/lib/design/page-hint-match";
+import { buildAutoCapturePlan, isSameRoutePath } from "@/lib/design/auto-capture-plan";
+import { extractPrdPageHints } from "@/lib/requirements/prd-page-hints";
+import { buildMockupSessionSeed } from "@/lib/design/mockup-session";
 import type { StepUIProps } from "../../../_shared/types";
 import { DocDiffView } from "../../../_shared/DocDiffView";
 import {
@@ -914,32 +918,127 @@ export function DesignUI(props: StepUIProps) {
     async (urls: string[]) => {
       setIsMatching(true);
       try {
-        await Promise.allSettled(
-          urls.map(async (url) => {
-            let screenshotDataUrl: string | undefined;
-            let cssToken: Record<string, string> | undefined;
+        // Sequential, NOT Promise.all: each capture persists via
+        // addDesignReference, which read-modify-writes the shared manifest.
+        // Running them concurrently races that read-modify-write so all but the
+        // last entry are lost (the screenshots land on disk but vanish from the
+        // manifest → no card binds them). Serial also avoids spawning N hidden
+        // Electron render windows at once.
+        for (const url of urls) {
+          let screenshotDataUrl: string | undefined;
+          let cssToken: Record<string, string> | undefined;
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
-              try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const result = await (window as any).electronAPI.renderReferenceUrl(url);
-                screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
-                cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
-              } catch {
-                // no screenshot available in Electron
-              }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const result = await (window as any).electronAPI.renderReferenceUrl(url);
+              screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
+              cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
+            } catch {
+              // no screenshot available in Electron
             }
+          }
 
-            if (!screenshotDataUrl) return; // Non-Electron: skip — no screenshot available
+          if (!screenshotDataUrl) continue; // Non-Electron / capture failed: skip
 
-            await usePipelineStore
-              .getState()
-              .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
-          }),
-        );
+          await usePipelineStore
+            .getState()
+            .fetchUrlDesignReference(url, screenshotDataUrl, cssToken);
+        }
         if (prdContent) {
           await usePipelineStore.getState().autoMatchDesignReferences(prdContent);
+        }
+      } finally {
+        setIsMatching(false);
+      }
+    },
+    [prdContent],
+  );
+
+  // Auto-capture every PRD page from ONE entry URL. Deterministic: each page's
+  // route is joined to the entry origin and the screenshot is bound straight to
+  // that page's card (pageHint = PAGE-id, manual) — no Vision auto-match. Param
+  // routes (`/x/:id`) are resolved from same-origin links harvested while
+  // capturing the static pages (the crawl half of "both"). Desktop-only (uses
+  // Electron renderReferenceUrl); serial to avoid the manifest write race.
+  const handleAutoCaptureFromEntry = useCallback(
+    async (entryUrl: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const electronApi =
+        typeof window !== "undefined" ? (window as any).electronAPI : undefined;
+      if (!electronApi?.renderReferenceUrl) {
+        console.warn(
+          "[DesignUI] auto-capture needs the desktop app (Electron renderReferenceUrl).",
+        );
+        return;
+      }
+      setIsMatching(true);
+      try {
+        const pages = extractPrdPageHints(prdContent);
+
+        const captureOne = async (url: string, pageHint: string): Promise<string[]> => {
+          try {
+            const seed = buildMockupSessionSeed(url, prdContent, new Date().toISOString());
+            const result = await electronApi.renderReferenceUrl(
+              url,
+              seed ? { localStorageSeed: seed } : undefined,
+            );
+            const links: string[] = Array.isArray(result?.links) ? result.links : [];
+            const shot: string | undefined =
+              result?.screenshotDataUrl ?? result?.screenshot;
+            if (!shot) {
+              console.warn(`[DesignUI] auto-capture: no screenshot for ${url}`);
+              return links;
+            }
+            // Role-gated routes (teacher/admin vs family) redirect a wrong-role
+            // or unauthenticated request to login / another home. Don't bind that
+            // wrong screenshot to the requested page's card — skip + report so the
+            // user knows the page needs the matching role/session.
+            const finalUrl: string | undefined = result?.finalUrl;
+            if (finalUrl && !isSameRoutePath(url, finalUrl)) {
+              console.warn(
+                `[DesignUI] auto-capture: ${url} redirected to ${finalUrl} — NOT binding (page needs the right role/login). Capture this page while signed in as that role.`,
+              );
+              return links;
+            }
+            const cssToken =
+              result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
+            await usePipelineStore
+              .getState()
+              .fetchUrlDesignReference(url, shot, cssToken, pageHint);
+            return links;
+          } catch (e) {
+            console.warn(
+              `[DesignUI] auto-capture failed for ${url}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+            return [];
+          }
+        };
+
+        // Phase 1 — static routes; harvest same-origin links along the way.
+        const { plan: staticPlan, skipped } = buildAutoCapturePlan(entryUrl, pages);
+        if (skipped.length > 0) {
+          console.log(
+            `[DesignUI] auto-capture: ${skipped.length} page(s) skipped — ${skipped
+              .map((s) => `${s.page} (${s.reason})`)
+              .join("; ")}`,
+          );
+        }
+        const crawledUrls: string[] = [];
+        const done = new Set<string>();
+        for (const item of staticPlan) {
+          const links = await captureOne(item.url, item.pageHint);
+          crawledUrls.push(...links);
+          done.add(item.pageHint);
+        }
+
+        // Phase 2 — param routes resolved from the harvested links.
+        const { plan: fullPlan } = buildAutoCapturePlan(entryUrl, pages, crawledUrls);
+        for (const item of fullPlan) {
+          if (done.has(item.pageHint)) continue;
+          await captureOne(item.url, item.pageHint);
+          done.add(item.pageHint);
         }
       } finally {
         setIsMatching(false);
@@ -956,8 +1055,24 @@ export function DesignUI(props: StepUIProps) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
         try {
+          // Role-correct session for client-side-gated mockups: derive the role
+          // from the URL path and seed localStorage so /teacher/* /admin/* render
+          // the real page instead of redirecting to another role's home.
+          const seed = buildMockupSessionSeed(url, prdContent, new Date().toISOString());
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = await (window as any).electronAPI.renderReferenceUrl(url);
+          const result = await (window as any).electronAPI.renderReferenceUrl(
+            url,
+            seed ? { localStorageSeed: seed } : undefined,
+          );
+          // Even with the seed, refuse to bind a screenshot that got redirected
+          // away from the requested route (would be the wrong page).
+          const finalUrl: string | undefined = result?.finalUrl;
+          if (finalUrl && !isSameRoutePath(url, finalUrl)) {
+            console.warn(
+              `[DesignUI] fetch-route: ${url} redirected to ${finalUrl} — not binding (page needs the right role/login).`,
+            );
+            return;
+          }
           screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
           cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
         } catch {
@@ -971,14 +1086,14 @@ export function DesignUI(props: StepUIProps) {
         .getState()
         .fetchUrlDesignReference(url, screenshotDataUrl, cssToken, pageHint);
     },
-    [],
+    [prdContent],
   );
 
   const handleDropToRoute = useCallback(
     async (referenceId: string, pageHint: string) => {
       const currentRefs = usePipelineStore.getState().designReferences;
       const existingOwner = currentRefs.find(
-        (r) => r.pageHint === pageHint && r.id !== referenceId,
+        (r) => pageHintOwnsRoute(r.pageHint, pageHint) && r.id !== referenceId,
       );
       if (existingOwner) {
         await usePipelineStore
@@ -1363,8 +1478,10 @@ export function DesignUI(props: StepUIProps) {
                   prdContent={prdContent}
                   references={designReferences}
                   isMatching={isMatching}
+                  projectId={props.projectSlug}
                   onUpload={handleUploadToGrid}
                   onFetchUrls={handleFetchUrlsToGrid}
+                  onAutoCaptureFromEntry={handleAutoCaptureFromEntry}
                   onFetchRouteUrl={handleFetchRouteUrl}
                   onRemove={async (id) => {
                     await usePipelineStore.getState().deleteDesignReference(id);

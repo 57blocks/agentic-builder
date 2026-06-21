@@ -33,6 +33,7 @@ import { promisify } from "util";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import type { RepairEmitter } from "./events";
 import { runDataAssertions, type DataGateFailureCode } from "./integration-data-gate";
+import { healBootEnvFromStderr } from "./boot-env-doctor";
 import {
   readActiveScope,
   scopeKeySet,
@@ -438,12 +439,47 @@ export async function runRuntimeSmokeGate(
   }
 
   const backendDir = path.join(outputDir, "backend");
-  const boot = await bootBackend(
+  let boot = await bootBackend(
     backendDir,
     bootTimeoutMs,
     port,
     input.dataAssertions ? input.testDatabaseUrl : undefined,
   );
+
+  // Boot-error doctor: a boot failure is often a fixable `.env` config problem
+  // (timescale CREATE EXTENSION on plain Postgres → needs TIMESCALE_DISABLED=1;
+  // or a TDD run killed mid-neutralization left DATABASE_URL blank). The LLM
+  // repair loop can't touch `.env`, so without this it would stagnate. Read the
+  // captured boot stderr, apply the deterministic fix it implies (knowable
+  // switches set, secrets restored from .tdd-bak — never invented), and retry ONCE.
+  // Bounded heal loop: re-diagnose each new boot's stderr so SEQUENTIAL blockers
+  // (e.g. blank DATABASE_URL fails first, then timescale surfaces) get fixed in
+  // turn. Stops when a heal applies nothing new (cap 2 → at most 3 boots total).
+  for (let healAttempt = 1; !boot.child && healAttempt <= 2; healAttempt++) {
+    const bootOutput = boot.output || boot.bootError || "";
+    const heal = await healBootEnvFromStderr(outputDir, bootOutput).catch(() => ({
+      applied: [] as string[],
+    }));
+    if (heal.applied.length === 0) break; // nothing fixable → stop, don't spin
+    if (emitter) {
+      emitter({
+        stage: "integration-gate",
+        sessionId,
+        event: "runtime_boot_env_healed",
+        details: { applied: heal.applied, attempt: healAttempt, port },
+      });
+    }
+    console.log(
+      `[runtime-smoke] boot failed; env heal #${healAttempt} applied [${heal.applied.join(", ")}], retrying boot.`,
+    );
+    boot = await bootBackend(
+      backendDir,
+      bootTimeoutMs,
+      port,
+      input.dataAssertions ? input.testDatabaseUrl : undefined,
+    );
+  }
+
   if (!boot.child) {
     result.bootFailed = true;
     result.failures.push({

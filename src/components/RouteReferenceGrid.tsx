@@ -3,17 +3,31 @@
 import React, { useRef, useState, useCallback } from "react";
 import { X, RefreshCw, Image } from "lucide-react";
 import { extractPrdPageHints } from "@/lib/requirements/prd-page-hints";
+import { pageHintOwnsRoute } from "@/lib/design/page-hint-match";
 import type { DesignReferenceSummary } from "@/store/pipeline-store";
 
 interface RouteReferenceGridProps {
   prdContent: string;
   references: DesignReferenceSummary[];
   isMatching: boolean;
+  /**
+   * Project slug/id. Design references are stored per-project under
+   * `.blueprint/projects/<projectId>/design-references/`, so the `<img>` GET
+   * MUST carry `?projectId=` or the server reads the wrong (default) dir and
+   * 404s — the card shows metadata (from the manifest) but a blank thumbnail.
+   */
+  projectId?: string;
   onUpload: (files: File[]) => void;
   onFetchUrls: (urls: string[]) => void;
   onFetchRouteUrl: (url: string, pageHint: string) => void;
   onRemove: (referenceId: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
+  /**
+   * Given ONE entry URL, capture every PRD page automatically (entry origin +
+   * each PRD route, bound straight to its card). Desktop-only; the input is
+   * hidden when this isn't provided.
+   */
+  onAutoCaptureFromEntry?: (entryUrl: string) => void;
 }
 
 function isImageFile(file: File): boolean {
@@ -31,6 +45,7 @@ interface RouteCardProps {
   route: RouteInfo;
   reference: DesignReferenceSummary | undefined;
   isMatchingThis: boolean;
+  projectId?: string;
   onRemove: (id: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
   onFetchRouteUrl: (url: string, pageHint: string) => void;
@@ -40,6 +55,7 @@ function RouteCard({
   route,
   reference,
   isMatchingThis,
+  projectId,
   onRemove,
   onDropToRoute,
   onFetchRouteUrl,
@@ -47,7 +63,9 @@ function RouteCard({
   const [isDragOver, setIsDragOver] = useState(false);
   const [routeUrl, setRouteUrl] = useState("");
   const imageUrl = reference
-    ? `/api/agents/pipeline/design-references/${reference.id}/file`
+    ? `/api/agents/pipeline/design-references/${reference.id}/file${
+        projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""
+      }`
     : null;
 
   // Border + background per state
@@ -204,15 +222,24 @@ export function RouteReferenceGrid({
   prdContent,
   references,
   isMatching,
+  projectId,
   onUpload,
   onFetchUrls,
   onFetchRouteUrl,
   onRemove,
   onDropToRoute,
+  onAutoCaptureFromEntry,
 }: RouteReferenceGridProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [urlInput, setUrlInput] = useState("");
+  const [entryUrl, setEntryUrl] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const handleAutoCapture = () => {
+    const trimmed = entryUrl.trim();
+    if (!trimmed || !onAutoCaptureFromEntry) return;
+    onAutoCaptureFromEntry(trimmed);
+  };
 
   const routes: RouteInfo[] = extractPrdPageHints(prdContent).map((p) => ({
     id: p.id,
@@ -220,11 +247,11 @@ export function RouteReferenceGrid({
   }));
 
   const matchedCount = routes.filter((r) =>
-    references.some((ref) => ref.pageHint === r.id),
+    references.some((ref) => pageHintOwnsRoute(ref.pageHint, r.id)),
   ).length;
 
   const cssTokenCount = references.filter(
-    (r) => r.cssToken && routes.some((route) => route.id === r.pageHint),
+    (r) => r.cssToken && routes.some((route) => pageHintOwnsRoute(r.pageHint, route.id)),
   ).length;
 
   const handleFileDrop = useCallback(
@@ -255,6 +282,37 @@ export function RouteReferenceGrid({
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Auto-capture from one entry URL — captures every PRD page automatically */}
+      {onAutoCaptureFromEntry && (
+        <div className="flex flex-col gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="url"
+              value={entryUrl}
+              onChange={(e) => setEntryUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAutoCapture();
+              }}
+              placeholder="Entry URL — e.g. https://your-app.com"
+              disabled={isMatching}
+              className="flex-1 text-[12px] bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-700 placeholder-slate-400 outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 disabled:opacity-50"
+            />
+            <button
+              onClick={handleAutoCapture}
+              disabled={!entryUrl.trim() || isMatching}
+              className="shrink-0 text-[12px] font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3.5 py-2 transition-colors inline-flex items-center gap-1.5"
+            >
+              {isMatching && <RefreshCw size={13} className="animate-spin" />}
+              Auto-capture all pages
+            </button>
+          </div>
+          <span className="text-[10px] text-slate-500">
+            Captures every PRD page (entry origin + each route) and binds each
+            screenshot to its card. Pages behind login prompt a one-time sign-in.
+          </span>
+        </div>
+      )}
+
       {/* Top input zone */}
       <div className="flex flex-col gap-2">
         <div className="flex gap-3">
@@ -326,13 +384,16 @@ export function RouteReferenceGrid({
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {routes.map((route) => {
-              const reference = references.find((r) => r.pageHint === route.id);
+              const reference = references.find((r) =>
+                pageHintOwnsRoute(r.pageHint, route.id),
+              );
               return (
                 <RouteCard
                   key={route.id}
                   route={route}
                   reference={reference}
                   isMatchingThis={isMatching && !reference}
+                  projectId={projectId}
                   onRemove={onRemove}
                   onDropToRoute={onDropToRoute}
                   onFetchRouteUrl={onFetchRouteUrl}

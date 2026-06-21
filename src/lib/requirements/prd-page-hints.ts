@@ -6,7 +6,32 @@
 export interface PrdPageHint {
   id: string;   // e.g. "PAGE-001"
   name: string; // e.g. "Dashboard"
+  /**
+   * Route path parsed from the heading, when present — e.g. the
+   * `` `/family/dashboard` `` inside `FamilyDashboardPage（`/family/dashboard`）`.
+   * Used by the "auto-capture from one entry URL" flow to build
+   * `<entryOrigin><route>` and bind the screenshot straight to this page.
+   * Absent for pages with no route (`暂无路由`).
+   */
+  route?: string;
+  /** True when `route` contains a `:param` segment (needs a concrete id to capture). */
+  isParamRoute?: boolean;
 }
+
+/** First backtick-quoted absolute path in a heading, e.g. `` `/family/dashboard` ``. */
+function extractRoute(rawTitle: string): string | undefined {
+  const m = rawTitle.match(/`(\/[^`\s]*)`/);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * Upper bound on extracted pages. The old cap of 20 silently truncated L-tier
+ * PRDs — e.g. a project with ~38 page specs (15 family + 7 teacher + 14 admin
+ * routes) showed only the first 20 in the Reference-Screenshots route grid.
+ * 80 comfortably covers large multi-domain L projects while still bounding a
+ * pathological PRD that turns every heading into a "page".
+ */
+const MAX_PAGE_HINTS = 80;
 
 /** Section headings that mean "here come the pages" */
 const PAGE_SECTION_PATTERNS = [
@@ -26,7 +51,18 @@ const SKIP_HEADERS = new Set([
   "deployment", "testing", "future work", "changelog",
 ]);
 
-/** Looks like a page header: "Login Page", "Dashboard", "User Profile", etc. */
+/**
+ * PascalCase component names ending in a page-ish suffix — `AuthPage`,
+ * `FamilyDashboardPage`, `ActivitiesPage`, `AdminApprovalsPage`. These are how
+ * spec-driven PRDs name page sections (often with a non-English heading and
+ * sometimes NO route, e.g. `ActivitiesPage（暂无路由）`), so the bare keyword /
+ * route-slug checks below miss them. Requires ≥1 prefix char so a lone "Page"
+ * heading doesn't qualify.
+ */
+const PASCAL_PAGE_NAME =
+  /\b[A-Z][A-Za-z]+(?:Page|Screen|View|Dashboard|Modal|Drawer|Panel|Dialog)\b/;
+
+/** Looks like a page header: "Login Page", "Dashboard", "AuthPage", etc. */
 function looksLikePage(title: string): boolean {
   const lower = title.toLowerCase();
   // Skip generic section headings
@@ -34,6 +70,8 @@ function looksLikePage(title: string): boolean {
   if (SKIP_HEADERS.has(cleaned)) return false;
   // Skip very long lines (likely prose, not headings)
   if (title.length > 80) return false;
+  // PascalCase page component name (works for non-English / route-less headers)
+  if (PASCAL_PAGE_NAME.test(title)) return true;
   // Positive signals
   if (/\bpage\b|\bscreen\b|\bview\b|\bpanel\b|\bdashboard\b|\bmodal\b|\bdrawer\b/i.test(title)) return true;
   // Looks like a route: contains "/" or starts with "/"
@@ -71,7 +109,12 @@ export function extractPrdPageHints(markdown: string): PrdPageHint[] {
     if (seen.has(key)) return;
     seen.add(key);
     const id = `PAGE-${String(results.length + 1).padStart(3, "0")}`;
-    results.push({ id, name });
+    const route = extractRoute(rawTitle);
+    results.push({
+      id,
+      name,
+      ...(route ? { route, isParamRoute: route.includes(":") } : {}),
+    });
   };
 
   for (const line of lines) {
@@ -106,5 +149,5 @@ export function extractPrdPageHints(markdown: string): PrdPageHint[] {
     }
   }
 
-  return results.slice(0, 20); // cap at 20 pages
+  return results.slice(0, MAX_PAGE_HINTS);
 }

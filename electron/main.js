@@ -238,10 +238,18 @@ function waitForLogin(win) {
   });
 }
 
-async function captureReferenceUrl(url, sender) {
+async function captureReferenceUrl(url, sender, opts) {
   if (!isValidHttpUrl(url)) {
     return { ok: false, error: "A valid http(s) URL is required" };
   }
+  // Optional localStorage seed injected BEFORE navigation — lets the renderer
+  // set a role-correct session for client-side-gated mockups so `/teacher/*` /
+  // `/admin/*` render the real page instead of redirecting to another role's
+  // home (PRD §6.2). { key, value } where value is a JSON string.
+  const seed =
+    opts && opts.localStorageSeed && typeof opts.localStorageSeed.key === "string"
+      ? opts.localStorageSeed
+      : null;
   const notify = (channel) => {
     try {
       if (sender && !sender.isDestroyed()) sender.send(channel);
@@ -267,6 +275,24 @@ async function captureReferenceUrl(url, sender) {
   const dbg = win.webContents.debugger;
   let attached = false;
   try {
+    // Seed localStorage on the target ORIGIN first (localStorage is origin-
+    // scoped and needs a loaded document), then navigate to the real target so
+    // the SPA boots with the right session/role.
+    if (seed) {
+      try {
+        const origin = new URL(url).origin;
+        await withTimeout(win.loadURL(origin), RENDER_TIMEOUT_MS, "Seed load timed out");
+        await delay(300);
+        const js = seed.clear
+          ? `try { localStorage.removeItem(${JSON.stringify(seed.key)}); } catch (e) {}`
+          : `try { localStorage.setItem(${JSON.stringify(seed.key)}, ${JSON.stringify(
+              String(seed.value ?? ""),
+            )}); } catch (e) {}`;
+        await win.webContents.executeJavaScript(js, true);
+      } catch {
+        /* best-effort: fall through to a normal capture */
+      }
+    }
     await withTimeout(win.loadURL(url), RENDER_TIMEOUT_MS, "Render timed out after 20s");
 
     // Give client-side frameworks time to hydrate / fetch data.
@@ -307,6 +333,35 @@ async function captureReferenceUrl(url, sender) {
       /* tokens stay null; screenshot is the primary signal */
     }
 
+    // Best-effort same-origin link discovery — lets the renderer crawl from one
+    // entry URL to find pages (esp. concrete instances of `:param` routes) that
+    // the PRD-route list can't enumerate. Absolute, same-origin, hash stripped.
+    let links = [];
+    try {
+      const json = await win.webContents.executeJavaScript(
+        `JSON.stringify((() => {
+          try {
+            const here = new URL(location.href);
+            const out = new Set();
+            for (const a of document.querySelectorAll('a[href]')) {
+              try {
+                const u = new URL(a.getAttribute('href'), location.href);
+                if (u.origin !== here.origin) continue;
+                u.hash = '';
+                out.add(u.href);
+              } catch (e) {}
+            }
+            return [...out].slice(0, 300);
+          } catch (e) { return []; }
+        })())`,
+        true,
+      );
+      const parsed = JSON.parse(json);
+      if (Array.isArray(parsed)) links = parsed;
+    } catch {
+      /* links stay []; non-fatal */
+    }
+
     // Full-page screenshot via the Chrome DevTools Protocol. Timeout-protected
     // so an unexpected stall can never hang the IPC (infinite spinner).
     dbg.attach("1.3");
@@ -331,6 +386,7 @@ async function captureReferenceUrl(url, sender) {
       ok: true,
       screenshotDataUrl: `data:image/jpeg;base64,${data}`,
       tokens,
+      links,
       finalUrl: win.webContents.getURL() || url,
     };
   } catch (err) {
@@ -346,8 +402,12 @@ async function captureReferenceUrl(url, sender) {
   }
 }
 
-ipcMain.handle("render-reference-url", (event, url) =>
-  captureReferenceUrl(typeof url === "string" ? url.trim() : "", event.sender),
+ipcMain.handle("render-reference-url", (event, url, opts) =>
+  captureReferenceUrl(
+    typeof url === "string" ? url.trim() : "",
+    event.sender,
+    opts && typeof opts === "object" ? opts : undefined,
+  ),
 );
 
 // ── Project cover capture ────────────────────────────────────────────────────

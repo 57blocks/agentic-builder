@@ -96,6 +96,11 @@ export function formatGeneratedCodeDotEnv(databaseUrl: string): string {
     `DATABASE_URL=${JSON.stringify(databaseUrl)}`,
     `JWT_SECRET=${JSON.stringify(generateJwtSecret())}`,
     `JWT_EXPIRES_IN="7d"`,
+    // Safe default carried from backend/.env.example: the generated db layer
+    // runs `CREATE EXTENSION timescaledb` unless this is set, which CRASHES boot
+    // on a plain Postgres. The .env.example had it but this runtime .env writer
+    // used to drop it — keep it so the backend boots on vanilla Postgres.
+    `TIMESCALE_DISABLED=1`,
     "",
   ].join("\n");
 }
