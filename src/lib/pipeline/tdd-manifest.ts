@@ -28,6 +28,40 @@ function collectTaskFiles(task: CodingTask): string[] {
   return [...files.creates, ...files.modifies, ...files.reads];
 }
 
+/**
+ * Coerce a TDD test file's extension to `.tsx` when the test renders a React
+ * component (its target set includes a `.tsx`/`.jsx` file). esbuild/Vite
+ * REFUSE to parse JSX inside a `.ts` file — a `.ts` test that does
+ * `render(<Page />)` fails to transform ("Expected '>' but found ...") and
+ * collects ZERO tests, which the TDD hard gate counts as a permanent P0
+ * failure. That hangs the integration-verify repair loop forever (the agent
+ * keeps "fixing" the component, but the real fault is the test file's
+ * extension). Renaming `.test.ts` → `.test.tsx` here — at the single source
+ * of truth the writer and the GREEN gate both consume — fixes it for every
+ * project. Pure-logic tests (targets only `.ts`, e.g. a hook/service) are
+ * left untouched.
+ */
+export function coerceJsxTestExtension(
+  file: string,
+  targetFiles: string[],
+  command: string,
+): { file: string; command: string } {
+  const rendersJsx = targetFiles.some((f) => /\.(tsx|jsx)$/i.test(f));
+  if (!rendersJsx) return { file, command };
+  if (!/\.(test|spec)\.ts$/i.test(file)) return { file, command };
+
+  const newFile = file.replace(/\.(test|spec)\.ts$/i, ".$1.tsx");
+  const oldBase = file.split("/").pop() ?? file;
+  const newBase = newFile.split("/").pop() ?? newFile;
+  let newCommand = command ?? "";
+  if (newCommand.includes(file)) {
+    newCommand = newCommand.split(file).join(newFile);
+  } else if (oldBase && newCommand.includes(oldBase)) {
+    newCommand = newCommand.split(oldBase).join(newBase);
+  }
+  return { file: newFile, command: newCommand };
+}
+
 export async function writeTddManifestFromTasks(
   outputDir: string,
   tasks: CodingTask[],
@@ -38,15 +72,28 @@ export async function writeTddManifestFromTasks(
 
   for (const task of tasks) {
     for (const test of task.tddPlan?.tests ?? []) {
+      const targetFiles = collectTaskFiles(task).filter(
+        (file) => file !== test.file,
+      );
+      const { file, command } = coerceJsxTestExtension(
+        test.file,
+        targetFiles,
+        test.command,
+      );
+      if (file !== test.file) {
+        console.log(
+          `[TddManifest] Coerced JSX test extension: ${test.file} → ${file} (renders a React component; .ts cannot contain JSX).`,
+        );
+      }
       tests.push({
         id: test.id,
         taskId: task.id,
         requirementIds: task.coversRequirementIds ?? [],
         priority: test.priority,
         type: test.type,
-        file: test.file,
-        targetFiles: collectTaskFiles(task).filter((file) => file !== test.file),
-        command: test.command,
+        file,
+        targetFiles,
+        command,
         expectedRed: test.expectedRed,
         expectedGreen: test.expectedGreen,
       });

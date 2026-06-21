@@ -28,6 +28,7 @@ import {
 } from "@/lib/openrouter";
 import {
   readDesignReferencesFromOutput,
+  extractReferenceLayoutBlueprint,
   type DesignReferenceEntry,
 } from "@/lib/pipeline/design-references";
 import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
@@ -1553,6 +1554,12 @@ async function runCodegenAgentSession(
   let totalTokens = 0;
   let llmCalls = 0;
   let readOnlyRounds = 0;
+  // Consecutive read-only rounds (reset on any write). Drives the anti-spiral
+  // guard below: this agentic-tools loop previously had NO breaker (unlike the
+  // multi-round loop), so a model that kept calling read_file/list_files/grep
+  // could spin to CODEGEN_AGENT_MAX_ITERATIONS (300) without ever writing —
+  // observed as a ~75-min hang on a vision task over a 200-file project.
+  let consecutiveReadRounds = 0;
   let writeToolCalls = 0;
   let lastModel = "unknown";
   let lastContent = "";
@@ -1566,6 +1573,26 @@ async function runCodegenAgentSession(
   let didSecondaryRecall = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
+    // ── Anti read-only spiral ─────────────────────────────────────────────
+    // After N consecutive read-only rounds, nudge once; after M, force
+    // `tool_choice:"none"` so the model MUST emit file output instead of yet
+    // another read. Mirrors the multi-round loop's guard.
+    const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
+      messages.push({
+        role: "system",
+        content:
+          "You now have enough context. STOP calling read-only tools (read_file/read_many_files/list_files/grep). Write the required file(s) THIS round via write_file (or output ```file:<path>``` blocks). Do not inspect anything further.",
+      });
+      console.log(
+        `[Worker] read-stall nudge after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
+    if (forceWrite) {
+      console.log(
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
     // Cheap, lossless context compaction: drop stale repeated read-only tool
     // results (same file read again later → earlier copy is superseded) before
     // each call, so re-reads during a fix don't bloat the prompt. Disable with
@@ -1593,7 +1620,7 @@ async function runCodegenAgentSession(
           openRouterVariant: codegenVariant,
           codingMode,
           tools: WORKER_TOOLS,
-          tool_choice: "auto",
+          tool_choice: forceWrite ? "none" : "auto",
           contextDump: {
             taskId: toolOptions?.taskId ?? task.id,
             iteration: i,
@@ -1689,7 +1716,12 @@ async function runCodegenAgentSession(
         toolResultTexts.push(result.content);
       }
 
-      if (!hadWriteTool) readOnlyRounds++;
+      if (!hadWriteTool) {
+        readOnlyRounds++;
+        consecutiveReadRounds++;
+      } else {
+        consecutiveReadRounds = 0;
+      }
 
       if (recallCtx && !didSecondaryRecall) {
         const errorSignal = detectErrorSignalForRecall(
@@ -1733,6 +1765,7 @@ async function runCodegenAgentSession(
     validateCodegenFileOutput(content);
     const parsedFiles = parseFileOutput(content);
     const parsedEntries = Object.entries(parsedFiles);
+    if (parsedEntries.length > 0) consecutiveReadRounds = 0;
     for (const [fp, fc] of parsedEntries) {
       const msg = await fsWrite(fp, fc, outputDir, toolOptions?.fsWriteOptions);
       if (msg.startsWith("SKIPPED_PROTECTED") || msg.startsWith("REJECTED")) {
@@ -2172,20 +2205,39 @@ function buildFrontendPriorityNote(opts: {
     : "";
   const checklistTier = `\n${hasImage ? (hasTokens ? "4" : "3") : hasTokens ? "3" : "2"}. **Sub-steps & task title** — a FILE + DATA-WIRING checklist ONLY, never a visual spec. They tell you WHICH files/components to create and HOW data flows. When a sub-step's UI wording (e.g. "sortable table", "Edit/Delete buttons per row", "header with New Bill button") conflicts with ${hasImage ? "the screenshot" : "the Design Specification"}, ${hasImage ? "the SCREENSHOT" : "the Design Specification"} WINS. Do not let a sub-step's layout phrasing pull you toward a generic CRUD shape.`;
 
+  // Typography guardrail. The model CANNOT reliably estimate pixel sizes from a
+  // screenshot — a full-page capture (≈1440px wide) makes text look far larger
+  // than its real px, and the model consistently overshoots (observed: body
+  // text emitted at text-[28px], H1 at text-[56px]). So forbid arbitrary px
+  // font sizes and pin a sane default scale unless a token / DesignSpec value
+  // explicitly says otherwise.
+  const typographyGuardrail =
+    `\n\n## Typography guardrail (HARD RULE)\n` +
+    `Do NOT estimate font sizes from the screenshot — full-page captures distort apparent size and you WILL overshoot. Do NOT emit arbitrary pixel font sizes (\`text-[28px]\`, \`text-[34px]\`, \`text-[56px]\` are all WRONG for body/headings here).\n` +
+    `Use a \`--computed-*-font-size\` token or an explicit Design Specification value when one exists for the element. Otherwise use this default scale:\n` +
+    `- Secondary / metadata / labels / status pills: \`text-xs\` (12px) – \`text-sm\` (14px)\n` +
+    `- Body text, card subtitle/metadata, table cells: \`text-sm\` (14px) – \`text-base\` (16px)\n` +
+    `- Card / list-item title: \`text-base\` (16px) – \`text-lg\` (18px)\n` +
+    `- Emphasised number (price/amount), section heading: \`text-xl\` (20px) – \`text-2xl\` (24px)\n` +
+    `- Page H1 only: \`text-3xl\` (30px) – \`text-4xl\` (36px)\n` +
+    `Body / label / metadata text must NEVER exceed ~16px. The screenshot governs LAYOUT and relative hierarchy; this scale governs absolute size.`;
+
   if (hasImage) {
     return (
       `\n\n## Source of truth (read first, apply to every decision)\n` +
-      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative sizing. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
+      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative hierarchy (which text is bigger than which). It does NOT define absolute pixel sizes — see the Typography guardrail below. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
       `2. **Design Specification** (Project Context → section "Design Specification") — the authoritative source for EXACT quantitative values that match the screenshot: hex colours, font sizes, line-heights, spacing, radii, shadows, gradients. Pull precise numbers from here. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
       tokenTier +
-      checklistTier
+      checklistTier +
+      typographyGuardrail
     );
   }
   return (
     `\n\n## Source of truth (read first, apply to every decision)\n` +
     `1. **Design Specification** (Project Context → section "Design Specification") — your PRIMARY visual authority since no reference screenshot is attached: layout, component shape, exact hex colours, font sizes, spacing, radii, shadows. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
     tokenTier +
-    checklistTier
+    checklistTier +
+    typographyGuardrail
   );
 }
 
@@ -3199,20 +3251,54 @@ async function generateCode(state: WorkerState) {
             hasTokens: cssTokenEntries.length > 0,
           });
 
+          // Parse the screenshot into a BINDING layout blueprint (cached per
+          // image). This gives the codegen model a concrete, image-derived
+          // spec that is as specific as the task's CRUD sub-steps and is
+          // declared to OVERRIDE them — the only way to beat a task whose
+          // title/file-names/sub-steps/TDD all assume a generic table.
+          let blueprintNote = "";
+          try {
+            const blueprint = await extractReferenceLayoutBlueprint({
+              cacheDir: path.join(state.outputDir, ".design-references"),
+              storedFileName: matchedRef.storedFileName,
+              bytes: imgBytes.byteLength,
+              imageDataUrl: dataUrl,
+              label: matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
+            });
+            if (blueprint) {
+              blueprintNote =
+                `\n\n## Reference layout blueprint (image-derived — AUTHORITATIVE layout contract)\n` +
+                `This blueprint was parsed directly from the attached screenshot. It OVERRIDES the task title, the planned file names, and the sub-steps. Where a sub-step says "table / Edit-Delete / New Bill" but this blueprint says otherwise (e.g. a card list with receipt actions), FOLLOW THE BLUEPRINT. Reproduce the component type, per-item anatomy, button labels, and states exactly as described here.\n\n${blueprint}`;
+              console.log(
+                `[Worker:${state.workerLabel}] Layout blueprint extracted for "${task.title}" (${blueprint.length} chars).`,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[Worker:${state.workerLabel}] Layout blueprint extraction failed (ignored):`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
               {
                 type: "text",
-                text: priorityNote + cssTokenNote + "\n\n" + userTaskText,
+                text:
+                  priorityNote +
+                  blueprintNote +
+                  cssTokenNote +
+                  "\n\n" +
+                  userTaskText,
               },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
           injectedVisionImage = true;
           console.log(
-            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""})`,
+            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""}${blueprintNote ? ", +layout blueprint" : ""})`,
           );
         }
       } catch (err) {

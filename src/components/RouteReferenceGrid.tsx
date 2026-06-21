@@ -10,30 +10,30 @@ interface RouteReferenceGridProps {
   prdContent: string;
   references: DesignReferenceSummary[];
   isMatching: boolean;
-  /**
-   * Project slug/id. Design references are stored per-project under
-   * `.blueprint/projects/<projectId>/design-references/`, so the `<img>` GET
-   * MUST carry `?projectId=` or the server reads the wrong (default) dir and
-   * 404s — the card shows metadata (from the manifest) but a blank thumbnail.
-   */
-  projectId?: string;
+  /** Project slug — required so reference file URLs resolve to the per-project store. */
+  projectSlug?: string;
   onUpload: (files: File[]) => void;
   onFetchUrls: (urls: string[]) => void;
   onFetchRouteUrl: (url: string, pageHint: string) => void;
   onRemove: (referenceId: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
-  /**
-   * Given ONE entry URL, capture every PRD page automatically (entry origin +
-   * each PRD route, bound straight to its card). Desktop-only; the input is
-   * hidden when this isn't provided.
-   */
-  onAutoCaptureFromEntry?: (entryUrl: string) => void;
+  onUploadToRoute: (file: File, pageHint: string) => void;
 }
 
 function isImageFile(file: File): boolean {
   return ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"].includes(
     file.type,
   );
+}
+
+/**
+ * Whether a reference's `pageHint` belongs to a given route. Auto-match writes
+ * enriched hints like `"PAGE-002 monitor dashboard"` (leading token is the
+ * canonical route id), while manual binds store the bare id — match both.
+ */
+function pageHintMatchesRoute(pageHint: string, routeId: string): boolean {
+  if (!pageHint) return false;
+  return pageHint === routeId || pageHint.split(/\s+/)[0] === routeId;
 }
 
 interface RouteInfo {
@@ -49,6 +49,8 @@ interface RouteCardProps {
   onRemove: (id: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
   onFetchRouteUrl: (url: string, pageHint: string) => void;
+  onUploadToRoute: (file: File, pageHint: string) => void;
+  projectSlug?: string;
 }
 
 function RouteCard({
@@ -59,13 +61,20 @@ function RouteCard({
   onRemove,
   onDropToRoute,
   onFetchRouteUrl,
+  onUploadToRoute,
+  projectSlug,
 }: RouteCardProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [routeUrl, setRouteUrl] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Reference files live under the per-project store, so the file URL must
+  // carry `projectId` — otherwise the route falls back to the global store
+  // and 404s. `uploadedAt` is appended as a cache-buster so a Replace shows
+  // the new image instead of the stale cached one.
   const imageUrl = reference
-    ? `/api/agents/pipeline/design-references/${reference.id}/file${
-        projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""
-      }`
+    ? `/api/agents/pipeline/design-references/${reference.id}/file` +
+      `?v=${encodeURIComponent(reference.uploadedAt)}` +
+      (projectSlug ? `&projectId=${encodeURIComponent(projectSlug)}` : "")
     : null;
 
   // Border + background per state
@@ -99,6 +108,13 @@ function RouteCard({
     setRouteUrl("");
   };
 
+  const handleUploadClick = () => fileInputRef.current?.click();
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && isImageFile(file)) onUploadToRoute(file, route.id);
+    e.target.value = "";
+  };
+
   return (
     <div
       className={`relative flex flex-col rounded-xl border-2 overflow-hidden transition-colors ${cardClass}`}
@@ -106,8 +122,12 @@ function RouteCard({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Thumbnail area */}
-      <div className="relative h-28 bg-slate-100 flex items-center justify-center shrink-0">
+      {/* Thumbnail area — click to upload/replace a screenshot for this route */}
+      <div
+        className="group relative h-28 bg-slate-100 flex items-center justify-center shrink-0 cursor-pointer"
+        onClick={handleUploadClick}
+        title={reference ? "Click to replace screenshot" : "Click to upload screenshot"}
+      >
         {isMatchingThis && !reference ? (
           <div className="flex flex-col items-center gap-2">
             <RefreshCw size={18} className="text-amber-500 animate-spin" />
@@ -125,8 +145,28 @@ function RouteCard({
             }}
           />
         ) : (
-          <Image size={22} className="text-slate-300" />
+          <div className="flex flex-col items-center gap-1">
+            <Image size={22} className="text-slate-300 group-hover:text-indigo-400 transition-colors" />
+            <span className="text-[9px] text-slate-400 group-hover:text-indigo-500 transition-colors">
+              Click to upload
+            </span>
+          </div>
         )}
+
+        {/* Hover overlay on an already-matched image */}
+        {imageUrl && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 opacity-0 group-hover:opacity-100 transition-all pointer-events-none">
+            <span className="text-[10px] font-medium text-white">Click to replace</span>
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={handleFileChange}
+        />
 
         {/* Badges — only shown on matched cards */}
         {reference && (
@@ -181,7 +221,7 @@ function RouteCard({
             </div>
             <div className="flex gap-1">
               <button
-                onClick={() => onRemove(reference.id)}
+                onClick={handleUploadClick}
                 className="flex-1 text-[9px] bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 rounded-md py-0.5 transition-colors"
               >
                 Replace
@@ -222,13 +262,13 @@ export function RouteReferenceGrid({
   prdContent,
   references,
   isMatching,
-  projectId,
+  projectSlug,
   onUpload,
   onFetchUrls,
   onFetchRouteUrl,
   onRemove,
   onDropToRoute,
-  onAutoCaptureFromEntry,
+  onUploadToRoute,
 }: RouteReferenceGridProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [urlInput, setUrlInput] = useState("");
@@ -247,11 +287,11 @@ export function RouteReferenceGrid({
   }));
 
   const matchedCount = routes.filter((r) =>
-    references.some((ref) => pageHintOwnsRoute(ref.pageHint, r.id)),
+    references.some((ref) => pageHintMatchesRoute(ref.pageHint, r.id)),
   ).length;
 
   const cssTokenCount = references.filter(
-    (r) => r.cssToken && routes.some((route) => pageHintOwnsRoute(r.pageHint, route.id)),
+    (r) => r.cssToken && routes.some((route) => pageHintMatchesRoute(r.pageHint, route.id)),
   ).length;
 
   const handleFileDrop = useCallback(
@@ -380,12 +420,12 @@ export function RouteReferenceGrid({
                 {cssTokenCount > 0 && ` · ${cssTokenCount} with CSS token`}
               </span>
             </span>
-            <span className="text-[10px] text-slate-400">Drag an image onto a card to override</span>
+            <span className="text-[10px] text-slate-400">Click a card to upload · or drag an image onto it</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {routes.map((route) => {
               const reference = references.find((r) =>
-                pageHintOwnsRoute(r.pageHint, route.id),
+                pageHintMatchesRoute(r.pageHint, route.id),
               );
               return (
                 <RouteCard
@@ -397,6 +437,8 @@ export function RouteReferenceGrid({
                   onRemove={onRemove}
                   onDropToRoute={onDropToRoute}
                   onFetchRouteUrl={onFetchRouteUrl}
+                  onUploadToRoute={onUploadToRoute}
+                  projectSlug={projectSlug}
                 />
               );
             })}

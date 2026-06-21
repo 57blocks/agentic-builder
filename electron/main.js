@@ -125,11 +125,18 @@ const TOKEN_EXTRACT_SCRIPT = `(() => {
   // best-effort — when the document has no matching element we just skip
   // the entry. The chosen properties are the ones a coding agent most
   // commonly has to guess from the screenshot.
+  // NOTE: computed COLOUR properties (background-color / color) are
+  // intentionally NOT sampled. The scraped semantic custom-props (--bg,
+  // --text, …) already cover colour, and a body-level computed colour
+  // routinely DISAGREES with them (observed: computed body bg cool-grey
+  // while the design is warm), which mis-leads the coding model. Only
+  // TYPOGRAPHY + SPACING + RADII are sampled — numeric values the model
+  // genuinely cannot eyeball from a screenshot.
   const ANCHORS = [
     ['h1',      'h1',                                ['font-size','line-height','font-weight','font-family','letter-spacing']],
     ['h2',      'h2',                                ['font-size','line-height','font-weight','font-family']],
     ['h3',      'h3',                                ['font-size','line-height','font-weight']],
-    ['body',    'body',                              ['font-size','line-height','font-family','background-color','color']],
+    ['body',    'body',                              ['font-size','line-height','font-family']],
     ['p',       'p',                                 ['font-size','line-height']],
     ['button',  'button, [role="button"]',           ['font-size','line-height','padding','border-radius','font-weight']],
     ['input',   'input:not([type="hidden"]), select, textarea', ['font-size','line-height','padding','border-radius']],
@@ -144,11 +151,18 @@ const TOKEN_EXTRACT_SCRIPT = `(() => {
     for (const p of props) {
       const v = cs.getPropertyValue(p);
       if (!v) continue;
-      const trimmed = String(v).trim();
+      let trimmed = String(v).trim();
       if (!trimmed) continue;
       // Skip default/uninteresting values that would just add noise.
       if (trimmed === 'normal' || trimmed === 'none' || trimmed === 'auto') continue;
       if (trimmed === 'rgba(0, 0, 0, 0)' || trimmed === 'transparent') continue;
+      // Clamp pathological border-radius: a pill shape computes to a giant
+      // value (e.g. 3.35544e+07px) that, copied verbatim, breaks the build.
+      // Normalise anything above 9999px to a usable "fully rounded" value.
+      if (p === 'border-radius') {
+        const n = parseFloat(trimmed);
+        if (!isFinite(n) || n > 9999) trimmed = '9999px';
+      }
       vars['--computed-' + prefix + '-' + p] = trimmed;
     }
   }
