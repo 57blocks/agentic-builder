@@ -94,3 +94,5 @@ agentic-builds/
 .blueprint/projects/
 # Ad-hoc comparison screenshots dropped at the repo root (PixPin exports, scratch shots)
 /*.png
+
+.projects/

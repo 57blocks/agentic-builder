@@ -368,6 +368,7 @@ function buildArchitectPrompt(): string {
     `- If the project uses the \`@\` alias, wire it in both \`vite.config.ts\` and \`tsconfig.json\`.`,
     `- API response DTOs must be narrow shapes — never alias \`type MeResponseDto = User\`.`,
     `- Shared packages: import by package name from context, never invent \`@shared/*\`.`,
+    `- **Backend \`db.ts\` (Sequelize connection) — HARD RULE:** when \`DATABASE_URL\` is missing, only \`throw\` in NON-test environments. In a test process (\`process.env.NODE_ENV === "test"\` OR a non-empty \`process.env.VITEST\`) fall back to in-memory SQLite — \`new Sequelize({ dialect: "sqlite", storage: ":memory:", logging: false })\` — instead of throwing. A top-level \`throw new Error("DATABASE_URL is required")\` that runs unconditionally is FORBIDDEN: the TDD gate strips \`DATABASE_URL\`, so an unconditional throw crashes every backend test at import and deadlocks the gate. Postgres-only options (\`dialectOptions.ssl\`) must be applied only on the postgres branch. The scaffold ships a correct \`backend/src/db.ts\` — extend it, do not replace this fallback.`,
     ``,
     FRONTEND_IMPORT_RULES,
     WORKER_READONLY_TOOLS_GUIDE,

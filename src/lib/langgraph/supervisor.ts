@@ -521,7 +521,8 @@ async function invokeArchitectWorkers(
   generatedFiles: GeneratedFile[];
   workerCostUsd: number;
 }> {
-  const tasks = ((input as { tasks?: CodingTask[] }).tasks ?? []) as CodingTask[];
+  const tasks = ((input as { tasks?: CodingTask[] }).tasks ??
+    []) as CodingTask[];
   const merge = (rs: WorkerState[]) => ({
     taskResults: rs.flatMap((r) => r.taskResults ?? []),
     generatedFiles: rs.flatMap((r) => r.generatedFiles ?? []),
@@ -1251,7 +1252,11 @@ async function scaffoldFix(state: SupervisorState) {
     }
   }
 
-  const codeFixChain = resolveCodingChain(state.codingMode, "codeFix", "gpt-4o");
+  const codeFixChain = resolveCodingChain(
+    state.codingMode,
+    "codeFix",
+    "gpt-4o",
+  );
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -2019,9 +2024,7 @@ async function e2eVerifyAndFix(
       // as visible "skipped" warnings in the playwright report.
       let unfilledKeysBlock = "";
       try {
-        const declaredResources = await readResourceRequirements(
-          process.cwd(),
-        );
+        const declaredResources = await readResourceRequirements(process.cwd());
         unfilledKeysBlock = formatUnfilledKeysForE2EPrompt(declaredResources);
         if (unfilledKeysBlock) {
           console.log(
@@ -2390,7 +2393,11 @@ async function e2eVerifyAndFix(
     });
   }
 
-  const e2eModelChain = resolveCodingChain(state.codingMode, "e2eGen", "gpt-4o");
+  const e2eModelChain = resolveCodingChain(
+    state.codingMode,
+    "e2eGen",
+    "gpt-4o",
+  );
   const testTaskContext = summarizeE2eTaskContext(state.testTasks);
   const testFiles = (await listFiles("frontend", state.outputDir))
     .filter((f) => /\.(spec|test)\.(ts|tsx|js|jsx)$/.test(f))
@@ -3091,8 +3098,7 @@ async function contractTaskCoverage(
     );
     return {};
   }
-  const tierMatch =
-    readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
+  const tierMatch = readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
   const tier: ProjectTier = normalizeProjectTier(tierMatch?.[1]);
 
   // ── 4. Repair ─────────────────────────────────────────────────────────
@@ -3251,7 +3257,9 @@ async function pageTaskCoverage(
   }
 
   if (repaired.added.length === 0) {
-    console.log(`${label}: no supplementary page tasks produced; ${repaired.finalMissingPageIds.length} page(s) still uncovered.`);
+    console.log(
+      `${label}: no supplementary page tasks produced; ${repaired.finalMissingPageIds.length} page(s) still uncovered.`,
+    );
     return {};
   }
 
@@ -3786,9 +3794,15 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     .join("");
 
   const _fePreview = feContext.slice(0, 50).replace(/\n/g, "↵");
-  console.log(`[Supervisor] feContext (${feContext.length} chars): "${_fePreview}…" — writing to /tmp/fe-context-debug.txt`);
+  console.log(
+    `[Supervisor] feContext (${feContext.length} chars): "${_fePreview}…" — writing to /tmp/fe-context-debug.txt`,
+  );
   try {
-    require("fs").writeFileSync("/tmp/fe-context-debug.txt", feContext, "utf-8");
+    require("fs").writeFileSync(
+      "/tmp/fe-context-debug.txt",
+      feContext,
+      "utf-8",
+    );
   } catch (e) {
     console.warn("[Supervisor] feContext write failed:", e);
   }
@@ -3798,7 +3812,8 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     (tasks, i) =>
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
-        workerLabel: feWorkerCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
+        workerLabel:
+          feWorkerCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
         tasks,
         outputDir: state.outputDir,
         projectContext: feContext,
@@ -4022,7 +4037,10 @@ async function schemaArbiter(
     `[Supervisor] schemaArbiter: ${pending.length} pending schema-change-request(s) — reviewing against PRD.`,
   );
 
-  const canonical = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
+  const canonical = await fsRead(
+    ".blueprint/shared-schema.ts",
+    state.outputDir,
+  );
   if (canonical.startsWith("FILE_NOT_FOUND") || !canonical.trim()) {
     // No canonical schema to amend — record and move on.
     await recordUnresolvedProblem(state.outputDir, {
@@ -4069,7 +4087,10 @@ async function schemaArbiter(
   ];
 
   const chain = resolveCodingChain(state.codingMode, "taskBreakdown", "gpt-4o");
-  let parsed: { decisions?: ArbiterDecisionRaw[]; updatedSchema?: string | null };
+  let parsed: {
+    decisions?: ArbiterDecisionRaw[];
+    updatedSchema?: string | null;
+  };
   try {
     const response = await chatCompletionWithFallback(messages, chain, {
       temperature: 0.1,
@@ -4106,7 +4127,8 @@ async function schemaArbiter(
 
   const decisionsRaw = Array.isArray(parsed.decisions) ? parsed.decisions : [];
   const byKey = new Map<string, SchemaChangeRequest>();
-  for (const p of pending) byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
+  for (const p of pending)
+    byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
 
   const accepted: SchemaChangeDecision[] = [];
   const all: SchemaChangeDecision[] = [];
@@ -5481,7 +5503,10 @@ async function invokeWorkerBatched(base: WorkerState): Promise<WorkerState> {
   let cost = 0;
   const batchCount = Math.ceil(tasks.length / WORKER_BATCH_SIZE);
   for (let b = 0; b < batchCount; b++) {
-    const batch = tasks.slice(b * WORKER_BATCH_SIZE, (b + 1) * WORKER_BATCH_SIZE);
+    const batch = tasks.slice(
+      b * WORKER_BATCH_SIZE,
+      (b + 1) * WORKER_BATCH_SIZE,
+    );
     console.log(
       `[Supervisor] ${base.workerLabel}: worker batch ${b + 1}/${batchCount} (${batch.length} tasks)…`,
     );
@@ -5657,7 +5682,8 @@ async function feRouteConsolidation(
   const views: ViewModule[] = [];
   for (const f of viewFiles) {
     const src = await fsRead(f, state.outputDir);
-    if (src.startsWith("FILE_NOT_FOUND") || src.startsWith("REJECTED")) continue;
+    if (src.startsWith("FILE_NOT_FOUND") || src.startsWith("REJECTED"))
+      continue;
     const exp = detectViewExport(src);
     if (!exp) continue;
     views.push({
@@ -5723,7 +5749,12 @@ async function feRouteConsolidation(
   };
 
   let routerSrc = "";
-  let guard = { ok: false, missingViews: [] as string[], hasPlaceholder: false, wiresRouter: false };
+  let guard = {
+    ok: false,
+    missingViews: [] as string[],
+    hasPlaceholder: false,
+    wiresRouter: false,
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     const corrective =
       attempt === 0
@@ -6223,7 +6254,7 @@ function parseValidationSuiteResult(
       const skipped = suite.skipped === true ? " (skipped)" : "";
       return `${name}: ${status}${skipped}`;
     });
-  return {
+    return {
       parsed: true,
       pass: data.pass === true,
       summary:
@@ -6321,7 +6352,9 @@ async function integrationVerifyAndFix(
       phase: "integration",
       attempts: priorIntegrationAttempts,
       summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${totalBudget} iterations without clearing the gate.`,
-      evidence: state.integrationErrors ? [state.integrationErrors.slice(0, 500)] : undefined,
+      evidence: state.integrationErrors
+        ? [state.integrationErrors.slice(0, 500)]
+        : undefined,
       artifacts: [".ralph/runtime-smoke.json", ".ralph/tdd-review.json"],
     });
     return {
@@ -6418,7 +6451,10 @@ async function integrationVerifyAndFix(
       // reflect the post-install state instead of the stale snapshot.
       try {
         const reAudit = await auditImportDependencyConsistency(state.outputDir);
-        if (reAudit.remainingIssues.length < initialDependencyAudit.remainingIssues.length) {
+        if (
+          reAudit.remainingIssues.length <
+          initialDependencyAudit.remainingIssues.length
+        ) {
           console.log(
             `${label}: dependency auto-install resolved ${initialDependencyAudit.remainingIssues.length - reAudit.remainingIssues.length} issue(s); ${reAudit.remainingIssues.length} remaining.`,
           );
@@ -6601,7 +6637,9 @@ async function integrationVerifyAndFix(
       console.log(
         `${label}: runtime-integration-audit found ${runtimeAuditResult.findings.length} residual finding(s) (${errCount} error, ${warnCount} warn) across ${Object.keys(runtimeAuditResult.byRule).length} rule(s)${fixedSummary}.`,
       );
-    } else if (runtimeAuditDispatch.deterministicFixes.some((o) => o.appliedAny)) {
+    } else if (
+      runtimeAuditDispatch.deterministicFixes.some((o) => o.appliedAny)
+    ) {
       const fixed = runtimeAuditDispatch.deterministicFixes.filter(
         (o) => o.appliedAny,
       );
@@ -7229,7 +7267,9 @@ async function integrationVerifyAndFix(
           typeof parsed === "object" &&
           parsed !== null &&
           "classifications" in parsed &&
-          Array.isArray((parsed as { classifications: unknown[] }).classifications)
+          Array.isArray(
+            (parsed as { classifications: unknown[] }).classifications,
+          )
         ) {
           const classifications = (
             parsed as {
@@ -7278,8 +7318,8 @@ async function integrationVerifyAndFix(
   const runtimeAuditBlock = runtimeAuditDispatch
     ? formatRuntimeAuditTasksBlock(runtimeAuditDispatch)
     : runtimeAuditResult
-    ? formatRuntimeAuditBlock(runtimeAuditResult)
-    : "";
+      ? formatRuntimeAuditBlock(runtimeAuditResult)
+      : "";
 
   const adminRouteCoverageBlock = adminRouteCoverageResult
     ? formatAdminRouteCoverageBlock(adminRouteCoverageResult)
@@ -7835,7 +7875,6 @@ async function integrationVerifyAndFix(
         let validationGatePassed = !validationStale;
         let validationSummaryLine = "";
 
-
         if (reportedStatus === "pass" && validationStale) {
           console.log(
             `${label}: report_done(pass) requested while stale — running system final validation instead of rejecting.`,
@@ -7926,7 +7965,10 @@ async function integrationVerifyAndFix(
 
           // All gates pass — accept.
           finalStatus = "pass";
-          finalSummary = [String(args.summary ?? "").trim(), validationSummaryLine]
+          finalSummary = [
+            String(args.summary ?? "").trim(),
+            validationSummaryLine,
+          ]
             .filter(Boolean)
             .join("\n\n");
           doneSignaled = true;
@@ -7979,18 +8021,35 @@ async function integrationVerifyAndFix(
           continue;
         }
         if (!validationStale && isIntegrationMutationTool(tc.function.name)) {
-          const result =
-            "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
-          console.log(
-            `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
-          );
-          messages.push({
-            role: "tool",
-            content: result,
-            tool_call_id: tc.id,
-            name: tc.function.name,
+          // Freezing edits after fresh validation must be TDD-aware. Scoped
+          // validation (tsc/build/smoke) going green does NOT mean integration
+          // is complete: the INDEPENDENT TDD hard gate can still be red, and
+          // clearing it REQUIRES file edits (fix test mocks / the implementation
+          // they target / db.ts). Without this check the worker hit an
+          // unbreakable loop — this guard said "stop editing, report_done(pass)"
+          // while the report_done guard said "can't pass, the TDD gate is red,
+          // go edit files". Only freeze mutations when BOTH scoped validation is
+          // fresh AND the TDD hard gate is green.
+          const freshTddGate = await evaluateTddHardGate(state.outputDir, {
+            sessionId: state.sessionId,
           });
-          continue;
+          if (freshTddGate.pass) {
+            const result =
+              "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
+            console.log(
+              `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
+            );
+            messages.push({
+              role: "tool",
+              content: result,
+              tool_call_id: tc.id,
+              name: tc.function.name,
+            });
+            continue;
+          }
+          console.log(
+            `${label}: allowing mutation despite fresh scoped validation — TDD hard gate still red (${freshTddGate.reasons.join("; ")}): ${tc.function.name}:${mutationPath}`,
+          );
         }
         if (
           tc.function.name === "bash" &&
@@ -8058,7 +8117,7 @@ async function integrationVerifyAndFix(
                   ...suiteTddGate.reasons.map((r) => `- ${r}`),
                   "Open the **TDD Repair Block** in the first user message and apply each concrete patch:",
                   "  • For a *missing* P0 test file: read `.ralph/test-manifest.json`, find the test by id, and write the `.test.ts` file yourself (real assertions, db mocked with sqlite::memory:).",
-                  "  • For an *unmocked ../db* import: add `vi.mock(\"../../../db\", …)` mirroring backend/src/models/index.test.ts.",
+                  '  • For an *unmocked ../db* import: add `vi.mock("../../../db", …)` mirroring backend/src/models/index.test.ts.',
                   "  • For a GREEN failure: run the test command via `bash`, read the failing assertion, and fix the test or the implementation it targets.",
                   "Then re-run `run_validation_suite` and call `report_done(pass)` only after the TDD gate is green.",
                 ].join("\n");
@@ -8097,13 +8156,13 @@ async function integrationVerifyAndFix(
           const validationKinds = detectScopedValidationKinds(command);
           if (validationKinds.length > 0) {
             for (const validationKind of validationKinds) {
-            const trendReason = noteValidationIssueTrend(
-              validationKind,
-              result,
-            );
-            if (trendReason) {
-              iterationValidationProgress = true;
-              iterationProgressReasons.push(trendReason);
+              const trendReason = noteValidationIssueTrend(
+                validationKind,
+                result,
+              );
+              if (trendReason) {
+                iterationValidationProgress = true;
+                iterationProgressReasons.push(trendReason);
               }
             }
           } else if (isMutatingSupervisorBashCommand(command)) {
@@ -8255,7 +8314,8 @@ async function integrationVerifyAndFix(
               const createdNow = stagnationStubResult.groups.filter(
                 (g) => g.created,
               ).length;
-              stagnationStubBlock = formatMissingRouteStubBlock(stagnationStubResult);
+              stagnationStubBlock =
+                formatMissingRouteStubBlock(stagnationStubResult);
               if (createdNow > 0) {
                 console.log(
                   `${label}: stagnation-escape stub generation — created ${createdNow} stub file(s) for ${routeAudit.missingContractEndpoints.length} missing contract endpoint(s).`,
@@ -8376,7 +8436,10 @@ async function integrationVerifyAndFix(
             iterationsConsumed: iterations - lastMeaningfulProgressIteration,
             chat: async (msgs) => {
               const replanChain = resolveModelChain(
-                resolveCodingModelConfigValue(state.codingMode, "taskBreakdown"),
+                resolveCodingModelConfigValue(
+                  state.codingMode,
+                  "taskBreakdown",
+                ),
                 resolveModel,
               );
               const resp = await chatCompletionWithFallback(
@@ -8495,7 +8558,10 @@ async function integrationVerifyAndFix(
           attempts: iterations,
           summary: `Stagnation fallback exhausted — LLM could not determine the right action${repeatedAction ? ` (most repeated: ${repeatedAction})` : ""}; escalating to human decision.`,
           evidence: [humanDecisionContext.slice(0, 500)],
-          artifacts: [".ralph/contract-usage-coverage.json", ".ralph/runtime-smoke.json"],
+          artifacts: [
+            ".ralph/contract-usage-coverage.json",
+            ".ralph/runtime-smoke.json",
+          ],
         });
         console.warn(
           `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
@@ -9037,11 +9103,11 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   const coverage = (await tryReadJson(
     ".ralph/contract-usage-coverage.json",
   )) as {
-        pendingRepairTasks?: Array<{
-          method?: string;
-          endpoint?: string;
-          directive?: string;
-        }>;
+    pendingRepairTasks?: Array<{
+      method?: string;
+      endpoint?: string;
+      directive?: string;
+    }>;
   } | null;
   if (
     coverage?.pendingRepairTasks &&
@@ -9078,8 +9144,10 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     } | null;
     if (routeAuditSnap) {
       const lines: string[] = [];
-      for (const m of routeAuditSnap.unregisteredModules ?? []) lines.push(`unregistered: ${m}`);
-      for (const r of routeAuditSnap.unresolvedRegistrations ?? []) lines.push(`unresolved registration: ${r}`);
+      for (const m of routeAuditSnap.unregisteredModules ?? [])
+        lines.push(`unregistered: ${m}`);
+      for (const r of routeAuditSnap.unresolvedRegistrations ?? [])
+        lines.push(`unresolved registration: ${r}`);
       if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
     }
   }
@@ -9099,14 +9167,14 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     directive?: string;
   }> | null;
   if (Array.isArray(runtimeTasks)) {
-    const errorTasks = runtimeTasks.filter(
-      (t) => t?.severity === "error",
-    );
+    const errorTasks = runtimeTasks.filter((t) => t?.severity === "error");
     if (errorTasks.length > 0) {
-      out.runtimeAuditErrors = errorTasks.slice(0, 8).map(
-        (t) =>
-          `[${t.ruleId ?? "?"}] ${t.file ?? "?"}:${t.line ?? 0} — ${t.directive ?? ""}`,
-      );
+      out.runtimeAuditErrors = errorTasks
+        .slice(0, 8)
+        .map(
+          (t) =>
+            `[${t.ruleId ?? "?"}] ${t.file ?? "?"}:${t.line ?? 0} — ${t.directive ?? ""}`,
+        );
     }
   }
 
@@ -9162,7 +9230,9 @@ async function backendReadinessGate(
   if (state.backendTasks.length === 0) return {}; // frontend-only project
 
   let notGreen = Boolean(state.scaffoldErrors && state.scaffoldErrors.trim());
-  let reason = notGreen ? "backend verify+fix ended with unresolved errors" : "";
+  let reason = notGreen
+    ? "backend verify+fix ended with unresolved errors"
+    : "";
   try {
     const tsc = await runBackendTscGate(state.outputDir);
     if (!tsc.skipped && !tsc.pass) {
@@ -9204,7 +9274,9 @@ async function backendReadinessGate(
     gate: "backend-readiness",
     phase: "backend",
     summary: `Backend not green before frontend phase — ${reason}`,
-    evidence: state.scaffoldErrors ? [state.scaffoldErrors.slice(0, 500)] : undefined,
+    evidence: state.scaffoldErrors
+      ? [state.scaffoldErrors.slice(0, 500)]
+      : undefined,
     artifacts: [".ralph/tsc-diagnostics.json", ".ralph/runtime-smoke.json"],
   });
   // Two modes once the backend is NOT green (both keep the quarantine marker above):
@@ -9242,7 +9314,9 @@ export function routeAfterBackendReadiness(state: SupervisorState): string {
   const decision = decideBackendReadinessRoute({
     flagOn: process.env.BLUEPRINT_BACKEND_GATE_BEFORE_FRONTEND === "1",
     hasBackendTasks: state.backendTasks.length > 0,
-    backendNotGreen: Boolean(state.scaffoldErrors && state.scaffoldErrors.trim()),
+    backendNotGreen: Boolean(
+      state.scaffoldErrors && state.scaffoldErrors.trim(),
+    ),
     hardStop: process.env.BLUEPRINT_BACKEND_GATE_MODE === "hard-stop",
   });
   return decision === "stop" ? "summary" : "extract_real_contracts";
@@ -9401,8 +9475,10 @@ function buildFrontendPhaseSubgraph() {
     .compile();
 }
 
-let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null = null;
-let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null = null;
+let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null =
+  null;
+let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null =
+  null;
 
 async function parallelCodegenPhase(
   state: SupervisorState,
@@ -9445,7 +9521,8 @@ async function parallelCodegenPhase(
     ],
     // Summed channel: return the combined delta; the main-graph reducer adds it to
     // the base exactly once.
-    totalCostUsd: beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
+    totalCostUsd:
+      beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
     fileRegistry: [...filesByPath.values()],
   };
 
