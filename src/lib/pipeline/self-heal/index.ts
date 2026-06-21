@@ -178,3 +178,12 @@ export type {
   RouteStubGroup,
   GenerateMissingRouteStubsResult,
 } from "./missing-route-stubs";
+export {
+  healDbTestFallback,
+  diagnoseDbSource,
+  rewriteDbSource,
+} from "./db-test-fallback-doctor";
+export type {
+  DbTestFallbackDiagnosis,
+  DbTestFallbackDoctorResult,
+} from "./db-test-fallback-doctor";

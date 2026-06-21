@@ -182,11 +182,22 @@ async function runOneTest(
       maxBuffer: 5 * 1024 * 1024,
       // Hard guarantee: TDD unit tests must never reach the real (kickoff)
       // database. Blanking DATABASE_URL means a test that imports the real db
-      // module (instead of mocking it) fails fast with "DATABASE_URL is
-      // required" rather than dialing the live Postgres. backend/.env is also
-      // neutralized for the phase (see runTddRuntimePhase) because the
-      // generated db.ts re-loads it via dotenv.
-      env: { ...process.env, FORCE_COLOR: "0", DATABASE_URL: "" },
+      // module cannot dial the live Postgres. backend/.env is also neutralized
+      // for the phase (see runTddRuntimePhase) because the generated db.ts
+      // re-loads it via dotenv.
+      //
+      // NODE_ENV=test is set explicitly so the db layer's "no DATABASE_URL"
+      // branch is deterministic: instead of throwing, a test-aware db.ts falls
+      // back to `sqlite::memory:` (vitest also sets VITEST, but pinning
+      // NODE_ENV here makes the fallback independent of the runner). This keeps
+      // the "tests can't touch the real DB" guarantee while letting the suite
+      // actually run on an in-memory database.
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0",
+        DATABASE_URL: "",
+        NODE_ENV: "test",
+      },
     });
     const output = `${stdout ?? ""}${stderr ?? ""}`.trim();
     const greenPass = phase === "green";
