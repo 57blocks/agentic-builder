@@ -6,15 +6,10 @@
  *   GET  /payments/checkout-session/:id      → PaymentStatus
  *
  * ── Path contract ───────────────────────────────────────────────────────
- * `apiClient` automatically prepends `API_BASE` (default `/api`). So callers
- * here pass paths WITHOUT the `/api` prefix.
- *
- * IMPORTANT — base vs versioned prefix:
- *   - Base scaffold mounts the apiRouter at `/api`  → use "/payments/...".
- *   - When an auth overlay (auth-password-rbac / magic-link / privy) is
- *     applied, the apiRouter is mounted at `/api/v1` → change `PAYMENTS_BASE`
- *     below to "/v1/payments". The backend route paths are identical; only
- *     the root prefix differs.
+ * `apiClient` prepends the FULL API mount prefix (API_BASE, default
+ * `/api/v1`). Callers here pass ONLY the business path — never `/api` or
+ * `/v1`. `PAYMENTS_BASE = "/payments"` + base `/api/v1` → the backend route
+ * `/api/v1/payments/...`.
  */
 
 import { apiClient } from "./client";

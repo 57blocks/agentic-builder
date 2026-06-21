@@ -14,18 +14,24 @@
  *                          message: string,
  *                          details?: unknown } }
  *
- * `apiClient.get<User>("/v1/users/me")` returns the inner `User`, NOT the
+ * `apiClient.get<User>("/users/me")` returns the inner `User`, NOT the
  * envelope — auto-unwrap is the default. The full envelope is reachable
  * via `apiClient.raw.get<...>()` for diagnostics, streaming, or callers
  * that need `ok`/`error` directly. Error envelopes are translated into
  * thrown `ApiError` instances carrying `status` + `code`.
  *
- * ── Path contract ──────────────────────────────────────────────────
+ * ── Path contract (ONE rule, no mental math) ───────────────────────
  *
- *   API_BASE = "/api"   (default — Vite dev server proxies /api → backend)
- *   override in production via VITE_API_BASE_URL.
- *   Callers MUST pass paths starting at `/v1/...` (NO leading `/api`).
- *   `apiClient.get("/v1/users/me")` → final URL `/api/v1/users/me`.
+ *   API_BASE = "/api/v1"  (default — the FULL API mount prefix, baked in
+ *   here ONCE). Override in production via VITE_API_BASE_URL.
+ *
+ *   Callers pass ONLY the business path — NEVER include `/api` or `/v1`.
+ *   To get a caller path from an API_CONTRACTS.json endpoint, strip the
+ *   `/api/v1` prefix: contract `/api/v1/users/me` → call `"/users/me"`.
+ *
+ *   ✅ `apiClient.get("/users/me")`  → final URL `/api/v1/users/me`
+ *   ❌ `apiClient.get("/api/v1/users/me")`  → `/api/v1/api/v1/users/me` (404)
+ *   ❌ `apiClient.get("/v1/users/me")`      → `/api/v1/v1/users/me` (404)
  *
  * ── Token contract ─────────────────────────────────────────────────
  *
@@ -49,7 +55,7 @@ export interface ApiConfig {
   baseURL: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
 export type ApiQueryValue = string | number | boolean | null | undefined;
 
@@ -110,15 +116,16 @@ function serialiseQuery(query: ApiRequestOptions["query"]): string {
 
 function isErrorEnvelope(
   data: unknown,
-): data is { ok: false; error: { code?: string; message?: string; details?: unknown } } {
+): data is {
+  ok: false;
+  error: { code?: string; message?: string; details?: unknown };
+} {
   if (!data || typeof data !== "object") return false;
   const o = data as { ok?: unknown; error?: unknown };
   return o.ok === false && !!o.error && typeof o.error === "object";
 }
 
-function isSuccessEnvelope(
-  data: unknown,
-): data is { ok: true; data: unknown } {
+function isSuccessEnvelope(data: unknown): data is { ok: true; data: unknown } {
   if (!data || typeof data !== "object") return false;
   const o = data as { ok?: unknown; data?: unknown };
   return o.ok === true && "data" in o;
@@ -266,11 +273,7 @@ export const apiClient = {
       );
     },
     delete<T>(path: string, opts?: ApiRequestOptions): Promise<T> {
-      return request<T>(
-        path,
-        { method: "DELETE" },
-        { ...opts, unwrap: false },
-      );
+      return request<T>(path, { method: "DELETE" }, { ...opts, unwrap: false });
     },
   },
 };

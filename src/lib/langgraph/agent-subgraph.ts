@@ -556,20 +556,30 @@ export async function buildProjectConventionCard(
     "## Project Convention Card (read before writing any code)",
   ];
 
-  // ── Detect frontend API client base URL ──────────────────────────────────
+  // ── Detect frontend API client base URL + backend mount prefix ───────────
+  // The client base already carries the FULL API mount prefix (it is kept in
+  // lock-step with the backend's `new Router({ prefix })` by the
+  // syncClientApiBase step). So callers pass ONLY the business path — never
+  // `/api` or a version segment. We surface the actual base AND a concrete,
+  // copy-pasteable example derived from it so the worker never has to do
+  // prefix mental-math (the historic double-/api and missing-/v1 404 classes).
   const clientContent = await fsRead("frontend/src/api/client.ts", outputDir);
   if (
     !clientContent.startsWith("FILE_NOT_FOUND") &&
     !clientContent.startsWith("REJECTED")
   ) {
     const baseMatch =
-      clientContent.match(/VITE_API_BASE_URL[^|]*\|\|\s*["'`]([^"'`]+)["'`]/) ??
+      clientContent.match(
+        /VITE_API_BASE_URL[^|?]*(?:\|\||\?\?)\s*["'`]([^"'`]+)["'`]/,
+      ) ??
       clientContent.match(/API_BASE\s*=\s*["'`]([^"'`]+)["'`]/) ??
       clientContent.match(/baseURL.*?["'`]([^"'`]+)["'`]/);
-    const base = baseMatch ? baseMatch[1] : "/api";
+    const base = baseMatch ? baseMatch[1] : "/api/v1";
     lines.push(
-      `- **Frontend API client base URL**: \`${base}\` — pass paths WITHOUT this prefix.`,
-      `  ✅ \`apiClient.get("/users/me")\`  ❌ \`apiClient.get("${base}/users/me")\``,
+      `- **Frontend API client base URL**: \`${base}\` — this is the FULL API prefix, prepended automatically. Pass ONLY the business path; NEVER include \`${base}\` (or any \`/api\` / \`/v1\` segment) in a call.`,
+      `  ✅ \`apiClient.get("/users/me")\` → final URL \`${base}/users/me\``,
+      `  ❌ \`apiClient.get("${base}/users/me")\` → \`${base}${base}/users/me\` (404)`,
+      `  To turn an API_CONTRACTS.json endpoint into a call path, strip the \`${base}\` prefix: contract \`${base}/users/me\` → \`apiClient.get("/users/me")\`.`,
     );
   }
 

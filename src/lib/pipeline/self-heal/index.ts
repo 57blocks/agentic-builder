@@ -187,3 +187,13 @@ export type {
   DbTestFallbackDiagnosis,
   DbTestFallbackDoctorResult,
 } from "./db-test-fallback-doctor";
+export {
+  syncClientApiBase,
+  computeSyncedClientSource,
+  extractMountPrefix,
+  extractClientBase,
+} from "./sync-client-api-base";
+export type {
+  ClientBaseSyncResult,
+  SyncClientApiBaseResult,
+} from "./sync-client-api-base";

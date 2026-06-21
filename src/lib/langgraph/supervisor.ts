@@ -95,6 +95,7 @@ import {
   generateMissingRouteStubs,
   formatMissingRouteStubBlock,
   type GenerateMissingRouteStubsResult,
+  syncClientApiBase,
 } from "@/lib/pipeline/self-heal";
 import {
   runContractCoverageGate,
@@ -4223,6 +4224,25 @@ async function schemaArbiter(
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
+  // Single-source the API prefix BEFORE any frontend worker runs: align the
+  // frontend client's API_BASE default to the backend's ACTUAL mount prefix
+  // (`new Router({ prefix })`). This makes "base + business-path == backend
+  // route" hold by construction, so frontend workers only ever pass the
+  // business path and can't split/double the `/api` or `/v1` segments.
+  try {
+    const sync = await syncClientApiBase({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+    });
+    if (sync.applied) {
+      console.log(`[Supervisor] extractRealContracts: ${sync.reason}`);
+    }
+  } catch (e) {
+    console.warn(
+      `[Supervisor] extractRealContracts: client API_BASE sync skipped (${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+
   // 1. Prefer BE-declared manifest when present.
   const manifest = await readRoutesManifest(state.outputDir);
   if (manifest && manifest.length > 0) {
