@@ -71,6 +71,7 @@ import {
 } from "./task-snapshot";
 import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
+import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
@@ -636,9 +637,9 @@ export async function buildProjectConventionCard(
           "migrations and NO migration runner — `syncModels()` runs " +
           "`sequelize.sync()` and builds every table from the model. Declare " +
           "EVERYTHING on the model under `backend/src/models/`: columns, " +
-          "`unique: true`, secondary indexes via `indexes: [{ fields: [\"col\"] }]` " +
+          '`unique: true`, secondary indexes via `indexes: [{ fields: ["col"] }]` ' +
           "in the `init()` options, and foreign keys via the column's " +
-          "`references: { model: \"<table>\", key: \"id\" }` + `onDelete`. If it " +
+          '`references: { model: "<table>", key: "id" }` + `onDelete`. If it ' +
           "is not on the model, `sync()` will NOT create it. Do NOT create a " +
           "`backend/src/database/migrations/` directory or call `queryInterface` " +
           "for schema DDL. Adding a field to a model is sufficient — no ALTER needed.",
@@ -726,7 +727,7 @@ export async function buildProjectConventionCard(
   if (presentSchemas.length > 0) {
     lines.push(
       `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
-      "- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ \"taskId\", \"typeName\", \"field\"?, \"kind\": \"missing-type\"|\"missing-field\"|\"wrong-type\"|\"other\", \"reason\", \"proposedChange\", \"endpoint\"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.",
+      '- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ "taskId", "typeName", "field"?, "kind": "missing-type"|"missing-field"|"wrong-type"|"other", "reason", "proposedChange", "endpoint"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.',
     );
   }
 
@@ -1197,7 +1198,11 @@ async function executeWorkerTool(
         stage: "worker-codegen",
         event: "worker_action",
         taskId: options.taskId,
-        details: { message: actionMsg, tool: name, durationMs: Date.now() - startedAt },
+        details: {
+          message: actionMsg,
+          tool: name,
+          durationMs: Date.now() - startedAt,
+        },
       });
     }
   }
@@ -1278,7 +1283,7 @@ async function runCodegenWorkerLoop(
   const codegenVariant =
     role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
 
-  console.log('run task with role', role,'codegenVariant', codegenVariant)
+  console.log("run task with role", role, "codegenVariant", codegenVariant);
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
     if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
@@ -1547,7 +1552,14 @@ async function runCodegenAgentSession(
   // — even mock-data factories that write zero .tsx — was burning codex.
   const codegenVariant =
     role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
-    console.log('run task with role', role,'codegenVariant', codegenVariant, 'hasVisionImage', hasVisionImage)
+  console.log(
+    "run task with role",
+    role,
+    "codegenVariant",
+    codegenVariant,
+    "hasVisionImage",
+    hasVisionImage,
+  );
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
@@ -1694,7 +1706,12 @@ async function runCodegenAgentSession(
           toolCall.function.name,
           args,
           outputDir,
-          { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId ?? task.id },
+          {
+            ...toolOptions,
+            workerLabel,
+            sessionId,
+            taskId: toolOptions?.taskId ?? task.id,
+          },
         );
         if (result.isWrite) {
           hadWriteTool = true;
@@ -2158,10 +2175,7 @@ function formatTaskFileHints(taskFiles: unknown): string {
 function isUiRenderingTask(task: CodingTask): boolean {
   const files: string[] = Array.isArray(task.files)
     ? task.files
-    : [
-        ...(task.files?.creates ?? []),
-        ...(task.files?.modifies ?? []),
-      ];
+    : [...(task.files?.creates ?? []), ...(task.files?.modifies ?? [])];
   if (files.length === 0) return false;
   const UI_PATTERNS: RegExp[] = [
     /(^|\/)(views|components|pages|screens|layouts)\/.+\.(tsx|jsx)$/i,
@@ -2828,7 +2842,9 @@ function snapshotValue(value: unknown, depth = 2): unknown {
     if (depth === 0) return `[${value.length} items]`;
     return {
       _length: value.length,
-      ...(value.length > 0 ? { "[0]": snapshotValue(value[0], depth - 1) } : {}),
+      ...(value.length > 0
+        ? { "[0]": snapshotValue(value[0], depth - 1) }
+        : {}),
     };
   }
   if (typeof value === "object") {
@@ -2844,19 +2860,19 @@ function snapshotValue(value: unknown, depth = 2): unknown {
 }
 
 const brief = (s: unknown, n = 50): string => {
-  const str = typeof s === "string" ? s : JSON.stringify(s) ?? "";
+  const str = typeof s === "string" ? s : (JSON.stringify(s) ?? "");
   return str.length <= n ? str : `${str.slice(0, n)}… (${str.length} chars)`;
 };
 
 function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
   console.log(
     `[Worker:${state.workerLabel}] ── AGENT CONTEXT SNAPSHOT ──\n` +
-    `  role           : ${state.role}\n` +
-    `  task           : ${taskTitle}\n` +
-    `  tasks          : ${state.tasks.length} total, index=${state.currentTaskIndex}\n` +
-    `  projectContext : ${brief(state.projectContext)}\n` +
-    `  fileRegistry   : ${state.fileRegistrySnapshot?.length ?? 0} entries\n` +
-    `  apiContracts   : ${state.apiContractsSnapshot?.length ?? 0} entries`,
+      `  role           : ${state.role}\n` +
+      `  task           : ${taskTitle}\n` +
+      `  tasks          : ${state.tasks.length} total, index=${state.currentTaskIndex}\n` +
+      `  projectContext : ${brief(state.projectContext)}\n` +
+      `  fileRegistry   : ${state.fileRegistrySnapshot?.length ?? 0} entries\n` +
+      `  apiContracts   : ${state.apiContractsSnapshot?.length ?? 0} entries`,
   );
 }
 
@@ -2872,7 +2888,9 @@ function findTaskDesignReference(
     title: string;
     description: string;
     coversRequirementIds?: string[];
-    files?: string[] | { creates?: string[]; modifies?: string[]; reads?: string[] };
+    files?:
+      | string[]
+      | { creates?: string[]; modifies?: string[]; reads?: string[] };
   },
   refs: DesignReferenceEntry[],
 ): DesignReferenceEntry | undefined {
@@ -3205,8 +3223,7 @@ async function generateCode(state: WorkerState) {
     // would burn ~75% more tokens AND would push the call onto the
     // expensive codex chain via the variant-selection downstream. See
     // `isUiRenderingTask` for the heuristic.
-    const isUiTask =
-      state.role === "frontend" && isUiRenderingTask(task);
+    const isUiTask = state.role === "frontend" && isUiRenderingTask(task);
     if (state.role === "frontend" && !isUiTask) {
       console.log(
         `[Worker:${state.workerLabel}] Skipping vision injection for non-UI frontend task "${task.title}" — routing through cheaper codeGen chain.`,
@@ -3263,7 +3280,8 @@ async function generateCode(state: WorkerState) {
               storedFileName: matchedRef.storedFileName,
               bytes: imgBytes.byteLength,
               imageDataUrl: dataUrl,
-              label: matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
+              label:
+                matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
             });
             if (blueprint) {
               blueprintNote =
@@ -3283,7 +3301,10 @@ async function generateCode(state: WorkerState) {
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
-              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              {
+                type: "image_url",
+                image_url: { url: dataUrl, detail: "high" },
+              },
               {
                 type: "text",
                 text:
@@ -4016,9 +4037,8 @@ async function verifyCode(state: WorkerState) {
   // blocks the task.
   if (process.env.BLUEPRINT_PER_TASK_TRANSPILE_CHECK !== "0") {
     try {
-      const { transpileCheckSource, formatTranspileDiagnostics } = await import(
-        "./per-task-transpile-check"
-      );
+      const { transpileCheckSource, formatTranspileDiagnostics } =
+        await import("./per-task-transpile-check");
       const diags: TranspileDiagnostic[] = [];
       for (const filePath of tsFiles) {
         const content = await fsRead(filePath, state.outputDir);
@@ -4070,22 +4090,88 @@ function isWorkerFixEligibleError(verifyErrors: string): boolean {
   return false;
 }
 
-function routeAfterVerify(state: WorkerState): string {
-  if (!state.verifyErrors) return "task_done";
-  // P0-C: file-plan failures (TASK_FILE_PLAN_UNFULFILLED) are now fixable
-  // alongside TypeScript errors. Other verify errors still fall through to
-  // `task_done` with warnings (unchanged legacy behaviour).
-  if (!isWorkerFixEligibleError(state.verifyErrors)) return "task_done";
+function computeWorkerMaxFix(state: WorkerState): number {
   const cfg = getWorkerTscFixConfig();
-  const maxFix = state.ralphConfig.enabled
+  return state.ralphConfig.enabled
     ? Math.min(
         state.ralphConfig.maxIterationsPerTask,
         cfg.maxFixAttemptsRalphCap,
       )
     : cfg.maxFixAttempts;
+}
+
+function routeAfterVerify(state: WorkerState): string {
+  // tsc/file verify is clean → run the worker-owned (scope=local) TDD tests
+  // before declaring the task done. Cross-cutting (integration-scope) tests
+  // are NOT run here — they only pass once the system is assembled, which is
+  // the integration stage's job.
+  if (!state.verifyErrors) return "local_tdd";
+  // P0-C: file-plan failures (TASK_FILE_PLAN_UNFULFILLED) are now fixable
+  // alongside TypeScript errors. Other verify errors still fall through to
+  // `task_done` with warnings (unchanged legacy behaviour). These give-up
+  // paths go STRAIGHT to task_done (not local_tdd) so their warning is not
+  // overwritten by a local-TDD run.
+  if (!isWorkerFixEligibleError(state.verifyErrors)) return "task_done";
+  const maxFix = computeWorkerMaxFix(state);
   if (state.fixAttempts >= maxFix) {
     console.log(
       `[Worker:${state.workerLabel}] Per-task fix: max attempts (${maxFix}) reached, continuing with warnings.`,
+    );
+    return "task_done";
+  }
+  return "task_fix";
+}
+
+/** Marker prefix so a local-TDD failure is distinguishable in logs / fix context. */
+const WORKER_LOCAL_TDD_FAIL_PREFIX = "[local-tdd] P0 local test(s) failing:";
+
+/**
+ * Run the current task's `scope=local` TDD tests (GREEN). These are
+ * self-contained — they target only files this task creates — so the producing
+ * worker is the right place to make them pass, with full local context and fast
+ * feedback, instead of deferring every red to the integration stage.
+ *
+ * Reached only when tsc/file verify is already clean. On P0 failure it records a
+ * TDD-flavoured `verifyErrors` so the shared fix loop (`task_fix` → `verify` →
+ * `local_tdd`) engages; the loop reuses the existing `fixAttempts` / maxFix
+ * budget, so it can never spin unbounded (see routeAfterLocalTdd).
+ */
+async function localTdd(state: WorkerState) {
+  const task = state.tasks[state.currentTaskIndex];
+  const result = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "green",
+    scope: "local",
+    taskIds: [task.id],
+    sessionId: state.sessionId,
+    emitter: getRepairEmitter(state.sessionId),
+  });
+
+  if (result.total === 0 || result.p0Failures.length === 0) {
+    // No local tests for this task, or all green — clear any prior marker and
+    // let routeAfterLocalTdd send us to task_done.
+    if (result.total > 0) {
+      console.log(
+        `[Worker:${state.workerLabel}] local-tdd: ${result.summary} for "${task.title}".`,
+      );
+    }
+    return { verifyErrors: "" };
+  }
+
+  const msg = `${WORKER_LOCAL_TDD_FAIL_PREFIX} ${result.p0Failures.join(", ")}. ${result.summary}`;
+  console.log(`[Worker:${state.workerLabel}] local-tdd: ${msg}`);
+  return { verifyErrors: msg };
+}
+
+function routeAfterLocalTdd(state: WorkerState): string {
+  // Clean (no local failures recorded) → done.
+  if (!state.verifyErrors) return "task_done";
+  // A local-TDD failure was recorded. Retry via the shared fix loop while
+  // budget remains; otherwise give up with a warning (completed_with_warnings).
+  const maxFix = computeWorkerMaxFix(state);
+  if (state.fixAttempts >= maxFix) {
+    console.log(
+      `[Worker:${state.workerLabel}] local-tdd: max fix attempts (${maxFix}) reached, continuing with warnings (integration gate will re-check).`,
     );
     return "task_done";
   }
@@ -4699,6 +4785,7 @@ export function createWorkerSubGraph() {
     .addNode("pick_next_task", pickNextTask)
     .addNode("generate_code", generateCode)
     .addNode("verify", verifyCode)
+    .addNode("local_tdd", localTdd)
     .addNode("task_fix", taskFix)
     .addNode("task_done", taskDone)
     .addNode("task_failed", taskFailed)
@@ -4714,9 +4801,14 @@ export function createWorkerSubGraph() {
       task_failed: "task_failed",
     })
     .addConditionalEdges("verify", routeAfterVerify, {
+      local_tdd: "local_tdd",
       task_done: "task_done",
       task_fix: "task_fix",
       task_failed: "task_failed",
+    })
+    .addConditionalEdges("local_tdd", routeAfterLocalTdd, {
+      task_done: "task_done",
+      task_fix: "task_fix",
     })
     .addEdge("task_fix", "verify")
     .addEdge("task_done", "pick_next_task")

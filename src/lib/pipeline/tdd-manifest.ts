@@ -5,7 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import type { CodingTask, TaskFilePlan } from "@/lib/pipeline/types";
-import type { TddManifestTest } from "@/lib/pipeline/tdd-evidence";
+import type { TddManifestTest, TddScope } from "@/lib/pipeline/tdd-evidence";
 
 export interface TddManifestPayload {
   generatedAt: string;
@@ -26,6 +26,79 @@ function collectTaskFiles(task: CodingTask): string[] {
   const files = task.files as TaskFilePlan | undefined;
   if (!files) return [];
   return [...files.creates, ...files.modifies, ...files.reads];
+}
+
+/** Files this task CREATES (the only files a `local` test may target). */
+function taskCreatedFiles(task: CodingTask): string[] {
+  if (Array.isArray(task.files)) return task.files;
+  const files = task.files as TaskFilePlan | undefined;
+  return files?.creates ?? [];
+}
+
+/** Test types whose assertions are pure logic against task-owned files. */
+const LOCAL_ELIGIBLE_TYPES = new Set(["unit", "util"]);
+
+/**
+ * Assembly / wiring files a `local` test must NOT depend on — touching any of
+ * these means the test only passes once the system is wired together, which is
+ * the integration stage's job.
+ */
+function isAssemblyFile(file: string): boolean {
+  return (
+    /(^|\/)index\.ts$/.test(file) ||
+    /(^|\/)router\.tsx?$/.test(file) ||
+    /(^|\/)app\.ts$/.test(file) ||
+    /(^|\/)server\.ts$/.test(file) ||
+    /\.routes\.ts$/.test(file) ||
+    /(^|\/)associations\.ts$/.test(file)
+  );
+}
+
+/**
+ * Conservative scope classifier. A test is `local` (runnable & owned by the
+ * producing worker) ONLY when ALL hold:
+ *   1. its `type` is a pure-logic kind (unit / util);
+ *   2. every `targetFiles` entry is a file the owning task CREATES (no
+ *      dependency on other tasks' or scaffold files);
+ *   3. no target is an assembly/registration file (index/router/app/server/
+ *      *.routes/associations);
+ *   4. the command runs a single test file, not the whole suite.
+ * Anything else ⇒ `integration` (the safe default). This deliberately errs
+ * toward `integration`: a mis-promoted cross-cutting test would "fail" in the
+ * worker where it cannot be fixed, so we only promote provably self-contained
+ * tests.
+ */
+export function classifyTddScope(
+  test: {
+    type?: string;
+    targetFiles?: string[];
+    command?: string;
+    file?: string;
+  },
+  createdFiles: string[],
+): TddScope {
+  const type = (test.type ?? "").toLowerCase();
+  if (!LOCAL_ELIGIBLE_TYPES.has(type)) return "integration";
+
+  const targets = test.targetFiles ?? [];
+  if (targets.length === 0) return "integration";
+
+  const created = new Set(createdFiles);
+  for (const t of targets) {
+    if (!created.has(t)) return "integration";
+    if (isAssemblyFile(t)) return "integration";
+  }
+
+  // Command must be file-scoped (e.g. `pnpm test <file>`), never a bare
+  // `pnpm test` / `vitest run` that executes the entire suite.
+  const command = (test.command ?? "").trim();
+  const file = test.file ?? "";
+  const base = file.split("/").pop() ?? "";
+  const runsSingleFile =
+    (!!file && command.includes(file)) || (!!base && command.includes(base));
+  if (!runsSingleFile) return "integration";
+
+  return "local";
 }
 
 /**
@@ -71,6 +144,7 @@ export async function writeTddManifestFromTasks(
   const tests: TddManifestTest[] = [];
 
   for (const task of tasks) {
+    const createdFiles = taskCreatedFiles(task);
     for (const test of task.tddPlan?.tests ?? []) {
       const targetFiles = collectTaskFiles(task).filter(
         (file) => file !== test.file,
@@ -85,6 +159,10 @@ export async function writeTddManifestFromTasks(
           `[TddManifest] Coerced JSX test extension: ${test.file} → ${file} (renders a React component; .ts cannot contain JSX).`,
         );
       }
+      const scope = classifyTddScope(
+        { type: test.type, targetFiles, command, file },
+        createdFiles,
+      );
       tests.push({
         id: test.id,
         taskId: task.id,
@@ -96,6 +174,7 @@ export async function writeTddManifestFromTasks(
         command,
         expectedRed: test.expectedRed,
         expectedGreen: test.expectedGreen,
+        scope,
       });
     }
   }

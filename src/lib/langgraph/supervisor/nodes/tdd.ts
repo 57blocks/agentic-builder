@@ -92,9 +92,13 @@ export async function tddGreenVerifyAndReview(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
   const emitter = getRepairEmitter(state.sessionId);
+  // Integration gate runs only the cross-cutting (scope=integration) tests.
+  // Self-contained (scope=local) tests were already verified in their owning
+  // worker's per-task fix loop, so re-running them here would be wasted work.
   let green = await runTddRuntimePhase({
     outputDir: state.outputDir,
     phase: "green",
+    scope: "integration",
     emitter,
     sessionId: state.sessionId,
   });
@@ -118,6 +122,7 @@ export async function tddGreenVerifyAndReview(
       green = await runTddRuntimePhase({
         outputDir: state.outputDir,
         phase: "green",
+        scope: "integration",
         emitter,
         sessionId: state.sessionId,
       });
