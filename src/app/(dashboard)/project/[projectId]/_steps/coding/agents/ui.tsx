@@ -46,7 +46,6 @@ import { TaskNode, type TaskNodeData } from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
-import { StatusBar } from "./components/StatusBar";
 import { TaskSearchBox } from "./components/TaskSearchBox";
 import { ServerConsolePanel } from "./components/ServerConsolePanel";
 import { useElapsedTimer } from "./use-elapsed-timer";
@@ -901,17 +900,15 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         </AnimatePresence>
       </div>
 
-      {/* ─── Bottom status bar ──────────────────────────────────────────────── */}
-      <StatusBar
+      {/* ─── Bottom bar: system status + live server console (merged) ───────── */}
+      <ServerConsolePanel
+        logs={codingState.serverLogs}
+        onClear={() => useCodingStore.setState({ serverLogs: [] })}
         isRunning={isRunning}
         isCompleted={isDone}
         isFailed={isFailed}
         isReturnVisit={isReturnVisit}
         onAbort={() => codingState.reset()}
-      />
-      <ServerConsolePanel
-        logs={codingState.serverLogs}
-        onClear={() => useCodingStore.setState({ serverLogs: [] })}
       />
 
       {/* Pick-and-rerun overlay */}
