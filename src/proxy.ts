@@ -11,8 +11,7 @@ const PUBLIC_PATHS = ["/login", "/api/auth"];
  * session. Do NOT set this env var in any deployed environment.
  */
 const DEV_AUTH_BYPASS =
-  process.env.NODE_ENV !== "production" &&
-  process.env.DEV_AUTH_BYPASS === "1";
+  process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_BYPASS === "1";
 
 const DEV_BYPASS_EMAIL = "dev@57blocks.com";
 
@@ -27,10 +26,11 @@ export async function proxy(req: NextRequest) {
   const payload = token ? await verifyToken(token) : null;
 
   // Dev-only auto-login: issue a session cookie and let the request through.
-  if (!payload && DEV_AUTH_BYPASS) {
-    const res = pathname.startsWith("/login")
-      ? NextResponse.redirect(new URL("/", req.url))
-      : NextResponse.next();
+  // EXCEPT when the user explicitly navigates to /login — otherwise logout
+  // (which clears the cookie then routes to /login) would immediately be
+  // re-authenticated and bounced back to "/", making logout impossible.
+  if (!payload && DEV_AUTH_BYPASS && !pathname.startsWith("/login")) {
+    const res = NextResponse.next();
     const devToken = await signToken(DEV_BYPASS_EMAIL);
     res.cookies.set(COOKIE_NAME, devToken, {
       httpOnly: true,

@@ -130,7 +130,10 @@ export async function syncClientApiBase(input: {
     };
   }
   const clientSrc = await fsRead(CLIENT_REL, outputDir);
-  if (clientSrc.startsWith("FILE_NOT_FOUND") || clientSrc.startsWith("REJECTED")) {
+  if (
+    clientSrc.startsWith("FILE_NOT_FOUND") ||
+    clientSrc.startsWith("REJECTED")
+  ) {
     return {
       applied: false,
       reason: "frontend client.ts not found",

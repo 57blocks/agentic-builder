@@ -96,3 +96,4 @@ agentic-builds/
 /*.png
 
 .projects/
+run.log

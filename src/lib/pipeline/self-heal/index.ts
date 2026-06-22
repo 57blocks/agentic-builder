@@ -21,9 +21,7 @@ export {
 } from "./events";
 export type { RepairEvent, RepairEmitter, RepairStage } from "./events";
 export { createJsonlRepairSink } from "./jsonl-sink";
-export {
-  runFeatureChecklistAudit,
-} from "./feature-checklist-audit";
+export { runFeatureChecklistAudit } from "./feature-checklist-audit";
 export { auditFrontendWiring } from "./wiring-audit";
 export { auditModelSchemaAlignment } from "./model-schema-audit";
 export type { ModelSchemaAuditInput } from "./model-schema-audit";

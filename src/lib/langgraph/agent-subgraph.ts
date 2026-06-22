@@ -163,17 +163,40 @@ async function withLlmCallTimeout<T>(
     cleanup();
   }
 }
-// Raise the iteration ceiling so complex tasks have enough read rounds.
-// 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
-// enough budget while still bounding the worst case.
-// Anti read-only spiral: inject a nudge when the model has read for too long.
-// Set relative to MAX_WORKER_TOOL_ITERATIONS so the nudge happens near the end,
-// not in the middle — we don't want to cut short legitimate reads.
-const READ_STALL_NUDGE_AFTER = 5; // nudge at round 5/10
-// Force tool_choice:"none" only when very close to the limit, as a last resort.
-// At this point the model has had ample reads; we'd rather get imperfect code
-// than throw an iteration-exceeded error.
-const READ_STALL_FORCE_WRITE_AFTER = 8; // force-write at round 8/10
+// Anti read-only spiral thresholds. A model that keeps calling
+// read_file/list_files/grep without ever writing would otherwise spin to the
+// iteration ceiling. Three graduated stages:
+//   1. NUDGE  — inject a system prompt telling the model to stop reading + write.
+//   2. FORCE  — pin `tool_choice` to the `write_file` function so the model MUST
+//      call it (NOT `tool_choice:"none"`, which strips all tools and made
+//      tool-calling models like deepseek-v4 give up with bare "STATUS: DONE",
+//      deadlocking the loop — see history of this constant).
+//   3. GIVE UP — if even forced write produces no file after several rounds,
+//      bail out of the loop (return incomplete) so the upper-level attempt
+//      retry takes over instead of burning rounds + tokens to the ceiling.
+const READ_STALL_NUDGE_AFTER = (() => {
+  const raw = Number(process.env.CODEGEN_READ_STALL_NUDGE_AFTER ?? "30");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 30;
+})();
+const READ_STALL_FORCE_WRITE_AFTER = (() => {
+  const raw = Number(process.env.CODEGEN_READ_STALL_FORCE_WRITE_AFTER ?? "50");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 50;
+})();
+// How many CONSECUTIVE forced-write rounds may produce zero writes before we
+// give up on the task. Counted from FORCE_WRITE_AFTER, so the absolute round is
+// READ_STALL_FORCE_WRITE_AFTER + READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS.
+const READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS = (() => {
+  const raw = Number(
+    process.env.CODEGEN_READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS ?? "20",
+  );
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
+})();
+// Forced `tool_choice` value: make the model call `write_file` instead of
+// disabling tools entirely.
+const FORCE_WRITE_TOOL_CHOICE = {
+  type: "function" as const,
+  function: { name: "write_file" },
+};
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -1310,11 +1333,13 @@ async function runCodegenWorkerLoop(
       });
     }
 
-    // Anti-spiral: after even more stall, force the model to output text (no tool calls).
+    // Anti-spiral: after even more stall, force the model to call write_file.
+    // NOT tool_choice:"none" — that strips all tools and deadlocks tool-calling
+    // models (they answer "STATUS: DONE" instead of emitting file blocks).
     const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
     if (forceWrite) {
       console.log(
-        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+        `[Worker] Forcing tool_choice=write_file after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
       );
     }
 
@@ -1340,9 +1365,8 @@ async function runCodegenWorkerLoop(
           max_tokens: MAX_OUTPUT_TOKENS,
           openRouterVariant: codegenVariant,
           codingMode,
-          // When forcing write, omit tools entirely so the model cannot call them.
-          tools: forceWrite ? undefined : WORKER_TOOLS,
-          tool_choice: forceWrite ? "none" : "auto",
+          tools: WORKER_TOOLS,
+          tool_choice: forceWrite ? FORCE_WRITE_TOOL_CHOICE : "auto",
           contextDump: {
             taskId: toolOptions?.taskId,
             iteration: i,
@@ -1499,7 +1523,8 @@ type CodegenAgentCompletionReason =
   | "status_done"
   | "task_complete"
   | "legacy_file_blocks"
-  | "max_iterations";
+  | "max_iterations"
+  | "gave_up_forced_write_no_output";
 
 type CodegenAgentSessionResult = {
   content: string;
@@ -1593,13 +1618,29 @@ async function runCodegenAgentSession(
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
   let didSecondaryRecall = false;
+  let gaveUpOnForcedWrite = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
     // ── Anti read-only spiral ─────────────────────────────────────────────
-    // After N consecutive read-only rounds, nudge once; after M, force
-    // `tool_choice:"none"` so the model MUST emit file output instead of yet
-    // another read. Mirrors the multi-round loop's guard.
+    // After N consecutive read-only rounds, nudge once; after M, force the
+    // model to call `write_file` (NOT tool_choice:"none", which strips tools
+    // and deadlocks tool-calling models into bare "STATUS: DONE"). If forced
+    // write still yields nothing after K more rounds, give up so the upper
+    // attempt-retry can take over instead of spinning to the iteration ceiling.
     const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    const forcedWriteRounds = forceWrite
+      ? consecutiveReadRounds - READ_STALL_FORCE_WRITE_AFTER + 1
+      : 0;
+    if (
+      forceWrite &&
+      forcedWriteRounds > READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS
+    ) {
+      console.warn(
+        `[Worker:${workerLabel}] Giving up after ${forcedWriteRounds - 1} forced-write round(s) produced no file (loop=${i + 1}, consecutiveReadRounds=${consecutiveReadRounds}). Returning incomplete so the task can be retried.`,
+      );
+      gaveUpOnForcedWrite = true;
+      break;
+    }
     if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
       messages.push({
         role: "system",
@@ -1612,7 +1653,7 @@ async function runCodegenAgentSession(
     }
     if (forceWrite) {
       console.log(
-        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+        `[Worker] Forcing tool_choice=write_file after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1}, forcedWriteRound=${forcedWriteRounds}/${READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS})`,
       );
     }
     // Cheap, lossless context compaction: drop stale repeated read-only tool
@@ -1642,7 +1683,7 @@ async function runCodegenAgentSession(
           openRouterVariant: codegenVariant,
           codingMode,
           tools: WORKER_TOOLS,
-          tool_choice: forceWrite ? "none" : "auto",
+          tool_choice: forceWrite ? FORCE_WRITE_TOOL_CHOICE : "auto",
           contextDump: {
             taskId: toolOptions?.taskId ?? task.id,
             iteration: i,
@@ -1807,17 +1848,26 @@ async function runCodegenAgentSession(
 
     const roundStatus = parseCodegenRoundStatus(content);
     const taskComplete = hasTaskCompleteSignal(content);
-    const remainingCreates = getRemainingPlannedCreates(
+    const remainingCreates = await getRemainingPlannedCreates(
       task,
       Array.from(changedFiles),
+      outputDir,
     );
     const hasWrites =
       changedFiles.size > 0 || deletedFiles.size > 0 || movedFiles.length > 0;
+    // A re-run over a prior session's output writes nothing this round, so
+    // `hasWrites` stays false even though every planned file exists on disk.
+    // Treat "had planned creates AND none remain" as satisfying the
+    // work-was-done guard so the model's completion signal can actually exit
+    // the loop instead of spinning to the iteration ceiling.
+    const plannedCreatesAllOnDisk =
+      getTaskFilePlanBuckets(task.files).creates.length > 0 &&
+      remainingCreates.length === 0;
 
     if (
       (roundStatus === "done" || taskComplete || parsedEntries.length > 0) &&
       remainingCreates.length === 0 &&
-      hasWrites
+      (hasWrites || plannedCreatesAllOnDisk)
     ) {
       return {
         content,
@@ -1874,7 +1924,9 @@ async function runCodegenAgentSession(
     deletedFiles: Array.from(deletedFiles),
     movedFiles,
     completed: false,
-    completionReason: "max_iterations",
+    completionReason: gaveUpOnForcedWrite
+      ? "gave_up_forced_write_no_output"
+      : "max_iterations",
     secondaryInjectedIds,
   };
 }
@@ -2265,10 +2317,11 @@ function buildFrontendPriorityNote(opts: {
   );
 }
 
-function getRemainingPlannedCreates(
+async function getRemainingPlannedCreates(
   task: CodingTask,
   writtenFiles: string[],
-): string[] {
+  outputDir?: string,
+): Promise<string[]> {
   const { creates } = getTaskFilePlanBuckets(task.files);
   const normalize = (p: string): string => p.replace(/\\/g, "/");
   const writtenNorm = writtenFiles.map(normalize);
@@ -2290,12 +2343,54 @@ function getRemainingPlannedCreates(
       .replace(/^(frontend|backend|apps\/web|apps\/api|packages\/[^/]+)\//, "");
   const fuzzyWrittenSet = new Set(writtenNorm.map(fuzz));
 
-  return creates.filter((file) => {
+  const remaining = creates.filter((file) => {
     const norm = normalize(file);
     if (writtenSet.has(norm)) return false;
     if (fuzzyWrittenSet.has(fuzz(norm))) return false;
     return true;
   });
+
+  // Disk-existence fallback. `writtenFiles` only tracks files written DURING
+  // the current session. When a task is re-run (e.g. a crashed/resumed coding
+  // session) over files a PRIOR session already produced, the model correctly
+  // refuses to rewrite identical content and just signals completion — so the
+  // in-memory set stays empty and `remaining` never shrinks, spinning the loop
+  // to CODEGEN_AGENT_MAX_ITERATIONS (300). Treat any planned create that
+  // already exists on disk as satisfied. Mirrors the tier-prefix fuzziness
+  // above so plan paths missing a `frontend/`/`backend/` root still match.
+  if (!outputDir || remaining.length === 0) return remaining;
+  const stillMissing: string[] = [];
+  for (const file of remaining) {
+    if (await plannedCreateExistsOnDisk(outputDir, file)) continue;
+    stillMissing.push(file);
+  }
+  return stillMissing;
+}
+
+/**
+ * Probe whether a planned-create path already exists under `outputDir`. Tries
+ * the literal relative path first, then the common tier roots when the plan
+ * path lacks one — matching the fuzzy prefix handling in
+ * `getRemainingPlannedCreates`.
+ */
+async function plannedCreateExistsOnDisk(
+  outputDir: string,
+  relPath: string,
+): Promise<boolean> {
+  const norm = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const candidates = [norm];
+  if (!/^(frontend|backend|apps\/web|apps\/api|packages\/)/.test(norm)) {
+    candidates.push(`frontend/${norm}`, `backend/${norm}`);
+  }
+  for (const candidate of candidates) {
+    try {
+      await nodeFs.access(path.join(outputDir, candidate));
+      return true;
+    } catch {
+      /* not present at this candidate path */
+    }
+  }
+  return false;
 }
 
 function scoreGeneratedFileForTask(
@@ -3595,7 +3690,11 @@ async function generateCode(state: WorkerState) {
         );
         roundWritesByRound.push(roundWrites);
 
-        const remainingCreates = getRemainingPlannedCreates(task, writtenFiles);
+        const remainingCreates = await getRemainingPlannedCreates(
+          task,
+          writtenFiles,
+          state.outputDir,
+        );
         const forcedContinue =
           CODEGEN_MULTI_ROUND_ENABLED &&
           remainingCreates.length > 0 &&

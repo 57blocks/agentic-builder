@@ -63,7 +63,10 @@ describe("api-path-prefix-mismatch", () => {
   it("passes when base + caller path composes under the backend mount prefix", async () => {
     // base "/api/v1" + "/users/me" → "/api/v1/users/me" ⊂ mount "/api/v1".
     await writeFile("frontend/src/api/client.ts", CLIENT("/api/v1"));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/users.ts",
       `import { apiClient } from "./client";
@@ -75,7 +78,10 @@ describe("api-path-prefix-mismatch", () => {
   it("also passes the legacy split convention (base /api + caller /v1/...)", async () => {
     // base "/api" + "/v1/users/me" → "/api/v1/users/me" ⊂ mount "/api/v1".
     await writeFile("frontend/src/api/client.ts", CLIENT("/api"));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/users.ts",
       `import { apiClient } from "./client";
@@ -87,7 +93,10 @@ describe("api-path-prefix-mismatch", () => {
   it("flags a double prefix (caller repeats the base)", async () => {
     // base "/api/v1" + "/api/v1/users" → "/api/v1/api/v1/users" 404.
     await writeFile("frontend/src/api/client.ts", CLIENT("/api/v1"));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/users.ts",
       `import { apiClient } from "./client";
@@ -102,7 +111,10 @@ describe("api-path-prefix-mismatch", () => {
   it("flags a missing version segment (composed path escapes the mount)", async () => {
     // base "/api" + "/users" → "/api/users", but backend mounts at "/api/v1".
     await writeFile("frontend/src/api/client.ts", CLIENT("/api"));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/users.ts",
       `import { apiClient } from "./client";
@@ -116,7 +128,10 @@ describe("api-path-prefix-mismatch", () => {
   it("does not fire in absolute-URL mode (empty base default)", async () => {
     // base "" → caller carries the full path; nothing to compose-check.
     await writeFile("frontend/src/api/client.ts", CLIENT(""));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/users.ts",
       `import { apiClient } from "./client";
@@ -139,7 +154,10 @@ describe("api-path-prefix-mismatch", () => {
 
   it("ignores full URLs and template-variable paths", async () => {
     await writeFile("frontend/src/api/client.ts", CLIENT("/api/v1"));
-    await writeFile("backend/src/api/modules/index.ts", MODULES_INDEX("/api/v1"));
+    await writeFile(
+      "backend/src/api/modules/index.ts",
+      MODULES_INDEX("/api/v1"),
+    );
     await writeFile(
       "frontend/src/api/misc.ts",
       `import { apiClient } from "./client";

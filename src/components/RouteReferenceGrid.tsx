@@ -18,12 +18,18 @@ interface RouteReferenceGridProps {
   onRemove: (referenceId: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
   onUploadToRoute: (file: File, pageHint: string) => void;
+  /** When provided, shows the "auto-capture from one entry URL" panel. */
+  onAutoCaptureFromEntry?: (entryUrl: string) => void;
 }
 
 function isImageFile(file: File): boolean {
-  return ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"].includes(
-    file.type,
-  );
+  return [
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+  ].includes(file.type);
 }
 
 /**
@@ -45,7 +51,6 @@ interface RouteCardProps {
   route: RouteInfo;
   reference: DesignReferenceSummary | undefined;
   isMatchingThis: boolean;
-  projectId?: string;
   onRemove: (id: string) => void;
   onDropToRoute: (referenceId: string, pageHint: string) => void;
   onFetchRouteUrl: (url: string, pageHint: string) => void;
@@ -57,7 +62,6 @@ function RouteCard({
   route,
   reference,
   isMatchingThis,
-  projectId,
   onRemove,
   onDropToRoute,
   onFetchRouteUrl,
@@ -83,10 +87,10 @@ function RouteCard({
       ? "border-violet-400 bg-violet-50"
       : "border-emerald-400 bg-emerald-50"
     : isMatchingThis
-    ? "border-amber-400 bg-amber-50"
-    : isDragOver
-    ? "border-indigo-400 bg-indigo-50"
-    : "border-slate-200 border-dashed bg-white";
+      ? "border-amber-400 bg-amber-50"
+      : isDragOver
+        ? "border-indigo-400 bg-indigo-50"
+        : "border-slate-200 border-dashed bg-white";
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -126,7 +130,11 @@ function RouteCard({
       <div
         className="group relative h-28 bg-slate-100 flex items-center justify-center shrink-0 cursor-pointer"
         onClick={handleUploadClick}
-        title={reference ? "Click to replace screenshot" : "Click to upload screenshot"}
+        title={
+          reference
+            ? "Click to replace screenshot"
+            : "Click to upload screenshot"
+        }
       >
         {isMatchingThis && !reference ? (
           <div className="flex flex-col items-center gap-2">
@@ -141,12 +149,16 @@ function RouteCard({
             className="w-full h-full object-cover"
             draggable
             onDragStart={(e) => {
-              if (reference) e.dataTransfer.setData("referenceId", reference.id);
+              if (reference)
+                e.dataTransfer.setData("referenceId", reference.id);
             }}
           />
         ) : (
           <div className="flex flex-col items-center gap-1">
-            <Image size={22} className="text-slate-300 group-hover:text-indigo-400 transition-colors" />
+            <Image
+              size={22}
+              className="text-slate-300 group-hover:text-indigo-400 transition-colors"
+            />
             <span className="text-[9px] text-slate-400 group-hover:text-indigo-500 transition-colors">
               Click to upload
             </span>
@@ -156,7 +168,9 @@ function RouteCard({
         {/* Hover overlay on an already-matched image */}
         {imageUrl && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 opacity-0 group-hover:opacity-100 transition-all pointer-events-none">
-            <span className="text-[10px] font-medium text-white">Click to replace</span>
+            <span className="text-[10px] font-medium text-white">
+              Click to replace
+            </span>
           </div>
         )}
 
@@ -207,8 +221,8 @@ function RouteCard({
                 ? "text-violet-700"
                 : "text-emerald-700"
               : isMatchingThis
-              ? "text-amber-600"
-              : "text-slate-500"
+                ? "text-amber-600"
+                : "text-slate-500"
           }`}
         >
           {route.name}
@@ -269,6 +283,7 @@ export function RouteReferenceGrid({
   onRemove,
   onDropToRoute,
   onUploadToRoute,
+  onAutoCaptureFromEntry,
 }: RouteReferenceGridProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [urlInput, setUrlInput] = useState("");
@@ -291,7 +306,9 @@ export function RouteReferenceGrid({
   ).length;
 
   const cssTokenCount = references.filter(
-    (r) => r.cssToken && routes.some((route) => pageHintMatchesRoute(r.pageHint, route.id)),
+    (r) =>
+      r.cssToken &&
+      routes.some((route) => pageHintMatchesRoute(r.pageHint, route.id)),
   ).length;
 
   const handleFileDrop = useCallback(
@@ -348,7 +365,8 @@ export function RouteReferenceGrid({
           </div>
           <span className="text-[10px] text-slate-500">
             Captures every PRD page (entry origin + each route) and binds each
-            screenshot to its card. Pages behind login prompt a one-time sign-in.
+            screenshot to its card. Pages behind login prompt a one-time
+            sign-in.
           </span>
         </div>
       )}
@@ -371,11 +389,16 @@ export function RouteReferenceGrid({
             onDragLeave={() => setIsDraggingOver(false)}
             onDrop={handleFileDrop}
           >
-            <Image size={20} className={isDraggingOver ? "text-indigo-400" : "text-slate-400"} />
+            <Image
+              size={20}
+              className={isDraggingOver ? "text-indigo-400" : "text-slate-400"}
+            />
             <span className="text-[11px] text-slate-500 font-medium">
               Drop images here or click to upload
             </span>
-            <span className="text-[10px] text-slate-400">PNG · JPG · WebP · GIF · ≤6 MB</span>
+            <span className="text-[10px] text-slate-400">
+              PNG · JPG · WebP · GIF · ≤6 MB
+            </span>
             <input
               ref={fileInputRef}
               type="file"
@@ -420,7 +443,9 @@ export function RouteReferenceGrid({
                 {cssTokenCount > 0 && ` · ${cssTokenCount} with CSS token`}
               </span>
             </span>
-            <span className="text-[10px] text-slate-400">Click a card to upload · or drag an image onto it</span>
+            <span className="text-[10px] text-slate-400">
+              Click a card to upload · or drag an image onto it
+            </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {routes.map((route) => {
@@ -433,7 +458,6 @@ export function RouteReferenceGrid({
                   route={route}
                   reference={reference}
                   isMatchingThis={isMatching && !reference}
-                  projectId={projectId}
                   onRemove={onRemove}
                   onDropToRoute={onDropToRoute}
                   onFetchRouteUrl={onFetchRouteUrl}

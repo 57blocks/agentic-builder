@@ -73,7 +73,10 @@ describe("computeSyncedClientSource", () => {
   });
 
   it("no-ops when the mount prefix can't be derived", () => {
-    const res = computeSyncedClientSource(CLIENT("/api"), "export const x = 1;");
+    const res = computeSyncedClientSource(
+      CLIENT("/api"),
+      "export const x = 1;",
+    );
     expect(res.changed).toBe(false);
     expect(res.mountPrefix).toBeNull();
   });

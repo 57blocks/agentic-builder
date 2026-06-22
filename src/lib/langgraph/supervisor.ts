@@ -1261,9 +1261,10 @@ async function scaffoldFix(state: SupervisorState) {
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `You are a Senior Software Architect. Fix the build errors below so that "npm install && npm run build" succeeds.
+      content: `You are a Senior Software Architect. Fix the build errors below so that the project package manager's install + build commands succeed.
 Rules:
 - NEVER use create-react-app or react-scripts.
+- Use the package manager declared by package.json/lockfile (pnpm for pnpm-lock.yaml, yarn for yarn.lock, npm only for npm/package-lock projects). Do not run npm install in a pnpm project.
 - For M-tier and L-tier projects (same stack): frontend is Vite + React in frontend/, backend is Koa + TypeScript in backend/. NEVER introduce Next.js or Fastify. L-tier additionally ships backend/src/workers/, backend/src/queue/inProcessQueue.ts, pino logger, requestLogger + rateLimit middlewares.
 - For Vite projects: index.html must be in the project root, src/main.tsx is the entry point.
 - Output ONLY corrected/new files using \`\`\`file:<relative-path>\n<contents>\n\`\`\` format.
@@ -1281,7 +1282,7 @@ Rules:
           ? `## Current Files\n${fileContents.join("\n\n")}`
           : "",
         "",
-        "Fix all errors so npm install && npm run build passes. Output corrected files.",
+        "Fix all errors so the detected package manager's install + build commands pass. Output corrected files.",
       ].join("\n"),
     },
   ];

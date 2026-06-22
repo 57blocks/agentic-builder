@@ -114,9 +114,7 @@ function serialiseQuery(query: ApiRequestOptions["query"]): string {
   return s ? `?${s}` : "";
 }
 
-function isErrorEnvelope(
-  data: unknown,
-): data is {
+function isErrorEnvelope(data: unknown): data is {
   ok: false;
   error: { code?: string; message?: string; details?: unknown };
 } {

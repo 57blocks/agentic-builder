@@ -7,7 +7,13 @@
 //   1. Pipeline SSE  – standard step_start / step_stream / step_complete / done
 //   2. Parallel SSE  – doc_stream / doc_complete / generation_complete
 
-import type { StepAgent, StepAgentContext, SseEvent, StepAgentState, StepResultData } from "./types";
+import type {
+  StepAgent,
+  StepAgentContext,
+  SseEvent,
+  StepAgentState,
+  StepResultData,
+} from "./types";
 import type { StepId } from "@/_config/pipeline-flow";
 import { stripChangeMarkers } from "@/lib/agents/pm/prd-patch";
 
@@ -68,7 +74,12 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
 
   return {
     async execute(ctx: StepAgentContext): Promise<StepResultData> {
-      ctx.emitState({ isRunning: true, error: null, streamingContent: "", streamingThinking: "" });
+      ctx.emitState({
+        isRunning: true,
+        error: null,
+        streamingContent: "",
+        streamingThinking: "",
+      });
 
       let resultContent = "";
       let streamedContent = "";
@@ -87,7 +98,8 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
 
         if (!resp.ok) {
           const errData = await resp.json().catch(() => ({}));
-          const msg = (errData as { error?: string }).error || `${stepId} request failed`;
+          const msg =
+            (errData as { error?: string }).error || `${stepId} request failed`;
           ctx.emitState({ isRunning: false, error: msg });
           return {
             stepId,
@@ -100,7 +112,12 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
         const reader = resp.body?.getReader();
         if (!reader) {
           ctx.emitState({ isRunning: false, error: "No response body" });
-          return { stepId, status: "failed", error: "No response body", timestamp: new Date().toISOString() };
+          return {
+            stepId,
+            status: "failed",
+            error: "No response body",
+            timestamp: new Date().toISOString(),
+          };
         }
 
         await readSseStream(reader, (payload) => {
@@ -110,12 +127,23 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
           // Custom handler first
           if (onCustomEvent) {
             const state = ctx.getState();
-            const handled = onCustomEvent(event, (s) => ctx.emitState(s), () => state);
+            const handled = onCustomEvent(
+              event,
+              (s) => ctx.emitState(s),
+              () => state,
+            );
             if (handled) return;
           }
 
           // Only process events for this agent's stepId
-          if (stepId && (type === "step_stream" || type === "step_complete" || type === "step_start") && event.stepId && event.stepId !== stepId) {
+          if (
+            stepId &&
+            (type === "step_stream" ||
+              type === "step_complete" ||
+              type === "step_start") &&
+            event.stepId &&
+            event.stepId !== stepId
+          ) {
             return;
           }
 
@@ -125,8 +153,13 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
               break;
 
             case "step_stream": {
-              const chunk = event.chunk ?? (event.data as { chunk?: string } | undefined)?.chunk ?? "";
-              const chunkType = event.chunkType ?? (event.data as { chunkType?: string } | undefined)?.chunkType;
+              const chunk =
+                event.chunk ??
+                (event.data as { chunk?: string } | undefined)?.chunk ??
+                "";
+              const chunkType =
+                event.chunkType ??
+                (event.data as { chunkType?: string } | undefined)?.chunkType;
               if (chunkType === "thinking") {
                 const current = ctx.getState().streamingThinking;
                 ctx.emitState({ streamingThinking: current + chunk });
@@ -153,7 +186,11 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
                   ...(data.metadata as Record<string, unknown>),
                 };
               }
-              ctx.emitState({ isRunning: false, streamingContent: "", streamingThinking: "" });
+              ctx.emitState({
+                isRunning: false,
+                streamingContent: "",
+                streamingThinking: "",
+              });
               break;
             }
 
@@ -167,18 +204,27 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
               break;
           }
         });
-
       } catch (err) {
         // Silent return on intentional abort — caller (step-store) already reset state.
         if (err instanceof DOMException && err.name === "AbortError") {
-          return { stepId, status: "failed", error: "aborted", timestamp: new Date().toISOString() };
+          return {
+            stepId,
+            status: "failed",
+            error: "aborted",
+            timestamp: new Date().toISOString(),
+          };
         }
         resultError = err instanceof Error ? err.message : "Unknown error";
         ctx.emitState({ isRunning: false, error: resultError });
       }
 
       if (resultError) {
-        return { stepId, status: "failed", error: resultError, timestamp: new Date().toISOString() };
+        return {
+          stepId,
+          status: "failed",
+          error: resultError,
+          timestamp: new Date().toISOString(),
+        };
       }
 
       if (!resultContent.trim()) {
@@ -201,11 +247,16 @@ export function createPipelineSseAgent(options: PipelineSseOptions): StepAgent {
       };
     },
 
-    handleEvent(event: SseEvent, ctx: StepAgentContext): Partial<StepAgentState> {
+    handleEvent(
+      event: SseEvent,
+      ctx: StepAgentContext,
+    ): Partial<StepAgentState> {
       if (event.type === "step_stream") {
         const chunk = event.chunk ?? "";
         if (event.chunkType === "thinking") {
-          return { streamingThinking: ctx.getState().streamingThinking + chunk };
+          return {
+            streamingThinking: ctx.getState().streamingThinking + chunk,
+          };
         }
         return { streamingContent: ctx.getState().streamingContent + chunk };
       }
@@ -226,12 +277,19 @@ interface ParallelGenerateOptions {
   buildPayload: (ctx: StepAgentContext) => Record<string, unknown>;
 }
 
-export function createParallelGenerateAgent(options: ParallelGenerateOptions): StepAgent {
+export function createParallelGenerateAgent(
+  options: ParallelGenerateOptions,
+): StepAgent {
   const { stepId, docId, buildPayload } = options;
 
   return {
     async execute(ctx: StepAgentContext): Promise<StepResultData> {
-      ctx.emitState({ isRunning: true, error: null, streamingContent: "", streamingThinking: "" });
+      ctx.emitState({
+        isRunning: true,
+        error: null,
+        streamingContent: "",
+        streamingThinking: "",
+      });
 
       let resultContent = "";
       let resultCost = 0;
@@ -243,7 +301,10 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
         const rawPayload = buildPayload(ctx);
         const payload =
           typeof rawPayload.prdContent === "string"
-            ? { ...rawPayload, prdContent: stripChangeMarkers(rawPayload.prdContent) }
+            ? {
+                ...rawPayload,
+                prdContent: stripChangeMarkers(rawPayload.prdContent),
+              }
             : rawPayload;
         const resp = await fetch("/api/agents/parallel-generate", {
           method: "POST",
@@ -254,15 +315,27 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
 
         if (!resp.ok) {
           const errData = await resp.json().catch(() => ({}));
-          const msg = (errData as { error?: string }).error || `${stepId} generation failed`;
+          const msg =
+            (errData as { error?: string }).error ||
+            `${stepId} generation failed`;
           ctx.emitState({ isRunning: false, error: msg });
-          return { stepId, status: "failed", error: msg, timestamp: new Date().toISOString() };
+          return {
+            stepId,
+            status: "failed",
+            error: msg,
+            timestamp: new Date().toISOString(),
+          };
         }
 
         const reader = resp.body?.getReader();
         if (!reader) {
           ctx.emitState({ isRunning: false, error: "No response body" });
-          return { stepId, status: "failed", error: "No response body", timestamp: new Date().toISOString() };
+          return {
+            stepId,
+            status: "failed",
+            error: "No response body",
+            timestamp: new Date().toISOString(),
+          };
         }
 
         await readSseStream(reader, (payload) => {
@@ -280,15 +353,29 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
             }
 
             case "doc_complete":
-              if (event.docId === docId || (payload as Record<string, unknown>).docId === docId) {
+              if (
+                event.docId === docId ||
+                (payload as Record<string, unknown>).docId === docId
+              ) {
                 resultContent = (event.content as string) || resultContent;
                 resultCost = (event.costUsd as number) || resultCost;
                 resultDuration = (event.durationMs as number) || resultDuration;
-                const ids = (payload as Record<string, unknown>).recalledKnowledgeIds;
+                const ids = (payload as Record<string, unknown>)
+                  .recalledKnowledgeIds;
                 if (Array.isArray(ids) && ids.length > 0) {
                   resultMeta = { ...resultMeta, recalledKnowledgeIds: ids };
                 }
                 ctx.emitState({ streamingContent: "" });
+              }
+              break;
+
+            // Per-doc failure (server sends `doc_error`, NOT `error`). Only the
+            // event matching THIS agent's docId fails the step — sibling docs in
+            // the same batch are irrelevant here.
+            case "doc_error":
+              if (event.docId === docId) {
+                resultError = event.error || `${docId} generation failed`;
+                ctx.emitState({ isRunning: false, error: resultError });
               }
               break;
 
@@ -302,18 +389,42 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
               break;
           }
         });
-
       } catch (err) {
         // Silent return on intentional abort — caller (step-store) already reset state.
         if (err instanceof DOMException && err.name === "AbortError") {
-          return { stepId, status: "failed", error: "aborted", timestamp: new Date().toISOString() };
+          return {
+            stepId,
+            status: "failed",
+            error: "aborted",
+            timestamp: new Date().toISOString(),
+          };
         }
         resultError = err instanceof Error ? err.message : "Unknown error";
         ctx.emitState({ isRunning: false, error: resultError });
       }
 
       if (resultError) {
-        return { stepId, status: "failed", error: resultError, timestamp: new Date().toISOString() };
+        return {
+          stepId,
+          status: "failed",
+          error: resultError,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Guard against a silent "completed but empty" result: if the stream ended
+      // without a doc_complete carrying content (e.g. an error event we didn't
+      // model, or an upstream stall), surface it as a failure instead of leaving
+      // the UI stuck on "Waiting for … to generate".
+      if (!resultContent.trim()) {
+        const msg = `${stepId} returned empty content`;
+        ctx.emitState({ isRunning: false, error: msg });
+        return {
+          stepId,
+          status: "failed",
+          error: msg,
+          timestamp: new Date().toISOString(),
+        };
       }
 
       return {
@@ -327,7 +438,10 @@ export function createParallelGenerateAgent(options: ParallelGenerateOptions): S
       };
     },
 
-    handleEvent(event: SseEvent, _ctx: StepAgentContext): Partial<StepAgentState> {
+    handleEvent(
+      event: SseEvent,
+      _ctx: StepAgentContext,
+    ): Partial<StepAgentState> {
       if (event.type === "doc_stream") {
         return {}; // handled in execute() streaming loop
       }

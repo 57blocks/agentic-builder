@@ -66,9 +66,7 @@ export function createCheckoutSession(
   );
 }
 
-export function getCheckoutSession(
-  sessionId: string,
-): Promise<PaymentStatus> {
+export function getCheckoutSession(sessionId: string): Promise<PaymentStatus> {
   return apiClient.get<PaymentStatus>(
     `${PAYMENTS_BASE}/checkout-session/${encodeURIComponent(sessionId)}`,
   );

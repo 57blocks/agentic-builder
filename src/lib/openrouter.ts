@@ -426,7 +426,25 @@ export async function openRouterVisionChatCompletion(
       `OpenRouter vision API error: ${response.status} - ${raw.slice(0, 300)}`,
     );
   }
-  return JSON.parse(await response.text()) as OpenRouterResponse;
+  // OpenRouter occasionally returns 200 with an EMPTY body when an upstream
+  // gateway times out or truncates a very large request (e.g. many hi-res
+  // reference screenshots in one vision call). `JSON.parse("")` would throw an
+  // opaque "Unexpected end of JSON input" that hides the real cause — surface a
+  // diagnosable error instead.
+  const rawBody = await response.text();
+  if (!rawBody.trim()) {
+    throw new Error(
+      `OpenRouter vision API returned an empty response body (status ${response.status}, model=${model}). ` +
+        `This usually means the upstream timed out on an oversized request — reduce the number/size of images or lower max_tokens.`,
+    );
+  }
+  try {
+    return JSON.parse(rawBody) as OpenRouterResponse;
+  } catch {
+    throw new Error(
+      `OpenRouter vision API returned a non-JSON response (status ${response.status}, model=${model}): ${rawBody.slice(0, 300)}`,
+    );
+  }
 }
 
 export async function openRouterStreamChatCompletion(
