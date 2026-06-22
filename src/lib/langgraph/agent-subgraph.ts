@@ -1,6 +1,8 @@
 import path from "path";
 import * as nodeFs from "fs/promises";
 import { StateGraph, START, END } from "@langchain/langgraph";
+import type { TranspileDiagnostic } from "./per-task-transpile-check";
+import { supersedeStaleReadResults } from "./worker-tool-history-compaction";
 import {
   WorkerStateAnnotation,
   type WorkerState,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/openrouter";
 import {
   readDesignReferencesFromOutput,
+  extractReferenceLayoutBlueprint,
   type DesignReferenceEntry,
 } from "@/lib/pipeline/design-references";
 import { invokeCodegenOrOpenRouter } from "@/lib/providers/codegen";
@@ -34,6 +37,7 @@ import { getInjectTokenBudgetForRole } from "@/lib/memory/recall-config";
 import { classifyFailureMode } from "@/lib/memory/distill/failure-mode";
 import { parseMemoryCites, recordMemoryCites } from "@/lib/memory/cite";
 import { resolveModel } from "@/lib/openrouter";
+import { ENABLE_FE_ROUTE_CONSOLIDATION } from "@/lib/langgraph/supervisor/config";
 import { resolveModelChain } from "@/lib/model-config";
 import type {
   CodingAgentRole,
@@ -69,8 +73,9 @@ import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
-import { loadCodingSkillsBlock } from "./coding-skills";
+import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
+import { withTaskLogContext } from "@/lib/server-log-capture";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -581,8 +586,16 @@ export async function buildProjectConventionCard(
     lines.push(
       "- **Frontend framework**: Vite + React + React Router (NOT Next.js)",
       "- **Page views**: `frontend/src/views/` (flat, one file per page). NEVER use `src/pages/`.",
-      "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
     );
+    if (ENABLE_FE_ROUTE_CONSOLIDATION) {
+      lines.push(
+        "- **Routing (DO NOT register routes yourself)**: implement ONLY your own view component(s) under `frontend/src/views/` and export the page as a clear default export (`export default function XPage()`). Do NOT edit `frontend/src/router.tsx` to add your route — a dedicated consolidation step registers EVERY view into the router after all pages exist (page workers run in parallel, so editing the shared router here causes lost/clobbered routes). Just make sure your view is importable.",
+      );
+    } else {
+      lines.push(
+        "- **Route registration**: `frontend/src/router.tsx`, import from `./views/...`",
+      );
+    }
   }
 
   // ── Detect middleware directory ───────────────────────────────────────────
@@ -603,10 +616,14 @@ export async function buildProjectConventionCard(
     const hasKoa = backendPkg.includes('"koa"');
     const hasExpress = backendPkg.includes('"express"');
     const hasSequelize = backendPkg.includes('"sequelize"');
-    if (hasKoa)
+    if (hasKoa) {
       lines.push(
         "- **Backend framework**: Koa — use `ctx.request.body`, `AppKoaContext`, Joi validation",
       );
+      lines.push(
+        "- **Typed responses (HARD RULE)**: send every success response via `json<ResponseType>(ctx, data)` from `src/utils/respond.ts`, pinning the response type from the shared schema (use its `ENDPOINTS` registry to pick the right `responseType`). The `responseEnvelope` middleware wraps it into `{ ok, data }`. **NEVER `ctx.body = <Sequelize model instance>`** — serialize the row to the schema type first (e.g. a `toCourse(row): Course` mapper). Raw ORM rows (snake_case columns, extra audit fields, missing computed fields) are NOT the contract and silently break the frontend.",
+      );
+    }
     if (hasExpress)
       lines.push(
         "- **Backend framework**: Express — use `req.body`, `req.params`, `req.headers`",
@@ -710,6 +727,7 @@ export async function buildProjectConventionCard(
   if (presentSchemas.length > 0) {
     lines.push(
       `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
+      "- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ \"taskId\", \"typeName\", \"field\"?, \"kind\": \"missing-type\"|\"missing-field\"|\"wrong-type\"|\"other\", \"reason\", \"proposedChange\", \"endpoint\"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.",
     );
   }
 
@@ -1537,6 +1555,12 @@ async function runCodegenAgentSession(
   let totalTokens = 0;
   let llmCalls = 0;
   let readOnlyRounds = 0;
+  // Consecutive read-only rounds (reset on any write). Drives the anti-spiral
+  // guard below: this agentic-tools loop previously had NO breaker (unlike the
+  // multi-round loop), so a model that kept calling read_file/list_files/grep
+  // could spin to CODEGEN_AGENT_MAX_ITERATIONS (300) without ever writing —
+  // observed as a ~75-min hang on a vision task over a 200-file project.
+  let consecutiveReadRounds = 0;
   let writeToolCalls = 0;
   let lastModel = "unknown";
   let lastContent = "";
@@ -1550,6 +1574,38 @@ async function runCodegenAgentSession(
   let didSecondaryRecall = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
+    // ── Anti read-only spiral ─────────────────────────────────────────────
+    // After N consecutive read-only rounds, nudge once; after M, force
+    // `tool_choice:"none"` so the model MUST emit file output instead of yet
+    // another read. Mirrors the multi-round loop's guard.
+    const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
+      messages.push({
+        role: "system",
+        content:
+          "You now have enough context. STOP calling read-only tools (read_file/read_many_files/list_files/grep). Write the required file(s) THIS round via write_file (or output ```file:<path>``` blocks). Do not inspect anything further.",
+      });
+      console.log(
+        `[Worker] read-stall nudge after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
+    if (forceWrite) {
+      console.log(
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+      );
+    }
+    // Cheap, lossless context compaction: drop stale repeated read-only tool
+    // results (same file read again later → earlier copy is superseded) before
+    // each call, so re-reads during a fix don't bloat the prompt. Disable with
+    // BLUEPRINT_WORKER_READ_DEDUP=0.
+    if (process.env.BLUEPRINT_WORKER_READ_DEDUP !== "0") {
+      const dedup = supersedeStaleReadResults(messages);
+      if (dedup.superseded > 0) {
+        console.log(
+          `[Worker:${workerLabel}] read-dedup: superseded ${dedup.superseded} stale read result(s) (loop ${i + 1}).`,
+        );
+      }
+    }
     const callStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const waitedSec = Math.floor((Date.now() - callStartedAt) / 1000);
@@ -1565,7 +1621,7 @@ async function runCodegenAgentSession(
           openRouterVariant: codegenVariant,
           codingMode,
           tools: WORKER_TOOLS,
-          tool_choice: "auto",
+          tool_choice: forceWrite ? "none" : "auto",
           contextDump: {
             taskId: toolOptions?.taskId ?? task.id,
             iteration: i,
@@ -1661,7 +1717,12 @@ async function runCodegenAgentSession(
         toolResultTexts.push(result.content);
       }
 
-      if (!hadWriteTool) readOnlyRounds++;
+      if (!hadWriteTool) {
+        readOnlyRounds++;
+        consecutiveReadRounds++;
+      } else {
+        consecutiveReadRounds = 0;
+      }
 
       if (recallCtx && !didSecondaryRecall) {
         const errorSignal = detectErrorSignalForRecall(
@@ -1705,6 +1766,7 @@ async function runCodegenAgentSession(
     validateCodegenFileOutput(content);
     const parsedFiles = parseFileOutput(content);
     const parsedEntries = Object.entries(parsedFiles);
+    if (parsedEntries.length > 0) consecutiveReadRounds = 0;
     for (const [fp, fc] of parsedEntries) {
       const msg = await fsWrite(fp, fc, outputDir, toolOptions?.fsWriteOptions);
       if (msg.startsWith("SKIPPED_PROTECTED") || msg.startsWith("REJECTED")) {
@@ -2144,20 +2206,39 @@ function buildFrontendPriorityNote(opts: {
     : "";
   const checklistTier = `\n${hasImage ? (hasTokens ? "4" : "3") : hasTokens ? "3" : "2"}. **Sub-steps & task title** — a FILE + DATA-WIRING checklist ONLY, never a visual spec. They tell you WHICH files/components to create and HOW data flows. When a sub-step's UI wording (e.g. "sortable table", "Edit/Delete buttons per row", "header with New Bill button") conflicts with ${hasImage ? "the screenshot" : "the Design Specification"}, ${hasImage ? "the SCREENSHOT" : "the Design Specification"} WINS. Do not let a sub-step's layout phrasing pull you toward a generic CRUD shape.`;
 
+  // Typography guardrail. The model CANNOT reliably estimate pixel sizes from a
+  // screenshot — a full-page capture (≈1440px wide) makes text look far larger
+  // than its real px, and the model consistently overshoots (observed: body
+  // text emitted at text-[28px], H1 at text-[56px]). So forbid arbitrary px
+  // font sizes and pin a sane default scale unless a token / DesignSpec value
+  // explicitly says otherwise.
+  const typographyGuardrail =
+    `\n\n## Typography guardrail (HARD RULE)\n` +
+    `Do NOT estimate font sizes from the screenshot — full-page captures distort apparent size and you WILL overshoot. Do NOT emit arbitrary pixel font sizes (\`text-[28px]\`, \`text-[34px]\`, \`text-[56px]\` are all WRONG for body/headings here).\n` +
+    `Use a \`--computed-*-font-size\` token or an explicit Design Specification value when one exists for the element. Otherwise use this default scale:\n` +
+    `- Secondary / metadata / labels / status pills: \`text-xs\` (12px) – \`text-sm\` (14px)\n` +
+    `- Body text, card subtitle/metadata, table cells: \`text-sm\` (14px) – \`text-base\` (16px)\n` +
+    `- Card / list-item title: \`text-base\` (16px) – \`text-lg\` (18px)\n` +
+    `- Emphasised number (price/amount), section heading: \`text-xl\` (20px) – \`text-2xl\` (24px)\n` +
+    `- Page H1 only: \`text-3xl\` (30px) – \`text-4xl\` (36px)\n` +
+    `Body / label / metadata text must NEVER exceed ~16px. The screenshot governs LAYOUT and relative hierarchy; this scale governs absolute size.`;
+
   if (hasImage) {
     return (
       `\n\n## Source of truth (read first, apply to every decision)\n` +
-      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative sizing. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
+      `1. **SCREENSHOT** (attached above) — defines the visual direction and WINS on any conflict: page structure & component shape (cards vs table, grid vs stack, header/nav presence, density), every visible piece of text verbatim (H1, subtitles, button labels, field labels, status names), the colour FAMILY (warm vs cool), and relative hierarchy (which text is bigger than which). It does NOT define absolute pixel sizes — see the Typography guardrail below. Do NOT coerce it into a CRUD template; do NOT substitute generic labels (Edit/Delete) for the labels you can actually see.\n` +
       `2. **Design Specification** (Project Context → section "Design Specification") — the authoritative source for EXACT quantitative values that match the screenshot: hex colours, font sizes, line-heights, spacing, radii, shadows, gradients. Pull precise numbers from here. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
       tokenTier +
-      checklistTier
+      checklistTier +
+      typographyGuardrail
     );
   }
   return (
     `\n\n## Source of truth (read first, apply to every decision)\n` +
     `1. **Design Specification** (Project Context → section "Design Specification") — your PRIMARY visual authority since no reference screenshot is attached: layout, component shape, exact hex colours, font sizes, spacing, radii, shadows. Treat it as primary REGARDLESS of any "(SECONDARY)" label it carries in context.` +
     tokenTier +
-    checklistTier
+    checklistTier +
+    typographyGuardrail
   );
 }
 
@@ -2226,7 +2307,10 @@ function scoreGeneratedFileForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md"
   ) {
     score += 140;
@@ -2314,7 +2398,10 @@ function scoreCandidatePathForTask(
     normalizedPath === "backend/src/server.ts" ||
     normalizedPath === "backend/src/api/modules/index.ts" ||
     normalizedPath === "packages/shared/src/index.ts" ||
-    normalizedPath === "API_CONTRACTS.json" ||
+    normalizedPath === "src/shared/schema.ts" ||
+    normalizedPath === "frontend/src/shared/schema.ts" ||
+    normalizedPath === "backend/src/shared/schema.ts" ||
+    normalizedPath === ".blueprint/shared-schema.ts" ||
     normalizedPath === "SCAFFOLD_SPEC.md" ||
     normalizedPath === "DEPENDENCY_PLAN.md"
   ) {
@@ -2398,7 +2485,10 @@ async function buildRelevantFileContext(
     "apps/web/src/lib/apiClient.ts",
     "apps/web/lib/api/auth.client.ts",
     "apps/api/src/routes/auth.ts",
-    "API_CONTRACTS.json",
+    "src/shared/schema.ts",
+    "frontend/src/shared/schema.ts",
+    "backend/src/shared/schema.ts",
+    ".blueprint/shared-schema.ts",
     "SCAFFOLD_SPEC.md",
     "DEPENDENCY_PLAN.md",
   ].forEach((p) => candidates.add(p));
@@ -3005,10 +3095,35 @@ async function generateCode(state: WorkerState) {
     const fileHint = formatTaskFileHints(task.files);
 
     const promptContext = await loadPromptContext(state.outputDir);
+    // Codegen-role skills (.blueprint/skills/<role>/) — conditional guidance
+    // selected by project config (context triggers), injected via skillsBlock.
+    // Deterministic only (no LLM confirm) since this runs per worker invoke.
+    // NOTE: `promptContext` is cached per outputDir & shared across roles —
+    // never mutate it; build a per-role copy carrying this role's skillsBlock.
+    let roleContext = promptContext;
+    try {
+      const skillsLoaded = await loadSkillsForAgent(
+        {
+          agent: state.role,
+          prdContent: "",
+          trdContent: "",
+          appliedOptionalFeatures: promptContext.appliedOptionalFeatures,
+          declaredEnvKeys: promptContext.declaredEnvKeys,
+          flags: promptContext.flags,
+        },
+        { enableLlmConfirm: false },
+      );
+      const skillsBlock = formatAppliedSkills(skillsLoaded);
+      if (skillsBlock) roleContext = { ...promptContext, skillsBlock };
+    } catch (err) {
+      console.warn(
+        `[AgentSubgraph] skill load failed for role ${state.role} (ignored): ${err instanceof Error ? err.message : err}`,
+      );
+    }
     const messages: ChatMessage[] = [
       {
         role: "system",
-        content: buildRolePrompt(state.role, promptContext),
+        content: buildRolePrompt(state.role, roleContext),
       },
     ];
 
@@ -3145,20 +3260,54 @@ async function generateCode(state: WorkerState) {
             hasTokens: cssTokenEntries.length > 0,
           });
 
+          // Parse the screenshot into a BINDING layout blueprint (cached per
+          // image). This gives the codegen model a concrete, image-derived
+          // spec that is as specific as the task's CRUD sub-steps and is
+          // declared to OVERRIDE them — the only way to beat a task whose
+          // title/file-names/sub-steps/TDD all assume a generic table.
+          let blueprintNote = "";
+          try {
+            const blueprint = await extractReferenceLayoutBlueprint({
+              cacheDir: path.join(state.outputDir, ".design-references"),
+              storedFileName: matchedRef.storedFileName,
+              bytes: imgBytes.byteLength,
+              imageDataUrl: dataUrl,
+              label: matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
+            });
+            if (blueprint) {
+              blueprintNote =
+                `\n\n## Reference layout blueprint (image-derived — AUTHORITATIVE layout contract)\n` +
+                `This blueprint was parsed directly from the attached screenshot. It OVERRIDES the task title, the planned file names, and the sub-steps. Where a sub-step says "table / Edit-Delete / New Bill" but this blueprint says otherwise (e.g. a card list with receipt actions), FOLLOW THE BLUEPRINT. Reproduce the component type, per-item anatomy, button labels, and states exactly as described here.\n\n${blueprint}`;
+              console.log(
+                `[Worker:${state.workerLabel}] Layout blueprint extracted for "${task.title}" (${blueprint.length} chars).`,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[Worker:${state.workerLabel}] Layout blueprint extraction failed (ignored):`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
               {
                 type: "text",
-                text: priorityNote + cssTokenNote + "\n\n" + userTaskText,
+                text:
+                  priorityNote +
+                  blueprintNote +
+                  cssTokenNote +
+                  "\n\n" +
+                  userTaskText,
               },
             ],
           };
           messages.push(visionMsg as unknown as ChatMessage);
           injectedVisionImage = true;
           console.log(
-            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""})`,
+            `[Worker:${state.workerLabel}] Vision image injected for task "${task.title}" → ref "${matchedRef.label || matchedRef.fileName}" (pageHint=${matchedRef.pageHint}${cssTokenEntries.length > 0 ? `, ${cssTokenEntries.length} CSS tokens` : ""}${blueprintNote ? ", +layout blueprint" : ""})`,
           );
         }
       } catch (err) {
@@ -3866,8 +4015,58 @@ async function verifyCode(state: WorkerState) {
     return { verifyErrors: "", fixAttempts: state.fixAttempts };
   }
 
+  // Per-task single-file transpile check. Catches SYNTAX-level errors
+  // (truncated/malformed output, invalid tokens, bad JSX) in the task's own
+  // files at generation time — without resolving imports, so there are no
+  // false "cannot find module" findings for symbols a later task will create.
+  // Genuine cross-file type/resolution errors still defer to the project-wide
+  // tsc in supervisor integration-verify. Disable with
+  // BLUEPRINT_PER_TASK_TRANSPILE_CHECK=0. Fail-open: a checker error never
+  // blocks the task.
+  if (process.env.BLUEPRINT_PER_TASK_TRANSPILE_CHECK !== "0") {
+    try {
+      const { transpileCheckSource, formatTranspileDiagnostics } = await import(
+        "./per-task-transpile-check"
+      );
+      const diags: TranspileDiagnostic[] = [];
+      for (const filePath of tsFiles) {
+        const content = await fsRead(filePath, state.outputDir);
+        if (
+          content.startsWith("FILE_NOT_FOUND") ||
+          content.startsWith("REJECTED")
+        ) {
+          continue;
+        }
+        diags.push(...transpileCheckSource(filePath, content));
+      }
+      if (diags.length > 0) {
+        const detail = formatTranspileDiagnostics(diags);
+        console.log(
+          `[Worker:${state.workerLabel}] Per-task transpile check FAILED for "${task.title}": ${diags.length} syntax error(s) across ${new Set(diags.map((d) => d.file)).size} file(s).`,
+        );
+        getRepairEmitter(state.sessionId)({
+          stage: "worker-verify",
+          event: "task_transpile_errors",
+          taskId: task.id,
+          files: [...new Set(diags.map((d) => d.file))],
+          details: { count: diags.length },
+        });
+        // Reuse the tsc-verify prefix so the existing per-task fix loop
+        // (isWorkerTscVerifyError → routeAfterVerify → task_fix) repairs it.
+        return {
+          verifyErrors: `${WORKER_TSC_VERIFY_PREFIX}\n${detail}`,
+          fixAttempts: state.fixAttempts,
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[Worker:${state.workerLabel}] Per-task transpile check skipped (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   console.log(
-    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task tsc disabled; project-wide tsc runs in supervisor verify.`,
+    `[Worker:${state.workerLabel}] Task output OK for "${task.title}" (${tsFiles.length} TS file(s)) — per-task transpile check passed; project-wide tsc runs in supervisor verify.`,
   );
 
   return { verifyErrors: "", fixAttempts: state.fixAttempts };
@@ -4506,12 +4705,12 @@ export function hasConfigErrors(errors: string): boolean {
 
 export function createWorkerSubGraph() {
   const graph = new StateGraph(WorkerStateAnnotation)
-    .addNode("pick_next_task", pickNextTask)
-    .addNode("generate_code", generateCode)
-    .addNode("verify", verifyCode)
-    .addNode("task_fix", taskFix)
-    .addNode("task_done", taskDone)
-    .addNode("task_failed", taskFailed)
+    .addNode("pick_next_task", withTaskLogContext(pickNextTask))
+    .addNode("generate_code", withTaskLogContext(generateCode))
+    .addNode("verify", withTaskLogContext(verifyCode))
+    .addNode("task_fix", withTaskLogContext(taskFix))
+    .addNode("task_done", withTaskLogContext(taskDone))
+    .addNode("task_failed", withTaskLogContext(taskFailed))
 
     .addEdge(START, "pick_next_task")
     .addConditionalEdges("pick_next_task", shouldContinueOrEnd, {

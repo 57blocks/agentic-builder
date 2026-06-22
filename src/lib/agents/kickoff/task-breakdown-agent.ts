@@ -402,6 +402,7 @@ Before generating tasks, analyze the PRD to determine the project type:
    **Do NOT classify as frontend-only** just because the PRD describes a simple or small product — if there is any
    mention of saving data, user accounts, multi-user access, notifications, or any server-side feature, it is full-stack.
    → Use **React + Vite + TypeScript + Tailwind CSS**. NEVER use Next.js.
+   → **The stack is FIXED even for the simplest app.** NEVER produce a vanilla HTML/CSS/JS three-file site (\`index.html\` + \`styles.css\` + \`script.js\` at the repo root). All UI is React components/views under \`frontend/src/\`; all tests are vitest (\`*.test.tsx\`), never browser-opened HTML harnesses. "Simple scope" means FEWER tasks, NOT a downgraded tech stack.
    → Allowed phases: "Scaffolding", "Frontend" ONLY (do NOT use phase "Testing").
    → Do NOT generate "Data Layer", "Backend Services", "Auth & Gateway", "Infrastructure", or "Integration" tasks.
    → Do NOT use Prisma, API routes, Docker, Kubernetes, or any server-side technology.
@@ -456,6 +457,11 @@ Do not emit standalone testing tasks. Instead, embed a \`tddPlan\` object in eac
 - Page/route tasks MUST include at least one \`route-smoke\` test that (a) proves the route renders the real page (not a placeholder) AND (b) simulates the page's PRIMARY interaction (click the main button / submit the form) and asserts its effect — the API client method called with the expected payload, navigation to the target route, or the declared state change. \`expectedGreen\` MUST name the interaction and its effect (e.g. "clicking Pay calls paymentsApi.create with the cart payload and navigates to /confirmation"). Author the interaction-flow assertion at priority **P1** (it should surface and drive repair, not hard-block the gate) unless it guards a critical auth/payment flow.
 - Runtime/dependency tasks MUST include at least one \`runtime-smoke\` test for local startup/fallback behavior.
 - Each test MUST state the exact test file path, command, expected RED failure, and expected GREEN result.
+- **Test runner is FIXED — never invent one (HARD RULE):** the scaffold always ships **vitest** (unit / component / service) and **playwright** (e2e). EVERY test you plan MUST run under one of these. This is NOT a judgement call about the project's tech stack — the stack is always Vite + React + TypeScript (frontend) and Koa + Sequelize (backend), and the test tooling is always vitest + playwright.
+  - Test files MUST be \`*.test.ts\` / \`*.test.tsx\` (vitest) or a playwright spec under \`frontend/tests/e2e/\`. NEVER a standalone \`*.html\` file, and NEVER a test that targets \`index.html\` / \`styles.css\` / \`script.js\` as if the app were a vanilla HTML/CSS/JS page — the app is React/TypeScript under \`frontend/src/\`.
+  - \`command\` MUST be a real, headless runner invocation: \`pnpm test <file>\` / \`pnpm vitest run <file>\` / \`pnpm exec playwright test <file>\` (prefix \`cd frontend &&\` / \`cd backend &&\` as needed). NEVER a manual step like "open … in browser", "open the test page", or any instruction a human performs by hand.
+  - Assertions MUST use vitest \`expect(...)\` (or Playwright \`expect\`). Do NOT hand-roll a custom \`assert(...)\` harness.
+- **Test file extension (HARD RULE):** any test that renders a React component (imports a \`.tsx\` and uses \`render(<Component />)\` / JSX) MUST use a \`.test.tsx\` extension — NEVER \`.test.ts\`. esbuild cannot parse JSX inside a \`.ts\` file, so a \`.ts\` React test fails to transform and permanently breaks the TDD gate. Use \`.test.ts\` only for pure-logic tests (hooks/services/utils with no JSX).
 
 Example \`tddPlan\`:
 \`\`\`json
@@ -813,7 +819,7 @@ export class TaskBreakdownAgent extends BaseAgent {
         : "Focus on the PRD requirements and Design Spec components.";
 
     const referencesHint = documents.designReferencesBlock
-      ? ` The user attached design reference screenshots (see the **Design references** section below) — for every frontend task whose scope matches a screenshot's target/label, cite the reference path in the task description so coding agents consult it.`
+      ? ` The user attached design reference screenshots AFTER writing the PRD — see the **Per-page design digests** section below. For any page that HAS a digest, that digest is AUTHORITATIVE for the page's UI structure and OUTRANKS the PRD: decompose the page to MATCH the digest exactly, and DROP any PRD-described component the digest does not show (e.g. summary/KPI cards, stats dashboard, invoice table, modals) — do not create tasks for them. If the digest shows a 'vertical list of cards' with receipt actions, the page is a card list, NOT a dashboard. Keep the PRD only for non-visual functional details that don't contradict the digest. Cite the reference path in each such task's description. Pages with no digest have no screenshot — decompose those from the PRD as usual.`
       : "";
 
     const incrementalBlock = buildIncrementalInstructionBlock(

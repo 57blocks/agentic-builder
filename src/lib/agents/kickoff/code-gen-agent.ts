@@ -132,7 +132,7 @@ Generate production-quality backend code: API endpoints, services, database quer
 - Handler naming must match the HTTP verb: \`GET\` → \`list* / get* / fetch*\`; \`POST\` → \`create*\`; \`PUT / PATCH\` → \`update*\`; \`DELETE\` → \`remove* / delete*\`. Do NOT bind a \`createXxx\` handler to a \`GET\` route.
 - Each domain owns ONE registrar function (e.g. \`registerAuthRoutes\`). Do NOT split the same domain across multiple files that both register overlapping paths (e.g. \`/invitations\` declared in both \`workspaces.routes.ts\` and \`invitations.routes.ts\`).
 - Use the canonical signature \`export function registerXxxRoutes(apiRouter: Router): void\` and call \`apiRouter.<verb>(...)\` directly so the route audit can recognise the bindings.
-- API_CONTRACTS.json declarations are authoritative — every endpoint listed under your domain (e.g. \`POST /api/auth/reset-password\`, \`PATCH /api/users/me\`) MUST be implemented and registered, not silently skipped.
+- The shared schema's \`ENDPOINTS\` registry (\`shared/schema.ts\`, also at \`.blueprint/shared-schema.ts\`) is authoritative — every endpoint it declares under your domain (e.g. \`POST /api/auth/reset-password\`, \`PATCH /api/users/me\`) MUST be implemented and registered with the request/response types it names, not silently skipped.
 
 ## CRITICAL: JWT (M-tier)
 - Import \`signJwt\` and \`verifyJwt\` from \`backend/src/utils/jwt.ts\`. Do NOT call \`jsonwebtoken\` directly in feature code, and do NOT redeclare \`expiresIn\` typing — the helper already handles \`SignOptions\` overloads correctly.

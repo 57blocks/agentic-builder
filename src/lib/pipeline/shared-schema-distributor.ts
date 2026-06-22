@@ -91,6 +91,56 @@ export async function distributeSharedSchema(
   return { found: true, written, sourcePath };
 }
 
+export interface VerifySharedSchemaResult {
+  /** True when the source is absent (nothing to check) OR every copy matches it. */
+  intact: boolean;
+  /** Distributed copies that are missing or differ from the canonical source. */
+  drifted: Array<{ path: string; reason: "missing" | "differs" }>;
+  /** True when the canonical blueprint source itself was found + non-empty. */
+  sourceFound: boolean;
+  sourcePath: string;
+}
+
+/**
+ * Contract-integrity check (run at verify time): confirm every distributed copy
+ * of the shared schema is byte-identical to the canonical blueprint source.
+ *
+ * The distributor writes identical copies, but they can DRIFT afterwards — a
+ * worker editing one copy, or only one side being regenerated — which is exactly
+ * the silent "frontend and backend disagree on types" failure mode. This surfaces
+ * that deterministically. Read-only; never throws (returns intact=true when the
+ * source is missing, so it can't false-fail a run that skipped the TRD schema).
+ */
+export async function verifyDistributedSchemaIntact(
+  tier: SharedSchemaTier,
+  outputDir: string,
+  options?: { sourceDir?: string },
+): Promise<VerifySharedSchemaResult> {
+  const sourceDir = options?.sourceDir ?? process.cwd();
+  const sourcePath = path.resolve(sourceDir, SCHEMA_BLUEPRINT_REL);
+
+  let source: string;
+  try {
+    source = await fs.readFile(sourcePath, "utf8");
+  } catch {
+    return { intact: true, drifted: [], sourceFound: false, sourcePath };
+  }
+  if (!source.trim()) {
+    return { intact: true, drifted: [], sourceFound: false, sourcePath };
+  }
+
+  const drifted: VerifySharedSchemaResult["drifted"] = [];
+  for (const rel of TARGETS_BY_TIER[tier]) {
+    try {
+      const copy = await fs.readFile(path.join(outputDir, rel), "utf8");
+      if (copy !== source) drifted.push({ path: rel, reason: "differs" });
+    } catch {
+      drifted.push({ path: rel, reason: "missing" });
+    }
+  }
+  return { intact: drifted.length === 0, drifted, sourceFound: true, sourcePath };
+}
+
 /**
  * Copy the TRD-frozen workflow DAG into the project's .blueprint/. Workers
  * read it as a reference (via convention-card prompt directive) when

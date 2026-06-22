@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { readBuildFailedMarker } from "@/lib/pipeline/build-quarantine";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
+import { reconcileContractWithSchema } from "@/lib/pipeline/contract-reconcile";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
@@ -19,6 +20,7 @@ import {
 import {
   distributeSharedSchema,
   distributePipelineDag,
+  verifyDistributedSchemaIntact,
 } from "@/lib/pipeline/shared-schema-distributor";
 import {
   getTierScaffoldSpecForCodingContext,
@@ -88,6 +90,7 @@ import {
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
   auditFrontendWiring,
+  auditModelSchemaAlignment,
   dispatchAuditRepair,
   AttemptTracker,
   escalateRepairCircuit,
@@ -101,6 +104,11 @@ import {
   registerWorkerChunkSink,
   unregisterWorkerChunkSink,
 } from "@/lib/langgraph/worker-event-bridge";
+import { installServerLogCapture, logContext } from "@/lib/server-log-capture";
+import {
+  registerLogSink,
+  unregisterLogSink,
+} from "@/lib/langgraph/server-log-bridge";
 import {
   runEvidenceGate,
   collectCodingStageEvidence,
@@ -120,7 +128,6 @@ import {
 } from "@/lib/pipeline/model-scoring";
 import {
   writeSessionCheckpoint,
-  readSessionCheckpoint,
   clearSessionCheckpoint,
   type TaskCheckpointEntry,
 } from "@/lib/pipeline/session-checkpoint";
@@ -870,6 +877,15 @@ function runGoalModeCodingResponse(args: {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
+
+  // Server-console capture: install the console patch and open a session-scoped
+  // log context BEFORE any prep work (clean dir, scaffold, pnpm install, …) so
+  // those lines are buffered and flushed to the Server Console panel once the
+  // SSE sink attaches in the stream's start(). The main coding stream below
+  // reuses this same sessionId. See src/lib/server-log-capture.ts.
+  const sessionId = uuidv4();
+  installServerLogCapture();
+  logContext.enterWith({ sessionId });
   const {
     runId,
     tasks,
@@ -947,138 +963,15 @@ export async function POST(request: NextRequest) {
     retryFailedTaskIds && retryFailedTaskIds.length > 0
       ? new Set(retryFailedTaskIds)
       : null;
-  // In retry mode, expand the retry set to include any dependency tasks whose
-  // output files do not yet exist on disk. This prevents a scenario where a
-  // retry task (e.g. T-006 Integration) depends on pages created by T-003/T-004
-  // but those tasks were never completed — the worker would spin trying to find
-  // absent files. We include missing-dependency tasks silently so the retry
-  // remains targeted but self-healing.
-  let expandedRetrySet = retrySet;
-  if (retrySet) {
-    const expandedIds = new Set(retrySet);
-    const taskMap = new Map(tasksAfterStrip.map((t) => [t.id, t]));
-
-    const addMissingDeps = (taskId: string, visited = new Set<string>()) => {
-      if (visited.has(taskId)) return;
-      visited.add(taskId);
-      const task = taskMap.get(taskId);
-      if (!task) return;
-      for (const depId of task.dependencies ?? []) {
-        addMissingDeps(depId, visited);
-        const depTask = taskMap.get(depId);
-        if (!depTask) continue;
-        // Check if every "creates" file from the dep task exists on disk
-        const depCreates = Array.isArray(depTask.files)
-          ? depTask.files
-          : depTask.files?.creates ?? [];
-        const allCreatesExist = depCreates.every((f: string) => {
-          try {
-            require("fs").accessSync(path.join(outputRoot, f));
-            return true;
-          } catch {
-            return false;
-          }
-        });
-        if (!allCreatesExist) {
-          expandedIds.add(depId);
-        }
-      }
-    };
-
-    for (const id of retrySet) {
-      addMissingDeps(id);
-    }
-
-    if (expandedIds.size > retrySet.size) {
-      const added = [...expandedIds].filter((id) => !retrySet.has(id));
-      console.log(
-        `[CodingAPI] Retry mode: expanded retry set with missing-dependency tasks: ${added.join(", ")}`,
-      );
-      expandedRetrySet = expandedIds;
-    }
-  }
-
-  // Resume hygiene: never re-run a task the checkpoint marks completed when
-  // it was only pulled in by dependency expansion. Without this, a
-  // "Retry Failed" was re-running finished foundation tasks (e.g. T-002
-  // scaffold) from scratch, i.e. "starting from the top".
-  //
-  // Carve-out: tasks the user EXPLICITLY picked (`retrySet`) are never dropped
-  // here — if the user hand-picked an already-completed task to re-run, the
-  // checkpoint must NOT silently filter it out. Otherwise the request 400s
-  // with "None of the retryFailedTaskIds matched any known task" and the UI
-  // is left with optimistic-pending status but no execution. (Mirrors the
-  // same carve-out in the on-disk built filter below.)
-  if (expandedRetrySet && retrySet) {
-    try {
-      const cp = await readSessionCheckpoint(process.cwd());
-      if (cp) {
-        const completed = new Set(
-          Object.entries(cp.taskResults)
-            .filter(
-              ([, r]) =>
-                r.status === "completed" ||
-                r.status === "completed_with_warnings",
-            )
-            .map(([id]) => id),
-        );
-        const before = expandedRetrySet.size;
-        expandedRetrySet = new Set(
-          [...expandedRetrySet].filter(
-            (id) => retrySet.has(id) || !completed.has(id),
-          ),
-        );
-        if (expandedRetrySet.size < before) {
-          console.log(
-            `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-completed dependency task(s) from the retry set (checkpoint); explicitly-selected tasks were preserved.`,
-          );
-        }
-      }
-    } catch {
-      /* no/unreadable checkpoint → nothing to exclude */
-    }
-  }
-
-  // After a crash there is often no checkpoint, so the dependency-expansion
-  // above re-pulls a selected unfinished task's ALREADY-BUILT dependencies and
-  // the run re-does finished work (the user's complaint: "it's re-running tasks
-  // I already built"). Drop any dependency-pulled task whose `creates` files all
-  // exist on disk. Explicitly-selected tasks (in `retrySet`) are NEVER dropped —
-  // if the user hand-picked a built task to re-fix it, honour that.
-  if (expandedRetrySet && retrySet) {
-    const outputRootForCheck = resolveCodeOutputRoot(
-      process.cwd(),
-      codeOutputDir,
-    );
-    const taskById = new Map(tasksAfterStrip.map((t) => [t.id, t]));
-    const isBuiltOnDisk = (id: string): boolean => {
-      const t = taskById.get(id);
-      if (!t) return false;
-      const creates = Array.isArray(t.files)
-        ? t.files
-        : t.files?.creates ?? [];
-      if (creates.length === 0) return false; // can't prove built → keep it
-      return creates.every((f: string) => {
-        try {
-          require("fs").accessSync(path.join(outputRootForCheck, f));
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    };
-    const before = expandedRetrySet.size;
-    expandedRetrySet = new Set(
-      [...expandedRetrySet].filter(
-        (id) => retrySet.has(id) || !isBuiltOnDisk(id),
-      ),
-    );
-    if (expandedRetrySet.size < before) {
-      console.log(
-        `[CodingAPI] Resume: excluded ${before - expandedRetrySet.size} already-built dependency task(s) from the run set (on-disk); only unbuilt deps + explicitly-selected tasks run.`,
-      );
-    }
-  }
+  // Hand-picked rerun contract: run EXACTLY the tasks the user selected — no
+  // dependency expansion, no checkpoint/on-disk reconciliation. Selecting T-003
+  // runs only T-003, regardless of whether its upstream dependencies are built.
+  // This is the explicit, predictable behaviour the user asked for: "选什么就只
+  // 跑什么". Trade-off: if a selected task's upstream output is genuinely missing
+  // the worker may not find the files it expects — that is on the caller, who
+  // chose the targeted set. All other tasks are left untouched (they're simply
+  // absent from the run set and pre-populated as already-completed downstream).
+  const expandedRetrySet = retrySet;
 
   const tasksToRun = expandedRetrySet
     ? tasksAfterStrip.filter((t) => expandedRetrySet!.has(t.id))
@@ -2071,7 +1964,8 @@ export async function POST(request: NextRequest) {
     codingStatus: "pending" as const,
   }));
 
-  const sessionId = uuidv4();
+  // sessionId is created at the top of POST (above) so prep-phase console
+  // output is captured under the same id this stream registers its sink with.
   const mapper = new EventMapper(sessionId);
   const encoder = new TextEncoder();
 
@@ -2177,6 +2071,16 @@ export async function POST(request: NextRequest) {
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
 
+      // Mirror server console output into the SSE pipe for the live Server
+      // Console panel. enterWith tags every console.* on this request's async
+      // tree with the sessionId; worker nodes refine taskId via
+      // withTaskLogContext. See src/lib/server-log-capture.ts.
+      installServerLogCapture();
+      logContext.enterWith({ sessionId });
+      registerLogSink(sessionId, (entry) =>
+        send({ type: "server_log", sessionId, data: entry }),
+      );
+
       // Register a sink that forwards worker sub-graph chunks (emitted by
       // invokeWorkerBatched via workerGraph.stream) back into this SSE pipe.
       // Without this the outer stream never sees pick_next_task / generate_code
@@ -2206,6 +2110,38 @@ export async function POST(request: NextRequest) {
       });
       await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
+
+      // Incremental checkpoint. The session checkpoint used to be written ONLY
+      // at stream end, so aborting / killing the dev-server process mid-run lost
+      // ALL coding progress. Persist it as tasks complete (time-debounced) so a
+      // kill loses at most a few seconds of work, and a Retry/Rerun resumes from
+      // the last persisted task instead of from scratch.
+      let lastCheckpointAt = 0;
+      const CHECKPOINT_MIN_INTERVAL_MS = 8000;
+      const persistCheckpoint = async (reason: string): Promise<void> => {
+        try {
+          const checkpointMap = new Map<string, TaskCheckpointEntry>();
+          for (const [id, result] of collectedTaskResults) {
+            checkpointMap.set(id, {
+              status: result.status,
+              generatedFiles: result.generatedFiles,
+            });
+          }
+          await writeSessionCheckpoint(
+            process.cwd(),
+            sessionId,
+            checkpointMap,
+            normalizedTasks.map((t) => t.id),
+          );
+          lastCheckpointAt = Date.now();
+        } catch (cpErr) {
+          console.warn(
+            `[CodingAPI] Checkpoint write failed (${reason}, ignored):`,
+            cpErr instanceof Error ? cpErr.message : cpErr,
+          );
+        }
+      };
+
       // Pre-populate skipped tasks (from previous session) as completed_with_warnings
       // so they appear in audit and scoring reports without being re-generated.
       for (const t of tasksSkipped) {
@@ -2353,6 +2289,12 @@ export async function POST(request: NextRequest) {
             codingTasks,
             collectedTaskResults,
           );
+          // Persist progress incrementally (debounced) so a process kill / abort
+          // mid-run doesn't lose everything. Runs regardless of clientAborted —
+          // the graph keeps executing server-side after a client disconnect.
+          if (Date.now() - lastCheckpointAt >= CHECKPOINT_MIN_INTERVAL_MS) {
+            await persistCheckpoint("incremental");
+          }
           collectWorkerContextFromChunk(
             updates,
             collectedFileRegistry,
@@ -2413,6 +2355,31 @@ export async function POST(request: NextRequest) {
           if (wiringFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
             const fresh = wiringFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
+
+          // Backend model ↔ shared-schema field-alignment audit. Flags models
+          // that invented scalar columns the schema doesn't declare (e.g. a
+          // `status` enum or `isDeleted` boolean). `MODEL-<Entity>` ids are
+          // non-frontend, so the dispatcher routes them to a scoped BACKEND
+          // repair. Like wiring, these are `partial` verdicts (never flip
+          // `passed`), so a false positive costs at most one bounded repair pass.
+          const modelSchemaFindings = await auditModelSchemaAlignment({
+            tasks: codingTasks,
+            taskResults: auditTaskResults,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+          });
+          if (modelSchemaFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = modelSchemaFindings.filter(
+              (e) => !existingIds.has(e.id),
+            );
             if (fresh.length > 0) {
               finalAudit = {
                 ...finalAudit,
@@ -2529,6 +2496,54 @@ export async function POST(request: NextRequest) {
               ]
                 .filter(Boolean)
                 .join("\n"),
+            );
+          }
+
+          // P0①: shared-schema integrity — the frontend & backend copies of the
+          // contract must still be byte-identical to .blueprint/shared-schema.ts.
+          // Drift = silent frontend↔backend type mismatch (the exact failure mode
+          // this hardening targets). See docs/contract-single-source-of-truth.md.
+          try {
+            const schemaIntegrity = await verifyDistributedSchemaIntact(tier, outputRoot);
+            if (!schemaIntegrity.intact) {
+              blockingFailures.push(
+                `Shared-schema drift: ${schemaIntegrity.drifted
+                  .map((d) => `${d.path} (${d.reason})`)
+                  .join(", ")} no longer matches the canonical .blueprint/shared-schema.ts — frontend/backend types are out of sync.`,
+              );
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] shared-schema integrity check threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+
+          // P0③: contract↔schema reconciliation — WARN (record, don't block) when
+          // API_CONTRACTS.json references a request/response type not defined in
+          // shared/schema.ts. A missing type may be the LLM's MISSING_FROM_SCHEMA
+          // signal for the contract owner, so this is surfaced for analysis rather
+          // than failing the build. See docs/contract-single-source-of-truth.md.
+          try {
+            const reconcile = await reconcileContractWithSchema(outputRoot);
+            if (reconcile.checked && !reconcile.ok) {
+              const detail = reconcile.missing
+                .slice(0, 8)
+                .map((m) => `${m.method} ${m.endpoint} ${m.kind}=${m.type}`);
+              console.warn(
+                `[CodingAPI] contract↔schema: ${reconcile.missing.length} type ref(s) not in schema — ${detail.join("; ")}`,
+              );
+              await recordUnresolvedProblem(outputRoot, {
+                sessionId,
+                category: "contract-coverage",
+                gate: "contract-reconcile",
+                summary: `${reconcile.missing.length} API_CONTRACTS type reference(s) not defined in shared/schema.ts`,
+                evidence: detail,
+                artifacts: ["API_CONTRACTS.json", "backend/src/shared/schema.ts"],
+              });
+            }
+          } catch (e) {
+            console.warn(
+              `[CodingAPI] contract reconcile threw (ignored): ${e instanceof Error ? e.message : String(e)}`,
             );
           }
           if (!finalAudit.passed) {
@@ -2711,36 +2726,16 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // ── Session checkpoint ─────────────────────────────────────────────
-        // Persist task results so the next run can skip already-completed
-        // tasks via `retryFailedTaskIds`.
-        try {
-          const checkpointMap = new Map<string, TaskCheckpointEntry>();
-          for (const [id, result] of collectedTaskResults) {
-            checkpointMap.set(id, {
-              status: result.status,
-              generatedFiles: result.generatedFiles,
-            });
-          }
-          // Pass the full planned task ID list so tasks that were aborted before
-          // they even started are recorded as unknown/failed in the checkpoint.
-          const allSessionTaskIds = normalizedTasks.map((t) => t.id);
-          await writeSessionCheckpoint(
-            process.cwd(),
-            sessionId,
-            checkpointMap,
-            allSessionTaskIds,
-          );
-        } catch (cpErr) {
-          console.warn(
-            `[CodingAPI] Checkpoint write failed (ignored):`,
-            cpErr instanceof Error ? cpErr.message : cpErr,
-          );
-        }
+        // ── Session checkpoint (final) ─────────────────────────────────────
+        // Final flush of the same checkpoint persisted incrementally during the
+        // run (see `persistCheckpoint`). Lets the next run skip already-completed
+        // tasks via `retryFailedTaskIds`. Tasks never reached stay "unknown".
+        await persistCheckpoint("final");
 
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
         unregisterWorkerChunkSink(sessionId);
+        unregisterLogSink(sessionId);
         // Remove from registry only if we are still the active session
         // (a newer session may have already replaced us).
         if (activeCodingSessions.get(outputRoot) === sessionAbortController) {

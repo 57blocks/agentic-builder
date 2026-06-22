@@ -51,6 +51,13 @@ example
 .blueprint/resource-requirements.json
 .blueprint/auth-decision.json
 
+# per-run orchestration/session runtime state + generated project workspaces
+# (regenerated each run; not source — and often carry another project's content
+# since .blueprint is shared across projects)
+.blueprint/orchestration-status.json
+.blueprint/last-coding-session.json
+.blueprint/projects/
+
 # misc
 *.pem
 .DS_Store
@@ -70,6 +77,7 @@ CLAUDE.md
 .blueprint/kickoff-infra.json
 .blueprint/kickoff-database.json
 .claude/settings.json
+.claude/scheduled_tasks.lock
 
 # AI
 .trae/
@@ -82,3 +90,7 @@ agentic-builds/
 
 # Per-task frontend context dumps written by frontend-context-logger.ts
 /.logs/
+# Per-project runtime design references (uploaded screenshots + blueprint cache)
+.blueprint/projects/
+# Ad-hoc comparison screenshots dropped at the repo root (PixPin exports, scratch shots)
+/*.png

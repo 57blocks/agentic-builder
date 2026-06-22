@@ -38,7 +38,7 @@ import { useStepStore } from "@/store/step-store";
 import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
-import type { CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
+import type { AgentLogEntry, CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
 import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
@@ -46,7 +46,8 @@ import { TaskNode, type TaskNodeData } from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
-import { StatusBar } from "./components/StatusBar";
+import { TaskSearchBox } from "./components/TaskSearchBox";
+import { ServerConsolePanel } from "./components/ServerConsolePanel";
 import { useElapsedTimer } from "./use-elapsed-timer";
 
 // ─── React Flow node type registry ───────────────────────────────────────────
@@ -157,6 +158,9 @@ function buildFlowGraph(
       style: { width: boxW, height: LABEL_H + laneBodyH + LANE_PAD },
       selectable: false,
       draggable: false,
+      // Explicit stacking: lane background (0) < edges (1) < task nodes (2),
+      // so dependency lines always tuck behind the boxes they cross.
+      zIndex: 0,
     });
 
     for (const [lvl, levelIds] of byLevel) {
@@ -171,6 +175,8 @@ function buildFlowGraph(
           selected: id === selectedId,
           data: { task: taskMap.get(id)! } satisfies TaskNodeData,
           style: { width: NODE_W, height: NODE_H },
+          // Above edges (1) and the lane background (0) — see domainBox note.
+          zIndex: 2,
         });
       });
     }
@@ -218,6 +224,9 @@ function buildFlowGraph(
         target: task.id,
         // "default" = cubic bezier in React Flow
         type: "default",
+        // Between the lane background (0) and the task nodes (2), so the curves
+        // tuck behind the boxes they cross instead of arcing over their faces.
+        zIndex: 1,
         animated: flowing,
         style: {
           stroke: edgeColor,
@@ -441,7 +450,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // Same plumbing as "Retry Failed" (retryFailedTasks → retryFailedTaskIds),
   // but the user chooses the task ids in the picker instead of it defaulting to
   // the failed set. Lets you re-run never-run / specific tasks without a full
-  // rerun. Already-completed dependencies are skipped server-side.
+  // rerun. Server-side runs EXACTLY the picked tasks — dependencies are never
+  // auto-expanded or re-run, even if unbuilt.
   const [pickerOpen, setPickerOpen] = useState(false);
   const handleRunSelected = useCallback(
     (taskIds: string[]) => {
@@ -586,13 +596,26 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone, isFailed]);
 
-  // ── Agent logs (flat, all agents) + TDD per-test logs, ordered by time ──────
+  // ── Agent logs + TDD per-test logs + task-tagged server console lines ──────
   const allAgentLogs = useMemo(
     () =>
-      [...codingState.agents.flatMap((a) => a.logs), ...codingState.tddLogs].sort(
-        (a, b) => a.timestamp.localeCompare(b.timestamp),
-      ),
-    [codingState.agents, codingState.tddLogs],
+      [
+        ...codingState.agents.flatMap((a) => a.logs),
+        ...codingState.tddLogs,
+        // Server console lines attributed to a task (via withTaskLogContext)
+        // surface inside that task's REAL-TIME LOGS.
+        ...codingState.serverLogs
+          .filter((l) => l.taskId)
+          .map(
+            (l): AgentLogEntry => ({
+              timestamp: l.timestamp,
+              type: "info",
+              taskId: l.taskId,
+              message: `[console:${l.level}] ${l.message}`,
+            }),
+          ),
+      ].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+    [codingState.agents, codingState.tddLogs, codingState.serverLogs],
   );
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -701,7 +724,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
         {/* Active agents */}
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-2.5">
             ACTIVE AGENTS
           </p>
           <AgentBubbles agents={codingState.agents} placeholderRoles={placeholderRoles} />
@@ -785,7 +808,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
             className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
           >
             <ListChecks size={13} />
-            选择重跑
+            Pick to re-run
           </button>
         )}
 
@@ -817,6 +840,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* React Flow canvas */}
         <div className="flex-1 relative overflow-hidden">
+          {/* Floating task search/locator — sits above the flow layer */}
+          {mergedTasks.length > 0 && (
+            <TaskSearchBox tasks={mergedTasks} onLocate={focusTask} />
+          )}
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -873,8 +900,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         </AnimatePresence>
       </div>
 
-      {/* ─── Bottom status bar ──────────────────────────────────────────────── */}
-      <StatusBar
+      {/* ─── Bottom bar: system status + live server console (merged) ───────── */}
+      <ServerConsolePanel
+        logs={codingState.serverLogs}
+        onClear={() => useCodingStore.setState({ serverLogs: [] })}
         isRunning={isRunning}
         isCompleted={isDone}
         isFailed={isFailed}

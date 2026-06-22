@@ -272,6 +272,7 @@ export interface CodingSessionEvent {
     | "e2e_verify_start"
     | "e2e_verify_result"
     | "agent_task_substeps"
+    | "server_log"
     | "session_complete"
     | "session_error";
   sessionId: string;

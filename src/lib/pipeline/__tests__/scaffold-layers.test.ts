@@ -41,3 +41,21 @@ describe("listScaffoldTemplateRelativePaths for the merged L tier", () => {
     expect(paths).not.toContain("frontend/.env");
   });
 });
+
+describe("_optional/ is never part of a generated project (any tier)", () => {
+  // `_optional/` is scaffold-authoring metadata; `copyOptionalScaffolds` applies
+  // triggered features to canonical paths. A leaked `_optional/<feature>/frontend/`
+  // tree is a phantom duplicate that misleads coding agents (FE-foundation worker
+  // looped on tokens.css writing into `_optional/.../styles/`). Guard ALL tiers,
+  // including single-layer S/M whose only layer used to escape the exclusion.
+  it.each(["S", "M", "L"] as const)(
+    "tier %s lists zero _optional/ paths",
+    async (tier) => {
+      const paths = await listScaffoldTemplateRelativePaths(tier);
+      const leaked = paths.filter(
+        (p) => p === "_optional" || p.startsWith("_optional/"),
+      );
+      expect(leaked).toEqual([]);
+    },
+  );
+});

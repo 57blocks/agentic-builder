@@ -924,3 +924,278 @@ export function formatVisionDescriptionsBlock(
     ...sections,
   ].join("\n");
 }
+
+// ─── Layout blueprint (focused, binding implementation spec) ────────────────
+
+const BLUEPRINT_CACHE_FILE = "layout-blueprint-cache.json";
+
+interface BlueprintCacheEntry {
+  storedFileName: string;
+  bytes: number;
+  blueprint: string;
+  generatedAt: string;
+}
+
+async function readBlueprintCache(
+  absDir: string,
+): Promise<Map<string, BlueprintCacheEntry>> {
+  try {
+    const raw = await fs.readFile(
+      path.join(absDir, BLUEPRINT_CACHE_FILE),
+      "utf-8",
+    );
+    const arr = JSON.parse(raw) as BlueprintCacheEntry[];
+    return new Map(arr.map((e) => [e.storedFileName, e]));
+  } catch {
+    return new Map();
+  }
+}
+
+async function writeBlueprintCache(
+  absDir: string,
+  cache: Map<string, BlueprintCacheEntry>,
+): Promise<void> {
+  await fs.mkdir(absDir, { recursive: true });
+  await fs.writeFile(
+    path.join(absDir, BLUEPRINT_CACHE_FILE),
+    JSON.stringify([...cache.values()], null, 2),
+    "utf-8",
+  );
+}
+
+/**
+ * Parse a reference screenshot into a BINDING implementation blueprint — a
+ * concrete, structured spec the coding model can follow to reproduce the
+ * page. Unlike `buildVisionDescriptionsForReferences` (a soft prose
+ * description buried in projectContext), this is designed to be injected at
+ * the TOP of the codegen user message as the authoritative layout contract
+ * that OVERRIDES the task's sub-steps / file names / title — those are often
+ * CRUD-table templates that contradict the actual (e.g. card-list) design.
+ *
+ * Result is cached by storedFileName+bytes in
+ * `<dir>/layout-blueprint-cache.json` so repeated UI tasks referencing the
+ * same image reuse one vision call. Returns null on any failure (caller must
+ * degrade gracefully — never block the worker).
+ */
+export async function extractReferenceLayoutBlueprint(opts: {
+  /** Directory holding the image + where the blueprint cache lives. */
+  cacheDir: string;
+  storedFileName: string;
+  bytes: number;
+  /** Pre-built `data:<mime>;base64,...` URL for the image. */
+  imageDataUrl: string;
+  label?: string;
+}): Promise<string | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    console.warn(
+      `[LayoutBlueprint] ${opts.storedFileName}: OPENROUTER_API_KEY not set — cannot parse image, returning null.`,
+    );
+    return null;
+  }
+
+  const cache = await readBlueprintCache(opts.cacheDir);
+  const cached = cache.get(opts.storedFileName);
+  if (cached && cached.bytes === opts.bytes) {
+    console.log(
+      `[LayoutBlueprint] ${opts.storedFileName}: CACHE HIT (${cached.bytes}B) — reusing, no vision call.`,
+    );
+    return cached.blueprint;
+  }
+  console.log(
+    `[LayoutBlueprint] ${opts.storedFileName}: cache miss (cached=${cached ? `${cached.bytes}B` : "none"}, want=${opts.bytes}B) — calling vision (gpt-4o)…`,
+  );
+
+  try {
+    const resp = await openRouterVisionChatCompletion(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                `Analyze this UI screenshot${opts.label ? ` (page: "${opts.label}")` : ""} and produce a BINDING IMPLEMENTATION BLUEPRINT a frontend engineer must follow to reproduce it. Be concrete and decisive — this blueprint overrides any generic task description.`,
+                "",
+                "Output these sections, in this order:",
+                "",
+                "1. **Page layout type** — state the ONE dominant pattern explicitly: e.g. 'vertical list of cards', 'data table with column headers', 'KPI dashboard grid', 'split master-detail'. Do NOT hedge. If it is a list of rich cards, say cards (NOT a table).",
+                "2. **Global chrome** — is there a top brand/logo, global nav bar (list the nav items verbatim), user menu, cart, notification badge? If none, say 'none'.",
+                "3. **Page header** — the exact H1 text, any subtitle text, and any header-right controls (buttons/counts) with their exact labels.",
+                "4. **Filter / toolbar row** — controls and their exact labels, if present.",
+                "5. **Per-item anatomy** — for the repeating unit (card/row), list EVERY visible element in visual order: thumbnail/image, primary title, secondary metadata lines (verbatim label format, e.g. 'Buyer: <name>'), status pill (list the EXACT status strings seen), price/amount formatting, and the action buttons with their EXACT labels. Note if different states show different button sets.",
+                "6. **Distinct states shown** — list each visually distinct state/variant visible in the screenshot.",
+                "7. **Do NOT render** — list elements a generic CRUD template would add but that are ABSENT here (e.g. raw database IDs, Edit/Delete buttons, a New/Create button) so the engineer does not invent them.",
+                "",
+                "Keep it tight and factual. No code, no preamble.",
+              ].join("\n"),
+            },
+            {
+              type: "image_url",
+              image_url: { url: opts.imageDataUrl, detail: "high" },
+            },
+          ],
+        },
+      ],
+      { model: "openai/gpt-4o", max_tokens: 1600 },
+    );
+
+    const blueprint = resp.choices[0]?.message?.content;
+    if (typeof blueprint === "string" && blueprint.trim()) {
+      const text = blueprint.trim();
+      cache.set(opts.storedFileName, {
+        storedFileName: opts.storedFileName,
+        bytes: opts.bytes,
+        blueprint: text,
+        generatedAt: new Date().toISOString(),
+      });
+      await writeBlueprintCache(opts.cacheDir, cache).catch(() => {});
+      return text;
+    }
+  } catch (err) {
+    console.warn(
+      `[DesignReferences] Layout blueprint extraction failed for ${opts.storedFileName}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+  return null;
+}
+
+/**
+ * Build a compact, TEXT-ONLY per-page design digest block for the
+ * task-breakdown stage. For each uploaded IMAGE reference it produces (and
+ * caches) a layout blueprint via `extractReferenceLayoutBlueprint`, then
+ * formats them into one markdown block.
+ *
+ * Why text, not images: a project can have many pages × large screenshots;
+ * feeding raw images to task-breakdown would blow up input tokens AND repeat
+ * the cost on every re-run. Instead each image is parsed to a ~compact digest
+ * ONCE (cached in `<absDir>/layout-blueprint-cache.json` — the SAME cache the
+ * coding stage reads), and task-breakdown receives only the text. The vision
+ * call count equals the number of images, not the number of tasks or breakdown
+ * re-runs.
+ *
+ * Graceful degradation:
+ *   - No image references → returns "" (task-breakdown behaves exactly as
+ *     before, decomposing from PRD text).
+ *   - A page with no screenshot simply has no digest here — the prompt tells
+ *     the model to decompose those from the PRD as usual. The "don't invent
+ *     components" rule is scoped to pages that DO have a digest.
+ *   - Any per-image extraction failure (no API key, read error) is skipped;
+ *     never throws.
+ */
+export async function buildLayoutDigestBlock(
+  absDir: string,
+  entries: DesignReferenceEntry[],
+): Promise<string> {
+  const images = entries.filter((e) => e.kind === "image");
+  console.log(
+    `[LayoutDigest] ── building per-page design digests ──\n` +
+      `  dir: ${absDir}\n` +
+      `  manifest entries: ${entries.length} (images: ${images.length})` +
+      (images.length
+        ? `\n  images: ${images.map((e) => `${e.storedFileName}[${e.pageHint || e.label || e.fileName}]`).join(", ")}`
+        : ""),
+  );
+  if (images.length === 0) {
+    console.log(
+      "[LayoutDigest] no image references → digest block is empty (task-breakdown will use PRD text only).",
+    );
+    return "";
+  }
+
+  const sections: string[] = [];
+  for (const entry of images) {
+    let bytes: Buffer;
+    try {
+      bytes = await fs.readFile(path.join(absDir, entry.storedFileName));
+    } catch (e) {
+      console.warn(
+        `[LayoutDigest] SKIP ${entry.storedFileName} — image file not readable at ${absDir} (${e instanceof Error ? e.message : e})`,
+      );
+      continue;
+    }
+    const dataUrl = `data:${entry.mime};base64,${bytes.toString("base64")}`;
+    const label = entry.pageHint || entry.label || entry.fileName;
+    console.log(
+      `[LayoutDigest] parsing ${entry.storedFileName} (${(bytes.byteLength / 1024).toFixed(0)}KB, label="${label}") …`,
+    );
+    const t0 = Date.now();
+    const blueprint = await extractReferenceLayoutBlueprint({
+      cacheDir: absDir,
+      storedFileName: entry.storedFileName,
+      // Match the byte count the coding stage passes (actual file size) so the
+      // cache key is identical and the blueprint is computed exactly once
+      // across both stages.
+      bytes: bytes.byteLength,
+      imageDataUrl: dataUrl,
+      label,
+    });
+    if (!blueprint) {
+      console.warn(
+        `[LayoutDigest] ✗ ${entry.storedFileName}: no blueprint produced (vision failed / no API key) — this page will NOT have a digest.`,
+      );
+      continue;
+    }
+    // First line of the blueprint is "1. **Page layout type** — …" — surface it
+    // so you can confirm the parse direction at a glance.
+    const layoutLine =
+      blueprint
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => /layout type/i.test(l)) ?? "(layout line not found)";
+    console.log(
+      `[LayoutDigest] ✓ ${entry.storedFileName} digested in ${Date.now() - t0}ms (${blueprint.length} chars) → ${layoutLine}`,
+    );
+    sections.push(`### ${label}\n${blueprint}`);
+  }
+
+  if (sections.length === 0) {
+    console.warn(
+      "[LayoutDigest] no digests produced from any image → block empty.",
+    );
+    return "";
+  }
+
+  console.log(
+    `[LayoutDigest] ✅ digest block ready: ${sections.length}/${images.length} image(s) digested.`,
+  );
+
+  return [
+    "## Per-page design digests — AUTHORITATIVE for UI structure (parsed from the user's uploaded screenshots)",
+    "",
+    "These screenshots were uploaded by the user AFTER the PRD was written, and each is tied to a specific page. For UI STRUCTURE they OUTRANK the PRD: the PRD's prose about how a page looks may be stale or generic, while the screenshot is the user's latest, explicit intent.",
+    "",
+    "Rules:",
+    "- For any page that HAS a digest below, the digest is the SOURCE OF TRUTH for that page's layout and components. Decompose its frontend task(s) to MATCH the digest EXACTLY: build only the components/regions it lists, with the labels it shows.",
+    "- This OVERRIDES the PRD for that page. If the PRD describes summary/KPI cards, a stats dashboard, an invoice table, or modals that the digest does NOT show, DROP them — do not create tasks for them. Conversely, if the digest shows a 'vertical list of cards' with receipt actions, the task is a card list, NOT a dashboard. Keep the PRD only for non-visual functional requirements (data sources, validation, flows) that don't contradict the digest's structure.",
+    "- Pages with NO digest below have no screenshot — decompose those from the PRD text as usual (a legitimate dashboard/table is fine there).",
+    "",
+    ...sections,
+  ].join("\n");
+}
+
+/**
+ * One-stop block for the task-breakdown stage: reads the manifest under
+ * `projectRoot`, then returns the per-page design digests (image-derived,
+ * cached) joined with the file-listing block. Returns "" when there are no
+ * references. Use this anywhere task-breakdown is invoked so the breakdown
+ * decomposes against the real designs — both the main engine path AND the
+ * standalone `/api/agents/task-breakdown` regenerate path.
+ */
+export async function buildBreakdownDesignReferencesBlock(
+  projectRoot: string,
+  projectId?: string,
+): Promise<string> {
+  let entries: DesignReferenceEntry[];
+  try {
+    entries = await readManifest(projectRoot, projectId);
+  } catch {
+    return "";
+  }
+  if (entries.length === 0) return "";
+  const dir = designReferenceDirAbs(projectRoot, projectId);
+  const digest = await buildLayoutDigestBlock(dir, entries);
+  const fileBlock = formatDesignReferencesPromptBlock(entries);
+  return [digest, fileBlock].filter(Boolean).join("\n\n---\n\n");
+}

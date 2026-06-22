@@ -71,7 +71,7 @@ You receive THREE inputs:
 2. The TRD generated from that PRD by another agent.
 3. The authoritative project tier (S | M | L).
 
-Your job is to grade the TRD across 12 fixed dimensions, surface BLOCKERS that would break codegen, and propose actionable IMPROVEMENTS. Be specific — every observation must reference a concrete section, identifier, or line in the TRD.
+Your job is to grade the TRD across 13 fixed dimensions, surface BLOCKERS that would break codegen, and propose actionable IMPROVEMENTS. Be specific — every observation must reference a concrete section, identifier, or line in the TRD.
 
 ## Fixed dimensions (score each 1-10; 10 = excellent)
 
@@ -87,6 +87,7 @@ Your job is to grade the TRD across 12 fixed dimensions, surface BLOCKERS that w
 10. **seed-data-isolation** — Does the TRD forbid seed/demo data from marking real external source health as healthy or setting provider success timestamps? Missing this is a blocker for any app where the UI displays source freshness or score data.
 11. **source-health-semantics** — Does the TRD define that \`source_feeds\` / equivalent health and \`ingestion_runs\` are updated only by real ingestion jobs or explicit admin refetch, with distinct not-configured/stale/failed/demo/healthy states?
 12. **auth-decision-alignment** — Does the TRD state that auth mode must follow the persisted auth decision / Phase 0 override when present, instead of silently choosing Magic Link, Privy, OIDC, or username/password RBAC on its own?
+13. **consumer-endpoint-completeness** — Does EVERY data-needing UI control in the PRD have a backing READ endpoint in §3.3 / the §6 \`ENDPOINTS\` registry? Walk the PRD's interactive controls: any dropdown / autocomplete / member-or-assignee selector / filter / search box / list that must be populated FROM THE SERVER needs a GET endpoint returning its collection (e.g. an "assignee dropdown" needs \`GET /users\` or \`GET /users/team-members\` with a list Response type). A control that fetches data with no corresponding endpoint is a high-severity blocker — the frontend will have no contract to call (mock data or invented endpoints result). This is the CONSUMER side; dimension 4 covers the PRODUCER side.
 
 ## Blocker vs Improvement
 

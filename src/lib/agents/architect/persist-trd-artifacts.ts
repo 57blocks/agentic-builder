@@ -32,6 +32,7 @@ import {
   validateTrdContracts,
   type TrdContractValidation,
 } from "./trd-contract-validator";
+import { summarizeEndpointsRegistry } from "@/lib/pipeline/endpoints-registry";
 
 export interface PersistedTrdArtifacts {
   /** Raw parser output — useful for surfacing malformed/unknown blocks. */
@@ -48,6 +49,19 @@ export interface PersistedTrdArtifacts {
   dagValidation?: DagValidation;
   /** Result of running validateTrdContracts against the full TRD markdown. */
   contractValidation: TrdContractValidation;
+  /**
+   * Presence/shape of the §6 `ENDPOINTS` registry in the schema block.
+   * `schemaPresent && !hasRegistry` means the TRD authored a schema but no
+   * endpoint↔type registry — the single source `generateApiContracts` derives
+   * from. Callers regenerate the TRD once on this signal (see
+   * docs/contract-single-source-of-truth.md); the contract phase hard-fails on
+   * it when backend endpoints exist.
+   */
+  schemaRegistry: {
+    schemaPresent: boolean;
+    hasRegistry: boolean;
+    count: number;
+  };
 }
 
 export async function persistTrdArtifactsFromContent(
@@ -61,6 +75,23 @@ export async function persistTrdArtifactsFromContent(
   let rulesValidation: RulesDslValidation | undefined;
   let dagValidation: DagValidation | undefined;
   const contractValidation = validateTrdContracts(content);
+
+  const schemaPresent = !!artifacts.schemaTs && artifacts.schemaTs.trim().length > 0;
+  const registrySummary = schemaPresent
+    ? summarizeEndpointsRegistry(artifacts.schemaTs as string)
+    : { hasRegistry: false, count: 0 };
+  const schemaRegistry = {
+    schemaPresent,
+    hasRegistry: registrySummary.hasRegistry,
+    count: registrySummary.count,
+  };
+  if (schemaPresent && !registrySummary.hasRegistry) {
+    console.warn(
+      "[persist-trd] schema block has no `export const ENDPOINTS` registry — " +
+        "API_CONTRACTS will have no single source to derive from. Caller should " +
+        "regenerate the TRD; the contract phase hard-fails on this when backend endpoints exist.",
+    );
+  }
 
   if (artifacts.schemaTs) {
     const p = path.join(blueprintDir, "shared-schema.ts");
@@ -102,5 +133,6 @@ export async function persistTrdArtifactsFromContent(
     rulesValidation,
     dagValidation,
     contractValidation,
+    schemaRegistry,
   };
 }

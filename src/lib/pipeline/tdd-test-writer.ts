@@ -11,6 +11,7 @@ import {
   type OpenRouterToolDefinition,
 } from "@/lib/openrouter";
 import type { CodingTask } from "@/lib/pipeline/types";
+import { coerceJsxTestExtension } from "@/lib/pipeline/tdd-manifest";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import type { RepairEmitter } from "@/lib/pipeline/self-heal";
@@ -110,16 +111,28 @@ function flattenTddTests(tasks: CodingTask[]): FlattenedTddTest[] {
   const out: FlattenedTddTest[] = [];
   for (const task of tasks) {
     for (const test of task.tddPlan?.tests ?? []) {
+      const targetFiles = collectTaskFiles(task).filter(
+        (file) => file !== test.file,
+      );
+      // Same JSX-extension coercion the manifest applies, so the writer
+      // produces `.test.tsx` for React-rendering tests instead of a `.test.ts`
+      // that esbuild can't transform. Keeps writer ↔ manifest ↔ runner aligned
+      // on the same file path.
+      const { file, command } = coerceJsxTestExtension(
+        test.file,
+        targetFiles,
+        test.command,
+      );
       out.push({
         taskId: task.id,
         taskTitle: task.title,
         requirementIds: task.coversRequirementIds ?? [],
-        targetFiles: collectTaskFiles(task).filter((file) => file !== test.file),
+        targetFiles,
         id: test.id,
         type: test.type,
         priority: test.priority,
-        file: test.file,
-        command: test.command,
+        file,
+        command,
         expectedRed: test.expectedRed,
         expectedGreen: test.expectedGreen,
       });

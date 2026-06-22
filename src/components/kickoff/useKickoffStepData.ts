@@ -284,6 +284,7 @@ export function useKickoffStepData(
               ? result.metadata.runId
               : undefined,
           tier: tierRaw?.tier ?? "M",
+          projectId,
         }),
       });
       const data = (await resp.json()) as {
@@ -425,6 +426,7 @@ export function useKickoffStepData(
               : undefined,
           tier: tierRaw?.tier ?? "M",
           improvementNotes: selected.map((s) => s.instruction),
+          projectId,
         }),
       });
       const data = (await resp.json()) as {

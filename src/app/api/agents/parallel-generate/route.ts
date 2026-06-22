@@ -464,11 +464,65 @@ export async function POST(request: NextRequest) {
             | undefined;
           if (docId === "trd") {
             try {
-              const blueprintDir = path.resolve(process.cwd(), ".blueprint");
-              const persisted = await persistTrdArtifactsFromContent(
+              // Write TRD artifacts into the PROJECT's .blueprint (outputRoot),
+              // NOT process.cwd(). The coding phase reads
+              // `<outputDir>/.blueprint/shared-schema.ts` to derive API_CONTRACTS
+              // from the §6 ENDPOINTS registry; writing to process.cwd()
+              // (the agentic-builder repo) left the project's schema missing, so
+              // generateApiContracts hard-failed ("no ENDPOINTS registry") ~12min
+              // into coding even though the TRD authored ENDPOINTS correctly.
+              const blueprintDir = path.resolve(outputRoot, ".blueprint");
+              let persisted = await persistTrdArtifactsFromContent(
                 result.content,
                 blueprintDir,
               );
+
+              // Registry gate (P1①, option A): the §6 schema MUST carry an
+              // `ENDPOINTS` registry — the single source generateApiContracts
+              // derives API_CONTRACTS from (no PRD re-read). The LLM occasionally
+              // omits it; regenerate the TRD ONCE when a schema was authored but
+              // the registry block is missing. Still absent after the retry → the
+              // contract phase hard-fails (no silent PRD fallback). See
+              // docs/contract-single-source-of-truth.md.
+              if (
+                persisted.schemaRegistry.schemaPresent &&
+                !persisted.schemaRegistry.hasRegistry
+              ) {
+                console.warn(
+                  "[parallel-generate] TRD schema has no ENDPOINTS registry — regenerating TRD once.",
+                );
+                send({ type: "doc_stream", docId, chunk: "\n\n_[regenerating: schema missing ENDPOINTS registry]_\n" });
+                const retry = await agentFn(
+                  prdContent,
+                  "",
+                  "",
+                  "",
+                  sessionId,
+                  prdSpec,
+                  () => {},
+                );
+                const retryPersisted = await persistTrdArtifactsFromContent(
+                  retry.content,
+                  blueprintDir,
+                );
+                if (retryPersisted.schemaRegistry.hasRegistry) {
+                  result = retry;
+                  persisted = retryPersisted;
+                  results[docId] = {
+                    content: retry.content,
+                    costUsd: retry.costUsd,
+                    durationMs: retry.durationMs,
+                    tokens: retry.usage.total_tokens,
+                  };
+                  console.log(
+                    `[parallel-generate] TRD regenerated WITH ENDPOINTS registry (${retryPersisted.schemaRegistry.count} endpoint(s)).`,
+                  );
+                } else {
+                  console.warn(
+                    "[parallel-generate] TRD retry STILL has no ENDPOINTS registry — the contract phase will hard-fail if backend endpoints exist.",
+                  );
+                }
+              }
               trdArtifactsSummary = {};
               if (persisted.written.schemaTs) {
                 trdArtifactsSummary.schemaTs = path.relative(

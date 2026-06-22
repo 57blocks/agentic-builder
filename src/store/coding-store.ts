@@ -29,6 +29,26 @@ function abortBackendSession(codeOutputDir: string): void {
 
 import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
 
+export interface ServerLogEntry {
+  level: "log" | "info" | "warn" | "error" | "debug";
+  message: string;
+  taskId?: string;
+  timestamp: string;
+}
+
+/** Max server-console lines kept client-side; a multi-hour build can emit a
+ *  huge volume, so keep only the most recent N to bound memory. */
+const SERVER_LOG_CAP = 2000;
+
+export function appendServerLog(
+  logs: ServerLogEntry[],
+  entry: ServerLogEntry,
+  cap: number = SERVER_LOG_CAP,
+): ServerLogEntry[] {
+  const next = [...logs, entry];
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
 export interface IntegrationVerifyState {
   status: "verifying" | "fixing" | "passed" | "failed";
   errors?: string;
@@ -71,6 +91,8 @@ interface CodingState {
   e2eVerify: E2EVerifyState | null;
   /** Supervisor-level logs (phase verify, fix, install, etc.) */
   supervisorLogs: AgentLogEntry[];
+  /** Raw server-console output streamed via server_log SSE events. */
+  serverLogs: ServerLogEntry[];
   /** Per-test TDD RED/GREEN results, tagged with taskId. Merged into the
    *  task's real-time log view in the detail panel. */
   tddLogs: AgentLogEntry[];
@@ -283,6 +305,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   e2eVerify: null,
   gapAnalysis: null,
   supervisorLogs: [],
+  serverLogs: [],
   tddLogs: [],
   pendingHumanDecision: null,
   codingMode: "cost",
@@ -304,6 +327,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         integrationVerify: null,
         e2eVerify: null,
         supervisorLogs: [],
+        serverLogs: [],
         tddLogs: [],
         pendingHumanDecision: null,
         codingMode: "cost",
@@ -353,6 +377,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
@@ -516,6 +541,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
@@ -584,6 +610,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       tddLogs: [],
       pendingHumanDecision: null,
       codingMode,
@@ -892,6 +919,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       pendingHumanDecision: null,
     });
   },
@@ -945,6 +973,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       pendingHumanDecision: null,
     });
   },
@@ -971,6 +1000,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       integrationVerify: null,
       e2eVerify: null,
       supervisorLogs: [],
+      serverLogs: [],
       pendingHumanDecision: null,
     });
   },
@@ -984,6 +1014,27 @@ type IncomingPayload = {
   data?: Record<string, unknown>;
   session?: { tasks: CodingTask[]; totalCostUsd: number };
 };
+
+/**
+ * Collapse any worker still marked "working" down to "completed".
+ *
+ * Worker completion is inferred per-task (agent_task_complete) and per-phase
+ * (agent_completed); neither is guaranteed for every instance, so a missed
+ * end signal can orphan an agent in "working". Call this on terminal events
+ * to keep the ACTIVE AGENTS badge from showing phantom active workers after
+ * the run has finished. Returns the same array reference when nothing changed
+ * so callers don't trigger needless re-renders.
+ */
+function sweepWorkingAgents(
+  agents: CodingAgentInstance[],
+): CodingAgentInstance[] {
+  if (!agents.some((a) => a.status === "working")) return agents;
+  return agents.map((a) =>
+    a.status === "working"
+      ? { ...a, status: "completed" as const, currentTaskId: null }
+      : a,
+  );
+}
 
 function handleCodingEvent(
   payload: IncomingPayload,
@@ -1282,6 +1333,10 @@ function handleCodingEvent(
       if (a.id !== payload.agentId) return a;
       return {
         ...a,
+        // Mirror agent_task_complete: a failed task ends the worker's active
+        // window. Without this the worker stays "working" and keeps counting
+        // toward the ACTIVE AGENTS badge until the phase happens to finish.
+        status: "idle" as const,
         currentTaskId: null,
         failedTaskIds: [...a.failedTaskIds, payload.taskId!],
         logs: [
@@ -1363,12 +1418,17 @@ function handleCodingEvent(
       status: "completed",
       tasks: session.tasks ?? get().tasks,
       totalCostUsd: session.totalCostUsd ?? get().totalCostUsd,
+      // Terminal sweep: completion is otherwise inferred per-phase, so any
+      // worker instance that never received its task/phase end signal would
+      // stay "working" and keep inflating the ACTIVE AGENTS badge after the
+      // run is over. The run succeeded, so collapse them to "completed".
+      agents: sweepWorkingAgents(get().agents),
     });
     return;
   }
 
   if (type === "session_complete") {
-    set({ status: "completed" });
+    set({ status: "completed", agents: sweepWorkingAgents(get().agents) });
     return;
   }
 
@@ -1452,6 +1512,18 @@ function handleCodingEvent(
       message: (payload.data?.message as string) ?? "",
     };
     set({ supervisorLogs: [...get().supervisorLogs, entry] });
+    return;
+  }
+
+  if (type === "server_log") {
+    const d = payload.data ?? {};
+    const entry: ServerLogEntry = {
+      level: (d.level as ServerLogEntry["level"]) ?? "log",
+      message: (d.message as string) ?? "",
+      taskId: d.taskId as string | undefined,
+      timestamp: (d.timestamp as string) ?? new Date().toISOString(),
+    };
+    set({ serverLogs: appendServerLog(get().serverLogs, entry) });
     return;
   }
 
