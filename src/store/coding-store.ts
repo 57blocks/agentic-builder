@@ -985,6 +985,27 @@ type IncomingPayload = {
   session?: { tasks: CodingTask[]; totalCostUsd: number };
 };
 
+/**
+ * Collapse any worker still marked "working" down to "completed".
+ *
+ * Worker completion is inferred per-task (agent_task_complete) and per-phase
+ * (agent_completed); neither is guaranteed for every instance, so a missed
+ * end signal can orphan an agent in "working". Call this on terminal events
+ * to keep the ACTIVE AGENTS badge from showing phantom active workers after
+ * the run has finished. Returns the same array reference when nothing changed
+ * so callers don't trigger needless re-renders.
+ */
+function sweepWorkingAgents(
+  agents: CodingAgentInstance[],
+): CodingAgentInstance[] {
+  if (!agents.some((a) => a.status === "working")) return agents;
+  return agents.map((a) =>
+    a.status === "working"
+      ? { ...a, status: "completed" as const, currentTaskId: null }
+      : a,
+  );
+}
+
 function handleCodingEvent(
   payload: IncomingPayload,
   set: (s: Partial<CodingState>) => void,
@@ -1282,6 +1303,10 @@ function handleCodingEvent(
       if (a.id !== payload.agentId) return a;
       return {
         ...a,
+        // Mirror agent_task_complete: a failed task ends the worker's active
+        // window. Without this the worker stays "working" and keeps counting
+        // toward the ACTIVE AGENTS badge until the phase happens to finish.
+        status: "idle" as const,
         currentTaskId: null,
         failedTaskIds: [...a.failedTaskIds, payload.taskId!],
         logs: [
@@ -1363,12 +1388,17 @@ function handleCodingEvent(
       status: "completed",
       tasks: session.tasks ?? get().tasks,
       totalCostUsd: session.totalCostUsd ?? get().totalCostUsd,
+      // Terminal sweep: completion is otherwise inferred per-phase, so any
+      // worker instance that never received its task/phase end signal would
+      // stay "working" and keep inflating the ACTIVE AGENTS badge after the
+      // run is over. The run succeeded, so collapse them to "completed".
+      agents: sweepWorkingAgents(get().agents),
     });
     return;
   }
 
   if (type === "session_complete") {
-    set({ status: "completed" });
+    set({ status: "completed", agents: sweepWorkingAgents(get().agents) });
     return;
   }
 
