@@ -898,6 +898,7 @@ export async function POST(request: NextRequest) {
     projectId,
     stitchMeta,
     codingMode: codingModeRaw,
+    useEngineeringSkills: useEngineeringSkillsRaw,
     scopedSubsystemBuild,
     activeSubsystemId,
   } = body as {
@@ -926,6 +927,7 @@ export async function POST(request: NextRequest) {
       screenshotUrl?: string | null;
     } | null;
     codingMode?: CodingMode | string;
+    useEngineeringSkills?: boolean;
     /** Set on scoped sub-calls from the subsystem orchestrator — prevents this
      *  request from re-entering subsystem-orchestration mode (no recursion). */
     scopedSubsystemBuild?: boolean;
@@ -934,6 +936,7 @@ export async function POST(request: NextRequest) {
     activeSubsystemId?: string;
   };
   const codingMode = normalizeCodingMode(codingModeRaw);
+  const useEngineeringSkills = useEngineeringSkillsRaw === true;
 
   const ralphConfig: RalphConfig = {
     ...DEFAULT_RALPH_CONFIG,
@@ -2259,6 +2262,7 @@ export async function POST(request: NextRequest) {
             outputDir: outputRoot,
             projectContext,
             codingMode,
+            useEngineeringSkills,
             frontendDesignContext,
             prebuiltScaffold,
             scaffoldProtectedPaths,

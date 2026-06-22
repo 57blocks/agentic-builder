@@ -99,6 +99,10 @@ export const SupervisorStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => DEFAULT_CODING_MODE,
   }),
+  useEngineeringSkills: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
   frontendDesignContext: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
@@ -295,6 +299,10 @@ export const WorkerStateAnnotation = Annotation.Root({
   codingMode: Annotation<CodingMode>({
     reducer: (_prev, next) => next,
     default: () => DEFAULT_CODING_MODE,
+  }),
+  useEngineeringSkills: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
   }),
   fileRegistrySnapshot: Annotation<GeneratedFile[]>({
     reducer: (prev, next) => {
