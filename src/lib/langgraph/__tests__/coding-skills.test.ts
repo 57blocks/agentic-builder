@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadCodingSkillsBlock, clearCodingSkillsCache } from "../coding-skills";
+import { loadCodingSkillsBlock, loadCodingSkills, clearCodingSkillsCache } from "../coding-skills";
 
 function setupProject(prd: string): string {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "proj-"));
@@ -67,5 +67,35 @@ describe("loadCodingSkillsBlock", () => {
     clearCodingSkillsCache();
     const third = await loadCodingSkillsBlock("backend", out, opts);
     expect(third).toBe("");
+  });
+
+  it("loadCodingSkills returns applied skill refs (id, relative filePath, version)", async () => {
+    const out = setupProject("We need a Redis cache layer.");
+    const skillsRoot = setupSkillsRoot();
+    const { block, applied } = await loadCodingSkills("backend", out, {
+      skillsRoot,
+      enableLlmConfirm: false,
+    });
+    expect(block).toContain("Use a read-through cache.");
+    expect(applied).toHaveLength(1);
+    expect(applied[0].id).toBe("caching");
+    expect(applied[0].version).toBe("v1");
+    expect(applied[0].filePath.startsWith("/")).toBe(false);
+    expect(applied[0].filePath.endsWith("caching.md")).toBe(true);
+  });
+
+  it("loadCodingSkills returns empty applied when nothing matches", async () => {
+    const out = setupProject("A simple static landing page.");
+    const skillsRoot = setupSkillsRoot();
+    const { block, applied } = await loadCodingSkills("backend", out, {
+      skillsRoot,
+      enableLlmConfirm: false,
+    });
+    expect(block).toBe("");
+    expect(applied).toEqual([]);
+  });
+
+  it("loadCodingSkills returns empty for an empty outputDir", async () => {
+    expect(await loadCodingSkills("backend", "")).toEqual({ block: "", applied: [] });
   });
 });
