@@ -38,7 +38,7 @@ import { useStepStore } from "@/store/step-store";
 import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
-import type { CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
+import type { AgentLogEntry, CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
 import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
@@ -48,6 +48,7 @@ import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
 import { StatusBar } from "./components/StatusBar";
 import { TaskSearchBox } from "./components/TaskSearchBox";
+import { ServerConsolePanel } from "./components/ServerConsolePanel";
 import { useElapsedTimer } from "./use-elapsed-timer";
 
 // ─── React Flow node type registry ───────────────────────────────────────────
@@ -596,13 +597,26 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone, isFailed]);
 
-  // ── Agent logs (flat, all agents) + TDD per-test logs, ordered by time ──────
+  // ── Agent logs + TDD per-test logs + task-tagged server console lines ──────
   const allAgentLogs = useMemo(
     () =>
-      [...codingState.agents.flatMap((a) => a.logs), ...codingState.tddLogs].sort(
-        (a, b) => a.timestamp.localeCompare(b.timestamp),
-      ),
-    [codingState.agents, codingState.tddLogs],
+      [
+        ...codingState.agents.flatMap((a) => a.logs),
+        ...codingState.tddLogs,
+        // Server console lines attributed to a task (via withTaskLogContext)
+        // surface inside that task's REAL-TIME LOGS.
+        ...codingState.serverLogs
+          .filter((l) => l.taskId)
+          .map(
+            (l): AgentLogEntry => ({
+              timestamp: l.timestamp,
+              type: "info",
+              taskId: l.taskId,
+              message: `[console:${l.level}] ${l.message}`,
+            }),
+          ),
+      ].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+    [codingState.agents, codingState.tddLogs, codingState.serverLogs],
   );
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -894,6 +908,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         isFailed={isFailed}
         isReturnVisit={isReturnVisit}
         onAbort={() => codingState.reset()}
+      />
+      <ServerConsolePanel
+        logs={codingState.serverLogs}
+        onClear={() => useCodingStore.setState({ serverLogs: [] })}
       />
 
       {/* Pick-and-rerun overlay */}

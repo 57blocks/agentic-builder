@@ -75,6 +75,7 @@ import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-repor
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
+import { withTaskLogContext } from "@/lib/server-log-capture";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -4696,12 +4697,12 @@ export function hasConfigErrors(errors: string): boolean {
 
 export function createWorkerSubGraph() {
   const graph = new StateGraph(WorkerStateAnnotation)
-    .addNode("pick_next_task", pickNextTask)
-    .addNode("generate_code", generateCode)
-    .addNode("verify", verifyCode)
-    .addNode("task_fix", taskFix)
-    .addNode("task_done", taskDone)
-    .addNode("task_failed", taskFailed)
+    .addNode("pick_next_task", withTaskLogContext(pickNextTask))
+    .addNode("generate_code", withTaskLogContext(generateCode))
+    .addNode("verify", withTaskLogContext(verifyCode))
+    .addNode("task_fix", withTaskLogContext(taskFix))
+    .addNode("task_done", withTaskLogContext(taskDone))
+    .addNode("task_failed", withTaskLogContext(taskFailed))
 
     .addEdge(START, "pick_next_task")
     .addConditionalEdges("pick_next_task", shouldContinueOrEnd, {
