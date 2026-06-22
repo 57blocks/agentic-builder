@@ -24,6 +24,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 
 import type { ChatMessage } from "@/lib/openrouter";
+import type { AppliedSkillRef } from "./coding-skills";
 
 const LOG_ROOT_REL = path.join(".logs", "coding");
 
@@ -304,5 +305,46 @@ export async function logTaskContext(
       err instanceof Error ? err.message : err,
     );
     return null;
+  }
+}
+
+export interface TaskUsageRecord {
+  timestamp: string;
+  sessionId: string;
+  taskId: string;
+  role: string;
+  attempt: number;
+  model: string;
+  /** Whether Mechanism B (Engineering skill injection) was enabled this run. */
+  engineeringSkillsEnabled: boolean;
+  /** Engineering skills (Mechanism B) that matched; [] when disabled or none. */
+  appliedSkills: AppliedSkillRef[];
+  inputTokens: number;   // = promptTokens
+  outputTokens: number;  // = completionTokens
+  totalTokens: number;
+  costUsd: number;
+  llmCalls: number;
+}
+
+/**
+ * Write a self-contained `usage.json` into an existing per-task log folder
+ * (the dir returned by logTaskContext). Fire-and-forget: catches all I/O
+ * errors and downgrades to console.warn, never throwing into the worker.
+ */
+export async function writeTaskUsage(
+  taskLogDir: string,
+  record: TaskUsageRecord,
+): Promise<void> {
+  try {
+    await fs.writeFile(
+      path.join(taskLogDir, "usage.json"),
+      JSON.stringify(record, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn(
+      `[TaskContextLog] Failed to write usage.json:`,
+      err instanceof Error ? err.message : err,
+    );
   }
 }
