@@ -104,6 +104,8 @@ interface CodingState {
    *  view re-mounted (step navigation / SSE reconnect) — so a user-selected
    *  "cost" silently reverted to "normal" before handleStart ran. */
   setCodingMode: (mode: CodingMode) => void;
+  useEngineeringSkills: boolean;
+  setUseEngineeringSkills: (value: boolean) => void;
 
   startCoding: (
     runId: string,
@@ -291,6 +293,28 @@ async function reconnectAfterDrop(
   }
 }
 
+const SKILLS_TOGGLE_KEY_PREFIX = "coding:useEngineeringSkills:";
+
+/** Read the per-project Engineering-skill toggle from localStorage. SSR-safe. */
+export function readUseEngineeringSkills(projectId: string): boolean {
+  if (!projectId || typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(SKILLS_TOGGLE_KEY_PREFIX + projectId) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** Persist the per-project Engineering-skill toggle to localStorage. SSR-safe. */
+export function writeUseEngineeringSkills(projectId: string, value: boolean): void {
+  if (!projectId || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(SKILLS_TOGGLE_KEY_PREFIX + projectId, value ? "true" : "false");
+  } catch {
+    /* ignore quota/availability errors */
+  }
+}
+
 export const useCodingStore = create<CodingState>()((set, get) => ({
   sessionId: null,
   projectId: null,
@@ -309,6 +333,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
   tddLogs: [],
   pendingHumanDecision: null,
   codingMode: "cost",
+  useEngineeringSkills: false,
 
   setProjectId: (id) => {
     const current = get();
@@ -331,15 +356,21 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         tddLogs: [],
         pendingHumanDecision: null,
         codingMode: "cost",
+        useEngineeringSkills: readUseEngineeringSkills(id),
       });
       return;
     }
-    set({ projectId: id });
+    set({ projectId: id, useEngineeringSkills: readUseEngineeringSkills(id) });
   },
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
   setCodingMode: (mode) => set({ codingMode: mode }),
+
+  setUseEngineeringSkills: (value) => {
+    set({ useEngineeringSkills: value });
+    writeUseEngineeringSkills(get().projectId ?? "", value);
+  },
 
   submitHumanDecision: async (decisionId: string) => {
     const { sessionId, pendingHumanDecision } = get();
@@ -407,6 +438,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
         codeOutputDir,
         projectTier,
         codingMode,
+        useEngineeringSkills: get().useEngineeringSkills,
         prd: prdContent,
         stitchMeta,
         // Project slug — isolates per-project design references for mirroring.
