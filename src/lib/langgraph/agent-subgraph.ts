@@ -74,7 +74,8 @@ import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
-import { logTaskContext } from "./task-context-logger";
+import { logTaskContext, writeTaskUsage } from "./task-context-logger";
+import { loadCodingSkills, type AppliedSkillRef } from "./coding-skills";
 import { withTaskLogContext } from "@/lib/server-log-capture";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
@@ -3127,11 +3128,20 @@ async function generateCode(state: WorkerState) {
       },
     ];
 
-    // Inject Engineering-sourced skills matched to this role + project shape.
-    // Cached per (outputDir, role) so trigger eval runs at most once per role.
-    const skillsBlock = await loadCodingSkillsBlock(state.role, state.outputDir);
-    if (skillsBlock) {
-      messages.push({ role: "system", content: skillsBlock });
+    // Mechanism B — Engineering skills matched on PRD/TRD, appended as a
+    // separate system message. Gated by the A/B toggle; Mechanism A above
+    // (roleContext.skillsBlock) always runs regardless. `appliedEngineeringSkills`
+    // is captured (read-only) for usage.json.
+    let appliedEngineeringSkills: AppliedSkillRef[] = [];
+    if (state.useEngineeringSkills) {
+      const { block: engSkillsBlock, applied } = await loadCodingSkills(
+        state.role,
+        state.outputDir,
+      );
+      appliedEngineeringSkills = applied;
+      if (engSkillsBlock) {
+        messages.push({ role: "system", content: engSkillsBlock });
+      }
     }
 
     if (contextParts.length > 0) {
@@ -3341,7 +3351,7 @@ async function generateCode(state: WorkerState) {
     // memory recall, user message, vision image when present) to a per-task
     // folder under `<repoRoot>/.logs/coding/<role>/<taskSlug>/<runStamp>/`.
     // Fire-and-forget: never blocks or fails the worker.
-    void logTaskContext({
+    const taskLogDirPromise = logTaskContext({
       sessionId: state.sessionId,
       task: {
         id: task.id,
@@ -3632,6 +3642,29 @@ async function generateCode(state: WorkerState) {
     console.log(
       `[Worker:${state.workerLabel}] Codegen metrics task="${task.title}" mode=${codegenMode} llmCalls=${llmCalls} promptTokens=${promptTokens} completionTokens=${completionTokens} totalTokens=${totalTokens} readOnlyRounds=${readOnlyRounds} writeToolCalls=${writeToolCalls} roundWrites=${totalRoundWrites} roundWritesByRound=[${roundWritesByRound.join(",")}] deletedFiles=${deletedFileCount} movedFiles=${movedFileCount} durationSec=${(durationMs / 1000).toFixed(1)} model=${lastModel} completion=${completionReason}`,
     );
+
+    // A/B usage record (both arms): tokens + which Engineering skills
+    // (Mechanism B) were injected. Fire-and-forget; never blocks the worker.
+    void taskLogDirPromise.then((taskLogDir) => {
+      if (!taskLogDir) return;
+      return writeTaskUsage(taskLogDir, {
+        timestamp: new Date().toISOString(),
+        sessionId: state.sessionId,
+        taskId: task.id,
+        role: state.role,
+        attempt,
+        model: lastModel,
+        engineeringSkillsEnabled: state.useEngineeringSkills,
+        appliedSkills: appliedEngineeringSkills,
+        inputTokens: promptTokens,
+        outputTokens: completionTokens,
+        totalTokens,
+        costUsd: totalCostUsd,
+        llmCalls,
+      });
+    }).catch(() => {
+      /* fire-and-forget: writeTaskUsage already warns on its own errors */
+    });
 
     // RALPH: check for missing promise and log a warning (enforcement happens in routeAfterGenerate)
     if (state.ralphConfig.enabled) {
