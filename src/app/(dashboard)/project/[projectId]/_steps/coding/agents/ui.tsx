@@ -303,6 +303,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // reset to "normal" on re-mount → cost-saving runs ran as normal.
   const codingMode = codingState.codingMode;
   const setCodingMode = codingState.setCodingMode;
+  const useEngineeringSkills = codingState.useEngineeringSkills;
+  const setUseEngineeringSkills = codingState.setUseEngineeringSkills;
   useEffect(() => {
     // On first mount: if there's already an active/completed session in the store,
     // this is a return visit (user navigated away and came back).
@@ -747,6 +749,16 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {/* CTA buttons */}
         {isIdle && kickoffTasks.length > 0 && (
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600 select-none">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300"
+                checked={useEngineeringSkills}
+                disabled={isRunning}
+                onChange={(e) => setUseEngineeringSkills(e.target.checked)}
+              />
+              Engineering skills
+            </label>
             <select
               value={codingMode}
               onChange={(e) => setCodingMode(e.target.value as CodingMode)}
