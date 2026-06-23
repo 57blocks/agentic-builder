@@ -391,7 +391,7 @@ function buildFrontendPrompt(ctx: PromptContext): string {
     `- **Root route MUST resolve (HARD RULE):** \`router.tsx\` must guarantee the root path \`/\` renders a real page — NEVER let \`/\` fall through to the catch-all \`*\` / NotFound. A user opening the site at \`/\` must see content, not a 404. If the app's main page lives at a named path (e.g. \`/billing-center\`), add \`<Route path="/" element={<Navigate to="/billing-center" replace />} />\` (import \`Navigate\` from \`react-router-dom\`), or make that page the index route. For a single-page app, mount the main page directly at \`path="/"\`.`,
     `- API client → ONE canonical file at \`frontend/src/api/client.ts\`. Never create a parallel HTTP wrapper.`,
     `- **API paths: the client base URL already includes \`/api\`. Pass paths WITHOUT that prefix** — use \`"/users/me"\` not \`"/api/users/me"\`. Read the client file before coding if unsure.`,
-    `- Design spec: when "Design Specification", "Pencil design", or "Codegen handoff" is in context, treat it as source of truth. Match colors, layout, and component hierarchy exactly using Tailwind arbitrary values (\`bg-[#0a0a0a]\`).`,
+    `- Design spec: when "Design Specification", "Pencil design", or "Codegen handoff" is in context, treat it as source of truth. For every color/size/radius/font, FIRST use the matching semantic token utility (bg-primary, text-muted, rounded-md, p-4); ONLY when no token matches, fall back to a Tailwind arbitrary value (\`bg-[#0a0a0a]\`). Never approximate.`,
     ``,
     `**Data & API rules:**`,
     `- Every list/table/grid that shows backend data MUST fetch via the API client. No hardcoded arrays, no mock data, no \`useState([{ id: 1, ... }])\` placeholder initialization.`,

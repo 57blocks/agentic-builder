@@ -234,7 +234,7 @@ export async function buildFrontendDesignContextForCodegen(
           : "",
         "",
         "**THIS IS THE PRIMARY DESIGN REFERENCE.** You MUST reproduce the UI exactly as shown in the Stitch design.",
-        "Match every component, layout section, color, spacing, and design token precisely using Tailwind arbitrary values.",
+        "For every component, layout section, color, spacing, and design token: FIRST use the matching semantic token utility; only fall back to a Tailwind arbitrary value when no token matches.",
         "Do NOT deviate from the Stitch design unless the Design Specification explicitly contradicts it.",
         "",
         stitchText,

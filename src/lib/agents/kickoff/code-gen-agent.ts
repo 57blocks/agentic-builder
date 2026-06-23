@@ -56,7 +56,7 @@ Generate production-quality React frontend code: components, pages, hooks, store
 If the project context includes **Design Tokens**, you MUST faithfully reproduce the design:
 1. **Screen → Route mapping**: each Screen section = a separate route or view component.
 2. **Component tree**: indented hierarchy = JSX nesting. Each named element = a React element.
-3. **Colors (EXACT)**: Tailwind arbitrary values for every color: \`bg-[#1E293B]\`, \`text-[#F1F5F9]\`. Never approximate.
+3. **Colors (EXACT)**: Prefer matching semantic tokens; when a color has no token yet, use Tailwind arbitrary values: \`bg-[#1E293B]\`, \`text-[#F1F5F9]\`. Never approximate.
 4. **Sizing (EXACT)**: \`w-[720px]\`, \`h-[64px]\`, \`gap-[24px]\`, \`p-[32px]\` — match tokens.
 5. **Typography (EXACT)**: \`text-[20px] font-bold\` etc.
 6. **Layout**: \`layout: horizontal\` → \`flex flex-row\`, \`layout: vertical\` → \`flex flex-col\`.

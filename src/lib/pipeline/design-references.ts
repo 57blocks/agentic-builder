@@ -570,7 +570,7 @@ export function formatDesignReferencesPromptBlock(
       "- If a reference has no `target`, apply its aesthetic across the matching feature area (pick the best-fit page by label).",
       "- Do NOT rename, move, or delete files under `.design-references/` — leave them as-is so downstream tooling can consult them.",
       "- When pixel-matching is impossible (e.g. missing image tools), infer the user intent from the label/target and prioritize matching the structural composition.",
-      "- **CSS tokens** (when listed under an entry above) are the exact design-system values captured from the source page. Use them precisely: match every colour, spacing, font size, border-radius, and shadow using Tailwind arbitrary values (e.g. `bg-[#6366f1]`, `gap-[8px]`, `rounded-[6px]`) or CSS custom properties. Do not approximate or substitute.",
+      "- **CSS tokens** (when listed under an entry above) are exact design-system values. FIRST reuse a matching semantic token if one already exists; if the value has no token yet, render it precisely with a Tailwind arbitrary value (e.g. `bg-[#6366f1]`, `gap-[8px]`) or CSS custom property. Do not approximate or substitute.",
       "",
     );
   }

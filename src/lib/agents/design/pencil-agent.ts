@@ -443,7 +443,7 @@ export function toDesignTokensMarkdown(parsed: ParsedDesign): string {
     "## Implementation Notes\n",
     "- Each **Screen** maps to a separate route or view component.",
     "- Indented items are children of the parent node — replicate this hierarchy in React components.",
-    "- Use Tailwind arbitrary values for exact sizing: `w-[720px]`, `gap-[24px]`, `bg-[#1E293B]`, `text-[20px]`.",
+    "- Prefer existing semantic tokens; when a value has no token yet, use Tailwind arbitrary values for exact sizing: `w-[720px]`, `gap-[24px]`, `bg-[#1E293B]`, `text-[20px]`.",
     "- Frame `layout: horizontal` → `flex flex-row`, `layout: vertical` → `flex flex-col`.",
     "- `fill_container` → `w-full` or `h-full`, `fit_content` → `w-fit` or `h-fit`.",
     "- All colors from the design MUST be used exactly as specified.",
