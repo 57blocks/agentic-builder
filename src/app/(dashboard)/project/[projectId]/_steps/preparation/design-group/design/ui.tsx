@@ -709,6 +709,37 @@ export function DesignUI(props: StepUIProps) {
     return () => clearTimeout(handle);
   }, [persistedDesignContent, isRunning]);
 
+  // ── DesignSpec 保存后：派生 tokens.css 并落 <codeOutputDir>/tokens.css ──
+  useEffect(() => {
+    if (!persistedDesignContent.trim() || isRunning) return;
+    const codeOutputDir = useStepStore.getState().codeOutputDir;
+    const handle = setTimeout(async () => {
+      try {
+        const { deriveTokensFromDesignSpec } = await import(
+          "@/lib/design/derive-tokens"
+        );
+        const { renderTokensCss } = await import(
+          "@/lib/design/render-tokens-css"
+        );
+        const css = renderTokensCss(
+          deriveTokensFromDesignSpec(persistedDesignContent),
+        );
+        await fetch("/api/agents/save-doc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            docId: "design-tokens",
+            content: css,
+            codeOutputDir,
+          }),
+        });
+      } catch (err) {
+        console.warn("[DesignUI] derive/save tokens.css failed:", err);
+      }
+    }, 900);
+    return () => clearTimeout(handle);
+  }, [persistedDesignContent, isRunning]);
+
   // ── Auto-generate design styles once PRD content is available ────────────
   const autoGenRef = useRef(false);
 
