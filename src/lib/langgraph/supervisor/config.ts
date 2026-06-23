@@ -59,7 +59,9 @@ export const CODING_WORKER_CAP = (() => {
  * phases, so contract completeness is unchanged.
  */
 export const ENABLE_PARALLEL_FOUNDATION = (() => {
-  const raw = (process.env.CODEGEN_PARALLEL_FOUNDATION ?? "0").trim().toLowerCase();
+  const raw = (process.env.CODEGEN_PARALLEL_FOUNDATION ?? "0")
+    .trim()
+    .toLowerCase();
   return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
 })();
 
@@ -98,6 +100,27 @@ export const ENABLE_PARALLEL_FE_BE = (() => {
 })();
 
 /**
+ * Integration-fix implementation selector.
+ *
+ *  - "open"   → DEFAULT. The high-autonomy open integration fixer
+ *               (`openIntegrationVerifyAndFix`): a strong model
+ *               (claude-opus-4.8 by default), an open-ended prompt, layered
+ *               context compression, and NO procedural stagnation penalties —
+ *               only the cumulative budget circuit-breaker bounds the loop.
+ *  - "legacy" → the original `integrationVerifyAndFix` micro-managed loop,
+ *               kept byte-for-byte as a fallback.
+ *
+ * Both bind to the same `integration_verify` graph node and honour the same
+ * return contract (integrationErrors / integrationFixAttempts / totalCostUsd),
+ * so routing and the circuit-breaker are agnostic to which one runs.
+ */
+export type IntegrationFixMode = "open" | "legacy";
+export const INTEGRATION_FIX_MODE: IntegrationFixMode = (() => {
+  const raw = (process.env.INTEGRATION_FIX_MODE ?? "open").trim().toLowerCase();
+  return raw === "legacy" ? "legacy" : "open";
+})();
+
+/**
  * Schema reconciliation flag (default OFF).
  *
  * When on, a `schema_reconcile` node runs AFTER the frontend phase: it applies
@@ -111,7 +134,9 @@ export const ENABLE_PARALLEL_FE_BE = (() => {
  * Runs LLM workers, so it must be validated on a real run before defaulting on.
  */
 export const ENABLE_SCHEMA_RECONCILE = (() => {
-  const raw = (process.env.CODEGEN_SCHEMA_RECONCILE ?? "0").trim().toLowerCase();
+  const raw = (process.env.CODEGEN_SCHEMA_RECONCILE ?? "0")
+    .trim()
+    .toLowerCase();
   return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
 })();
 

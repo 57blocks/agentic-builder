@@ -126,6 +126,7 @@ export async function executeSupervisorTool(
   name: string,
   args: Record<string, unknown>,
   outputDir: string,
+  options?: { bashTimeoutMs?: number },
 ): Promise<string> {
   const MAX_OUT = 4000;
   const structuredResult = await executeStructuredSupervisorTool({
@@ -160,7 +161,7 @@ export async function executeSupervisorTool(
           {
             cwd: outputDir,
             maxBuffer: 10 * 1024 * 1024,
-            timeout: 120_000,
+            timeout: options?.bashTimeoutMs ?? 120_000,
             env: { ...process.env, FORCE_COLOR: "0" },
           },
         );

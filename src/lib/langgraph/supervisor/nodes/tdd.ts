@@ -88,6 +88,30 @@ export async function tddTestWriterAndRed(
   };
 }
 
+/**
+ * Open-mode passthrough for the `tdd_green_verify` graph node.
+ *
+ * In OpenIntegrationFix (the high-autonomy variant), TDD/E2E/unit tests are
+ * REFERENCE material the model reads itself — not a system gate. The model's
+ * `report_done` is the sole authority on done-ness. So this node must NOT:
+ *   - run the ~7-minute GREEN integration suite, nor
+ *   - write "TDD hard gate failed" into `integrationErrors`
+ * (which would loop control back into integration_verify and override the
+ * model's decision).
+ *
+ * Returning `{}` preserves whatever the open node already set in state
+ * (`integrationErrors=""` on a model pass, or a model-reported failure string),
+ * so `routeAfterTddGreenVerify*` simply proceeds to e2e/summary.
+ */
+export async function tddGreenVerifyPassthrough(
+  _state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  console.log(
+    "[Supervisor] tdd_green_verify: OPEN mode — skipping the TDD hard gate (tests are reference material; the model's report_done decides done-ness).",
+  );
+  return {};
+}
+
 export async function tddGreenVerifyAndReview(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {

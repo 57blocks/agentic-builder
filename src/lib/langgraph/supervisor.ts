@@ -173,6 +173,7 @@ import {
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
   scaledIntegrationVerifyFixTotalBudget,
   remainingIntegrationVerifyBudget,
+  INTEGRATION_FIX_MODE,
 } from "./supervisor/config";
 import {
   splitFrontendTasks,
@@ -239,6 +240,7 @@ import {
   buildIntegrationReasoningOptions,
 } from "./supervisor/verify-tools/command-classifier";
 import { executeSupervisorTool } from "./supervisor/verify-tools/executor";
+import { openIntegrationVerifyAndFix } from "./open-integration-verify-fix";
 import {
   normalizeFrontendHookSignatures,
   normalizeFrontendJsxElementAnnotations,
@@ -264,6 +266,7 @@ import {
   syncDeps,
   tddTestWriterAndRed,
   tddGreenVerifyAndReview,
+  tddGreenVerifyPassthrough,
 } from "./supervisor/nodes/tdd";
 
 // ─── Nodes ───
@@ -9556,6 +9559,26 @@ async function parallelCodegenPhase(
 }
 
 export function createSupervisorGraph() {
+  // Pick the integration-fix implementation once per graph build. Both honour
+  // the same node contract, so routing + circuit-breaker are agnostic.
+  const integrationVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? integrationVerifyAndFix
+      : openIntegrationVerifyAndFix;
+  // In OPEN mode the TDD hard gate is bypassed at the graph level — tests are
+  // reference material, and the open node's `report_done` is the sole authority
+  // on done-ness (no loop-back, no session-fail override).
+  const tddGreenVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? tddGreenVerifyAndReview
+      : tddGreenVerifyPassthrough;
+  console.log(
+    `[Supervisor] integration_verify node bound to ${
+      INTEGRATION_FIX_MODE === "legacy"
+        ? "legacy IntegrationVerifyFix"
+        : "OpenIntegrationFix"
+    } (INTEGRATION_FIX_MODE=${INTEGRATION_FIX_MODE}).`,
+  );
   // ─── Route B (flag ON): BE + FE phases run concurrently in parallel_codegen,
   // then verify + extract run sequentially post-join. Built as a separate chain so
   // the flag-OFF path below stays byte-identical (zero regression).
@@ -9583,8 +9606,8 @@ export function createSupervisorGraph() {
       .addNode("schema_arbiter", schemaArbiter)
       .addNode("schema_reconcile", schemaReconcile)
       .addNode("sync_deps", syncDeps)
-      .addNode("integration_verify", integrationVerifyAndFix)
-      .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+      .addNode("integration_verify", integrationVerifyNode)
+      .addNode("tdd_green_verify", tddGreenVerifyNode)
       .addNode("e2e_verify", e2eVerifyAndFix)
       .addNode("summary", summary)
 
@@ -9662,8 +9685,8 @@ export function createSupervisorGraph() {
       phaseVerifyAndFix(s, { workerHintRoles: ["frontend"] }),
     )
     .addNode("sync_deps", syncDeps)
-    .addNode("integration_verify", integrationVerifyAndFix)
-    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+    .addNode("integration_verify", integrationVerifyNode)
+    .addNode("tdd_green_verify", tddGreenVerifyNode)
     .addNode("e2e_verify", e2eVerifyAndFix)
     .addNode("summary", summary)
 
@@ -9718,9 +9741,18 @@ export function createSupervisorGraph() {
 }
 
 export function createIntegrationRetryGraph() {
+  const integrationVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? integrationVerifyAndFix
+      : openIntegrationVerifyAndFix;
+  // OPEN mode bypasses the graph-level TDD hard gate (see createSupervisorGraph).
+  const tddGreenVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? tddGreenVerifyAndReview
+      : tddGreenVerifyPassthrough;
   const graph = new StateGraph(SupervisorStateAnnotation)
-    .addNode("integration_verify", integrationVerifyAndFix)
-    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+    .addNode("integration_verify", integrationVerifyNode)
+    .addNode("tdd_green_verify", tddGreenVerifyNode)
     .addNode("summary", summary)
     .addEdge(START, "integration_verify")
     .addEdge("integration_verify", "tdd_green_verify")
