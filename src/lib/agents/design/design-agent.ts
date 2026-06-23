@@ -34,7 +34,7 @@ Produce sections in this order:
    f. 🌫 Shadows — shadow tokens with visual demos
    g. 🧩 Components — live HTML demos of: Buttons (primary/secondary/danger/sm/disabled), Badges (colored dots), Inputs & Selects, Tabs (pill + segment), Cards (basic + KPI grid), Data Table, Alert Feed
    h. 📐 Page Patterns — Sidebar nav demo, Topbar demo, plus any domain-specific patterns (metric cards, score rings, timelines, etc.)
-   i. 📋 CSS Token Quick Reference — a styled <pre> code block showing the full :root {} token map
+   i. 📋 CSS Token Quick Reference — a styled <pre> code block showing the full :root {} token map (MUST include the --space-* spacing scale and --text-* font-size scale)
 
 ## Design Token Requirements
 Derive all tokens from the selected visual style and product domain. Define them as CSS custom properties in :root. Use semantic naming:
@@ -43,6 +43,8 @@ Derive all tokens from the selected visual style and product domain. Define them
 - --text-primary, --text-secondary, --text-muted
 - --shadow-sm, --shadow-md
 - --radius-sm (8px), --radius-md (12px), --radius-lg (16px)
+- --space-1 … --space-12 (spacing scale, 4px base: --space-1=4px, --space-2=8px, --space-4=16px, --space-6=24px, …) — define ALL as :root CSS variables
+- --text-xs … --text-4xl (font-size scale: --text-xs≈12px, --text-base=16px, --text-lg=18px, --text-xl=20px, --text-2xl=24px, …) — define ALL as :root CSS variables
 - Status/semantic colors as needed by the product (e.g., --risk-normal, --risk-elevated, --risk-high, --risk-critical or --status-success, --status-warning, --status-error)
 
 ## Visual Quality Rules
