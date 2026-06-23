@@ -81,7 +81,7 @@ if (invokedDirectly) {
   const repoRoot = process.cwd();
   const summary = buildCodingSkills({
     engineeringDir: path.join(repoRoot, "Engineering"),
-    blueprintSkillsDir: path.join(repoRoot, ".blueprint", "skills"),
+    blueprintSkillsDir: path.join(repoRoot, ".blueprint", "engineering-skills"),
   });
   console.info(
     `[build:skills] wrote ${summary.written} skill(s): ${JSON.stringify(summary.byRole)}`,

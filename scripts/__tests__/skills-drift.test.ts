@@ -12,7 +12,7 @@ describe("coding skills drift guard", () => {
   // Engineering/ is gitignored and may be absent in CI / fresh clones.
   // Only assert drift when the source tree is actually present.
   it.skipIf(!hasEngineering)(
-    ".blueprint/skills matches a fresh build from Engineering",
+    ".blueprint/engineering-skills matches a fresh build from Engineering",
     () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "drift-"));
       buildCodingSkills({
@@ -21,7 +21,7 @@ describe("coding skills drift guard", () => {
       });
 
       for (const role of ["backend", "frontend"]) {
-        const committed = path.join(repoRoot, ".blueprint", "skills", role);
+        const committed = path.join(repoRoot, ".blueprint", "engineering-skills", role);
         const fresh = path.join(tmp, role);
         const committedFiles = fs.existsSync(committed)
           ? fs.readdirSync(committed).sort()

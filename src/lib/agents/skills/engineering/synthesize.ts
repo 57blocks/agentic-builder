@@ -54,7 +54,7 @@ export function trimBody(body: string): string {
 /**
  * Convert one parsed Engineering skill into a loader-format `.md` string.
  * The returned `id` is the skill name; the file must be written as
- * `.blueprint/skills/<role>/<id>.md` so `parseSkillFile`'s basename/agent
+ * `.blueprint/engineering-skills/<role>/<id>.md` so `parseSkillFile`'s basename/agent
  * invariants hold.
  */
 export function convertEngineeringSkill(

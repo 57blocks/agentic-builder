@@ -3,8 +3,10 @@ import path from "node:path";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import type { CodingAgentRole } from "@/lib/pipeline/types";
 
+const ENGINEERING_SKILLS_ROOT = path.join(process.cwd(), ".blueprint", "engineering-skills");
+
 export interface CodingSkillsOptions {
-  /** Override the skills root (default: <cwd>/.blueprint/skills). For tests. */
+  /** Override the skills root (default: <cwd>/.blueprint/engineering-skills). For tests. */
   skillsRoot?: string;
   /** Disable the LLM confirm step (composite → prefilter-only). For tests. */
   enableLlmConfirm?: boolean;
@@ -14,7 +16,7 @@ export interface CodingSkillsOptions {
 export interface AppliedSkillRef {
   /** Skill id (filename basename). */
   id: string;
-  /** Path relative to repo root, e.g. ".blueprint/skills/backend/auth.md". */
+  /** Path relative to repo root, e.g. ".blueprint/engineering-skills/backend/auth.md". */
   filePath: string;
   /** Skill version, e.g. "v1". */
   version: string;
@@ -59,7 +61,8 @@ export async function loadCodingSkills(
   opts: CodingSkillsOptions = {},
 ): Promise<CodingSkillsResult> {
   if (!outputDir) return { block: "", applied: [] };
-  const cacheKey = `${outputDir}::${role}::${opts.skillsRoot ?? "default"}::${opts.enableLlmConfirm ?? "default"}`;
+  const skillsRoot = opts.skillsRoot ?? ENGINEERING_SKILLS_ROOT;
+  const cacheKey = `${outputDir}::${role}::${skillsRoot}::${opts.enableLlmConfirm ?? "default"}`;
   const cached = resultCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -70,7 +73,7 @@ export async function loadCodingSkills(
 
   const loaded = await loadSkillsForAgent(
     { agent: role, prdContent: prd, trdContent: trd },
-    { skillsRoot: opts.skillsRoot, enableLlmConfirm: opts.enableLlmConfirm },
+    { skillsRoot, enableLlmConfirm: opts.enableLlmConfirm },
   );
   const block = formatAppliedSkills(loaded);
   const applied: AppliedSkillRef[] = loaded.applied.map((a) => ({
