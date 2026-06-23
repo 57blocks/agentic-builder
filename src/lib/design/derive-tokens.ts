@@ -33,11 +33,11 @@ export function deriveTokensFromDesignSpec(html: string): DesignTokens {
     radius: { ...DEFAULT_TOKENS.radius },
   };
   for (const [name, value] of Object.entries(vars)) {
+    // fonts are handled here; classify() only returns spacing/fontSizes/radius/colors
     if (name === "font-sans") { t.fonts.sans = value; continue; }
     if (name === "font-mono") { t.fonts.mono = value; continue; }
     const c = classify(name);
     if (!c) continue;
-    if (c.bucket === "fonts") continue;
     (t[c.bucket] as Record<string, string>)[c.key] = value;
   }
   return t;

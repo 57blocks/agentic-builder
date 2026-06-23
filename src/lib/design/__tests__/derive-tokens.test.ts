@@ -34,4 +34,32 @@ describe("deriveTokensFromDesignSpec", () => {
     const t = deriveTokensFromDesignSpec("<html></html>");
     expect(t.colors.primary).toBe(DEFAULT_TOKENS.colors.primary);
   });
+
+  it("--font-sans / --font-mono 路由到 t.fonts.sans / t.fonts.mono", () => {
+    const html = `<!DOCTYPE html><html><head><style>
+:root {
+  --font-sans: 'Roboto', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+</style></head><body></body></html>`;
+    const t = deriveTokensFromDesignSpec(html);
+    expect(t.fonts.sans).toBe("'Roboto', sans-serif");
+    expect(t.fonts.mono).toBe("'JetBrains Mono', monospace");
+  });
+
+  it("fontSizes/spacing 局部覆盖时其余键仍回退 DEFAULT_TOKENS", () => {
+    const html = `<!DOCTYPE html><html><head><style>
+:root {
+  --text-lg: 1.5rem;
+  --space-4: 2rem;
+}
+</style></head><body></body></html>`;
+    const t = deriveTokensFromDesignSpec(html);
+    // overridden values
+    expect(t.fontSizes.lg).toBe("1.5rem");
+    expect(t.spacing["4"]).toBe("2rem");
+    // other keys must still equal DEFAULT_TOKENS
+    expect(t.fontSizes.base).toBe(DEFAULT_TOKENS.fontSizes.base);
+    expect(t.spacing["6"]).toBe(DEFAULT_TOKENS.spacing["6"]);
+  });
 });
