@@ -46,6 +46,7 @@ import {
   prdSignalsBackend,
 } from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
+import { copyDesignTokens } from "@/lib/pipeline/copy-design-tokens";
 import { InfraAgent } from "@/lib/agents/infra/infra-agent";
 import { applyInfra } from "@/lib/pipeline/infra/apply";
 import { buildInfraSpecFromKickoff } from "@/lib/pipeline/infra/from-kickoff";
@@ -1361,6 +1362,9 @@ export async function POST(request: NextRequest) {
       `[CodingAPI] Failed to mirror design references: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
+
+  // 把 design 阶段生成的 tokens.css 复制到 tier 对应位置（在 copyScaffold 之后）。
+  await copyDesignTokens(outputRoot, scaffoldTier);
 
   try {
     await writeScaffoldSpecFile(outputRoot, scaffoldTier);
