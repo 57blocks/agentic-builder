@@ -47,12 +47,15 @@ describe("ensureFrontendFoundationTask", () => {
     expect(out.map((t) => t.id)).toEqual(["T-001", "T-002"]);
 
     const shell = out.find((t) => t.id === "T-001")!;
-    // Shell keeps router.tsx and gains tokens + primitives.
+    // Shell keeps router.tsx and gains tokens. shadcn primitives are
+    // pre-installed by the scaffold, so the Foundation no longer CREATES them.
     expect(creates(shell)).toContain("frontend/src/router.tsx");
     expect(creates(shell)).toContain("frontend/src/styles/tokens.css");
-    expect(creates(shell)).toContain("frontend/src/components/ui/Button.tsx");
+    expect(creates(shell)).not.toContain("frontend/src/components/ui/Button.tsx");
+    expect(creates(shell)).not.toContain("frontend/src/components/ui/index.ts");
     expect(shell.priority).toBe("P0");
-    expect(shell.description).toContain("FORBIDDEN");
+    // Contract now points at the pre-installed shadcn primitives + token-first.
+    expect(shell.description).toContain("@/components/ui");
     // router.tsx is created exactly once across all tasks.
     const routerOwners = out.filter((t) =>
       creates(t).includes("frontend/src/router.tsx"),

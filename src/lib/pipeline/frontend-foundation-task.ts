@@ -40,19 +40,9 @@ const TOKENS_FILE = "frontend/src/styles/tokens.css";
 const UI_BARREL = "frontend/src/components/ui/index.ts";
 const INDEX_CSS = "frontend/src/index.css";
 
-/** Shared UI primitives every page should compose instead of re-inventing. */
-const UI_PRIMITIVES = [
-  "Button",
-  "Card",
-  "Input",
-  "Select",
-  "Textarea",
-  "Badge",
-  "Table",
-  "Modal",
-  "EmptyState",
-  "Spinner",
-].map((n) => `frontend/src/components/ui/${n}.tsx`);
+// UI primitives are NO LONGER hand-rolled by the Foundation: the scaffold
+// pre-installs shadcn-ui components under `frontend/src/components/ui/` plus an
+// `index.ts` barrel. The Foundation consumes them; it does not create them.
 
 /** Layout shell + app-shell anchor files (so task-dep-inference locks onto us). */
 const LAYOUT_FILES = [
@@ -65,11 +55,12 @@ const SHELL_FILES = [
   "frontend/src/context/AuthContext.tsx",
 ];
 
-/** Files the Foundation owns, in priority order (tokens first, shell last). */
+/** Files the Foundation owns, in priority order (tokens first, shell last).
+ *  NOTE: shadcn UI primitives + the `index.ts` barrel are PRE-INSTALLED by the
+ *  scaffold — they are intentionally NOT in this list (the Foundation consumes
+ *  them, never recreates them). */
 const FOUNDATION_CREATES = [
   TOKENS_FILE,
-  UI_BARREL,
-  ...UI_PRIMITIVES,
   ...LAYOUT_FILES,
   ...SHELL_FILES,
 ];
@@ -106,17 +97,22 @@ const FOUNDATION_DESCRIPTION = [
   "     (bg-primary, text-muted, rounded-md, p-4, text-lg). If a genuinely new",
   "     token is required, ADD it using the existing --color-*/--text-*/",
   "     --spacing-*/--radius-* naming; never replace the file.",
-  "  2. Shared UI primitives in `frontend/src/components/ui/` (Button, Card,",
-  "     Input, Select, Textarea, Badge, Table, Modal, EmptyState, Spinner) that",
-  "     consume ONLY the tokens above, re-exported from the `index.ts` barrel.",
+  "  2. Shared UI primitives are PRE-INSTALLED as shadcn-ui components in",
+  "     `frontend/src/components/ui/` (Button, Input, Label, Textarea, Card,",
+  "     Badge, Dialog), re-exported from the `index.ts` barrel. CONSUME them —",
+  "     do NOT hand-roll or recreate. Need a component shadcn doesn't ship?",
+  "     Add it under `components/ui/` (compose Radix primitives) using the",
+  "     existing tokens, and export it from the barrel.",
   "  3. Layout shell (AppLayout + Sidebar + TopNav) and per-role shells.",
   ...ROUTER_DELIVERABLE,
   "  5. Shared AuthContext / providers.",
   "",
   "DESIGN-SYSTEM CONTRACT for all downstream page tasks:",
-  "  - Import primitives from `@/components/ui`; do NOT hand-roll buttons/cards.",
-  "  - Use semantic tokens (bg-primary, text-muted, rounded-md). Inline arbitrary",
-  "    hex such as bg-[#7d976b] is FORBIDDEN — it causes cross-page colour drift.",
+  "  - Import shadcn primitives from `@/components/ui`; do NOT hand-roll",
+  "    buttons/inputs/cards. Need a missing component? add it under",
+  "    `components/ui/` and export it from the barrel.",
+  "  - Prefer semantic tokens (bg-primary, text-muted, rounded-md, p-4). Only",
+  "    fall back to an arbitrary value (bg-[#7d976b]) when no token matches.",
 ].join("\n");
 
 // ─── helpers ───────────────────────────────────────────────────────────────
