@@ -19,8 +19,15 @@
  */
 
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Modal, Typography } from "antd";
 import { usePrivy } from "@privy-io/react-auth";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  Button,
+} from "@/components/ui";
 
 export type LoginModalProps = {
   open: boolean;
@@ -79,74 +86,50 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   }
 
-  function handleCancel() {
-    setError(null);
-    onClose();
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      setError(null);
+      onClose();
+    }
   }
 
   return (
-    <Modal
-      title={null}
-      open={open}
-      onCancel={handleCancel}
-      footer={null}
-      destroyOnClose
-      centered
-      width={420}
-    >
-      <div className="px-1">
-        <div className="text-center mb-5">
-          <Typography.Title level={4} style={{ marginBottom: 4 }}>
-            Sign in
-          </Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            Pick a provider to continue
-          </Typography.Text>
-        </div>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader className="items-center text-center">
+          <DialogTitle>Sign in</DialogTitle>
+          <DialogDescription>Pick a provider to continue</DialogDescription>
+        </DialogHeader>
 
         {error && (
-          <Alert
-            type="error"
-            showIcon
-            message="Authentication failed"
-            description={error}
-            className="mb-4"
-          />
+          <div
+            role="alert"
+            className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            <p className="font-medium">Authentication failed</p>
+            <p>{error}</p>
+          </div>
         )}
 
         <div className="flex flex-col gap-3">
           <Button
-            type="primary"
-            block
-            size="large"
-            disabled={!ready}
-            loading={loading}
+            className="w-full"
+            disabled={!ready || loading}
             onClick={handleProviderClick}
           >
-            Continue with OAuth
+            {loading ? "Connecting…" : "Continue with OAuth"}
           </Button>
-          <Typography.Text
-            type="secondary"
-            style={{ fontSize: 11, textAlign: "center" }}
-          >
+          <p className="text-center text-xs text-muted-foreground">
             Privy will let you pick from the configured providers (Google,
-            Email, Twitter, …). Adjust `loginMethods` in
-            <code> providers/PrivyProvider.tsx </code> to match your PRD.
-          </Typography.Text>
+            Email, Twitter, …). Adjust <code>loginMethods</code> in{" "}
+            <code>providers/PrivyProvider.tsx</code> to match your PRD.
+          </p>
         </div>
 
-        <Typography.Text
-          type="secondary"
-          style={{
-            fontSize: 11,
-            display: "block",
-            textAlign: "center",
-            marginTop: 18,
-          }}
-        >
+        <p className="mt-4 text-center text-xs text-muted-foreground">
           Protected by Privy
-        </Typography.Text>
-      </div>
-    </Modal>
+        </p>
+      </DialogContent>
+    </Dialog>
   );
 };

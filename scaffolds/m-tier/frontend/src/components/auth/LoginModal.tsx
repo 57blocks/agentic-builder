@@ -1,5 +1,14 @@
 import React, { useState } from "react";
-import { Alert, Button, Form, Input, Modal, Typography } from "antd";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  Input,
+  Label,
+  Button,
+} from "@/components/ui";
 
 export type LoginModalProps = {
   open: boolean;
@@ -8,21 +17,35 @@ export type LoginModalProps = {
   onLogin: (email: string, password: string) => Promise<void>;
 };
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const LoginModal: React.FC<LoginModalProps> = ({
   open,
   onClose,
   onLogin,
 }) => {
-  const [form] = Form.useForm<{ email: string; password: string }>();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(values: { email: string; password: string }) {
+  function reset() {
+    setEmail("");
+    setPassword("");
     setError(null);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!email.trim()) return setError("Please enter your email");
+    if (!EMAIL_RE.test(email))
+      return setError("Please enter a valid email address");
+    if (!password) return setError("Please enter your password");
     setLoading(true);
     try {
-      await onLogin(values.email, values.password);
-      form.resetFields();
+      await onLogin(email, password);
+      reset();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -31,90 +54,70 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   }
 
-  function handleCancel() {
-    form.resetFields();
-    setError(null);
-    onClose();
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      reset();
+      onClose();
+    }
   }
 
   return (
-    <Modal
-      title={null}
-      open={open}
-      onCancel={handleCancel}
-      footer={null}
-      destroyOnClose
-      centered
-      width={420}
-    >
-      <div className="px-1">
-        <div className="text-center mb-4">
-          <Typography.Title level={4} style={{ marginBottom: 4 }}>
-            Sign in
-          </Typography.Title>
-          <Typography.Text type="secondary">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader className="items-center text-center">
+          <DialogTitle>Sign in</DialogTitle>
+          <DialogDescription>
             Enter your email and password to continue
-          </Typography.Text>
-        </div>
+          </DialogDescription>
+        </DialogHeader>
 
         {error && (
-          <Alert type="error" showIcon message={error} className="mb-4" />
+          <p
+            role="alert"
+            className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {error}
+          </p>
         )}
 
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-          requiredMark={false}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-4"
           autoComplete="on"
         >
-          <Form.Item
-            name="email"
-            label="Email"
-            rules={[
-              { required: true, message: "Please enter your email" },
-              { type: "email", message: "Please enter a valid email address" },
-            ]}
-          >
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="login-email">Email</Label>
             <Input
-              size="large"
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               autoComplete="email"
             />
-          </Form.Item>
+          </div>
 
-          <Form.Item
-            name="password"
-            label="Password"
-            rules={[{ required: true, message: "Please enter your password" }]}
-          >
-            <Input.Password
-              size="large"
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="login-password">Password</Label>
+            <Input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               autoComplete="current-password"
             />
-          </Form.Item>
+          </div>
 
-          <Form.Item style={{ marginBottom: 0 }}>
-            <Button
-              type="primary"
-              htmlType="submit"
-              block
-              size="large"
-              loading={loading}
-            >
-              Sign in
-            </Button>
-          </Form.Item>
-        </Form>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? "Signing in…" : "Sign in"}
+          </Button>
+        </form>
 
-        <Typography.Text
-          type="secondary"
-          style={{ fontSize: 12, display: "block", textAlign: "center", marginTop: 12 }}
-        >
+        <p className="mt-3 text-center text-xs text-muted-foreground">
           By continuing, you agree to our Terms of Service and Privacy Policy.
-        </Typography.Text>
-      </div>
-    </Modal>
+        </p>
+      </DialogContent>
+    </Dialog>
   );
 };
