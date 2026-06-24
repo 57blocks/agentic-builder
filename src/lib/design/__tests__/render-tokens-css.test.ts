@@ -26,11 +26,20 @@ describe("renderTokensCss", () => {
     expect(css).toMatch(/HARD RULE|语义|token/i);
   });
 
-  it("含 shadcn 变量映射层，引用语义 token", () => {
-    expect(css).toContain("--background: var(--color-bg)");
-    expect(css).toContain("--foreground: var(--color-text-primary)");
-    expect(css).toContain("--primary: var(--color-primary)");
-    expect(css).toContain("--border: var(--color-border)");
-    expect(css).toContain("--radius: var(--radius-md)");
+  it("含 shadcn 颜色别名，落在 --color-* 命名空间（@theme 内）", () => {
+    // shadcn 组件工具类依赖这些 --color-* 名才能被 Tailwind 生成
+    expect(css).toContain("--color-background: #f4f6f8;"); // = colors.bg
+    expect(css).toContain("--color-foreground: #1f2a30;"); // = colors.text-primary
+    expect(css).toContain("--color-primary-foreground: #ffffff;"); // = colors.primary-ink
+    expect(css).toContain("--color-muted-foreground: #8a949b;"); // = colors.text-muted
+    expect(css).toContain("--color-input: #d7dde2;"); // = colors.border
+    expect(css).toContain("--color-ring: #4f6670;"); // = colors.primary
+    expect(css).toContain("--color-destructive: #a4453a;"); // = colors.status-error
+  });
+
+  it("shadcn 别名全部在 @theme 块内（非裸 :root）", () => {
+    const theme = css.slice(css.indexOf("@theme {"), css.lastIndexOf("}") + 1);
+    expect(theme).toContain("--color-background:");
+    expect(theme).toContain("--color-ring:");
   });
 });

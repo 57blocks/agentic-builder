@@ -35,6 +35,21 @@
   --color-status-error-bg: #f7e2df;
   --color-status-info: #4f6670;
   --color-status-info-bg: #e6eef1;
+  --color-background: #f4f6f8;
+  --color-foreground: #1f2a30;
+  --color-card: #ffffff;
+  --color-card-foreground: #1f2a30;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1f2a30;
+  --color-primary-foreground: #ffffff;
+  --color-secondary-foreground: #ffffff;
+  --color-muted: #f3f6f8;
+  --color-muted-foreground: #8a949b;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #a4453a;
+  --color-destructive-foreground: #ffffff;
+  --color-input: #d7dde2;
+  --color-ring: #4f6670;
   --font-sans: Inter, system-ui, -apple-system, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
   --text-xs: 0.75rem;
@@ -59,27 +74,4 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --radius-pill: 999px;
-}
-
-:root {
-  --background: var(--color-bg);
-  --foreground: var(--color-text-primary);
-  --card: var(--color-surface);
-  --card-foreground: var(--color-text-primary);
-  --popover: var(--color-surface);
-  --popover-foreground: var(--color-text-primary);
-  --primary: var(--color-primary);
-  --primary-foreground: var(--color-primary-ink);
-  --secondary: var(--color-secondary);
-  --secondary-foreground: var(--color-text-inverse);
-  --muted: var(--color-surface-soft);
-  --muted-foreground: var(--color-text-muted);
-  --accent: var(--color-accent);
-  --accent-foreground: var(--color-text-inverse);
-  --destructive: var(--color-status-error);
-  --destructive-foreground: var(--color-text-inverse);
-  --border: var(--color-border);
-  --input: var(--color-border);
-  --ring: var(--color-primary);
-  --radius: var(--radius-md);
 }
