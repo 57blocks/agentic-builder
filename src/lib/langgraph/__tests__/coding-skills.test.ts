@@ -98,4 +98,22 @@ describe("loadCodingSkillsBlock", () => {
   it("loadCodingSkills returns empty for an empty outputDir", async () => {
     expect(await loadCodingSkills("backend", "")).toEqual({ block: "", applied: [] });
   });
+
+  it("defaults to regex-prefilter-only (skips the LLM confirm) for coding-stage matching", async () => {
+    // A composite-trigger skill = regex prefilter on "cache" + an LLM confirm.
+    // With the production default (no enableLlmConfirm passed), the worker must
+    // match via the prefilter WITHOUT any LLM round-trip (no API key in tests).
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "skills-comp-"));
+    const dir = path.join(root, "backend");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "comp.md"),
+      `---\nid: comp\nagent: backend\nversion: v1\ndescription: Composite test skill.\npriority: 50\nexcludes: []\ntrigger:\n  type: composite\n  prefilter:\n    type: regex\n    match: both\n    any_of:\n      - "cache"\n  confirm:\n    type: llm\n    match: both\n    prompt: "Does this need caching? Answer YES_QUOTE or NO_NONE."\n---\n\nComposite body.\n`,
+      "utf-8",
+    );
+    const out = setupProject("We need a Redis cache layer.");
+    // No enableLlmConfirm → exercises the production default (regex-only).
+    const { applied } = await loadCodingSkills("backend", out, { skillsRoot: root });
+    expect(applied.map((s) => s.id)).toContain("comp");
+  });
 });

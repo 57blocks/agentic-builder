@@ -62,7 +62,13 @@ export async function loadCodingSkills(
 ): Promise<CodingSkillsResult> {
   if (!outputDir) return { block: "", applied: [] };
   const skillsRoot = opts.skillsRoot ?? ENGINEERING_SKILLS_ROOT;
-  const cacheKey = `${outputDir}::${role}::${skillsRoot}::${opts.enableLlmConfirm ?? "default"}`;
+  // Coding-stage matching favours RECALL: by default we run only the cheap
+  // regex prefilter and SKIP the LLM confirm, so any skill whose prefilter
+  // matches the PRD/TRD gets injected. (The confirm was over-rejecting on
+  // narrow projects — e.g. a no-auth billing UI dropped every regex hit.)
+  // Callers/tests can opt back into the LLM confirm with enableLlmConfirm: true.
+  const enableLlmConfirm = opts.enableLlmConfirm ?? false;
+  const cacheKey = `${outputDir}::${role}::${skillsRoot}::${enableLlmConfirm}`;
   const cached = resultCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -73,7 +79,7 @@ export async function loadCodingSkills(
 
   const loaded = await loadSkillsForAgent(
     { agent: role, prdContent: prd, trdContent: trd },
-    { skillsRoot, enableLlmConfirm: opts.enableLlmConfirm },
+    { skillsRoot, enableLlmConfirm },
   );
   const block = formatAppliedSkills(loaded);
   const applied: AppliedSkillRef[] = loaded.applied.map((a) => ({
