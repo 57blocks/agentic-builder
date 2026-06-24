@@ -14,4 +14,4 @@
 
 - **优先用语义 token**：颜色/间距/圆角/字号优先用 `tokens.css` 暴露的语义工具类（`bg-primary`、`text-muted`、`rounded-md`、`p-4`、`text-lg`）。仅在确无对应 token 时才回退任意值（`bg-[#...]`）。
 - **优先复用 shadcn 组件**：界面用 `@/components/ui` 下的 shadcn 组件构建；交互元素（按钮/输入/选择/弹窗）优先用 shadcn，而非裸 `<button>/<input>`。
-- **缺组件就自造**：脚手架预装了常用组件（Button / Input / Label / Textarea / Card / Badge / Dialog）。需要更多组件时，用 `npx shadcn@latest add <name>` 添加，或在 `components/ui/` 手写（可用 Radix 原语）；同样优先 `cn()` + 语义 token，尽量避免行内 `style={{}}`。
+- **缺组件就自造**：脚手架预装了常用 shadcn 组件（Button / Input / Label / Textarea / Card / Badge / Dialog / Select / Dropdown-menu / Checkbox / Tabs / Tooltip / Form / Sonner）。需要更多组件时，用 `npx shadcn@latest add <name>` 添加，或在 `components/ui/` 手写（可用 Radix 原语）；同样优先 `cn()` + 语义 token，尽量避免行内 `style={{}}`。
