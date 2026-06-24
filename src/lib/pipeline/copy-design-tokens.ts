@@ -11,6 +11,8 @@ export function tokensDestForTier(tier: string): string {
     : "frontend/src/styles/tokens.css";
 }
 
+type ResolvedTokens = { css: string; source: "file" | "designspec" };
+
 /**
  * 解析出本次项目应使用的 tokens.css 内容（确定性，服务端，与前端 UI 是否运行无关）。
  * 优先级：
@@ -19,10 +21,13 @@ export function tokensDestForTier(tier: string): string {
  *      阶段必定存在；这条路径让 headless / Ralph 等自动化运行也能拿到设计派生 token。
  * 都没有则返回 null（保留 scaffold stub）。
  */
-async function resolveDesignTokensCss(outputRoot: string): Promise<string | null> {
+async function resolveDesignTokensCss(
+  outputRoot: string,
+): Promise<ResolvedTokens | null> {
   // 1) design 阶段显式产出的 tokens.css
   try {
-    return await fs.readFile(path.join(outputRoot, "tokens.css"), "utf-8");
+    const css = await fs.readFile(path.join(outputRoot, "tokens.css"), "utf-8");
+    if (css.trim()) return { css, source: "file" };
   } catch {
     /* fall through to DesignSpec derivation */
   }
@@ -33,7 +38,10 @@ async function resolveDesignTokensCss(outputRoot: string): Promise<string | null
       "utf-8",
     );
     if (spec.trim()) {
-      return renderTokensCss(deriveTokensFromDesignSpec(spec));
+      return {
+        css: renderTokensCss(deriveTokensFromDesignSpec(spec)),
+        source: "designspec",
+      };
     }
   } catch {
     /* no DesignSpec either */
@@ -44,23 +52,35 @@ async function resolveDesignTokensCss(outputRoot: string): Promise<string | null
 /**
  * 把设计派生的 tokens.css 写入 tier 对应的最终位置。
  * 必须在 copyScaffold(forceOverwrite) 之后调用，否则会被 stub 覆盖。
+ *
+ * 当 token 是从 DesignSpec 反推得到时，同时把它落成 `<outputRoot>/tokens.css`
+ * 根产物（与 DesignSpec.md 并列、可检视，符合“design 阶段落地 tokens.css”的预期）。
+ *
  * 优雅回退：无显式 tokens.css 且无 DesignSpec 时保留 scaffold stub，仅 warn，不抛错。
  */
 export async function copyDesignTokens(
   outputRoot: string,
   tier: string,
 ): Promise<boolean> {
-  const css = await resolveDesignTokensCss(outputRoot);
+  const resolved = await resolveDesignTokensCss(outputRoot);
   const dest = path.join(outputRoot, tokensDestForTier(tier));
-  if (!css) {
+  if (!resolved) {
     console.warn(
       "[CodingAPI] design tokens.css not applied (no tokens.css / DesignSpec.md; using scaffold stub)",
     );
     return false;
   }
   try {
+    // 反推得到的，落一份根产物 <outputRoot>/tokens.css（显式产出的则它本就存在）。
+    if (resolved.source === "designspec") {
+      await fs.writeFile(
+        path.join(outputRoot, "tokens.css"),
+        resolved.css,
+        "utf-8",
+      );
+    }
     await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.writeFile(dest, css, "utf-8");
+    await fs.writeFile(dest, resolved.css, "utf-8");
     return true;
   } catch (e) {
     console.warn(

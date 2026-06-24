@@ -42,6 +42,9 @@ describe("copyDesignTokens", () => {
     expect(out).toContain("--color-primary: #8ea07f;"); // 反推出设计色
     expect(out).toContain("@theme {");
     expect(out).toContain("--color-ring: #8ea07f;"); // shadcn 别名跟随
+    // 反推时也落根产物 <outputRoot>/tokens.css
+    const rootArtifact = await fs.readFile(path.join(dir, "tokens.css"), "utf-8");
+    expect(rootArtifact).toContain("--color-primary: #8ea07f;");
   });
 
   it("显式 tokens.css 优先于 DesignSpec.md", async () => {
