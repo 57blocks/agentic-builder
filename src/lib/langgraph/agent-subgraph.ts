@@ -202,6 +202,16 @@ const CODEGEN_AGENT_MAX_ITERATIONS = (() => {
   if (!Number.isFinite(raw) || raw <= 0) return 300;
   return Math.min(Math.max(Math.floor(raw), 4), 300);
 })();
+// No-progress breaker for the agentic-tools loop: if the changed-file set has
+// not grown for this many consecutive rounds, stop — the model is spinning
+// (e.g. re-editing the same files, or making tool calls but never emitting a
+// completion signal). Complements the read-only-stall guard, which only fires
+// on consecutive READ rounds and so misses "keeps writing but never finishes".
+const AGENT_NO_PROGRESS_LIMIT = (() => {
+  const raw = Number(process.env.CODEGEN_AGENT_NO_PROGRESS_LIMIT ?? "6");
+  if (!Number.isFinite(raw) || raw <= 0) return 6;
+  return Math.min(Math.max(Math.floor(raw), 2), 50);
+})();
 const CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS = (() => {
   const raw = Number(
     process.env.CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS ??
@@ -1486,7 +1496,51 @@ type CodegenAgentCompletionReason =
   | "status_done"
   | "task_complete"
   | "legacy_file_blocks"
+  | "no_progress"
   | "max_iterations";
+
+/**
+ * Decide whether the agentic codegen loop should stop THIS round. Pure +
+ * unit-tested so the loop's exit logic is verifiable without mocking the LLM.
+ *
+ * Returns `null` to keep looping, or a `{ completed, reason }` verdict:
+ *  - explicit completion (STATUS: DONE / <task_complete>) or all planned files
+ *    written this round → completed. This now also fires on TOOL-CALL rounds
+ *    (previously the loop `continue`d past the completion check whenever the
+ *    model used tools, so a model that kept tool-calling never terminated).
+ *  - no-progress backstop: the changed-file set has not grown for
+ *    `noProgressLimit` rounds → stop. `completed` reflects whether anything was
+ *    ever written (so a stuck-without-writes session reports completed:false
+ *    and the supervisor can retry/repair instead of shipping nothing).
+ */
+export function decideAgentStop(p: {
+  taskComplete: boolean;
+  roundStatusDone: boolean;
+  producedFilesThisRound: boolean;
+  remainingPlannedCreates: number;
+  hasWrites: boolean;
+  staleRounds: number;
+  noProgressLimit: number;
+}): { completed: boolean; reason: CodegenAgentCompletionReason } | null {
+  const planSatisfied = p.remainingPlannedCreates === 0 && p.hasWrites;
+  if (
+    (p.taskComplete || p.roundStatusDone || p.producedFilesThisRound) &&
+    planSatisfied
+  ) {
+    return {
+      completed: true,
+      reason: p.taskComplete
+        ? "task_complete"
+        : p.roundStatusDone
+          ? "status_done"
+          : "legacy_file_blocks",
+    };
+  }
+  if (p.staleRounds >= p.noProgressLimit) {
+    return { completed: p.hasWrites, reason: "no_progress" };
+  }
+  return null;
+}
 
 type CodegenAgentSessionResult = {
   content: string;
@@ -1573,6 +1627,62 @@ async function runCodegenAgentSession(
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
   let didSecondaryRecall = false;
+  // No-progress tracking for the stale breaker (see AGENT_NO_PROGRESS_LIMIT).
+  let staleRounds = 0;
+  let lastProgressCount = 0;
+
+  const buildResult = (
+    completed: boolean,
+    reason: CodegenAgentCompletionReason,
+    finalContent: string,
+  ): CodegenAgentSessionResult => ({
+    content: finalContent,
+    rawContent: rawParts.join(""),
+    model: lastModel,
+    costUsd: totalCostUsd,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    llmCalls,
+    readOnlyRounds,
+    writeToolCalls,
+    changedFiles: Array.from(changedFiles),
+    deletedFiles: Array.from(deletedFiles),
+    movedFiles,
+    completed,
+    completionReason: reason,
+    secondaryInjectedIds,
+  });
+
+  // Advance the no-progress tracker for one finished round and return the stop
+  // verdict (null = keep looping). Called from BOTH the tool-call branch and
+  // the text/file-block branch so completion is checked either way.
+  const advanceAndDecide = (
+    producedFilesThisRound: boolean,
+    taskComplete: boolean,
+    roundStatusDone: boolean,
+  ) => {
+    const progressCount =
+      changedFiles.size + deletedFiles.size + movedFiles.length;
+    if (progressCount > lastProgressCount) {
+      lastProgressCount = progressCount;
+      staleRounds = 0;
+    } else {
+      staleRounds += 1;
+    }
+    return decideAgentStop({
+      taskComplete,
+      roundStatusDone,
+      producedFilesThisRound,
+      remainingPlannedCreates: getRemainingPlannedCreates(
+        task,
+        Array.from(changedFiles),
+      ).length,
+      hasWrites: progressCount > 0,
+      staleRounds,
+      noProgressLimit: AGENT_NO_PROGRESS_LIMIT,
+    });
+  };
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
     // ── Anti read-only spiral ─────────────────────────────────────────────
@@ -1761,6 +1871,17 @@ async function runCodegenAgentSession(
           }
         }
       }
+      const toolDecision = advanceAndDecide(
+        hadWriteTool,
+        hasTaskCompleteSignal(content),
+        parseCodegenRoundStatus(content) === "done",
+      );
+      if (toolDecision) {
+        console.log(
+          `[Worker:${workerLabel ?? "worker"}] agentic loop stop (tool round, loop=${i + 1}): ${toolDecision.reason}, completed=${toolDecision.completed}`,
+        );
+        return buildResult(toolDecision.completed, toolDecision.reason, content);
+      }
       continue;
     }
 
@@ -1780,44 +1901,22 @@ async function runCodegenAgentSession(
       );
     }
 
-    const roundStatus = parseCodegenRoundStatus(content);
-    const taskComplete = hasTaskCompleteSignal(content);
+    const noToolDecision = advanceAndDecide(
+      parsedEntries.length > 0,
+      hasTaskCompleteSignal(content),
+      parseCodegenRoundStatus(content) === "done",
+    );
+    if (noToolDecision) {
+      console.log(
+        `[Worker:${workerLabel ?? "worker"}] agentic loop stop (text round, loop=${i + 1}): ${noToolDecision.reason}, completed=${noToolDecision.completed}`,
+      );
+      return buildResult(noToolDecision.completed, noToolDecision.reason, content);
+    }
+
     const remainingCreates = getRemainingPlannedCreates(
       task,
       Array.from(changedFiles),
     );
-    const hasWrites =
-      changedFiles.size > 0 || deletedFiles.size > 0 || movedFiles.length > 0;
-
-    if (
-      (roundStatus === "done" || taskComplete || parsedEntries.length > 0) &&
-      remainingCreates.length === 0 &&
-      hasWrites
-    ) {
-      return {
-        content,
-        rawContent: rawParts.join(""),
-        model: lastModel,
-        costUsd: totalCostUsd,
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        llmCalls,
-        readOnlyRounds,
-        writeToolCalls,
-        changedFiles: Array.from(changedFiles),
-        deletedFiles: Array.from(deletedFiles),
-        movedFiles,
-        completed: true,
-        completionReason: taskComplete
-          ? "task_complete"
-          : roundStatus === "done"
-            ? "status_done"
-            : "legacy_file_blocks",
-        secondaryInjectedIds,
-      };
-    }
-
     messages.push({
       role: "user",
       content: [
@@ -1834,24 +1933,7 @@ async function runCodegenAgentSession(
     });
   }
 
-  return {
-    content: lastContent,
-    rawContent: rawParts.join(""),
-    model: lastModel,
-    costUsd: totalCostUsd,
-    promptTokens,
-    completionTokens,
-    totalTokens,
-    llmCalls,
-    readOnlyRounds,
-    writeToolCalls,
-    changedFiles: Array.from(changedFiles),
-    deletedFiles: Array.from(deletedFiles),
-    movedFiles,
-    completed: false,
-    completionReason: "max_iterations",
-    secondaryInjectedIds,
-  };
+  return buildResult(false, "max_iterations", lastContent);
 }
 
 /**
