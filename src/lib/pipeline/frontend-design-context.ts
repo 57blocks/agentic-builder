@@ -311,7 +311,34 @@ export async function buildFrontendDesignContextForCodegen(
     console.warn("[FrontendDesignContext] Failed to build vision descriptions (ignored):", err instanceof Error ? err.message : err);
   }
 
-  return [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets]
-    .filter(Boolean)
-    .join("\n\n---\n\n");
+  // ── (REQUIRED) Component-system rule ──────────────────────────────────────
+  // The design references below say "reproduce the UI exactly", which on its own
+  // makes agents hand-roll raw <div>/<button> to pixel-match the image. This
+  // block reframes that: reproduce the LAYOUT/look, but BUILD it by composing the
+  // pre-installed shadcn-ui components. Placed first so it frames every reference.
+  const componentSystemBlock = [
+    "## (REQUIRED) Build the UI with the pre-installed shadcn-ui components",
+    "",
+    "This project ships shadcn-ui components in `@/components/ui` (Button, Card,",
+    "Input, Textarea, Label, Select, Dropdown-menu, Checkbox, Tabs, Tooltip,",
+    "Dialog, Badge, Form, Sonner). The design references below define the visual",
+    "TARGET — layout, spacing, colours, component hierarchy — NOT the markup.",
+    "",
+    "- Reproduce that target by COMPOSING these shadcn components (`<Button>`,",
+    "  `<Card>`, `<Input>`, `<Select>`, `<Dialog>`, `<Tabs>`, `<Badge>` …)",
+    "  imported from `@/components/ui`. Do NOT hand-roll or re-style raw",
+    "  `<button>`/`<input>`/`<select>`/`<textarea>` for interactive elements.",
+    "- Drop to a plain `<div>`/`<span>`/`<section>` ONLY for pure layout structure",
+    "  no component covers. Missing a component? add it under `components/ui/`",
+    "  (or `npx shadcn@latest add <name>`) instead of hand-rolling.",
+    "- Style with the semantic token utilities (bg-primary, text-muted,",
+    "  rounded-md, p-4); fall back to an arbitrary value only when no token fits.",
+  ].join("\n");
+
+  const referenceBlocks = [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets].filter(Boolean);
+  // Preserve original "nothing to inject" semantics: only emit the component-system
+  // rule when there is at least one design reference to frame.
+  if (referenceBlocks.length === 0) return "";
+
+  return [componentSystemBlock, ...referenceBlocks].join("\n\n---\n\n");
 }
