@@ -60,3 +60,26 @@
   --radius-xl: 24px;
   --radius-pill: 999px;
 }
+
+:root {
+  --background: var(--color-bg);
+  --foreground: var(--color-text-primary);
+  --card: var(--color-surface);
+  --card-foreground: var(--color-text-primary);
+  --popover: var(--color-surface);
+  --popover-foreground: var(--color-text-primary);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-ink);
+  --secondary: var(--color-secondary);
+  --secondary-foreground: var(--color-text-inverse);
+  --muted: var(--color-surface-soft);
+  --muted-foreground: var(--color-text-muted);
+  --accent: var(--color-accent);
+  --accent-foreground: var(--color-text-inverse);
+  --destructive: var(--color-status-error);
+  --destructive-foreground: var(--color-text-inverse);
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-primary);
+  --radius: var(--radius-md);
+}

@@ -25,4 +25,12 @@ describe("renderTokensCss", () => {
   it("文件头含语义类用法提示注释", () => {
     expect(css).toMatch(/HARD RULE|语义|token/i);
   });
+
+  it("含 shadcn 变量映射层，引用语义 token", () => {
+    expect(css).toContain("--background: var(--color-bg)");
+    expect(css).toContain("--foreground: var(--color-text-primary)");
+    expect(css).toContain("--primary: var(--color-primary)");
+    expect(css).toContain("--border: var(--color-border)");
+    expect(css).toContain("--radius: var(--radius-md)");
+  });
 });
