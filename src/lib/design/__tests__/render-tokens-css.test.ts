@@ -42,4 +42,20 @@ describe("renderTokensCss", () => {
     expect(theme).toContain("--color-background:");
     expect(theme).toContain("--color-ring:");
   });
+
+  it("shadows/lineHeights/extras 渲染到正确命名空间(非 --color-*)", () => {
+    const out = renderTokensCss({
+      ...DEFAULT_TOKENS,
+      shadows: { sm: "0 4px 14px rgba(0,0,0,0.08)" },
+      lineHeights: { tight: "1.2" },
+      extras: { "hero-gradient": "linear-gradient(135deg, #fff, #000)" },
+    });
+    expect(out).toContain("--shadow-sm: 0 4px 14px rgba(0,0,0,0.08);");
+    expect(out).toContain("--leading-tight: 1.2;");
+    expect(out).toContain("--hero-gradient: linear-gradient(135deg, #fff, #000);");
+    // 不应出现颜色命名空间的误归类
+    expect(out).not.toContain("--color-shadow-sm");
+    expect(out).not.toContain("--color-lh-tight");
+    expect(out).not.toContain("--color-hero-gradient");
+  });
 });

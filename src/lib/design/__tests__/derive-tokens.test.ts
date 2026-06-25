@@ -62,4 +62,26 @@ describe("deriveTokensFromDesignSpec", () => {
     expect(t.fontSizes.base).toBe(DEFAULT_TOKENS.fontSizes.base);
     expect(t.spacing["6"]).toBe(DEFAULT_TOKENS.spacing["6"]);
   });
+
+  it("阴影/行高/渐变正确归类,不污染 colors", () => {
+    const html = `<!DOCTYPE html><html><head><style>
+:root {
+  --shadow-sm: 0 4px 14px rgba(0,0,0,0.08);
+  --lh-tight: 1.2;
+  --leading-base: 1.5;
+  --hero-gradient: linear-gradient(135deg, #fff 0%, #000 100%);
+}
+</style></head><body></body></html>`;
+    const t = deriveTokensFromDesignSpec(html);
+    expect(t.shadows?.sm).toBe("0 4px 14px rgba(0,0,0,0.08)");
+    expect(t.lineHeights?.tight).toBe("1.2");
+    expect(t.lineHeights?.base).toBe("1.5");
+    expect(t.extras?.["hero-gradient"]).toBe(
+      "linear-gradient(135deg, #fff 0%, #000 100%)",
+    );
+    // 关键:这些都不应进 colors 桶
+    expect(t.colors["shadow-sm"]).toBeUndefined();
+    expect(t.colors["lh-tight"]).toBeUndefined();
+    expect(t.colors["hero-gradient"]).toBeUndefined();
+  });
 });
