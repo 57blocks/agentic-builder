@@ -311,43 +311,61 @@ export async function buildFrontendDesignContextForCodegen(
     console.warn("[FrontendDesignContext] Failed to build vision descriptions (ignored):", err instanceof Error ? err.message : err);
   }
 
-  // ── (REQUIRED) Component-system rule ──────────────────────────────────────
-  // The design references below say "reproduce the UI exactly", which on its own
-  // makes agents hand-roll raw <div>/<button> to pixel-match the image. This
-  // block reframes that: reproduce the LAYOUT/look, but BUILD it by composing the
-  // pre-installed shadcn-ui components. Placed first so it frames every reference.
+  // ── (REQUIRED) Fidelity + component-system rule ───────────────────────────
+  // Two goals that must BOTH hold — they are not a trade-off:
+  //   (1) faithfully reproduce the reference (layout, background incl. gradients,
+  //       type scale, radius, shadow, spacing), and
+  //   (2) implement it by composing the pre-installed shadcn-ui components + tokens.
+  // Earlier wording ("references define the target, NOT the markup") was read as
+  // permission to simplify/deviate from the layout — removed.
   const componentSystemBlock = [
-    "## (REQUIRED) Build the UI with the pre-installed shadcn-ui components",
+    "## (REQUIRED) Reproduce the design faithfully — built from shadcn + tokens",
     "",
+    "Two requirements that BOTH must hold (not a trade-off):",
+    "",
+    "**A. Visual fidelity — match the design reference closely.**",
+    "Reproduce the reference's layout, section structure, page background,",
+    "typography scale, border-radius, shadows and spacing as faithfully as you",
+    "can. Do NOT simplify, genericise, or drop sections. Specifically:",
+    "- Keep the reference's real page title / headings (e.g. \"Course Catalog\",",
+    "  \"Private Course List\") — do NOT replace them with generic ones like",
+    "  \"Student Dashboard\".",
+    "- Apply the page-level BACKGROUND from the design. If a gradient token exists",
+    "  (`--page-gradient`, `--*-gradient`) use it via",
+    "  `style={{ background: \"var(--page-gradient)\" }}`; never leave a page on a",
+    "  bare white background when the reference has a tinted/gradient backdrop.",
+    "- Match the reference's radius (rounded-xl/2xl if cards are soft), shadow",
+    "  depth, and type scale — use the `--radius-*`, `--shadow-*`, `--text-*` tokens.",
+    "- Reproduce filters/tabs/tables with their real options/columns and wire them",
+    "  up; do not render an empty or non-functional version.",
+    "",
+    "**B. Build it from the pre-installed shadcn-ui components.**",
     "This project ships shadcn-ui components in `@/components/ui` (Button, Card,",
     "Input, Textarea, Label, Select, Dropdown-menu, Checkbox, Tabs, Tooltip,",
-    "Dialog, Badge, Table, Form, Sonner). The design references below define the",
-    "visual TARGET — layout, spacing, colours, component hierarchy — NOT the markup.",
-    "",
-    "- Reproduce that target by COMPOSING these shadcn components (`<Button>`,",
-    "  `<Card>`, `<Input>`, `<Select>`, `<Dialog>`, `<Tabs>`, `<Badge>`, `<Table>` …)",
-    "  imported from `@/components/ui`. Do NOT hand-roll or re-style raw",
-    "  `<button>`/`<input>`/`<select>`/`<textarea>` for interactive elements.",
-    "- Status pills, tags, labels, chips, count/state indicators → use `<Badge>`",
-    "  (with the closest variant). Do NOT hand-roll a styled `<span>` pill.",
-    "- Tabular data (rows/columns, data grids) → use `<Table>` (TableHeader/",
-    "  TableRow/TableHead/TableCell). Do NOT hand-roll a raw `<table>`.",
-    "- Drop to a plain `<div>`/`<span>`/`<section>` ONLY for pure layout structure",
-    "  no component covers. Missing a component? add it under `components/ui/`",
-    "  (or `npx shadcn@latest add <name>`) instead of hand-rolling.",
+    "Dialog, Badge, Table, Form, Sonner). Compose them to hit the target above:",
+    "- Interactive elements → the matching shadcn component; do NOT hand-roll raw",
+    "  `<button>`/`<input>`/`<select>`/`<textarea>`.",
+    "- Tab bars → `<Tabs>`/`<TabsList>`/`<TabsTrigger>` (not a row of plain buttons).",
+    "- Status pills, tags, labels, chips → `<Badge>` (closest variant), not a",
+    "  styled `<span>`.",
+    "- Tabular data → `<Table>` (TableHeader/TableRow/TableHead/TableCell), not a",
+    "  raw `<table>`.",
+    "- Drop to a plain `<div>`/`<span>`/`<section>` ONLY for layout structure no",
+    "  component covers. Missing a component? add it under `components/ui/` (or",
+    "  `npx shadcn@latest add <name>`) instead of hand-rolling.",
     "",
     "### Styling: tokens first, NO inlined design values",
-    "- `tokens.css` already encodes the design's exact palette/scale as tokens:",
-    "  `--color-*` (→ bg-primary, text-muted, border-input …), `--radius-*`,",
-    "  `--spacing-*` (→ p-4, gap-6), `--text-*`, `--shadow-*` (→ shadow-sm),",
-    "  `--leading-*`, plus passthrough gradients like `--page-gradient`,",
-    "  `--*-gradient`. ALWAYS use the matching token.",
-    "- For a gradient/background that has a token, apply it via the token —",
-    "  `style={{ background: \"var(--page-gradient)\" }}` or",
-    "  `bg-[image:var(--teacher-page-gradient)]` — NEVER paste the literal",
+    "- `tokens.css` encodes the design's exact palette/scale: `--color-*`",
+    "  (→ bg-primary, text-muted, border-input …), `--radius-*`, `--spacing-*`",
+    "  (→ p-4, gap-6), `--text-*`, `--shadow-*` (→ shadow-sm), `--leading-*`, plus",
+    "  passthrough gradients (`--page-gradient`, `--*-gradient`). ALWAYS use the",
+    "  matching token; do not approximate with `text-gray-500` etc.",
+    "- Gradient/background with a token → apply via the token",
+    "  (`style={{ background: \"var(--page-gradient)\" }}` /",
+    "  `bg-[image:var(--teacher-page-gradient)]`); NEVER paste the literal",
     "  `linear-gradient(... #hex ...)`.",
-    "- Only when NO token matches a required value may you use a Tailwind",
-    "  arbitrary value (`bg-[#1e293b]`). Never paste raw hex that a token covers.",
+    "- Only when NO token matches may you use a Tailwind arbitrary value",
+    "  (`bg-[#1e293b]`). Never paste raw hex that a token already covers.",
   ].join("\n");
 
   const referenceBlocks = [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets].filter(Boolean);
