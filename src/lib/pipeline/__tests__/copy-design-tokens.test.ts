@@ -34,17 +34,17 @@ describe("copyDesignTokens", () => {
   it("无 tokens.css 时从 DesignSpec.md 服务端反推", async () => {
     await fs.writeFile(
       path.join(dir, "DesignSpec.md"),
-      `<style>:root{ --primary: #8ea07f; --radius-md: 12px; --space-4: 16px; }</style>`,
+      `<style>:root{ --primary: #336699; --radius-md: 12px; --space-4: 16px; }</style>`,
     );
     const ok = await copyDesignTokens(dir, "m");
     expect(ok).toBe(true);
     const out = await fs.readFile(path.join(dir, "frontend/src/styles/tokens.css"), "utf-8");
-    expect(out).toContain("--color-primary: #8ea07f;"); // 反推出设计色
+    expect(out).toContain("--color-primary: #336699;"); // 反推出设计色
     expect(out).toContain("@theme {");
-    expect(out).toContain("--color-ring: #8ea07f;"); // shadcn 别名跟随
+    expect(out).toContain("--color-ring: #336699;"); // shadcn 别名跟随
     // 反推时也落根产物 <outputRoot>/tokens.css
     const rootArtifact = await fs.readFile(path.join(dir, "tokens.css"), "utf-8");
-    expect(rootArtifact).toContain("--color-primary: #8ea07f;");
+    expect(rootArtifact).toContain("--color-primary: #336699;");
   });
 
   it("显式 tokens.css 优先于 DesignSpec.md", async () => {
