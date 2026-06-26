@@ -40,6 +40,35 @@ re-work.
 
 ---
 
+## Source-of-truth precedence (cross-cutting principle)
+
+**The PRD is the single authoritative source of truth. The demo and its captured
+HTML snapshot are a *subordinate* visual/structural reference. On any conflict,
+the PRD wins.**
+
+This governs the whole initiative:
+
+- **Page set is PRD-anchored.** Captured pages come from `extractPrdPageHints(prd)`;
+  the crawl joins PRD routes to the demo origin, and same-origin link discovery
+  only resolves param-route *instances of PRD-declared pages*. A page that exists
+  in the demo but is **not** declared in the PRD is never bound to a `PAGE-id` and
+  is not introduced as an authoritative artifact.
+- **The snapshot is non-authoritative.** It records "what the demo rendered", not
+  "what must be built". Downstream consumers (sub-projects 2/3) must treat the PRD
+  as authoritative when the demo and PRD disagree on page existence, fields,
+  flows, content/copy, or behavior — the snapshot informs *structure/visual
+  fidelity only*, never requirements.
+- **Consumption-time enforcement (sub-projects 2/3).** The structure-port agent
+  prompt and `task-breakdown` must state this precedence explicitly so generated
+  code follows the PRD where the demo diverges. (Owned by those specs; flagged
+  here so the principle is not lost.)
+
+For sub-project 1, the concrete obligations are: (a) only bind PRD-declared pages
+(already true via the PRD-driven crawl plan — made explicit in §4), and (b) label
+the stored artifact as a subordinate reference, not ground truth (§3 note).
+
+---
+
 ## Goals / Non-Goals
 
 **Goals**
@@ -158,6 +187,15 @@ New route `src/app/api/agents/pipeline/design-references/fetch-html/route.ts`
 - `pageHint` is the bare `PAGE-id` (manual bind) — same key the screenshot uses,
   so both artifacts land on the same Route-Mapping card.
 
+> **Subordinate-reference note (source-of-truth precedence).** The stored entry
+> carries no "authoritative" flag and introduces no requirements — it is a
+> visual/structural reference subordinate to the PRD (see the cross-cutting
+> principle above). The existing `formatDesignReferencesPromptBlock` wording
+> ("treat each screenshot as the visual ground truth") predates this principle;
+> reconciling that wording so consumers follow the PRD on conflict is **owned by
+> sub-project 2** (consumption) and is out of scope here, but flagged so it is
+> not lost.
+
 `urlToFileSlug` is currently module-private in `fetch-url/route.ts`. Extract it to
 a tiny shared helper (e.g. `src/app/api/agents/pipeline/design-references/_url-slug.ts`)
 and import from both routes. No behavior change.
@@ -176,6 +214,14 @@ screenshot post:
 
 Apply the same addition to the per-card URL fetch path (`onFetchRouteUrl` /
 `handleFetchRouteUrl`) so a single-page manual capture also produces HTML.
+
+> **PRD-anchored binding (source-of-truth precedence).** The crawl plan is built
+> from `extractPrdPageHints(prd)`, so every bound `PAGE-id` is a PRD-declared
+> page. Same-origin links harvested during the crawl are used only to resolve
+> param-route instances of those PRD pages — a demo-only URL with no matching PRD
+> page is never assigned a `PAGE-id` and is not persisted as a bound reference.
+> No change is needed to enforce this (it is inherent in `buildAutoCapturePlan`);
+> it is stated here as an explicit invariant the implementation must preserve.
 
 ### 5. Storage & mirroring (no change)
 
