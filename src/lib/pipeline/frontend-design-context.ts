@@ -366,6 +366,20 @@ export async function buildFrontendDesignContextForCodegen(
     "  linear-gradient(...) when a token already covers it.",
     "- Only when NO token matches may you use a Tailwind arbitrary value",
     "  (`bg-[#1e293b]`). Never paste raw hex that a token already covers.",
+    "",
+    "### Detail fidelity (match the reference, common pitfalls)",
+    "- Form fields: give Input/Select/Textarea a SOLID fill matching the",
+    "  reference (usually white / a light surface) so they don't show the page",
+    "  gradient through them. Keep Input and Select the SAME height — if you set a",
+    "  height, set the identical class on both (they align at the default height",
+    "  otherwise).",
+    "- Badge/tag colour: pick the variant whose colour MATCHES the reference. A",
+    "  neutral grey chip is `variant=\"outline\"` or a muted/secondary style — do",
+    "  NOT use a saturated brand colour for a chip the reference shows as neutral.",
+    "- Font sizes: take sizes from the reference; meta/price/label text is usually",
+    "  small (~text-sm/text-base), not text-xl. Read the reference rather than",
+    "  defaulting large. Never emit a unitless arbitrary size like `text-[26]`",
+    "  (use `text-[26px]` or a `--text-*` token).",
   ].join("\n");
 
   const referenceBlocks = [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets].filter(Boolean);
