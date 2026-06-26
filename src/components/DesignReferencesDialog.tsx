@@ -32,7 +32,9 @@ const ACCEPTED_EXTS = [...IMAGE_EXTS, ...HTML_EXTS];
 const MAX_BYTES_IMAGE = 6 * 1024 * 1024;
 // HTML can inline base64 assets and CSS — give it more breathing room.
 const MAX_BYTES_HTML = 8 * 1024 * 1024;
-const MAX_TOTAL = 24;
+// Keep in sync with MAX_TOTAL_REFERENCES in src/lib/pipeline/design-references.ts
+// (server enforces the real cap; this only drives client-side UI/quota hints).
+const MAX_TOTAL = 64;
 
 function classifyFile(file: File): ReferenceKind | null {
   const mime = file.type.toLowerCase();

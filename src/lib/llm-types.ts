@@ -1,6 +1,9 @@
 export type VisionContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+  | {
+      type: "image_url";
+      image_url: { url: string; detail?: "auto" | "low" | "high" };
+    };
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -92,6 +95,21 @@ export interface OpenRouterOptions {
    * behaviour for everything else.
    */
   forceOpenRouter?: boolean;
+  /**
+   * Opt INTO direct-provider routing (e.g. DeepSeek V4 Pro at api.deepseek.com)
+   * for THIS call, overriding the env-level force-OpenRouter flags
+   * (LLM_PROVIDER=openrouter / USE_OPENROUTER / FORCE_OPENROUTER).
+   *
+   * Needed because those env flags are global: a call site that wants the
+   * direct provider (e.g. the open integration fixer in debug mode) cannot get
+   * there just by passing `forceOpenRouter: false`, since the env flag is OR'd
+   * in. Set this true to take the direct branch regardless of the env default.
+   * Still requires the direct provider's own precondition (DEEPSEEK_API_KEY).
+   *
+   * `forceOpenRouter: true` takes precedence over this if both are set.
+   * Defaults to undefined (env behaviour unchanged for every other caller).
+   */
+  preferDirectProvider?: boolean;
   /**
    * Per-call request timeout in milliseconds.
    * Overrides the global OPENROUTER_CHAT_TIMEOUT_MS env var.

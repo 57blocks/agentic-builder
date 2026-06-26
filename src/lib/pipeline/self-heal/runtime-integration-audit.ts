@@ -28,6 +28,7 @@
  * | auth-guard-as-middleware        | backend  | err  | §4.x — `requireXxxAuth` (assertion guard) used as Koa middleware without next() — silent 404 |
  * | dbuser-not-found-as-404         | backend  | err  | §4.x — `User.findOne(privy_id) + ctx.throw(404)` instead of `resolveOrCreateDbUser` upsert |
  * | controller-handler-not-routed   | backend  | err  | §4.x — `*Handler` exported from controller but the sibling `*.routes.ts` never registers it |
+ * | api-path-prefix-mismatch        | global   | err  | §4.x — frontend apiClient call path + client base URL does not compose to the backend's actual mount prefix (double `/api`, missing version segment → silent 404) |
  *
  * Output (in addition to the in-memory result):
  *   `<outputDir>/.ralph/runtime-integration-audit.json` — full findings list
@@ -49,7 +50,8 @@ export type RuntimeAuditRuleId =
   | "empty-results-not-failure"
   | "auth-guard-as-middleware"
   | "dbuser-not-found-as-404"
-  | "controller-handler-not-routed";
+  | "controller-handler-not-routed"
+  | "api-path-prefix-mismatch";
 
 export type RuntimeAuditSeverity = "error" | "warn" | "info";
 
@@ -122,7 +124,10 @@ function clampSnippet(s: string): string {
   return trimmed.length > 200 ? `${trimmed.slice(0, 197)}…` : trimmed;
 }
 
-async function readSafe(file: string, outputDir: string): Promise<string | null> {
+async function readSafe(
+  file: string,
+  outputDir: string,
+): Promise<string | null> {
   const content = await fsRead(file, outputDir);
   if (content.startsWith("FILE_NOT_FOUND") || content.startsWith("REJECTED")) {
     return null;
@@ -202,9 +207,7 @@ async function ruleUseSyncExternalStore(
       severity: "error",
       file,
       line,
-      snippet: clampSnippet(
-        content.slice(Math.max(0, idx - 40), idx + 120),
-      ),
+      snippet: clampSnippet(content.slice(Math.max(0, idx - 40), idx + 120)),
       reason:
         "Custom store consumed via useSyncExternalStore but getSnapshot() does not return a cached reference. Returning a fresh object on every call triggers React's `Maximum update depth exceeded`.",
       directive:
@@ -226,7 +229,9 @@ async function ruleUseBlockerDataRouter(
 ): Promise<RuntimeAuditFinding[]> {
   const main = await readSafe("frontend/src/main.tsx", outputDir);
   const usesBrowserRouter =
-    !!main && /<BrowserRouter[\s>]/.test(main) && !/createBrowserRouter/.test(main);
+    !!main &&
+    /<BrowserRouter[\s>]/.test(main) &&
+    !/createBrowserRouter/.test(main);
   if (!usesBrowserRouter) return [];
 
   const findings: RuntimeAuditFinding[] = [];
@@ -249,9 +254,7 @@ async function ruleUseBlockerDataRouter(
       severity: "error",
       file,
       line,
-      snippet: clampSnippet(
-        content.slice(Math.max(0, idx - 40), idx + 80),
-      ),
+      snippet: clampSnippet(content.slice(Math.max(0, idx - 40), idx + 80)),
       reason:
         "useBlocker only works inside a data router (createBrowserRouter). This project uses <BrowserRouter> in main.tsx, so this import crashes on first navigation with `useBlocker must be used within a data router`.",
       directive:
@@ -317,9 +320,9 @@ async function ruleExternalIdVsDbPk(
             content.slice(Math.max(0, idx - 60), idx + 120),
           ),
           reason:
-            "ctx.state.user.id is the EXTERNAL provider id (Privy DID / Clerk userId), not the DB primary key. Passing it to findByPk / `where: { id }` / `where: { user_id }` throws Postgres `invalid input syntax for type uuid: \"did:privy:...\"`.",
+            'ctx.state.user.id is the EXTERNAL provider id (Privy DID / Clerk userId), not the DB primary key. Passing it to findByPk / `where: { id }` / `where: { user_id }` throws Postgres `invalid input syntax for type uuid: "did:privy:..."`.',
           directive:
-            "At the top of this handler/service: `const user = await User.findOne({ where: { privy_id: ctx.state.user.id } }); if (!user) ctx.throw(404, \"User not found\");` then use `user.id` (UUID) for any FK queries below. Apply the SAME fix to every other handler in this file that reads `ctx.state.user.id`.",
+            'At the top of this handler/service: `const user = await User.findOne({ where: { privy_id: ctx.state.user.id } }); if (!user) ctx.throw(404, "User not found");` then use `user.id` (UUID) for any FK queries below. Apply the SAME fix to every other handler in this file that reads `ctx.state.user.id`.',
         });
       }
     }
@@ -348,7 +351,8 @@ async function ruleBgClearStaleRuns(
     if (!looksLikeRoute) continue;
 
     // Look for refresh/restart endpoints handled in this file.
-    const refreshRe = /\b(?:apiRouter|router)\.(?:post|put)\s*\(\s*["'`][^"'`]*\/(refresh|reaggregate|restart)\b/;
+    const refreshRe =
+      /\b(?:apiRouter|router)\.(?:post|put)\s*\(\s*["'`][^"'`]*\/(refresh|reaggregate|restart)\b/;
     const m = refreshRe.exec(content);
     if (!m) continue;
 
@@ -402,8 +406,7 @@ async function ruleBgInprocBranch(
     if (!m) continue;
 
     const branched =
-      /startsWith\(\s*["']inproc:/.test(content) ||
-      /isUuid\s*\(/.test(content);
+      /startsWith\(\s*["']inproc:/.test(content) || /isUuid\s*\(/.test(content);
     if (branched) continue;
 
     const line = content.slice(0, m.index).split("\n").length;
@@ -420,7 +423,7 @@ async function ruleBgInprocBranch(
       reason:
         "This file queries the *Run table by id but does not branch on `inproc:` run-ids. In-process runs use ids like `inproc:<userId>:<ts>` that are NOT UUIDs — Postgres throws `invalid input syntax for type uuid`, the SSE / status endpoint 5xxs, and the user sees an indefinite spinner.",
       directive:
-        "Wrap the lookup in a discriminator: `if (runId.startsWith(\"inproc:\")) { /* subscribe to in-memory event emitter; do NOT touch DB */ } else if (isUuid(runId)) { const run = await XxxRun.findByPk(runId); ... } else { ctx.throw(400, \"Invalid run_id\"); }`. Apply to every status / stream handler in this file.",
+        'Wrap the lookup in a discriminator: `if (runId.startsWith("inproc:")) { /* subscribe to in-memory event emitter; do NOT touch DB */ } else if (isUuid(runId)) { const run = await XxxRun.findByPk(runId); ... } else { ctx.throw(400, "Invalid run_id"); }`. Apply to every status / stream handler in this file.',
     });
   }
   return findings;
@@ -491,9 +494,15 @@ async function ruleLlmClientAbstraction(
   // Forbidden imports (pattern → label).
   const VENDOR_IMPORTS: Array<{ re: RegExp; label: string }> = [
     { re: /from\s+["']openai["']/, label: "openai" },
-    { re: /from\s+["']@google\/generative-ai["']/, label: "@google/generative-ai" },
+    {
+      re: /from\s+["']@google\/generative-ai["']/,
+      label: "@google/generative-ai",
+    },
     { re: /from\s+["']@anthropic-ai\/sdk["']/, label: "@anthropic-ai/sdk" },
-    { re: /from\s+["']@mistralai\/mistralai["']/, label: "@mistralai/mistralai" },
+    {
+      re: /from\s+["']@mistralai\/mistralai["']/,
+      label: "@mistralai/mistralai",
+    },
     { re: /from\s+["']cohere-ai["']/, label: "cohere-ai" },
   ];
 
@@ -515,7 +524,9 @@ async function ruleLlmClientAbstraction(
         severity: "error",
         file,
         line,
-        snippet: clampSnippet(content.slice(Math.max(0, m.index - 20), m.index + 120)),
+        snippet: clampSnippet(
+          content.slice(Math.max(0, m.index - 20), m.index + 120),
+        ),
         reason: `Direct \`${label}\` import in feature code violates the LLM provider abstraction. The project declared \`LLM_PROVIDER\` so swapping providers must be a one-line .env change with zero source edits.`,
         directive: `Remove the direct \`${label}\` import. Replace the call(s) below with \`llmService.chat(...)\` / \`llmService.embed(...)\` from \`backend/src/services/llmService.ts\`. If \`llmService.ts\` does not yet support the call shape you need, EXTEND it (and only it) — never hardcode vendor URLs / model ids in feature files.`,
       });
@@ -566,7 +577,9 @@ async function ruleEmptyResultsNotFailure(
         severity: "warn",
         file,
         line,
-        snippet: clampSnippet(content.slice(Math.max(0, m.index - 20), m.index + 140)),
+        snippet: clampSnippet(
+          content.slice(Math.max(0, m.index - 20), m.index + 140),
+        ),
         reason: `Aggregation throws \`${label}\` when all upstream sources return zero rows. Empty result is a normal user-visible state, not an error — throwing turns a benign empty feed into a hard failure that leaves stale 'running' rows in the DB.`,
         directive: `Replace the throw with a graceful empty-feed completion: mark the run \`status='completed'\` with \`item_count=0\`, clear the user's existing items (or leave them — depending on the empty-state UX you want), and emit a final SSE \`complete\` event so the frontend transitions to an empty state instead of an error toast.`,
       });
@@ -614,10 +627,8 @@ async function ruleAuthGuardAsMiddleware(
         file,
         line,
         snippet: clampSnippet(content.slice(Math.max(0, idx - 40), idx + 160)),
-        reason:
-          `\`${guardName}\` is an assertion guard that returns claims but does NOT call next(). Mounting it as a Koa middleware leaves the chain stalled and the request surfaces as a misleading 404 to the client. This was the #1 cause of "OAuth succeeds but every authenticated /api/* call returns 404" in the previous run.`,
-        directive:
-          `Replace \`${guardName}\` with \`${guardName}Middleware\` in this route definition (the auth-privy / auth-clerk scaffolds export both). If the *Middleware version doesn't exist yet, add it to the same middleware file: \`export const ${guardName}Middleware: Middleware = async (ctx, next) => { ${guardName}(ctx); await next(); };\`. To assert auth from inside a handler body, calling \`${guardName}(ctx)\` directly remains correct.`,
+        reason: `\`${guardName}\` is an assertion guard that returns claims but does NOT call next(). Mounting it as a Koa middleware leaves the chain stalled and the request surfaces as a misleading 404 to the client. This was the #1 cause of "OAuth succeeds but every authenticated /api/* call returns 404" in the previous run.`,
+        directive: `Replace \`${guardName}\` with \`${guardName}Middleware\` in this route definition (the auth-privy / auth-clerk scaffolds export both). If the *Middleware version doesn't exist yet, add it to the same middleware file: \`export const ${guardName}Middleware: Middleware = async (ctx, next) => { ${guardName}(ctx); await next(); };\`. To assert auth from inside a handler body, calling \`${guardName}(ctx)\` directly remains correct.`,
       });
     }
   }
@@ -669,7 +680,7 @@ async function ruleDbUserNotFoundAs404(
         reason:
           "Resolving the current Privy session to a DB row and throwing 404 when missing creates a hard-to-diagnose error — a legitimately authenticated user gets a misleading 404 just because the upsert hasn't run yet. Browsers and the verify-fix worker can't distinguish this from a route registration bug.",
         directive:
-          "Replace the `User.findOne(...) + ctx.throw(404, \"User not found\")` block with `const user = await resolveOrCreateDbUser(ctx);` (imported from `../middlewares/privyAuth`). The helper auto-upserts on first hit and returns a `User` instance — use `user.id` (UUID) for FK queries below. If you genuinely need the 404 (e.g. an admin route looking up someone ELSE's row by a path param), keep the explicit findOne but DO NOT use `ctx.state.user.id` as the lookup key.",
+          'Replace the `User.findOne(...) + ctx.throw(404, "User not found")` block with `const user = await resolveOrCreateDbUser(ctx);` (imported from `../middlewares/privyAuth`). The helper auto-upserts on first hit and returns a `User` instance — use `user.id` (UUID) for FK queries below. If you genuinely need the 404 (e.g. an admin route looking up someone ELSE\'s row by a path param), keep the explicit findOne but DO NOT use `ctx.state.user.id` as the lookup key.',
       });
     }
   }
@@ -745,11 +756,161 @@ async function ruleControllerHandlerNotRouted(
             ctrlContent.indexOf(name) + 80,
           ),
         ),
-        reason:
-          `Controller exports \`${name}\` but \`${moduleStem}.routes.ts\` never references it. The handler is dead code — clients hitting the corresponding endpoint will get 404 because no \`router.<verb>(...)\` registers it.`,
-        directive:
-          `Open \`${routesFile}\` and add a \`router.<method>(\"<path>\", ${name})\` registration that matches the intended endpoint (consult API_CONTRACTS.json for the canonical method+path). If the handler is genuinely unused, delete its export from \`${moduleStem}.controller.ts\` instead — but never let an exported \`*Handler\` exist without a corresponding route.`,
+        reason: `Controller exports \`${name}\` but \`${moduleStem}.routes.ts\` never references it. The handler is dead code — clients hitting the corresponding endpoint will get 404 because no \`router.<verb>(...)\` registers it.`,
+        directive: `Open \`${routesFile}\` and add a \`router.<method>(\"<path>\", ${name})\` registration that matches the intended endpoint (consult API_CONTRACTS.json for the canonical method+path). If the handler is genuinely unused, delete its export from \`${moduleStem}.controller.ts\` instead — but never let an exported \`*Handler\` exist without a corresponding route.`,
       });
+    }
+  }
+  return findings;
+}
+
+// ─── api-path-prefix-mismatch helpers ──────────────────────────────────────
+
+/** Normalise a URL path: ensure one leading slash, collapse `//`, drop a
+ *  trailing slash (except root) and any query/hash. */
+function normalisePath(p: string): string {
+  let out = p.trim().replace(/[?#].*$/, "");
+  if (!out.startsWith("/")) out = `/${out}`;
+  out = out.replace(/\/{2,}/g, "/");
+  if (out.length > 1 && out.endsWith("/")) out = out.slice(0, -1);
+  return out;
+}
+
+/**
+ * Extract the frontend client's base URL default — the literal in
+ * `import.meta.env.VITE_API_BASE_URL || "<base>"` (or `?? "<base>"`). Returns
+ * null when the file or the pattern is absent (don't guess).
+ */
+function extractClientApiBase(clientSrc: string): string | null {
+  const m = clientSrc.match(
+    /import\.meta\.env\.VITE_API_BASE_URL\s*(?:\|\||\?\?)\s*["'`]([^"'`]*)["'`]/,
+  );
+  if (!m) return null;
+  // Empty default ("") means "same origin, paths are absolute" — caller paths
+  // then carry the full prefix themselves; nothing to compose-check.
+  return m[1];
+}
+
+/**
+ * Extract the backend root apiRouter mount prefix — the literal in
+ * `new Router({ prefix: "<prefix>" })` in modules/index.ts. Returns null when
+ * absent.
+ */
+function extractBackendMountPrefix(modulesIndexSrc: string): string | null {
+  const m = modulesIndexSrc.match(
+    /new\s+Router\s*\(\s*\{[^}]*prefix\s*:\s*["'`]([^"'`]+)["'`]/,
+  );
+  return m ? normalisePath(m[1]) : null;
+}
+
+/**
+ * §4.x — API path-prefix consistency.
+ *
+ * The frontend reaches the backend through THREE coupled prefixes that must
+ * compose exactly, or every call silently 404s:
+ *   client base (API_BASE)  +  caller path  ==  backend mount prefix  +  route
+ *
+ * The convention (see the scaffold frontend `src/api/client.ts`) is that the
+ * client base already carries the API mount prefix and callers pass ONLY the
+ * business path. The two failure modes this rule catches deterministically:
+ *
+ *   1. Double prefix — caller path itself starts with the mount prefix that the
+ *      base already injects (`base="/api/v1"` + path="/api/v1/x" → "/api/v1/api/v1/x").
+ *   2. Composed path escapes the backend mount — `base + path` does not begin
+ *      with the backend's actual `new Router({ prefix })`, so it can never hit a
+ *      registered route (e.g. base="/api" + path="/users" but backend mounts at
+ *      "/api/v1" → "/api/users" 404s; the caller dropped the version segment).
+ *
+ * Convention-agnostic: it reads the ACTUAL base + mount prefix from the
+ * generated files rather than assuming a fixed string, so it works whether the
+ * project mounts at `/api`, `/api/v1`, or anything else. Conservative: skips
+ * when either anchor is missing or the base is empty (absolute-URL mode).
+ */
+async function ruleApiPathPrefixMismatch(
+  outputDir: string,
+  feFiles: string[],
+): Promise<RuntimeAuditFinding[]> {
+  const findings: RuntimeAuditFinding[] = [];
+
+  const clientSrc = await readSafe("frontend/src/api/client.ts", outputDir);
+  const modulesIndexSrc = await readSafe(
+    "backend/src/api/modules/index.ts",
+    outputDir,
+  );
+  if (!clientSrc || !modulesIndexSrc) return findings;
+
+  const apiBaseRaw = extractClientApiBase(clientSrc);
+  const mountPrefix = extractBackendMountPrefix(modulesIndexSrc);
+  // No usable anchors, or base="" (absolute-URL mode where callers carry the
+  // whole path themselves) → nothing to compose-check.
+  if (apiBaseRaw == null || mountPrefix == null) return findings;
+  const apiBase = apiBaseRaw.trim();
+  if (apiBase === "") return findings;
+  const base = normalisePath(apiBase);
+
+  // Only consider caller files under the frontend api/service/view layers, and
+  // skip the client itself (its base literal isn't a call path).
+  const callRe =
+    /\b(?:apiClient|api|client|http)\s*\.\s*(?:raw\s*\.\s*)?(get|post|put|patch|delete)\s*(?:<[^>]*>)?\(\s*[`"']([^`"']+)[`"']/gi;
+
+  for (const file of feFiles) {
+    const norm = file.split(path.sep).join("/");
+    if (norm.endsWith("frontend/src/api/client.ts")) continue;
+    const content = await readSafe(file, outputDir);
+    if (!content) continue;
+
+    let m: RegExpExecArray | null;
+    callRe.lastIndex = 0;
+    while ((m = callRe.exec(content)) !== null) {
+      const method = m[1].toUpperCase();
+      const rawPath = m[2];
+      // Ignore non-root-relative paths (full URLs, template-only paths that
+      // start with a variable) — those bypass the base entirely.
+      if (/^https?:\/\//i.test(rawPath)) continue;
+      if (rawPath.startsWith("${")) continue;
+      const callerPath = normalisePath(rawPath);
+      const composed = normalisePath(`${base}${callerPath}`);
+      const line = content.slice(0, m.index).split("\n").length;
+
+      // Failure mode 1: caller path repeats the base prefix (double prefix).
+      const baseIsPrefixed = base !== "/" && base.length > 1;
+      if (baseIsPrefixed && callerPath.startsWith(`${base}/`)) {
+        findings.push({
+          id: makeId("api-path-prefix-mismatch", file, line),
+          ruleId: "api-path-prefix-mismatch",
+          scope: "global",
+          severity: "error",
+          file,
+          line,
+          snippet: clampSnippet(`${method} ${rawPath}`),
+          reason: `The apiClient base URL already injects \`${base}\`, but this call path repeats it → final URL \`${composed}\` doubles the prefix and 404s. (client.ts: API_BASE="${apiBase}".)`,
+          directive: `In \`${file}\`, change the call path from \`${rawPath}\` to \`${normalisePath(callerPath.slice(base.length))}\` — pass ONLY the business path; the client prepends \`${base}\`.`,
+        });
+        continue;
+      }
+
+      // Failure mode 2: composed path does not fall under the backend mount
+      // prefix → no registered route can match. Only flag when the composed
+      // path shares the FIRST segment with the mount prefix (so we're confident
+      // it's an intended API call that lost a later segment, not an unrelated
+      // absolute path the client base doesn't govern).
+      const mountFirstSeg = mountPrefix.split("/").filter(Boolean)[0];
+      const composedFirstSeg = composed.split("/").filter(Boolean)[0];
+      const underMount =
+        composed === mountPrefix || composed.startsWith(`${mountPrefix}/`);
+      if (!underMount && mountFirstSeg && composedFirstSeg === mountFirstSeg) {
+        findings.push({
+          id: makeId("api-path-prefix-mismatch", file, line),
+          ruleId: "api-path-prefix-mismatch",
+          scope: "global",
+          severity: "error",
+          file,
+          line,
+          snippet: clampSnippet(`${method} ${rawPath}`),
+          reason: `Call composes to \`${composed}\` (base "${apiBase}" + path "${rawPath}"), but the backend mounts its API router at \`${mountPrefix}\` (backend/src/api/modules/index.ts). The composed path is not under that prefix, so it can never hit a registered route — a silent 404.`,
+          directive: `Align the prefix. Either (a) fix the call path in \`${file}\` so \`${base} + path\` starts with \`${mountPrefix}\` (e.g. add the missing \`${normalisePath(mountPrefix.slice(base.length) || "/")}\` version segment), or (b) if the client base should carry the full prefix, set API_BASE to \`${mountPrefix}\` in frontend/src/api/client.ts and keep caller paths as business-only. Pick ONE source of truth for the prefix — do not split it across both.`,
+        });
+      }
     }
   }
   return findings;
@@ -760,12 +921,7 @@ async function ruleControllerHandlerNotRouted(
 export async function runRuntimeIntegrationAudit(
   input: RuntimeIntegrationAuditInput,
 ): Promise<RuntimeIntegrationAuditResult> {
-  const {
-    outputDir,
-    declaredEnvKeys = [],
-    emitter,
-    sessionId,
-  } = input;
+  const { outputDir, declaredEnvKeys = [], emitter, sessionId } = input;
 
   // appliedOptionalFeatures: prefer caller-provided value, otherwise auto-load
   // from <outputDir>/.blueprint/scaffold-applied.json. The auto-load path
@@ -803,7 +959,11 @@ export async function runRuntimeIntegrationAudit(
   findings.push(...(await ruleUseSyncExternalStore(outputDir, feFiles)));
   findings.push(...(await ruleUseBlockerDataRouter(outputDir, feFiles)));
   findings.push(
-    ...(await ruleExternalIdVsDbPk(outputDir, beFiles, appliedOptionalFeatures)),
+    ...(await ruleExternalIdVsDbPk(
+      outputDir,
+      beFiles,
+      appliedOptionalFeatures,
+    )),
   );
   findings.push(...(await ruleBgClearStaleRuns(outputDir, beFiles)));
   findings.push(...(await ruleBgInprocBranch(outputDir, beFiles)));
@@ -814,9 +974,14 @@ export async function runRuntimeIntegrationAudit(
   findings.push(...(await ruleEmptyResultsNotFailure(outputDir, beFiles)));
   findings.push(...(await ruleAuthGuardAsMiddleware(outputDir, beFiles)));
   findings.push(
-    ...(await ruleDbUserNotFoundAs404(outputDir, beFiles, appliedOptionalFeatures)),
+    ...(await ruleDbUserNotFoundAs404(
+      outputDir,
+      beFiles,
+      appliedOptionalFeatures,
+    )),
   );
   findings.push(...(await ruleControllerHandlerNotRouted(outputDir, beFiles)));
+  findings.push(...(await ruleApiPathPrefixMismatch(outputDir, feFiles)));
 
   // Dedupe by id (file+line+rule) defensively.
   const seen = new Set<string>();
@@ -918,7 +1083,10 @@ export function formatRuntimeAuditBlock(
   result: RuntimeIntegrationAuditResult,
 ): string {
   if (result.clean) return "";
-  const lines: string[] = ["", "## Runtime integration audit (deterministic findings)"];
+  const lines: string[] = [
+    "",
+    "## Runtime integration audit (deterministic findings)",
+  ];
   lines.push(
     `Findings: ${result.findings.length} (${result.bySeverity.error ?? 0} error, ${result.bySeverity.warn ?? 0} warn). Full report: \`.ralph/runtime-integration-audit.json\`.`,
   );

@@ -227,6 +227,16 @@ export const SupervisorStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
+  /**
+   * True when the E2E loop gave up with DETERMINISTIC failures still unresolved
+   * (real code bugs, not flake/infra). This is the only E2E condition that
+   * HARD-FAILS the session — flaky/infra failures are isolated + reported but do
+   * not block. Set by `e2eVerifyAndFix`, read by the coding route's gate.
+   */
+  e2eDeterministicUnresolved: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
 
   /** RALPH loop configuration. Passed down to every worker. */
   ralphConfig: Annotation<RalphConfig>({

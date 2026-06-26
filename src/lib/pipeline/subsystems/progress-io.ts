@@ -13,7 +13,7 @@ const PROGRESS_FILE = path.join(".blueprint", "subsystems-progress.json");
 
 export interface SubsystemProgressEntry {
   subsystemId: string;
-  status: "completed" | "failed" | "skipped";
+  status: "completed" | "failed" | "skipped" | "blocked";
   summary?: string;
   updatedAt?: string;
 }

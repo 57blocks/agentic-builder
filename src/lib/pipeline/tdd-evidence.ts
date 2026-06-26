@@ -7,6 +7,8 @@ import path from "path";
 
 export type TddPriority = "P0" | "P1" | "P2";
 export type TddPhase = "red" | "green";
+/** Layer at which a TDD test is first runnable & owned. See TddManifestTest.scope. */
+export type TddScope = "local" | "integration";
 export type TddEvidenceStatus =
   | "expected_fail"
   | "pass"
@@ -31,6 +33,19 @@ export interface TddManifestTest {
   command?: string;
   expectedRed?: string;
   expectedGreen?: string;
+  /**
+   * Where this test is first runnable & owned:
+   *   - "local"       → self-contained (pure logic, targets only files the
+   *                     owning task creates). Runnable by the producing worker
+   *                     the moment it finishes, so it is verified in the
+   *                     worker's per-task fix loop.
+   *   - "integration" → depends on cross-task wiring (route registration, app
+   *                     assembly, DB schema, other tasks' models). Only
+   *                     runnable after the system is assembled, so it stays in
+   *                     the integration-stage TDD gate.
+   * Absent ⇒ treat as "integration" (the safe default).
+   */
+  scope?: TddScope;
 }
 
 export interface TddEvidenceEvent {
@@ -78,13 +93,19 @@ export interface TddEvidenceSummary {
   }>;
 }
 
-const EMPTY_PRIORITY_COUNTS: Record<TddPriority, { total: number; greenPassed: number }> = {
+const EMPTY_PRIORITY_COUNTS: Record<
+  TddPriority,
+  { total: number; greenPassed: number }
+> = {
   P0: { total: 0, greenPassed: 0 },
   P1: { total: 0, greenPassed: 0 },
   P2: { total: 0, greenPassed: 0 },
 };
 
-function clonePriorityCounts(): Record<TddPriority, { total: number; greenPassed: number }> {
+function clonePriorityCounts(): Record<
+  TddPriority,
+  { total: number; greenPassed: number }
+> {
   return {
     P0: { ...EMPTY_PRIORITY_COUNTS.P0 },
     P1: { ...EMPTY_PRIORITY_COUNTS.P1 },
@@ -141,7 +162,9 @@ async function readJsonIfPresent(filePath: string): Promise<unknown | null> {
   }
 }
 
-async function readJsonlEvidence(filePath: string): Promise<TddEvidenceEvent[]> {
+async function readJsonlEvidence(
+  filePath: string,
+): Promise<TddEvidenceEvent[]> {
   try {
     const raw = await fs.readFile(filePath, "utf-8");
     return raw
@@ -166,12 +189,18 @@ async function readTddReviewSummary(outputDir: string): Promise<{
   findingCount: number;
   p0ErrorCount: number;
 }> {
-  const reviewJson = await readJsonIfPresent(path.join(outputDir, ".ralph", "tdd-review.json"));
+  const reviewJson = await readJsonIfPresent(
+    path.join(outputDir, ".ralph", "tdd-review.json"),
+  );
   if (!isRecord(reviewJson)) {
     return { present: false, findingCount: 0, p0ErrorCount: 0 };
   }
-  const findings = Array.isArray(reviewJson.findings) ? reviewJson.findings : [];
-  const p0Errors = Array.isArray(reviewJson.p0Errors) ? reviewJson.p0Errors : [];
+  const findings = Array.isArray(reviewJson.findings)
+    ? reviewJson.findings
+    : [];
+  const p0Errors = Array.isArray(reviewJson.p0Errors)
+    ? reviewJson.p0Errors
+    : [];
   return {
     present: true,
     findingCount: findings.length,
@@ -220,8 +249,12 @@ export async function readTddEvidenceSummary(
     const priority = normalizePriority(test.priority);
     byPriority[priority].total += 1;
     const events = evidenceByTest.get(test.id) ?? [];
-    const latestRed = [...events].reverse().find((event) => event.phase === "red");
-    const latestGreen = [...events].reverse().find((event) => event.phase === "green");
+    const latestRed = [...events]
+      .reverse()
+      .find((event) => event.phase === "red");
+    const latestGreen = [...events]
+      .reverse()
+      .find((event) => event.phase === "green");
 
     // Latest-event semantics: a test is "valid RED" only when its LATEST
     // red event is `expected_fail`; "GREEN passed" only when its LATEST
@@ -267,9 +300,7 @@ export async function readTddEvidenceSummary(
         redStatus: latestRed?.status,
         greenStatus: latestGreen?.status,
         failureExcerpt:
-          latestGreen?.failureExcerpt ??
-          latestRed?.failureExcerpt ??
-          undefined,
+          latestGreen?.failureExcerpt ?? latestRed?.failureExcerpt ?? undefined,
       });
     }
   }

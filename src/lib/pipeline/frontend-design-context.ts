@@ -3,6 +3,7 @@ import path from "path";
 import { fetchStitchScreenHtml } from "@/lib/stitch-api";
 import {
   readManifest,
+  designReferenceDirAbs,
   buildVisionDescriptionsForReferences,
   buildVisionDescriptionsFromDir,
   formatVisionDescriptionsBlock,
@@ -178,6 +179,12 @@ export async function buildFrontendDesignContextForCodegen(
   pencilDesignRaw: string,
   stitchMeta?: StitchDesignMeta,
   projectRoot?: string,
+  /** When set, design references are read from the PER-PROJECT store
+   *  (.blueprint/projects/<projectId>/design-references) instead of the shared
+   *  default store — so another project's upload can't pollute this build's
+   *  references (the CSMA "Donezo" contamination). Falls back to shared when
+   *  unset. */
+  projectId?: string,
 ): Promise<string> {
   console.log("[FrontendDesignContext] ── building frontend coding context ──");
   console.log(`[FrontendDesignContext] outputRoot = ${outputRoot}`);
@@ -258,10 +265,12 @@ export async function buildFrontendDesignContextForCodegen(
   // the exact layout, colors, and components.
   let visionBlock = "";
   const rootForVision = projectRoot ?? process.cwd();
-  const canonicalDir = path.join(rootForVision, ".blueprint", "design-references");
+  // Per-project store when projectId is set (prevents cross-project pollution);
+  // designReferenceDirAbs falls back to the shared store when projectId is undefined.
+  const canonicalDir = designReferenceDirAbs(rootForVision, projectId);
   const fallbackDir = path.join(outputRoot, ".design-references");
   try {
-    let refEntries = await readManifest(rootForVision);
+    let refEntries = await readManifest(rootForVision, projectId);
     let resolvedDir = canonicalDir;
     let usedFallback = false;
 

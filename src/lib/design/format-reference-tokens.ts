@@ -24,6 +24,12 @@ export interface ReferenceCaptureResult {
   tokens?: ReferenceTokens | null;
   /** The URL actually landed on (after redirects). */
   finalUrl?: string;
+  /**
+   * Same-origin absolute links found on the page (hash-stripped, deduped, capped).
+   * Used by the "auto-capture from one entry URL" flow to crawl/discover pages —
+   * notably concrete instances of `:param` routes the PRD can't enumerate.
+   */
+  links?: string[];
   /** True when capture failed because an interactive login was required but not completed. */
   needsAuth?: boolean;
   error?: string;

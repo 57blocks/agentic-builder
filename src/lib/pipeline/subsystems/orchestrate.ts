@@ -195,7 +195,10 @@ export type SubsystemCodingRunner = (
 export interface SubsystemRunResult {
   subsystemId: string;
   layer: number;
-  status: "completed" | "failed" | "skipped";
+  /** "skipped" = already built in a prior run. "blocked" = NOT built because a
+   *  (transitive) dependency failed/blocked — distinct from "failed" (this
+   *  domain itself never ran) so reporting + allOk can tell them apart. */
+  status: "completed" | "failed" | "skipped" | "blocked";
   summary?: string;
 }
 
@@ -204,15 +207,19 @@ export interface RunSubsystemsOptions {
   alreadyDone?: Set<string>;
   /** Called after each subsystem finishes (to persist a checkpoint). */
   onStepDone?: (result: SubsystemRunResult) => Promise<void> | void;
-  /** Stop the whole run on the first failure (default true) — a dependent layer
-   *  cannot safely build on a broken dependency. */
+  /** When true (default), a failed domain BLOCKS only its (transitive)
+   *  dependents — independent domains still build. When false, every domain is
+   *  attempted regardless of upstream failures. (Previously this aborted the
+   *  whole run on the first failure, which orphaned every later domain even when
+   *  it had no dependency on the failure.) */
   stopOnFailure?: boolean;
 }
 
 /**
  * Execute the plan layer-by-layer. Each subsystem is coded via the injected
- * `runCoding`. Failures stop dependent layers (by default) since later layers
- * build on earlier ones.
+ * `runCoding`. A failed domain blocks ONLY its (transitive) dependents — every
+ * domain that doesn't depend on a failure still builds, so one broken domain no
+ * longer orphans the rest of the app (the old behaviour aborted the whole run).
  *
  * Within a layer, subsystems run SEQUENTIALLY (one `runCoding` at a time), not
  * concurrently. The coding route shares process-global, file-backed state across
@@ -234,6 +241,11 @@ export async function runSubsystemBuilds(
   const done = new Set(opts?.alreadyDone ?? []);
   const stopOnFailure = opts?.stopOnFailure ?? true;
   const results: SubsystemRunResult[] = [];
+  // Domains that failed OR were blocked by a failed dependency. Because layers
+  // are topological, every dependency of a step has already been processed by
+  // the time we reach it, so a direct `dependsOn ∩ blocked` check captures the
+  // full transitive closure.
+  const blocked = new Set<string>();
 
   const recordResult = async (r: SubsystemRunResult): Promise<void> => {
     results.push(r);
@@ -242,12 +254,27 @@ export async function runSubsystemBuilds(
   };
 
   for (const layer of plan.layers) {
-    let layerFailed = false;
     // Sequential within the layer — see the function doc for why.
     for (const step of layer) {
       if (done.has(step.subsystemId)) {
         await recordResult({ subsystemId: step.subsystemId, layer: step.layer, status: "skipped" });
         continue;
+      }
+      // Skip ONLY when a dependency failed/was blocked — a broken domain must
+      // not have its dependents built on top of it, but independent domains
+      // continue. (stopOnFailure:false attempts every domain regardless.)
+      if (stopOnFailure) {
+        const failedDep = step.dependsOn.find((d) => blocked.has(d));
+        if (failedDep) {
+          blocked.add(step.subsystemId);
+          await recordResult({
+            subsystemId: step.subsystemId,
+            layer: step.layer,
+            status: "blocked",
+            summary: `blocked: dependency "${failedDep}" failed or was blocked`,
+          });
+          continue;
+        }
       }
       let result: SubsystemRunResult;
       try {
@@ -267,10 +294,9 @@ export async function runSubsystemBuilds(
         };
       }
       await recordResult(result);
-      if (result.status === "failed") layerFailed = true;
+      if (result.status === "failed") blocked.add(step.subsystemId);
     }
-    // A dependent layer cannot safely build on a broken dependency — stop here.
-    if (stopOnFailure && layerFailed) break;
+    // No break — later layers' domains that don't depend on a failure still build.
   }
 
   return results;

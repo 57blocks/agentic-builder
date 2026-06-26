@@ -12,12 +12,38 @@ import type {
   TddManifestTest,
   TddPhase,
   TddPriority,
+  TddScope,
 } from "@/lib/pipeline/tdd-evidence";
 import type { RepairEmitter } from "@/lib/pipeline/self-heal";
 
 const execFileAsync = promisify(execFile);
 const TDD_COMMAND_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 2000;
+
+/**
+ * In-process mutex chain, keyed by output dir. `runTddRuntimePhase` mutates the
+ * shared `backend/.env` (neutralize → run → restore) because the generated
+ * db.ts re-loads `.env` via dotenv. Worker-stage local-TDD now runs inside
+ * PARALLEL workers on the same project, so two concurrent runs could corrupt
+ * that file (one restoring while the other neutralizes). Serialize the whole
+ * neutralize→run→restore window per project to make it race-free. Cross-process
+ * safety is already handled by the `.tdd-bak` sentinel + crash recovery.
+ */
+const tddEnvLocks = new Map<string, Promise<unknown>>();
+
+function withTddEnvLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = tddEnvLocks.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  // Keep the chain alive but don't let a rejection poison the next waiter.
+  tddEnvLocks.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
 
 /**
  * Prepended to a failure excerpt when the gate stripped DATABASE_URL and the
@@ -60,11 +86,17 @@ function normalizePriority(value: unknown): TddPriority {
 }
 
 function isUnsafeCommand(command: string): boolean {
-  return /\brm\s+-rf\b|\bsudo\b|\bgit\s+push\b|>\s*\/dev\/|\/\s*$/i.test(command);
+  return /\brm\s+-rf\b|\bsudo\b|\bgit\s+push\b|>\s*\/dev\/|\/\s*$/i.test(
+    command,
+  );
 }
 
 function classifyFailure(output: string): TddEvidenceStatus {
-  if (/missing script|command not found|Cannot find module ['"]?(vitest|jest|playwright)|ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL/i.test(output)) {
+  if (
+    /missing script|command not found|Cannot find module ['"]?(vitest|jest|playwright)|ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL/i.test(
+      output,
+    )
+  ) {
     return "infra_fail";
   }
   return "fail";
@@ -105,7 +137,10 @@ function extractExpectedRedTerms(expectedRed: string | undefined): string[] {
   ].slice(0, 12);
 }
 
-function matchExpectedRed(output: string, expectedRed: string | undefined): {
+function matchExpectedRed(
+  output: string,
+  expectedRed: string | undefined,
+): {
   matched: boolean;
   reason: string;
 } {
@@ -182,11 +217,22 @@ async function runOneTest(
       maxBuffer: 5 * 1024 * 1024,
       // Hard guarantee: TDD unit tests must never reach the real (kickoff)
       // database. Blanking DATABASE_URL means a test that imports the real db
-      // module (instead of mocking it) fails fast with "DATABASE_URL is
-      // required" rather than dialing the live Postgres. backend/.env is also
-      // neutralized for the phase (see runTddRuntimePhase) because the
-      // generated db.ts re-loads it via dotenv.
-      env: { ...process.env, FORCE_COLOR: "0", DATABASE_URL: "" },
+      // module cannot dial the live Postgres. backend/.env is also neutralized
+      // for the phase (see runTddRuntimePhase) because the generated db.ts
+      // re-loads it via dotenv.
+      //
+      // NODE_ENV=test is set explicitly so the db layer's "no DATABASE_URL"
+      // branch is deterministic: instead of throwing, a test-aware db.ts falls
+      // back to `sqlite::memory:` (vitest also sets VITEST, but pinning
+      // NODE_ENV here makes the fallback independent of the runner). This keeps
+      // the "tests can't touch the real DB" guarantee while letting the suite
+      // actually run on an in-memory database.
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0",
+        DATABASE_URL: "",
+        NODE_ENV: "test",
+      },
     });
     const output = `${stdout ?? ""}${stderr ?? ""}`.trim();
     const greenPass = phase === "green";
@@ -211,14 +257,17 @@ async function runOneTest(
       stderr?: string;
       message?: string;
     };
-    const output = `${e.stdout ?? ""}${e.stderr ?? ""}${e.message ?? ""}`.trim();
+    const output =
+      `${e.stdout ?? ""}${e.stderr ?? ""}${e.message ?? ""}`.trim();
     const failureKind = classifyFailure(output);
     const expectedRedMatch =
       phase === "red" && failureKind !== "infra_fail"
         ? matchExpectedRed(output, test.expectedRed)
         : { matched: false, reason: "" };
     const status =
-      phase === "red" && failureKind !== "infra_fail" && expectedRedMatch.matched
+      phase === "red" &&
+      failureKind !== "infra_fail" &&
+      expectedRedMatch.matched
         ? "expected_fail"
         : failureKind;
     // When the gate stripped DATABASE_URL and the test still tried to reach a
@@ -227,7 +276,9 @@ async function runOneTest(
     // Trim the output tail FIRST, then prepend the marker so it survives.
     const trimmed = output.slice(-MAX_OUTPUT_CHARS);
     const failureExcerpt =
-      dbNeutralized && status !== "expected_fail" && looksLikeDbConnectionFailure(output)
+      dbNeutralized &&
+      status !== "expected_fail" &&
+      looksLikeDbConnectionFailure(output)
         ? `${GATE_DB_MARKER}\n---\n${trimmed}`
         : trimmed;
     return {
@@ -237,8 +288,10 @@ async function runOneTest(
       command,
       exitCode: typeof e.code === "number" ? e.code : 1,
       status,
-      expectedFailureMatched: phase === "red" ? status === "expected_fail" : undefined,
-      expectedFailureReason: phase === "red" ? expectedRedMatch.reason : undefined,
+      expectedFailureMatched:
+        phase === "red" ? status === "expected_fail" : undefined,
+      expectedFailureReason:
+        phase === "red" ? expectedRedMatch.reason : undefined,
       failureExcerpt,
       timestamp: new Date().toISOString(),
       sessionId,
@@ -320,7 +373,10 @@ export async function recoverFromCrashedTddNeutralization(
 async function neutralizeBackendDatabaseUrl(
   outputDir: string,
 ): Promise<DbNeutralization> {
-  const noop: DbNeutralization = { neutralized: false, restore: async () => {} };
+  const noop: DbNeutralization = {
+    neutralized: false,
+    restore: async () => {},
+  };
   const { envPath, bakPath } = backendEnvPaths(outputDir);
 
   // Self-heal first: a `.tdd-bak` from a prior killed run means the real .env
@@ -375,14 +431,40 @@ export async function runTddRuntimePhase(input: {
   phase: TddPhase;
   emitter?: RepairEmitter;
   sessionId?: string;
+  /**
+   * Run only tests with this scope. Omit to run every test (back-compat).
+   *   - "local"       → worker-owned, self-contained tests.
+   *   - "integration" → cross-cutting tests the integration gate owns.
+   */
+  scope?: TddScope;
+  /** Run only tests owned by these task ids. Omit to run all. */
+  taskIds?: string[];
 }): Promise<TddRuntimeExecutorResult> {
   const manifest = await readTddManifest(input.outputDir);
-  if (!manifest || manifest.tests.length === 0) {
-    const summary = "TDD runtime skipped: no tests in manifest.";
+  // Apply scope / taskId filters. A test with no `scope` defaults to
+  // "integration" so legacy manifests keep running under the integration gate.
+  const taskIdFilter = input.taskIds ? new Set(input.taskIds) : null;
+  const filteredTests = (manifest?.tests ?? []).filter((test) => {
+    if (input.scope) {
+      const testScope: TddScope = test.scope ?? "integration";
+      if (testScope !== input.scope) return false;
+    }
+    if (taskIdFilter && !(test.taskId && taskIdFilter.has(test.taskId))) {
+      return false;
+    }
+    return true;
+  });
+  if (!manifest || filteredTests.length === 0) {
+    const scopeNote = input.scope ? ` (scope=${input.scope})` : "";
+    const summary = `TDD runtime skipped: no tests in manifest${scopeNote}.`;
     input.emitter?.({
       stage: "tdd-runtime",
       event: "tdd_runtime_skipped",
-      details: { phase: input.phase, reason: "no-manifest-tests" },
+      details: {
+        phase: input.phase,
+        reason: manifest ? "no-tests-after-filter" : "no-manifest-tests",
+        scope: input.scope,
+      },
     });
     return {
       phase: input.phase,
@@ -407,85 +489,92 @@ export async function runTddRuntimePhase(input: {
 
   // Neutralize the real DATABASE_URL for the whole phase so any test that
   // imports the real db module (instead of mocking it) fails fast rather than
-  // dialing the live kickoff Postgres. Restored in finally.
-  const { neutralized: dbNeutralized, restore: restoreDbUrl } =
-    await neutralizeBackendDatabaseUrl(input.outputDir);
-  try {
-    for (const test of manifest.tests) {
-      const event = await runOneTest(
-        input.outputDir,
-        input.phase,
-        test,
-        input.sessionId,
-        dbNeutralized,
-      );
-      await appendEvidence(input.outputDir, event);
+  // dialing the live kickoff Postgres. Restored in finally. The whole
+  // neutralize→run→restore window is serialized per project (withTddEnvLock)
+  // so parallel workers running local-TDD can't corrupt the shared backend/.env.
+  await withTddEnvLock(input.outputDir, async () => {
+    const { neutralized: dbNeutralized, restore: restoreDbUrl } =
+      await neutralizeBackendDatabaseUrl(input.outputDir);
+    try {
+      for (const test of filteredTests) {
+        const event = await runOneTest(
+          input.outputDir,
+          input.phase,
+          test,
+          input.sessionId,
+          dbNeutralized,
+        );
+        await appendEvidence(input.outputDir, event);
 
-      // Per-test event so the UI can stream RED/GREEN results onto the owning
-      // task's real-time log (filtered by taskId). Aggregate counts are still
-      // emitted once below for the run-level summary.
-      input.emitter?.({
-        stage: "tdd-runtime",
-        event: "tdd_test_result",
-        taskId: event.taskId,
-        details: {
-          testId: event.testId,
-          phase: event.phase,
-          type: test.type,
-          priority: test.priority,
-          status: event.status,
-          command: event.command,
-          requirementIds: test.requirementIds,
-          expectedRed: test.expectedRed,
-          expectedGreen: test.expectedGreen,
-          failureExcerpt: event.failureExcerpt,
-        },
-      });
+        // Per-test event so the UI can stream RED/GREEN results onto the owning
+        // task's real-time log (filtered by taskId). Aggregate counts are still
+        // emitted once below for the run-level summary.
+        input.emitter?.({
+          stage: "tdd-runtime",
+          event: "tdd_test_result",
+          taskId: event.taskId,
+          details: {
+            testId: event.testId,
+            phase: event.phase,
+            type: test.type,
+            priority: test.priority,
+            status: event.status,
+            command: event.command,
+            requirementIds: test.requirementIds,
+            expectedRed: test.expectedRed,
+            expectedGreen: test.expectedGreen,
+            failureExcerpt: event.failureExcerpt,
+          },
+        });
 
-      if (event.status === "pass") {
-        passed += 1;
-        // A RED-phase test that PASSES proves nothing — record its file so the
-        // caller can delete + regenerate it as a genuinely-failing test.
-        if (input.phase === "red" && test.file) {
-          redPassedTooEarlyFiles.push(test.file);
-        }
-      } else if (event.status === "expected_fail") expectedFailed += 1;
-      else if (event.status === "skipped") skipped += 1;
-      else failed += 1;
+        if (event.status === "pass") {
+          passed += 1;
+          // A RED-phase test that PASSES proves nothing — record its file so the
+          // caller can delete + regenerate it as a genuinely-failing test.
+          if (input.phase === "red" && test.file) {
+            redPassedTooEarlyFiles.push(test.file);
+          }
+        } else if (event.status === "expected_fail") expectedFailed += 1;
+        else if (event.status === "skipped") skipped += 1;
+        else failed += 1;
 
-      const priority = normalizePriority(test.priority);
-      const isBlocking =
-        priority === "P0" &&
-        ((input.phase === "red" && event.status !== "expected_fail") ||
-          (input.phase === "green" && event.status !== "pass"));
-      if (isBlocking) p0Failures.push(test.id);
+        const priority = normalizePriority(test.priority);
+        const isBlocking =
+          priority === "P0" &&
+          ((input.phase === "red" && event.status !== "expected_fail") ||
+            (input.phase === "green" && event.status !== "pass"));
+        if (isBlocking) p0Failures.push(test.id);
+      }
+    } finally {
+      await restoreDbUrl();
     }
-  } finally {
-    await restoreDbUrl();
-  }
+  });
 
+  const total = filteredTests.length;
+  const scopeLabel = input.scope ? ` [${input.scope}]` : "";
   const summary =
     input.phase === "red"
-      ? `TDD RED: ${expectedFailed}/${manifest.tests.length} expected failures, ${failed} failed unexpectedly, ${passed} passed too early, ${skipped} skipped.`
-      : `TDD GREEN: ${passed}/${manifest.tests.length} passed, ${failed} failed, ${skipped} skipped.`;
+      ? `TDD RED${scopeLabel}: ${expectedFailed}/${total} expected failures, ${failed} failed unexpectedly, ${passed} passed too early, ${skipped} skipped.`
+      : `TDD GREEN${scopeLabel}: ${passed}/${total} passed, ${failed} failed, ${skipped} skipped.`;
 
   input.emitter?.({
     stage: "tdd-runtime",
     event: input.phase === "red" ? "tdd_red_executed" : "tdd_green_executed",
     details: {
-      total: manifest.tests.length,
+      total,
       passed,
       expectedFailed,
       failed,
       skipped,
       p0Failures,
+      scope: input.scope,
     },
   });
 
   return {
     phase: input.phase,
     manifestPresent: true,
-    total: manifest.tests.length,
+    total,
     passed,
     expectedFailed,
     failed,

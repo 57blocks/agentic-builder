@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 
 import type { SupervisorState } from "../../state";
-import { getRepairEmitter } from "@/lib/pipeline/self-heal";
+import { getRepairEmitter, healDbTestFallback } from "@/lib/pipeline/self-heal";
 import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
@@ -71,7 +71,9 @@ export async function tddTestWriterAndRed(
       emitter,
     });
     extraCost += rewrite.costUsd;
-    console.log(`[Supervisor] TDD Test Writer (RED regenerate): ${rewrite.summary}`);
+    console.log(
+      `[Supervisor] TDD Test Writer (RED regenerate): ${rewrite.summary}`,
+    );
     red = await runTddRuntimePhase({
       outputDir: state.outputDir,
       phase: "red",
@@ -86,16 +88,74 @@ export async function tddTestWriterAndRed(
   };
 }
 
+/**
+ * Open-mode passthrough for the `tdd_green_verify` graph node.
+ *
+ * In OpenIntegrationFix (the high-autonomy variant), TDD/E2E/unit tests are
+ * REFERENCE material the model reads itself — not a system gate. The model's
+ * `report_done` is the sole authority on done-ness. So this node must NOT:
+ *   - run the ~7-minute GREEN integration suite, nor
+ *   - write "TDD hard gate failed" into `integrationErrors`
+ * (which would loop control back into integration_verify and override the
+ * model's decision).
+ *
+ * Returning `{}` preserves whatever the open node already set in state
+ * (`integrationErrors=""` on a model pass, or a model-reported failure string),
+ * so `routeAfterTddGreenVerify*` simply proceeds to e2e/summary.
+ */
+export async function tddGreenVerifyPassthrough(
+  _state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  console.log(
+    "[Supervisor] tdd_green_verify: OPEN mode — skipping the TDD hard gate (tests are reference material; the model's report_done decides done-ness).",
+  );
+  return {};
+}
+
 export async function tddGreenVerifyAndReview(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
   const emitter = getRepairEmitter(state.sessionId);
-  const green = await runTddRuntimePhase({
+  // Integration gate runs only the cross-cutting (scope=integration) tests.
+  // Self-contained (scope=local) tests were already verified in their owning
+  // worker's per-task fix loop, so re-running them here would be wasted work.
+  let green = await runTddRuntimePhase({
     outputDir: state.outputDir,
     phase: "green",
+    scope: "integration",
     emitter,
     sessionId: state.sessionId,
   });
+
+  // ── Deterministic db.ts test-fallback heal ────────────────────────────────
+  // The #1 GREEN-gate deadlock: a generated backend/src/db.ts that throws
+  // "DATABASE_URL is required" at module load crashes EVERY backend test at
+  // import (the gate strips DATABASE_URL by design). The LLM repair loop is
+  // told to mock ../db in each test — O(tests) work that frequently stalls.
+  // Instead, when the latest GREEN evidence implicates that throw, rewrite
+  // db.ts ONCE to fall back to in-memory sqlite under test, then re-run GREEN
+  // so the rest of this node sees the unblocked state.
+  if (green.p0Failures.length > 0) {
+    const heal = await healDbTestFallback({
+      outputDir: state.outputDir,
+      sessionId: state.sessionId,
+      emitter,
+    });
+    if (heal.applied) {
+      console.log(`[Supervisor] TDD GREEN: ${heal.reason} — re-running GREEN.`);
+      green = await runTddRuntimePhase({
+        outputDir: state.outputDir,
+        phase: "green",
+        scope: "integration",
+        emitter,
+        sessionId: state.sessionId,
+      });
+      console.log(
+        `[Supervisor] ${green.summary} (after db.ts test-fallback heal)`,
+      );
+    }
+  }
+
   const review = await reviewTddTests({
     outputDir: state.outputDir,
     emitter,
@@ -116,7 +176,8 @@ export async function tddGreenVerifyAndReview(
   const prevReviewP0 = state.tddReviewP0Count ?? -1;
   let stallRounds = state.tddReviewStallRounds ?? 0;
   if (greenP0 === 0 && reviewP0 > 0) {
-    stallRounds = prevReviewP0 >= 0 && reviewP0 >= prevReviewP0 ? stallRounds + 1 : 0;
+    stallRounds =
+      prevReviewP0 >= 0 && reviewP0 >= prevReviewP0 ? stallRounds + 1 : 0;
   } else {
     stallRounds = 0;
   }

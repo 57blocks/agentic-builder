@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -29,16 +24,23 @@ import {
   AlertTriangle,
   RefreshCw,
   ListChecks,
+  Bug,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import { useCodingStore } from "@/store/coding-store";
 import type { CodingSessionSnapshot } from "@/store/coding-store";
+import type { SessionCheckpoint } from "@/lib/pipeline/session-checkpoint";
 import { useStepStore } from "@/store/step-store";
 import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
-import type { AgentLogEntry, CodingAgentRole, CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
+import type {
+  AgentLogEntry,
+  CodingAgentRole,
+  CodingTask,
+  KickoffWorkItem,
+} from "@/lib/pipeline/types";
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
 import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
@@ -214,9 +216,7 @@ function buildFlowGraph(
 
       // Get the phase accent color of the target task for the flowing edge
       const targetTask = taskMap.get(task.id);
-      const edgeColor = flowing && targetTask
-        ? "#8b5cf6"
-        : "#94a3b8";
+      const edgeColor = flowing && targetTask ? "#8b5cf6" : "#94a3b8";
 
       edges.push({
         id: edgeId,
@@ -249,7 +249,10 @@ function calcProgress(tasks: CodingTask[]): number {
   if (tasks.length === 0) return 0;
   let score = 0;
   for (const t of tasks) {
-    if (t.codingStatus === "completed" || t.codingStatus === "completed_with_warnings") {
+    if (
+      t.codingStatus === "completed" ||
+      t.codingStatus === "completed_with_warnings"
+    ) {
       score += 1;
     } else if (t.codingStatus === "in_progress") {
       score += 0.5;
@@ -291,8 +294,14 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   const setStepResult = useStepStore((s) => s.setStepResult);
 
   const codingState = useCodingStore();
-  const { startCoding, retryFailedTasks, rerunCoding, hydrateFromSnapshot } =
-    useCodingStore();
+  const {
+    startCoding,
+    retryFailedTasks,
+    rerunCoding,
+    retryIntegrationVerify,
+    hydrateFromSnapshot,
+    hydrateFromCheckpoint,
+  } = useCodingStore();
   const projectId = useStageStore((s) => s.projectId);
 
   // Track whether this mount is a "return visit" (component unmounted and remounted)
@@ -328,16 +337,25 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // ── Data from step-store (pre-hydrated by parent page) ─────────────────────
   const prdContent = steps.prd?.content ?? "";
 
-  const designMeta = steps.design?.metadata as Record<string, unknown> | undefined;
+  const designMeta = steps.design?.metadata as
+    | Record<string, unknown>
+    | undefined;
   const stitchMeta = designMeta?.stitchResult as
-    | { projectId: string; screenId: string; projectUrl: string; screenshotUrl?: string | null; htmlDownloadUrl?: string | null }
+    | {
+        projectId: string;
+        screenId: string;
+        projectUrl: string;
+        screenshotUrl?: string | null;
+        htmlDownloadUrl?: string | null;
+      }
     | null
     | undefined;
 
   const taskMeta = useMemo(
     () =>
-      (steps["task-breakdown"]?.metadata ??
-        steps.summary?.metadata) as Record<string, unknown> | undefined,
+      (steps["task-breakdown"]?.metadata ?? steps.summary?.metadata) as
+        | Record<string, unknown>
+        | undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [steps["task-breakdown"]?.metadata, steps.summary?.metadata],
   );
@@ -365,7 +383,12 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
 
   // ── Hydrate coding state from DB when the page opens in idle state ─────────
   useEffect(() => {
-    if (!projectId || codingState.status !== "idle" || kickoffTasks.length === 0) return;
+    if (
+      !projectId ||
+      codingState.status !== "idle" ||
+      kickoffTasks.length === 0
+    )
+      return;
 
     const load = async () => {
       try {
@@ -373,21 +396,47 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           `/api/projects/${projectId}/project-step-snapshot?stepId=coding-session`,
           { cache: "no-store" },
         );
-        if (!res.ok) return;
-        const data = (await res.json()) as { snapshot: CodingSessionSnapshot | null };
-        if (!data.snapshot?.sessionId) return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            snapshot: CodingSessionSnapshot | null;
+          };
+          if (data.snapshot?.sessionId) {
+            // hydrateFromSnapshot correctly includes E2E / server-injected extra
+            // tasks that live in the DB snapshot but are absent from kickoffTasks.
+            hydrateFromSnapshot(data.snapshot, kickoffTasks);
+            return;
+          }
+        }
 
-        const snap = data.snapshot;
-        // hydrateFromSnapshot correctly includes E2E / server-injected extra
-        // tasks that live in the DB snapshot but are absent from kickoffTasks.
-        hydrateFromSnapshot(snap, kickoffTasks);
+        // Fallback: no DB snapshot. The coding-session snapshot is persisted ONLY
+        // when a session reaches completed/failed (see coding-store
+        // persistSessionSnapshot), so a run that was KILLED mid-flight leaves no
+        // snapshot and the UI would show 0 progress. Rehydrate per-task status
+        // from the durable file checkpoint (returned by orchestration-status) so
+        // the UI reflects what actually got built.
+        const cpRes = await fetch("/api/agents/coding/orchestration-status", {
+          cache: "no-store",
+        });
+        if (!cpRes.ok) return;
+        const cpData = (await cpRes.json()) as {
+          checkpoint: SessionCheckpoint | null;
+        };
+        const results = cpData.checkpoint?.taskResults;
+        if (!results) return;
+        // Guard against the shared (process.cwd()) checkpoint belonging to a
+        // DIFFERENT project: only rehydrate when its task ids overlap this
+        // project's kickoff tasks.
+        const cpIds = new Set(Object.keys(results));
+        if (kickoffTasks.some((t) => cpIds.has(t.id))) {
+          hydrateFromCheckpoint(cpData.checkpoint!, kickoffTasks);
+        }
       } catch {
         // silently ignore — user can still start fresh
       }
     };
     load();
-  // Run once when kickoffTasks become available and we're still idle
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Run once when kickoffTasks become available and we're still idle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, kickoffTasks.length]);
 
   // ── Failed task IDs (for "Retry Failed" bar button) ────────────────────────
@@ -523,6 +572,27 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     prdContent,
     stitchMeta,
   ]);
+
+  // ── Debug: trigger ONLY the integration-fix stage ─────────────────────────
+  // Dev aid — runs `createIntegrationRetryGraph` (integration_verify →
+  // tdd_green_verify → summary) against the already-generated output WITHOUT
+  // re-running codegen. Bound to INTEGRATION_FIX_MODE on the server (open by
+  // default). Verbose stage logs are printed server-side for debugging.
+  const handleDebugIntegrationFix = useCallback(() => {
+    if (!codeOutputDir) {
+      window.alert("No code output directory available for this project yet.");
+      return;
+    }
+    const ok = window.confirm(
+      `Debug: trigger the integration-fix stage directly?\n\n` +
+        `This runs ONLY the integration verify+fix graph against the existing\n` +
+        `generated output (no codegen rerun). Output dir:\n  ${codeOutputDir}\n\n` +
+        `Detailed stage logs (context compression, model calls, gates) are\n` +
+        `printed in the server console.`,
+    );
+    if (!ok) return;
+    retryIntegrationVerify(runId, codeOutputDir, projectTier);
+  }, [retryIntegrationVerify, runId, codeOutputDir, projectTier]);
 
   // ── Merge kickoff + live coding tasks ──────────────────────────────────────
   const mergedTasks = useMergedTasks(kickoffTasks, codingState.tasks);
@@ -727,7 +797,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-2.5">
             ACTIVE AGENTS
           </p>
-          <AgentBubbles agents={codingState.agents} placeholderRoles={placeholderRoles} />
+          <AgentBubbles
+            agents={codingState.agents}
+            placeholderRoles={placeholderRoles}
+          />
         </div>
 
         {/* Cost */}
@@ -770,7 +843,12 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         {/* Mode label when session is active/done */}
         {hasStarted && (
           <span className="px-2 py-1 text-[11px] font-medium text-slate-500 bg-slate-100 rounded">
-            {codingMode === "fast" ? "Fast" : codingMode === "cost" ? "Cost" : "Normal"} mode
+            {codingMode === "fast"
+              ? "Fast"
+              : codingMode === "cost"
+                ? "Cost"
+                : "Normal"}{" "}
+            mode
           </span>
         )}
 
@@ -783,7 +861,9 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
               transition={{ duration: 1.2, repeat: Infinity }}
             />
             <span className="text-[12px] font-semibold text-violet-700">
-              {isReturnVisit ? "Session in progress — reconnected" : "Coding in progress…"}
+              {isReturnVisit
+                ? "Session in progress — reconnected"
+                : "Coding in progress…"}
             </span>
           </div>
         )}
@@ -823,6 +903,20 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           >
             <RefreshCw size={13} />
             {isRunning ? "Abort & Rerun" : "Rerun"}
+          </button>
+        )}
+
+        {/* Debug — trigger ONLY the integration-fix stage against the existing
+            generated output (no codegen rerun). Dev aid; verbose stage logs are
+            printed server-side. Hidden mid-run so it can't race the session. */}
+        {hasStarted && !isRunning && kickoffTasks.length > 0 && (
+          <button
+            onClick={handleDebugIntegrationFix}
+            title="Debug: trigger the integration-fix stage directly (verbose server logs)"
+            className="flex items-center gap-2 px-4 py-2 border border-amber-300 hover:border-amber-400 hover:bg-amber-50 text-amber-700 text-[12px] font-semibold rounded-lg transition-colors"
+          >
+            <Bug size={13} />
+            Debug: Integration Fix
           </button>
         )}
 

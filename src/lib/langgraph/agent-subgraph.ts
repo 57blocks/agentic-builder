@@ -71,6 +71,7 @@ import {
 } from "./task-snapshot";
 import { pickPrdSpecEntriesForTask } from "./prd-spec-prompt";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
+import { runTddRuntimePhase } from "@/lib/pipeline/tdd-runtime-executor";
 import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-report";
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
@@ -163,21 +164,40 @@ async function withLlmCallTimeout<T>(
     cleanup();
   }
 }
-// Raise the iteration ceiling so complex tasks have enough read rounds.
-// 10 rounds gives complex tasks (markets scanner, pipeline orchestrators, etc.)
-// enough budget while still bounding the worst case.
-// Anti read-only spiral: inject a nudge when the model has read for too long.
-// Set relative to MAX_WORKER_TOOL_ITERATIONS so the nudge happens near the end,
-// not in the middle — we don't want to cut short legitimate reads.
-const READ_STALL_NUDGE_AFTER = 5; // nudge at round 5/10
-// Force tool_choice:"none" only when very close to the limit, as a last resort.
-// At this point the model has had ample reads; we'd rather get imperfect code
-// than throw an iteration-exceeded error.
-const READ_STALL_FORCE_WRITE_AFTER = 8; // force-write at round 8/10
-// Once forceWrite is engaged (tool_choice:"none"), if this many consecutive
-// forceWrite rounds make no write progress, give up instead of spinning to the
-// iteration cap. Guards the agentic loop against the observed loop=300 hang.
-const FORCE_WRITE_GIVEUP_AFTER = 3;
+// Anti read-only spiral thresholds. A model that keeps calling
+// read_file/list_files/grep without ever writing would otherwise spin to the
+// iteration ceiling. Three graduated stages:
+//   1. NUDGE  — inject a system prompt telling the model to stop reading + write.
+//   2. FORCE  — pin `tool_choice` to the `write_file` function so the model MUST
+//      call it (NOT `tool_choice:"none"`, which strips all tools and made
+//      tool-calling models like deepseek-v4 give up with bare "STATUS: DONE",
+//      deadlocking the loop — see history of this constant).
+//   3. GIVE UP — if even forced write produces no file after several rounds,
+//      bail out of the loop (return incomplete) so the upper-level attempt
+//      retry takes over instead of burning rounds + tokens to the ceiling.
+const READ_STALL_NUDGE_AFTER = (() => {
+  const raw = Number(process.env.CODEGEN_READ_STALL_NUDGE_AFTER ?? "30");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 30;
+})();
+const READ_STALL_FORCE_WRITE_AFTER = (() => {
+  const raw = Number(process.env.CODEGEN_READ_STALL_FORCE_WRITE_AFTER ?? "50");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 50;
+})();
+// How many CONSECUTIVE forced-write rounds may produce zero writes before we
+// give up on the task. Counted from FORCE_WRITE_AFTER, so the absolute round is
+// READ_STALL_FORCE_WRITE_AFTER + READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS.
+const READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS = (() => {
+  const raw = Number(
+    process.env.CODEGEN_READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS ?? "20",
+  );
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
+})();
+// Forced `tool_choice` value: make the model call `write_file` instead of
+// disabling tools entirely.
+const FORCE_WRITE_TOOL_CHOICE = {
+  type: "function" as const,
+  function: { name: "write_file" },
+};
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -560,20 +580,30 @@ export async function buildProjectConventionCard(
     "## Project Convention Card (read before writing any code)",
   ];
 
-  // ── Detect frontend API client base URL ──────────────────────────────────
+  // ── Detect frontend API client base URL + backend mount prefix ───────────
+  // The client base already carries the FULL API mount prefix (it is kept in
+  // lock-step with the backend's `new Router({ prefix })` by the
+  // syncClientApiBase step). So callers pass ONLY the business path — never
+  // `/api` or a version segment. We surface the actual base AND a concrete,
+  // copy-pasteable example derived from it so the worker never has to do
+  // prefix mental-math (the historic double-/api and missing-/v1 404 classes).
   const clientContent = await fsRead("frontend/src/api/client.ts", outputDir);
   if (
     !clientContent.startsWith("FILE_NOT_FOUND") &&
     !clientContent.startsWith("REJECTED")
   ) {
     const baseMatch =
-      clientContent.match(/VITE_API_BASE_URL[^|]*\|\|\s*["'`]([^"'`]+)["'`]/) ??
+      clientContent.match(
+        /VITE_API_BASE_URL[^|?]*(?:\|\||\?\?)\s*["'`]([^"'`]+)["'`]/,
+      ) ??
       clientContent.match(/API_BASE\s*=\s*["'`]([^"'`]+)["'`]/) ??
       clientContent.match(/baseURL.*?["'`]([^"'`]+)["'`]/);
-    const base = baseMatch ? baseMatch[1] : "/api";
+    const base = baseMatch ? baseMatch[1] : "/api/v1";
     lines.push(
-      `- **Frontend API client base URL**: \`${base}\` — pass paths WITHOUT this prefix.`,
-      `  ✅ \`apiClient.get("/users/me")\`  ❌ \`apiClient.get("${base}/users/me")\``,
+      `- **Frontend API client base URL**: \`${base}\` — this is the FULL API prefix, prepended automatically. Pass ONLY the business path; NEVER include \`${base}\` (or any \`/api\` / \`/v1\` segment) in a call.`,
+      `  ✅ \`apiClient.get("/users/me")\` → final URL \`${base}/users/me\``,
+      `  ❌ \`apiClient.get("${base}/users/me")\` → \`${base}${base}/users/me\` (404)`,
+      `  To turn an API_CONTRACTS.json endpoint into a call path, strip the \`${base}\` prefix: contract \`${base}/users/me\` → \`apiClient.get("/users/me")\`.`,
     );
   }
 
@@ -641,9 +671,9 @@ export async function buildProjectConventionCard(
           "migrations and NO migration runner — `syncModels()` runs " +
           "`sequelize.sync()` and builds every table from the model. Declare " +
           "EVERYTHING on the model under `backend/src/models/`: columns, " +
-          "`unique: true`, secondary indexes via `indexes: [{ fields: [\"col\"] }]` " +
+          '`unique: true`, secondary indexes via `indexes: [{ fields: ["col"] }]` ' +
           "in the `init()` options, and foreign keys via the column's " +
-          "`references: { model: \"<table>\", key: \"id\" }` + `onDelete`. If it " +
+          '`references: { model: "<table>", key: "id" }` + `onDelete`. If it ' +
           "is not on the model, `sync()` will NOT create it. Do NOT create a " +
           "`backend/src/database/migrations/` directory or call `queryInterface` " +
           "for schema DDL. Adding a field to a model is sufficient — no ALTER needed.",
@@ -731,7 +761,7 @@ export async function buildProjectConventionCard(
   if (presentSchemas.length > 0) {
     lines.push(
       `- **Shared schema (CANONICAL)**: ${presentSchemas.map((p) => `\`${p}\``).join(", ")} — TRD-frozen single source of truth for every type that crosses the API boundary. **Read it first.** Import the types you need; do NOT redefine any type whose name already appears there. The file is scaffold-protected — do NOT rewrite it.`,
-      "- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ \"taskId\", \"typeName\", \"field\"?, \"kind\": \"missing-type\"|\"missing-field\"|\"wrong-type\"|\"other\", \"reason\", \"proposedChange\", \"endpoint\"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.",
+      '- **If the schema is actually WRONG** (a field the PRD requires is missing, a type is the wrong shape, or an endpoint has no type): do NOT edit the schema and do NOT invent a local divergent type. Instead append ONE line to `.ralph/schema-change-requests.jsonl` — a JSON object `{ "taskId", "typeName", "field"?, "kind": "missing-type"|"missing-field"|"wrong-type"|"other", "reason", "proposedChange", "endpoint"? }` — then implement against the schema AS-IS to keep the build green. A contract-owner arbiter reconciles these against the PRD and updates the single source; silently forking the schema is what breaks front/back contract alignment.',
     );
   }
 
@@ -1202,7 +1232,11 @@ async function executeWorkerTool(
         stage: "worker-codegen",
         event: "worker_action",
         taskId: options.taskId,
-        details: { message: actionMsg, tool: name, durationMs: Date.now() - startedAt },
+        details: {
+          message: actionMsg,
+          tool: name,
+          durationMs: Date.now() - startedAt,
+        },
       });
     }
   }
@@ -1283,7 +1317,7 @@ async function runCodegenWorkerLoop(
   const codegenVariant =
     role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
 
-  console.log('run task with role', role,'codegenVariant', codegenVariant)
+  console.log("run task with role", role, "codegenVariant", codegenVariant);
   for (let i = 0; i < MAX_WORKER_TOOL_ITERATIONS; i++) {
     // Anti-spiral: inject a nudge message after too many consecutive read rounds.
     if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
@@ -1300,11 +1334,13 @@ async function runCodegenWorkerLoop(
       });
     }
 
-    // Anti-spiral: after even more stall, force the model to output text (no tool calls).
+    // Anti-spiral: after even more stall, force the model to call write_file.
+    // NOT tool_choice:"none" — that strips all tools and deadlocks tool-calling
+    // models (they answer "STATUS: DONE" instead of emitting file blocks).
     const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
     if (forceWrite) {
       console.log(
-        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
+        `[Worker] Forcing tool_choice=write_file after ${consecutiveReadRounds} consecutive read-only rounds (loop=${i + 1})`,
       );
     }
 
@@ -1330,9 +1366,8 @@ async function runCodegenWorkerLoop(
           max_tokens: MAX_OUTPUT_TOKENS,
           openRouterVariant: codegenVariant,
           codingMode,
-          // When forcing write, omit tools entirely so the model cannot call them.
-          tools: forceWrite ? undefined : WORKER_TOOLS,
-          tool_choice: forceWrite ? "none" : "auto",
+          tools: WORKER_TOOLS,
+          tool_choice: forceWrite ? FORCE_WRITE_TOOL_CHOICE : "auto",
           contextDump: {
             taskId: toolOptions?.taskId,
             iteration: i,
@@ -1490,7 +1525,7 @@ type CodegenAgentCompletionReason =
   | "task_complete"
   | "legacy_file_blocks"
   | "max_iterations"
-  | "read_stall_giveup";
+  | "gave_up_forced_write_no_output";
 
 type CodegenAgentSessionResult = {
   content: string;
@@ -1553,7 +1588,14 @@ async function runCodegenAgentSession(
   // — even mock-data factories that write zero .tsx — was burning codex.
   const codegenVariant =
     role === "frontend" && hasVisionImage ? "codeGenFrontend" : "codeGen";
-    console.log('run task with role', role,'codegenVariant', codegenVariant, 'hasVisionImage', hasVisionImage)
+  console.log(
+    "run task with role",
+    role,
+    "codegenVariant",
+    codegenVariant,
+    "hasVisionImage",
+    hasVisionImage,
+  );
   let totalCostUsd = 0;
   let promptTokens = 0;
   let completionTokens = 0;
@@ -1566,15 +1608,6 @@ async function runCodegenAgentSession(
   // could spin to CODEGEN_AGENT_MAX_ITERATIONS (300) without ever writing —
   // observed as a ~75-min hang on a vision task over a 200-file project.
   let consecutiveReadRounds = 0;
-  // Deadlock breaker for the forceWrite state. Once consecutiveReadRounds hits
-  // READ_STALL_FORCE_WRITE_AFTER we set tool_choice="none", but if the model
-  // still produces no valid write (e.g. it keeps re-attempting a write_file
-  // that content-loss-guard REJECTs, which returns isWrite=false and never
-  // resets the counter), nothing pulls it back below the threshold and it spins
-  // to CODEGEN_AGENT_MAX_ITERATIONS. Count forceWrite rounds that make no write
-  // progress and bail out early.
-  let forceWriteNoProgressRounds = 0;
-  let writesAtLastForceWrite = 0;
   let writeToolCalls = 0;
   let lastModel = "unknown";
   let lastContent = "";
@@ -1586,13 +1619,29 @@ async function runCodegenAgentSession(
   const injectedIds = new Set(primaryIds);
   const secondaryInjectedIds: string[] = [];
   let didSecondaryRecall = false;
+  let gaveUpOnForcedWrite = false;
 
   for (let i = 0; i < CODEGEN_AGENT_MAX_ITERATIONS; i++) {
     // ── Anti read-only spiral ─────────────────────────────────────────────
-    // After N consecutive read-only rounds, nudge once; after M, force
-    // `tool_choice:"none"` so the model MUST emit file output instead of yet
-    // another read. Mirrors the multi-round loop's guard.
+    // After N consecutive read-only rounds, nudge once; after M, force the
+    // model to call `write_file` (NOT tool_choice:"none", which strips tools
+    // and deadlocks tool-calling models into bare "STATUS: DONE"). If forced
+    // write still yields nothing after K more rounds, give up so the upper
+    // attempt-retry can take over instead of spinning to the iteration ceiling.
     const forceWrite = consecutiveReadRounds >= READ_STALL_FORCE_WRITE_AFTER;
+    const forcedWriteRounds = forceWrite
+      ? consecutiveReadRounds - READ_STALL_FORCE_WRITE_AFTER + 1
+      : 0;
+    if (
+      forceWrite &&
+      forcedWriteRounds > READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS
+    ) {
+      console.warn(
+        `[Worker:${workerLabel}] Giving up after ${forcedWriteRounds - 1} forced-write round(s) produced no file (loop=${i + 1}, consecutiveReadRounds=${consecutiveReadRounds}). Returning incomplete so the task can be retried.`,
+      );
+      gaveUpOnForcedWrite = true;
+      break;
+    }
     if (consecutiveReadRounds === READ_STALL_NUDGE_AFTER) {
       messages.push({
         role: "system",
@@ -1604,27 +1653,9 @@ async function runCodegenAgentSession(
       );
     }
     if (forceWrite) {
-      // Track write progress across forceWrite rounds. If we've engaged
-      // tool_choice="none" but the model still isn't producing any successful
-      // write (e.g. repeatedly re-sending a content-loss-guard-rejected
-      // write_file), bail out rather than spin to CODEGEN_AGENT_MAX_ITERATIONS.
-      const totalWrites =
-        changedFiles.size + deletedFiles.size + movedFiles.length;
-      if (totalWrites > writesAtLastForceWrite) {
-        forceWriteNoProgressRounds = 0;
-        writesAtLastForceWrite = totalWrites;
-      } else {
-        forceWriteNoProgressRounds++;
-      }
       console.log(
-        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1}, noProgress=${forceWriteNoProgressRounds})`,
+        `[Worker] Forcing tool_choice=write_file after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1}, forcedWriteRound=${forcedWriteRounds}/${READ_STALL_FORCE_WRITE_GIVE_UP_ROUNDS})`,
       );
-      if (forceWriteNoProgressRounds >= FORCE_WRITE_GIVEUP_AFTER) {
-        console.log(
-          `[Worker] Giving up after ${forceWriteNoProgressRounds} forceWrite round(s) with no write progress (loop=${i + 1}).`,
-        );
-        break;
-      }
     }
     // Cheap, lossless context compaction: drop stale repeated read-only tool
     // results (same file read again later → earlier copy is superseded) before
@@ -1653,7 +1684,7 @@ async function runCodegenAgentSession(
           openRouterVariant: codegenVariant,
           codingMode,
           tools: WORKER_TOOLS,
-          tool_choice: forceWrite ? "none" : "auto",
+          tool_choice: forceWrite ? FORCE_WRITE_TOOL_CHOICE : "auto",
           contextDump: {
             taskId: toolOptions?.taskId ?? task.id,
             iteration: i,
@@ -1741,7 +1772,12 @@ async function runCodegenAgentSession(
           toolCall.function.name,
           args,
           outputDir,
-          { ...toolOptions, workerLabel, sessionId, taskId: toolOptions?.taskId ?? task.id },
+          {
+            ...toolOptions,
+            workerLabel,
+            sessionId,
+            taskId: toolOptions?.taskId ?? task.id,
+          },
         );
         if (result.isWrite) {
           hadWriteTool = true;
@@ -1840,17 +1876,26 @@ async function runCodegenAgentSession(
 
     const roundStatus = parseCodegenRoundStatus(content);
     const taskComplete = hasTaskCompleteSignal(content);
-    const remainingCreates = getRemainingPlannedCreates(
+    const remainingCreates = await getRemainingPlannedCreates(
       task,
       Array.from(changedFiles),
+      outputDir,
     );
     const hasWrites =
       changedFiles.size > 0 || deletedFiles.size > 0 || movedFiles.length > 0;
+    // A re-run over a prior session's output writes nothing this round, so
+    // `hasWrites` stays false even though every planned file exists on disk.
+    // Treat "had planned creates AND none remain" as satisfying the
+    // work-was-done guard so the model's completion signal can actually exit
+    // the loop instead of spinning to the iteration ceiling.
+    const plannedCreatesAllOnDisk =
+      getTaskFilePlanBuckets(task.files).creates.length > 0 &&
+      remainingCreates.length === 0;
 
     if (
       (roundStatus === "done" || taskComplete || parsedEntries.length > 0) &&
       remainingCreates.length === 0 &&
-      hasWrites
+      (hasWrites || plannedCreatesAllOnDisk)
     ) {
       return {
         content,
@@ -1907,10 +1952,9 @@ async function runCodegenAgentSession(
     deletedFiles: Array.from(deletedFiles),
     movedFiles,
     completed: false,
-    completionReason:
-      forceWriteNoProgressRounds >= FORCE_WRITE_GIVEUP_AFTER
-        ? "read_stall_giveup"
-        : "max_iterations",
+    completionReason: gaveUpOnForcedWrite
+      ? "gave_up_forced_write_no_output"
+      : "max_iterations",
     secondaryInjectedIds,
   };
 }
@@ -2221,10 +2265,7 @@ function formatTaskFileHints(taskFiles: unknown): string {
 function isUiRenderingTask(task: CodingTask): boolean {
   const files: string[] = Array.isArray(task.files)
     ? task.files
-    : [
-        ...(task.files?.creates ?? []),
-        ...(task.files?.modifies ?? []),
-      ];
+    : [...(task.files?.creates ?? []), ...(task.files?.modifies ?? [])];
   if (files.length === 0) return false;
   const UI_PATTERNS: RegExp[] = [
     /(^|\/)(views|components|pages|screens|layouts)\/.+\.(tsx|jsx)$/i,
@@ -2304,10 +2345,11 @@ function buildFrontendPriorityNote(opts: {
   );
 }
 
-function getRemainingPlannedCreates(
+async function getRemainingPlannedCreates(
   task: CodingTask,
   writtenFiles: string[],
-): string[] {
+  outputDir?: string,
+): Promise<string[]> {
   const { creates } = getTaskFilePlanBuckets(task.files);
   const normalize = (p: string): string => p.replace(/\\/g, "/");
   const writtenNorm = writtenFiles.map(normalize);
@@ -2329,12 +2371,54 @@ function getRemainingPlannedCreates(
       .replace(/^(frontend|backend|apps\/web|apps\/api|packages\/[^/]+)\//, "");
   const fuzzyWrittenSet = new Set(writtenNorm.map(fuzz));
 
-  return creates.filter((file) => {
+  const remaining = creates.filter((file) => {
     const norm = normalize(file);
     if (writtenSet.has(norm)) return false;
     if (fuzzyWrittenSet.has(fuzz(norm))) return false;
     return true;
   });
+
+  // Disk-existence fallback. `writtenFiles` only tracks files written DURING
+  // the current session. When a task is re-run (e.g. a crashed/resumed coding
+  // session) over files a PRIOR session already produced, the model correctly
+  // refuses to rewrite identical content and just signals completion — so the
+  // in-memory set stays empty and `remaining` never shrinks, spinning the loop
+  // to CODEGEN_AGENT_MAX_ITERATIONS (300). Treat any planned create that
+  // already exists on disk as satisfied. Mirrors the tier-prefix fuzziness
+  // above so plan paths missing a `frontend/`/`backend/` root still match.
+  if (!outputDir || remaining.length === 0) return remaining;
+  const stillMissing: string[] = [];
+  for (const file of remaining) {
+    if (await plannedCreateExistsOnDisk(outputDir, file)) continue;
+    stillMissing.push(file);
+  }
+  return stillMissing;
+}
+
+/**
+ * Probe whether a planned-create path already exists under `outputDir`. Tries
+ * the literal relative path first, then the common tier roots when the plan
+ * path lacks one — matching the fuzzy prefix handling in
+ * `getRemainingPlannedCreates`.
+ */
+async function plannedCreateExistsOnDisk(
+  outputDir: string,
+  relPath: string,
+): Promise<boolean> {
+  const norm = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const candidates = [norm];
+  if (!/^(frontend|backend|apps\/web|apps\/api|packages\/)/.test(norm)) {
+    candidates.push(`frontend/${norm}`, `backend/${norm}`);
+  }
+  for (const candidate of candidates) {
+    try {
+      await nodeFs.access(path.join(outputDir, candidate));
+      return true;
+    } catch {
+      /* not present at this candidate path */
+    }
+  }
+  return false;
 }
 
 function scoreGeneratedFileForTask(
@@ -2891,7 +2975,9 @@ function snapshotValue(value: unknown, depth = 2): unknown {
     if (depth === 0) return `[${value.length} items]`;
     return {
       _length: value.length,
-      ...(value.length > 0 ? { "[0]": snapshotValue(value[0], depth - 1) } : {}),
+      ...(value.length > 0
+        ? { "[0]": snapshotValue(value[0], depth - 1) }
+        : {}),
     };
   }
   if (typeof value === "object") {
@@ -2907,19 +2993,19 @@ function snapshotValue(value: unknown, depth = 2): unknown {
 }
 
 const brief = (s: unknown, n = 50): string => {
-  const str = typeof s === "string" ? s : JSON.stringify(s) ?? "";
+  const str = typeof s === "string" ? s : (JSON.stringify(s) ?? "");
   return str.length <= n ? str : `${str.slice(0, n)}… (${str.length} chars)`;
 };
 
 function logAgentContextSnapshot(state: WorkerState, taskTitle: string): void {
   console.log(
     `[Worker:${state.workerLabel}] ── AGENT CONTEXT SNAPSHOT ──\n` +
-    `  role           : ${state.role}\n` +
-    `  task           : ${taskTitle}\n` +
-    `  tasks          : ${state.tasks.length} total, index=${state.currentTaskIndex}\n` +
-    `  projectContext : ${brief(state.projectContext)}\n` +
-    `  fileRegistry   : ${state.fileRegistrySnapshot?.length ?? 0} entries\n` +
-    `  apiContracts   : ${state.apiContractsSnapshot?.length ?? 0} entries`,
+      `  role           : ${state.role}\n` +
+      `  task           : ${taskTitle}\n` +
+      `  tasks          : ${state.tasks.length} total, index=${state.currentTaskIndex}\n` +
+      `  projectContext : ${brief(state.projectContext)}\n` +
+      `  fileRegistry   : ${state.fileRegistrySnapshot?.length ?? 0} entries\n` +
+      `  apiContracts   : ${state.apiContractsSnapshot?.length ?? 0} entries`,
   );
 }
 
@@ -2935,7 +3021,9 @@ function findTaskDesignReference(
     title: string;
     description: string;
     coversRequirementIds?: string[];
-    files?: string[] | { creates?: string[]; modifies?: string[]; reads?: string[] };
+    files?:
+      | string[]
+      | { creates?: string[]; modifies?: string[]; reads?: string[] };
   },
   refs: DesignReferenceEntry[],
 ): DesignReferenceEntry | undefined {
@@ -3268,8 +3356,7 @@ async function generateCode(state: WorkerState) {
     // would burn ~75% more tokens AND would push the call onto the
     // expensive codex chain via the variant-selection downstream. See
     // `isUiRenderingTask` for the heuristic.
-    const isUiTask =
-      state.role === "frontend" && isUiRenderingTask(task);
+    const isUiTask = state.role === "frontend" && isUiRenderingTask(task);
     if (state.role === "frontend" && !isUiTask) {
       console.log(
         `[Worker:${state.workerLabel}] Skipping vision injection for non-UI frontend task "${task.title}" — routing through cheaper codeGen chain.`,
@@ -3326,7 +3413,8 @@ async function generateCode(state: WorkerState) {
               storedFileName: matchedRef.storedFileName,
               bytes: imgBytes.byteLength,
               imageDataUrl: dataUrl,
-              label: matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
+              label:
+                matchedRef.pageHint || matchedRef.label || matchedRef.fileName,
             });
             if (blueprint) {
               blueprintNote =
@@ -3346,7 +3434,10 @@ async function generateCode(state: WorkerState) {
           const visionMsg: VisionChatMessage = {
             role: "user",
             content: [
-              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              {
+                type: "image_url",
+                image_url: { url: dataUrl, detail: "high" },
+              },
               {
                 type: "text",
                 text:
@@ -3627,7 +3718,11 @@ async function generateCode(state: WorkerState) {
         );
         roundWritesByRound.push(roundWrites);
 
-        const remainingCreates = getRemainingPlannedCreates(task, writtenFiles);
+        const remainingCreates = await getRemainingPlannedCreates(
+          task,
+          writtenFiles,
+          state.outputDir,
+        );
         const forcedContinue =
           CODEGEN_MULTI_ROUND_ENABLED &&
           remainingCreates.length > 0 &&
@@ -4079,9 +4174,8 @@ async function verifyCode(state: WorkerState) {
   // blocks the task.
   if (process.env.BLUEPRINT_PER_TASK_TRANSPILE_CHECK !== "0") {
     try {
-      const { transpileCheckSource, formatTranspileDiagnostics } = await import(
-        "./per-task-transpile-check"
-      );
+      const { transpileCheckSource, formatTranspileDiagnostics } =
+        await import("./per-task-transpile-check");
       const diags: TranspileDiagnostic[] = [];
       for (const filePath of tsFiles) {
         const content = await fsRead(filePath, state.outputDir);
@@ -4133,22 +4227,88 @@ function isWorkerFixEligibleError(verifyErrors: string): boolean {
   return false;
 }
 
-function routeAfterVerify(state: WorkerState): string {
-  if (!state.verifyErrors) return "task_done";
-  // P0-C: file-plan failures (TASK_FILE_PLAN_UNFULFILLED) are now fixable
-  // alongside TypeScript errors. Other verify errors still fall through to
-  // `task_done` with warnings (unchanged legacy behaviour).
-  if (!isWorkerFixEligibleError(state.verifyErrors)) return "task_done";
+function computeWorkerMaxFix(state: WorkerState): number {
   const cfg = getWorkerTscFixConfig();
-  const maxFix = state.ralphConfig.enabled
+  return state.ralphConfig.enabled
     ? Math.min(
         state.ralphConfig.maxIterationsPerTask,
         cfg.maxFixAttemptsRalphCap,
       )
     : cfg.maxFixAttempts;
+}
+
+function routeAfterVerify(state: WorkerState): string {
+  // tsc/file verify is clean → run the worker-owned (scope=local) TDD tests
+  // before declaring the task done. Cross-cutting (integration-scope) tests
+  // are NOT run here — they only pass once the system is assembled, which is
+  // the integration stage's job.
+  if (!state.verifyErrors) return "local_tdd";
+  // P0-C: file-plan failures (TASK_FILE_PLAN_UNFULFILLED) are now fixable
+  // alongside TypeScript errors. Other verify errors still fall through to
+  // `task_done` with warnings (unchanged legacy behaviour). These give-up
+  // paths go STRAIGHT to task_done (not local_tdd) so their warning is not
+  // overwritten by a local-TDD run.
+  if (!isWorkerFixEligibleError(state.verifyErrors)) return "task_done";
+  const maxFix = computeWorkerMaxFix(state);
   if (state.fixAttempts >= maxFix) {
     console.log(
       `[Worker:${state.workerLabel}] Per-task fix: max attempts (${maxFix}) reached, continuing with warnings.`,
+    );
+    return "task_done";
+  }
+  return "task_fix";
+}
+
+/** Marker prefix so a local-TDD failure is distinguishable in logs / fix context. */
+const WORKER_LOCAL_TDD_FAIL_PREFIX = "[local-tdd] P0 local test(s) failing:";
+
+/**
+ * Run the current task's `scope=local` TDD tests (GREEN). These are
+ * self-contained — they target only files this task creates — so the producing
+ * worker is the right place to make them pass, with full local context and fast
+ * feedback, instead of deferring every red to the integration stage.
+ *
+ * Reached only when tsc/file verify is already clean. On P0 failure it records a
+ * TDD-flavoured `verifyErrors` so the shared fix loop (`task_fix` → `verify` →
+ * `local_tdd`) engages; the loop reuses the existing `fixAttempts` / maxFix
+ * budget, so it can never spin unbounded (see routeAfterLocalTdd).
+ */
+async function localTdd(state: WorkerState) {
+  const task = state.tasks[state.currentTaskIndex];
+  const result = await runTddRuntimePhase({
+    outputDir: state.outputDir,
+    phase: "green",
+    scope: "local",
+    taskIds: [task.id],
+    sessionId: state.sessionId,
+    emitter: getRepairEmitter(state.sessionId),
+  });
+
+  if (result.total === 0 || result.p0Failures.length === 0) {
+    // No local tests for this task, or all green — clear any prior marker and
+    // let routeAfterLocalTdd send us to task_done.
+    if (result.total > 0) {
+      console.log(
+        `[Worker:${state.workerLabel}] local-tdd: ${result.summary} for "${task.title}".`,
+      );
+    }
+    return { verifyErrors: "" };
+  }
+
+  const msg = `${WORKER_LOCAL_TDD_FAIL_PREFIX} ${result.p0Failures.join(", ")}. ${result.summary}`;
+  console.log(`[Worker:${state.workerLabel}] local-tdd: ${msg}`);
+  return { verifyErrors: msg };
+}
+
+function routeAfterLocalTdd(state: WorkerState): string {
+  // Clean (no local failures recorded) → done.
+  if (!state.verifyErrors) return "task_done";
+  // A local-TDD failure was recorded. Retry via the shared fix loop while
+  // budget remains; otherwise give up with a warning (completed_with_warnings).
+  const maxFix = computeWorkerMaxFix(state);
+  if (state.fixAttempts >= maxFix) {
+    console.log(
+      `[Worker:${state.workerLabel}] local-tdd: max fix attempts (${maxFix}) reached, continuing with warnings (integration gate will re-check).`,
     );
     return "task_done";
   }
@@ -4762,6 +4922,7 @@ export function createWorkerSubGraph() {
     .addNode("pick_next_task", withTaskLogContext(pickNextTask))
     .addNode("generate_code", withTaskLogContext(generateCode))
     .addNode("verify", withTaskLogContext(verifyCode))
+    .addNode("local_tdd", withTaskLogContext(localTdd))
     .addNode("task_fix", withTaskLogContext(taskFix))
     .addNode("task_done", withTaskLogContext(taskDone))
     .addNode("task_failed", withTaskLogContext(taskFailed))
@@ -4777,9 +4938,14 @@ export function createWorkerSubGraph() {
       task_failed: "task_failed",
     })
     .addConditionalEdges("verify", routeAfterVerify, {
+      local_tdd: "local_tdd",
       task_done: "task_done",
       task_fix: "task_fix",
       task_failed: "task_failed",
+    })
+    .addConditionalEdges("local_tdd", routeAfterLocalTdd, {
+      task_done: "task_done",
+      task_fix: "task_fix",
     })
     .addEdge("task_fix", "verify")
     .addEdge("task_done", "pick_next_task")

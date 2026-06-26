@@ -91,6 +91,7 @@ export const MODELS = {
   "gemini-3-pro-preview": "google/gemini-2.5-pro",
   "claude-sonnet": "anthropic/claude-sonnet-4",
   "claude-opus": "anthropic/claude-opus-4",
+  "claude-opus-4.8": "anthropic/claude-opus-4.8",
   "gpt-4o": "openai/gpt-4o",
   "gpt-4o-mini": "openai/gpt-4o-mini",
   "gemini-pro": "google/gemini-2.5-pro",
@@ -111,6 +112,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     "qwen/qwen3.6-plus": { input: 0.325, output: 1.95 },
     "anthropic/claude-sonnet-4": { input: 3, output: 15 },
     "anthropic/claude-opus-4": { input: 15, output: 75 },
+    "anthropic/claude-opus-4.8": { input: 15, output: 75 },
     "openai/gpt-4o": { input: 2.5, output: 10 },
     "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
     "google/gemini-2.5-pro": { input: 1.25, output: 10 },
@@ -149,8 +151,16 @@ export async function chatCompletion(
   options: OpenRouterOptions = {},
 ): Promise<OpenRouterResponse> {
   const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
+  // Per-call override (used by callers like the open integration fixer that
+  // must pin a specific OpenRouter model regardless of the env-driven default
+  // provider routing) OR the env force-flags. An explicit `preferDirectProvider`
+  // opt-in overrides the env force so a debug call can reach the direct provider
+  // even when LLM_PROVIDER=openrouter; `forceOpenRouter: true` still wins.
+  const forceOpenRouter =
+    options.forceOpenRouter === true ||
+    (shouldForceOpenRouter() && options.preferDirectProvider !== true);
 
-  if (isDeepSeekV4Provider() && !shouldForceOpenRouter()) {
+  if (isDeepSeekV4Provider() && !forceOpenRouter) {
     const dsModel =
       process.env.DEEPSEEK_V4_MODEL?.trim() || DEEPSEEK_V4_DEFAULT_MODEL;
     const dsBase =
@@ -168,7 +178,7 @@ export async function chatCompletion(
     });
   }
 
-  if (isGeminiProvider() && !shouldForceOpenRouter()) {
+  if (isGeminiProvider() && !forceOpenRouter) {
     const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
     console.log(
       `[LLM] provider=gemini  model=${geminiModel}  (requested=${requestedModel})`,
@@ -236,8 +246,7 @@ export async function chatCompletionWithFallback(
         throw lastErr;
       }
 
-      const reason =
-        lastErr.name === "ModelTimeoutError" ? "timeout" : "error";
+      const reason = lastErr.name === "ModelTimeoutError" ? "timeout" : "error";
       console.warn(
         `[LLM Fallback] model=${model} ${reason} (${lastErr.message.slice(0, 150)}), trying next: ${modelChain[i + 1]}`,
       );
@@ -259,8 +268,11 @@ export async function streamChatCompletion(
   // model's tool-calling protocol (e.g. the in-IDE code-chat agent that
   // depends on Claude-style tool_calls deltas) should set this so they
   // don't get silently rerouted to DeepSeek V4 direct, which produces a
-  // different tool_calls schema and visibly hangs the chat UI.
-  const forceOpenRouter = options.forceOpenRouter || shouldForceOpenRouter();
+  // different tool_calls schema and visibly hangs the chat UI. An explicit
+  // `preferDirectProvider` opt-in overrides the env force the other way.
+  const forceOpenRouter =
+    options.forceOpenRouter === true ||
+    (shouldForceOpenRouter() && options.preferDirectProvider !== true);
 
   if (isDeepSeekV4Provider() && !forceOpenRouter) {
     const requestedModel = options.model ?? OPENROUTER_DEFAULT_MODEL;
@@ -318,7 +330,8 @@ export async function openRouterChatCompletion(
 
   const controller = new AbortController();
   const globalTimeout =
-    Number.isFinite(OPENROUTER_CHAT_TIMEOUT_MS) && OPENROUTER_CHAT_TIMEOUT_MS > 0
+    Number.isFinite(OPENROUTER_CHAT_TIMEOUT_MS) &&
+    OPENROUTER_CHAT_TIMEOUT_MS > 0
       ? OPENROUTER_CHAT_TIMEOUT_MS
       : 120_000;
   const timeoutMs = perCallTimeoutMs ?? globalTimeout;
@@ -426,7 +439,25 @@ export async function openRouterVisionChatCompletion(
       `OpenRouter vision API error: ${response.status} - ${raw.slice(0, 300)}`,
     );
   }
-  return JSON.parse(await response.text()) as OpenRouterResponse;
+  // OpenRouter occasionally returns 200 with an EMPTY body when an upstream
+  // gateway times out or truncates a very large request (e.g. many hi-res
+  // reference screenshots in one vision call). `JSON.parse("")` would throw an
+  // opaque "Unexpected end of JSON input" that hides the real cause — surface a
+  // diagnosable error instead.
+  const rawBody = await response.text();
+  if (!rawBody.trim()) {
+    throw new Error(
+      `OpenRouter vision API returned an empty response body (status ${response.status}, model=${model}). ` +
+        `This usually means the upstream timed out on an oversized request — reduce the number/size of images or lower max_tokens.`,
+    );
+  }
+  try {
+    return JSON.parse(rawBody) as OpenRouterResponse;
+  } catch {
+    throw new Error(
+      `OpenRouter vision API returned a non-JSON response (status ${response.status}, model=${model}): ${rawBody.slice(0, 300)}`,
+    );
+  }
 }
 
 export async function openRouterStreamChatCompletion(

@@ -21,9 +21,7 @@ export {
 } from "./events";
 export type { RepairEvent, RepairEmitter, RepairStage } from "./events";
 export { createJsonlRepairSink } from "./jsonl-sink";
-export {
-  runFeatureChecklistAudit,
-} from "./feature-checklist-audit";
+export { runFeatureChecklistAudit } from "./feature-checklist-audit";
 export { auditFrontendWiring } from "./wiring-audit";
 export { auditModelSchemaAlignment } from "./model-schema-audit";
 export type { ModelSchemaAuditInput } from "./model-schema-audit";
@@ -178,3 +176,22 @@ export type {
   RouteStubGroup,
   GenerateMissingRouteStubsResult,
 } from "./missing-route-stubs";
+export {
+  healDbTestFallback,
+  diagnoseDbSource,
+  rewriteDbSource,
+} from "./db-test-fallback-doctor";
+export type {
+  DbTestFallbackDiagnosis,
+  DbTestFallbackDoctorResult,
+} from "./db-test-fallback-doctor";
+export {
+  syncClientApiBase,
+  computeSyncedClientSource,
+  extractMountPrefix,
+  extractClientBase,
+} from "./sync-client-api-base";
+export type {
+  ClientBaseSyncResult,
+  SyncClientApiBaseResult,
+} from "./sync-client-api-base";

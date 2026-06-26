@@ -73,6 +73,8 @@ import { stripTestingPhaseTasks } from "@/lib/pipeline/strip-testing-tasks";
 import { triagePrebuiltArchitectTasks } from "./architect-triage";
 import {
   getRepairEmitter,
+  dispatchAuditRepair,
+  type AuditEntry,
   runContractUsageCoverage,
   runRuntimeIntegrationAudit,
   formatRuntimeAuditBlock,
@@ -93,6 +95,7 @@ import {
   generateMissingRouteStubs,
   formatMissingRouteStubBlock,
   type GenerateMissingRouteStubsResult,
+  syncClientApiBase,
 } from "@/lib/pipeline/self-heal";
 import {
   runContractCoverageGate,
@@ -116,7 +119,10 @@ import { runTddTestWriter } from "@/lib/pipeline/tdd-test-writer";
 import { reviewTddTests } from "@/lib/pipeline/tdd-reviewer";
 import { formatTddRepairBlock } from "@/lib/pipeline/tdd-diagnostics-block";
 import { formatRuntimeSmokeBlock } from "@/lib/pipeline/runtime-smoke-block";
-import { BUILD_FAILED_MARKER_REL } from "@/lib/pipeline/build-quarantine";
+import {
+  BUILD_FAILED_MARKER_REL,
+  isInfraDominatedFailure,
+} from "@/lib/pipeline/build-quarantine";
 import {
   runBackendTscGate,
   decideBackendReadinessRoute,
@@ -140,6 +146,11 @@ import {
 import { evaluateTddHardGate } from "@/lib/pipeline/tdd-evidence";
 import { pickRelevantSections } from "./doc-section-picker";
 import {
+  parsePrdE2eSpec,
+  planE2eTestFiles,
+  formatScenarioForGeneration,
+} from "@/lib/e2e/prd-e2e-spec";
+import {
   triageE2eFailures,
   hasInfraSignal,
   type FailedTestRecord,
@@ -154,6 +165,7 @@ import {
   ENABLE_PARALLEL_CODING_WORKERS,
   ENABLE_PARALLEL_FOUNDATION,
   ENABLE_PARALLEL_FE_BE,
+  ENABLE_SCHEMA_RECONCILE,
   ENABLE_FE_ROUTE_CONSOLIDATION,
   frontendPageWorkerCount,
   parsedWorkerLimit,
@@ -161,6 +173,7 @@ import {
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
   scaledIntegrationVerifyFixTotalBudget,
   remainingIntegrationVerifyBudget,
+  INTEGRATION_FIX_MODE,
 } from "./supervisor/config";
 import {
   splitFrontendTasks,
@@ -227,6 +240,7 @@ import {
   buildIntegrationReasoningOptions,
 } from "./supervisor/verify-tools/command-classifier";
 import { executeSupervisorTool } from "./supervisor/verify-tools/executor";
+import { openIntegrationVerifyAndFix } from "./open-integration-verify-fix";
 import {
   normalizeFrontendHookSignatures,
   normalizeFrontendJsxElementAnnotations,
@@ -252,6 +266,7 @@ import {
   syncDeps,
   tddTestWriterAndRed,
   tddGreenVerifyAndReview,
+  tddGreenVerifyPassthrough,
 } from "./supervisor/nodes/tdd";
 
 // ─── Nodes ───
@@ -510,7 +525,8 @@ async function invokeArchitectWorkers(
   generatedFiles: GeneratedFile[];
   workerCostUsd: number;
 }> {
-  const tasks = ((input as { tasks?: CodingTask[] }).tasks ?? []) as CodingTask[];
+  const tasks = ((input as { tasks?: CodingTask[] }).tasks ??
+    []) as CodingTask[];
   const merge = (rs: WorkerState[]) => ({
     taskResults: rs.flatMap((r) => r.taskResults ?? []),
     generatedFiles: rs.flatMap((r) => r.generatedFiles ?? []),
@@ -1240,13 +1256,18 @@ async function scaffoldFix(state: SupervisorState) {
     }
   }
 
-  const codeFixChain = resolveCodingChain(state.codingMode, "codeFix", "gpt-4o");
+  const codeFixChain = resolveCodingChain(
+    state.codingMode,
+    "codeFix",
+    "gpt-4o",
+  );
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `You are a Senior Software Architect. Fix the build errors below so that "npm install && npm run build" succeeds.
+      content: `You are a Senior Software Architect. Fix the build errors below so that the project package manager's install + build commands succeed.
 Rules:
 - NEVER use create-react-app or react-scripts.
+- Use the package manager declared by package.json/lockfile (pnpm for pnpm-lock.yaml, yarn for yarn.lock, npm only for npm/package-lock projects). Do not run npm install in a pnpm project.
 - For M-tier and L-tier projects (same stack): frontend is Vite + React in frontend/, backend is Koa + TypeScript in backend/. NEVER introduce Next.js or Fastify. L-tier additionally ships backend/src/workers/, backend/src/queue/inProcessQueue.ts, pino logger, requestLogger + rateLimit middlewares.
 - For Vite projects: index.html must be in the project root, src/main.tsx is the entry point.
 - Output ONLY corrected/new files using \`\`\`file:<relative-path>\n<contents>\n\`\`\` format.
@@ -1264,7 +1285,7 @@ Rules:
           ? `## Current Files\n${fileContents.join("\n\n")}`
           : "",
         "",
-        "Fix all errors so npm install && npm run build passes. Output corrected files.",
+        "Fix all errors so the detected package manager's install + build commands pass. Output corrected files.",
       ].join("\n"),
     },
   ];
@@ -2008,9 +2029,7 @@ async function e2eVerifyAndFix(
       // as visible "skipped" warnings in the playwright report.
       let unfilledKeysBlock = "";
       try {
-        const declaredResources = await readResourceRequirements(
-          process.cwd(),
-        );
+        const declaredResources = await readResourceRequirements(process.cwd());
         unfilledKeysBlock = formatUnfilledKeysForE2EPrompt(declaredResources);
         if (unfilledKeysBlock) {
           console.log(
@@ -2028,94 +2047,175 @@ async function e2eVerifyAndFix(
           "e2eGen",
           "gpt-4o",
         );
-        const genMessages: ChatMessage[] = [
-          {
-            role: "system",
-            content: [
-              "You are an expert Playwright E2E test author.",
-              "Generate complete Playwright TypeScript test files that cover every scenario in the PRD E2E spec.",
-              "",
-              "## Structure requirements",
-              "- One spec file per PRD section/route group (e.g. frontend/e2e/auth.spec.ts, frontend/e2e/dashboard.spec.ts).",
-              "- Use `test.describe` blocks matching section headings.",
-              "- Each `test()` maps 1-to-1 with a PRD E2E step sequence.",
-              "- Use `page.goto()`, `page.locator()`, `page.fill()`, `page.click()`, `expect()` from @playwright/test.",
-              "- Do NOT import anything outside @playwright/test.",
-              "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
-              "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
-              "- Do not re-generate smoke.spec.ts.",
-              "",
-              "## Skip tests for features with missing env keys",
-              "- If the user message contains a `## Env keys NOT configured` block,",
-              "  every test whose flow depends on one of those keys MUST start with",
-              "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
-              "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
-              "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
-              "  a hard failure the fix-loop has to keep chewing.",
-              "",
-              "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
-              "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
-              "  Always add `{ level: N }` or `{ name: 'exact text' }` so only ONE element matches.",
-              "  Example: `page.getByRole('heading', { level: 1 })` or `page.getByRole('heading', { name: 'Welcome' })`.",
-              "- NEVER use `page.getByRole('button')` alone — always add `{ name: '...' }`.",
-              "- NEVER use `page.getByText('...')` without `.first()` when the text may appear more than once.",
-              "- NEVER use `page.locator('text=...')` in `expect(...).toBeVisible()` without `.first()` unless the selector is guaranteed unique.",
-              "- Prefer `page.getByRole(...)` with unique qualifiers > `page.getByTestId(...)` > `page.locator('text=...')` > CSS selectors.",
-              "- When using `page.locator(css)` that could match multiple elements, always append `.first()` or `.nth(N)` before assertions.",
-              "- Text in selectors must match the EXACT case rendered in the DOM.",
-              "  If the UI shows 'SIGN UP' (uppercase), use `page.getByRole('link', { name: 'SIGN UP' })` — not 'Sign Up'.",
-              "- Avoid deprecated `page.click('text=...')` — use `page.locator('text=...').click()` or `page.getByRole(...).click()`.",
-              "- For form inputs always prefer `page.getByLabel('...')` or `page.getByPlaceholder('...')`.",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: [
-              `Project output dir: ${state.outputDir}`,
-              "",
-              "## PRD E2E Specification",
-              e2eSpecDoc.slice(0, 12000),
-              "",
-              unfilledKeysBlock,
-              state.projectContext
-                ? `## Project context\n${state.projectContext.slice(0, 4000)}`
-                : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          },
-        ];
-        const genResponse = await chatCompletionWithFallback(
-          genMessages,
-          genModelChain,
-          {
-            temperature: 0.1,
-            max_tokens: 16000,
-            forceOpenRouter: forceOpenRouterForMode(state.codingMode),
-          },
-        );
-        const genContent = genResponse.choices[0]?.message?.content ?? "";
-        recordSupervisorLlmUsage({
-          sessionId: state.sessionId,
-          stage: "e2e_generate_tests",
-          model: genResponse.model,
-          usage: genResponse.usage,
-          costUsd: estimateCost(genResponse.model, genResponse.usage),
-        });
-        const genFileBlocks = parseFileBlocksFromContent(genContent);
-        if (genFileBlocks.length > 0) {
-          for (const file of genFileBlocks) {
+        const E2E_GEN_SYSTEM = [
+          "You are an expert Playwright E2E test author.",
+          "Generate complete Playwright TypeScript test files for the scenarios you are given.",
+          "",
+          "## Structure requirements",
+          "- Use `test.describe` blocks; each `test()` maps 1-to-1 with one scenario's step sequence.",
+          "- Use `page.goto()`, `page.locator()`, `page.fill()`, `page.click()`, `expect()` from @playwright/test.",
+          "- Do NOT import anything outside @playwright/test.",
+          "- Output ONLY the file blocks using ```file:frontend/e2e/<name>.spec.ts``` syntax.",
+          "- The base URL is http://localhost:5173 (already configured in playwright.config.ts).",
+          "- Do not re-generate smoke.spec.ts.",
+          "",
+          "## Skip tests for features with missing env keys",
+          "- If the user message contains a `## Env keys NOT configured` block,",
+          "  every test whose flow depends on one of those keys MUST start with",
+          "  `test.skip(!process.env.<KEY>, '<feature> requires <KEY>');`.",
+          "- This keeps the suite green when external creds (SMTP, vendor APIs) are",
+          "  absent and surfaces the gap as a Playwright 'skipped' line rather than",
+          "  a hard failure the fix-loop has to keep chewing.",
+          "",
+          "## Playwright locator best practices (CRITICAL — violations cause strict mode errors)",
+          "- NEVER use `page.getByRole('heading')` or any role-based locator without a unique qualifier.",
+          "  Always add `{ level: N }` or `{ name: 'exact text' }` so only ONE element matches.",
+          "  Example: `page.getByRole('heading', { level: 1 })` or `page.getByRole('heading', { name: 'Welcome' })`.",
+          "- NEVER use `page.getByRole('button')` alone — always add `{ name: '...' }`.",
+          "- NEVER use `page.getByText('...')` without `.first()` when the text may appear more than once.",
+          "- NEVER use `page.locator('text=...')` in `expect(...).toBeVisible()` without `.first()` unless the selector is guaranteed unique.",
+          "- Prefer `page.getByRole(...)` with unique qualifiers > `page.getByTestId(...)` > `page.locator('text=...')` > CSS selectors.",
+          "- When using `page.locator(css)` that could match multiple elements, always append `.first()` or `.nth(N)` before assertions.",
+          "- Text in selectors must match the EXACT case rendered in the DOM.",
+          "  If the UI shows 'SIGN UP' (uppercase), use `page.getByRole('link', { name: 'SIGN UP' })` — not 'Sign Up'.",
+          "- Avoid deprecated `page.click('text=...')` — use `page.locator('text=...').click()` or `page.getByRole(...).click()`.",
+          "- For form inputs always prefer `page.getByLabel('...')` or `page.getByPlaceholder('...')`.",
+        ].join("\n");
+
+        const writeBlocks = async (content: string): Promise<string[]> => {
+          const blocks = parseFileBlocksFromContent(content);
+          for (const file of blocks) {
             await fsWrite(file.filePath, file.fileContent, state.outputDir, {
               scaffoldProtectedPaths: state.scaffoldProtectedPaths ?? [],
             });
           }
+          return blocks.map((b) => b.filePath);
+        };
+
+        // Prefer PER-FLOW generation from the STRUCTURED spec (PRD_E2E_SPEC.json):
+        // group scenarios by route and emit ONE focused spec file per group, so
+        // coverage scales with the app instead of being capped by a single
+        // 16k-token response (the old one-shot under-covered large apps).
+        const specJsonRaw = await fsRead("PRD_E2E_SPEC.json", state.outputDir);
+        const structuredSpec =
+          !specJsonRaw.startsWith("FILE_NOT_FOUND") &&
+          !specJsonRaw.startsWith("REJECTED")
+            ? parsePrdE2eSpec(specJsonRaw)
+            : null;
+
+        if (structuredSpec && structuredSpec.scenarios.length > 0) {
+          const groups = planE2eTestFiles(structuredSpec);
           console.log(
-            `[Supervisor] e2eVerify: generated ${genFileBlocks.length} PRD-based test file(s): ${genFileBlocks.map((f) => f.filePath).join(", ")}`,
+            `[Supervisor] e2eVerify: per-flow generation — ${structuredSpec.scenarios.length} scenario(s) → ${groups.length} spec file(s).`,
+          );
+          const written: string[] = [];
+          for (const group of groups) {
+            const scenarioBlock = group.scenarios
+              .map((s) => formatScenarioForGeneration(s))
+              .join("\n\n");
+            const groupMessages: ChatMessage[] = [
+              { role: "system", content: E2E_GEN_SYSTEM },
+              {
+                role: "user",
+                content: [
+                  `Project output dir: ${state.outputDir}`,
+                  `Generate EXACTLY ONE spec file at \`${group.fileName}\` covering ONLY the scenarios below — one \`test()\` per scenario, inside a single \`test.describe('${group.label}', …)\`.`,
+                  "",
+                  "## Scenarios to cover",
+                  scenarioBlock,
+                  "",
+                  unfilledKeysBlock,
+                  state.projectContext
+                    ? `## Project context\n${state.projectContext.slice(0, 4000)}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ];
+            try {
+              const groupResp = await chatCompletionWithFallback(
+                groupMessages,
+                genModelChain,
+                {
+                  temperature: 0.1,
+                  max_tokens: 8000,
+                  forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+                },
+              );
+              recordSupervisorLlmUsage({
+                sessionId: state.sessionId,
+                stage: "e2e_generate_tests",
+                model: groupResp.model,
+                usage: groupResp.usage,
+                costUsd: estimateCost(groupResp.model, groupResp.usage),
+              });
+              const paths = await writeBlocks(
+                groupResp.choices[0]?.message?.content ?? "",
+              );
+              written.push(...paths);
+              console.log(
+                `[Supervisor] e2eVerify: ${group.fileName} ← ${group.scenarios.length} scenario(s), wrote ${paths.length} file block(s).`,
+              );
+            } catch (groupErr) {
+              console.warn(
+                `[Supervisor] e2eVerify: generation for ${group.fileName} failed: ${groupErr instanceof Error ? groupErr.message : String(groupErr)}`,
+              );
+            }
+          }
+          console.log(
+            `[Supervisor] e2eVerify: per-flow generation wrote ${written.length} spec file(s) across ${groups.length} flow group(s).`,
           );
         } else {
-          console.warn(
-            "[Supervisor] e2eVerify: LLM returned no test file blocks during generation.",
+          // Fallback: no structured spec on disk — one-shot from the markdown.
+          const genMessages: ChatMessage[] = [
+            { role: "system", content: E2E_GEN_SYSTEM },
+            {
+              role: "user",
+              content: [
+                `Project output dir: ${state.outputDir}`,
+                "Generate one spec file per PRD section/route group (e.g. frontend/e2e/auth.spec.ts).",
+                "",
+                "## PRD E2E Specification",
+                e2eSpecDoc.slice(0, 12000),
+                "",
+                unfilledKeysBlock,
+                state.projectContext
+                  ? `## Project context\n${state.projectContext.slice(0, 4000)}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          ];
+          const genResponse = await chatCompletionWithFallback(
+            genMessages,
+            genModelChain,
+            {
+              temperature: 0.1,
+              max_tokens: 16000,
+              forceOpenRouter: forceOpenRouterForMode(state.codingMode),
+            },
           );
+          recordSupervisorLlmUsage({
+            sessionId: state.sessionId,
+            stage: "e2e_generate_tests",
+            model: genResponse.model,
+            usage: genResponse.usage,
+            costUsd: estimateCost(genResponse.model, genResponse.usage),
+          });
+          const paths = await writeBlocks(
+            genResponse.choices[0]?.message?.content ?? "",
+          );
+          if (paths.length > 0) {
+            console.log(
+              `[Supervisor] e2eVerify: generated ${paths.length} PRD-based test file(s) (one-shot fallback): ${paths.join(", ")}`,
+            );
+          } else {
+            console.warn(
+              "[Supervisor] e2eVerify: LLM returned no test file blocks during generation.",
+            );
+          }
         }
       } catch (genErr) {
         console.warn(
@@ -2152,10 +2252,15 @@ async function e2eVerifyAndFix(
     `[Supervisor] e2eVerify: output (last 800 chars):\n${output.slice(-800)}`,
   );
   if (attempt > MAX_E2E_VERIFY_FIX_ATTEMPTS) {
-    console.warn("[Supervisor] e2eVerify: max attempts reached.");
+    console.warn(
+      "[Supervisor] e2eVerify: max attempts reached with DETERMINISTIC failures still unresolved — this hard-fails the session.",
+    );
     return {
       e2eVerifyAttempts: attempt,
       e2eVerifyErrors: failureSummary,
+      // The loop only ever continues on deterministic failures (flaky/infra exit
+      // immediately), so reaching the cap means a real, unfixed code bug remains.
+      e2eDeterministicUnresolved: true,
     };
   }
 
@@ -2293,7 +2398,11 @@ async function e2eVerifyAndFix(
     });
   }
 
-  const e2eModelChain = resolveCodingChain(state.codingMode, "e2eGen", "gpt-4o");
+  const e2eModelChain = resolveCodingChain(
+    state.codingMode,
+    "e2eGen",
+    "gpt-4o",
+  );
   const testTaskContext = summarizeE2eTaskContext(state.testTasks);
   const testFiles = (await listFiles("frontend", state.outputDir))
     .filter((f) => /\.(spec|test)\.(ts|tsx|js|jsx)$/.test(f))
@@ -2994,8 +3103,7 @@ async function contractTaskCoverage(
     );
     return {};
   }
-  const tierMatch =
-    readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
+  const tierMatch = readable(scaffoldSpecRaw)?.match(/tier\s+([SML])/i) ?? null;
   const tier: ProjectTier = normalizeProjectTier(tierMatch?.[1]);
 
   // ── 4. Repair ─────────────────────────────────────────────────────────
@@ -3154,7 +3262,9 @@ async function pageTaskCoverage(
   }
 
   if (repaired.added.length === 0) {
-    console.log(`${label}: no supplementary page tasks produced; ${repaired.finalMissingPageIds.length} page(s) still uncovered.`);
+    console.log(
+      `${label}: no supplementary page tasks produced; ${repaired.finalMissingPageIds.length} page(s) still uncovered.`,
+    );
     return {};
   }
 
@@ -3689,9 +3799,15 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     .join("");
 
   const _fePreview = feContext.slice(0, 50).replace(/\n/g, "↵");
-  console.log(`[Supervisor] feContext (${feContext.length} chars): "${_fePreview}…" — writing to /tmp/fe-context-debug.txt`);
+  console.log(
+    `[Supervisor] feContext (${feContext.length} chars): "${_fePreview}…" — writing to /tmp/fe-context-debug.txt`,
+  );
   try {
-    require("fs").writeFileSync("/tmp/fe-context-debug.txt", feContext, "utf-8");
+    require("fs").writeFileSync(
+      "/tmp/fe-context-debug.txt",
+      feContext,
+      "utf-8",
+    );
   } catch (e) {
     console.warn("[Supervisor] feContext write failed:", e);
   }
@@ -3701,7 +3817,8 @@ export function dispatchFrontendWorkers(state: SupervisorState): Send[] {
     (tasks, i) =>
       new Send("fe_worker", {
         role: "frontend" as CodingAgentRole,
-        workerLabel: feWorkerCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
+        workerLabel:
+          feWorkerCount > 1 ? `Frontend Dev #${i + 1}` : "Frontend Dev",
         tasks,
         outputDir: state.outputDir,
         projectContext: feContext,
@@ -3925,7 +4042,10 @@ async function schemaArbiter(
     `[Supervisor] schemaArbiter: ${pending.length} pending schema-change-request(s) — reviewing against PRD.`,
   );
 
-  const canonical = await fsRead(".blueprint/shared-schema.ts", state.outputDir);
+  const canonical = await fsRead(
+    ".blueprint/shared-schema.ts",
+    state.outputDir,
+  );
   if (canonical.startsWith("FILE_NOT_FOUND") || !canonical.trim()) {
     // No canonical schema to amend — record and move on.
     await recordUnresolvedProblem(state.outputDir, {
@@ -3972,7 +4092,10 @@ async function schemaArbiter(
   ];
 
   const chain = resolveCodingChain(state.codingMode, "taskBreakdown", "gpt-4o");
-  let parsed: { decisions?: ArbiterDecisionRaw[]; updatedSchema?: string | null };
+  let parsed: {
+    decisions?: ArbiterDecisionRaw[];
+    updatedSchema?: string | null;
+  };
   try {
     const response = await chatCompletionWithFallback(messages, chain, {
       temperature: 0.1,
@@ -4009,7 +4132,8 @@ async function schemaArbiter(
 
   const decisionsRaw = Array.isArray(parsed.decisions) ? parsed.decisions : [];
   const byKey = new Map<string, SchemaChangeRequest>();
-  for (const p of pending) byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
+  for (const p of pending)
+    byKey.set(`${p.taskId}::${p.typeName}::${p.field ?? ""}`, p);
 
   const accepted: SchemaChangeDecision[] = [];
   const all: SchemaChangeDecision[] = [];
@@ -4104,6 +4228,25 @@ async function schemaArbiter(
 async function extractRealContracts(
   state: SupervisorState,
 ): Promise<Partial<SupervisorState>> {
+  // Single-source the API prefix BEFORE any frontend worker runs: align the
+  // frontend client's API_BASE default to the backend's ACTUAL mount prefix
+  // (`new Router({ prefix })`). This makes "base + business-path == backend
+  // route" hold by construction, so frontend workers only ever pass the
+  // business path and can't split/double the `/api` or `/v1` segments.
+  try {
+    const sync = await syncClientApiBase({
+      outputDir: state.outputDir,
+      emitter: getRepairEmitter(state.sessionId),
+    });
+    if (sync.applied) {
+      console.log(`[Supervisor] extractRealContracts: ${sync.reason}`);
+    }
+  } catch (e) {
+    console.warn(
+      `[Supervisor] extractRealContracts: client API_BASE sync skipped (${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+
   // 1. Prefer BE-declared manifest when present.
   const manifest = await readRoutesManifest(state.outputDir);
   if (manifest && manifest.length > 0) {
@@ -5384,7 +5527,10 @@ async function invokeWorkerBatched(base: WorkerState): Promise<WorkerState> {
   let cost = 0;
   const batchCount = Math.ceil(tasks.length / WORKER_BATCH_SIZE);
   for (let b = 0; b < batchCount; b++) {
-    const batch = tasks.slice(b * WORKER_BATCH_SIZE, (b + 1) * WORKER_BATCH_SIZE);
+    const batch = tasks.slice(
+      b * WORKER_BATCH_SIZE,
+      (b + 1) * WORKER_BATCH_SIZE,
+    );
     console.log(
       `[Supervisor] ${base.workerLabel}: worker batch ${b + 1}/${batchCount} (${batch.length} tasks)…`,
     );
@@ -5560,7 +5706,8 @@ async function feRouteConsolidation(
   const views: ViewModule[] = [];
   for (const f of viewFiles) {
     const src = await fsRead(f, state.outputDir);
-    if (src.startsWith("FILE_NOT_FOUND") || src.startsWith("REJECTED")) continue;
+    if (src.startsWith("FILE_NOT_FOUND") || src.startsWith("REJECTED"))
+      continue;
     const exp = detectViewExport(src);
     if (!exp) continue;
     views.push({
@@ -5626,7 +5773,12 @@ async function feRouteConsolidation(
   };
 
   let routerSrc = "";
-  let guard = { ok: false, missingViews: [] as string[], hasPlaceholder: false, wiresRouter: false };
+  let guard = {
+    ok: false,
+    missingViews: [] as string[],
+    hasPlaceholder: false,
+    wiresRouter: false,
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     const corrective =
       attempt === 0
@@ -6126,7 +6278,7 @@ function parseValidationSuiteResult(
       const skipped = suite.skipped === true ? " (skipped)" : "";
       return `${name}: ${status}${skipped}`;
     });
-  return {
+    return {
       parsed: true,
       pass: data.pass === true,
       summary:
@@ -6224,7 +6376,9 @@ async function integrationVerifyAndFix(
       phase: "integration",
       attempts: priorIntegrationAttempts,
       summary: `IntegrationVerifyFix circuit-breaker: ${priorIntegrationAttempts}/${totalBudget} iterations without clearing the gate.`,
-      evidence: state.integrationErrors ? [state.integrationErrors.slice(0, 500)] : undefined,
+      evidence: state.integrationErrors
+        ? [state.integrationErrors.slice(0, 500)]
+        : undefined,
       artifacts: [".ralph/runtime-smoke.json", ".ralph/tdd-review.json"],
     });
     return {
@@ -6321,7 +6475,10 @@ async function integrationVerifyAndFix(
       // reflect the post-install state instead of the stale snapshot.
       try {
         const reAudit = await auditImportDependencyConsistency(state.outputDir);
-        if (reAudit.remainingIssues.length < initialDependencyAudit.remainingIssues.length) {
+        if (
+          reAudit.remainingIssues.length <
+          initialDependencyAudit.remainingIssues.length
+        ) {
           console.log(
             `${label}: dependency auto-install resolved ${initialDependencyAudit.remainingIssues.length - reAudit.remainingIssues.length} issue(s); ${reAudit.remainingIssues.length} remaining.`,
           );
@@ -6504,7 +6661,9 @@ async function integrationVerifyAndFix(
       console.log(
         `${label}: runtime-integration-audit found ${runtimeAuditResult.findings.length} residual finding(s) (${errCount} error, ${warnCount} warn) across ${Object.keys(runtimeAuditResult.byRule).length} rule(s)${fixedSummary}.`,
       );
-    } else if (runtimeAuditDispatch.deterministicFixes.some((o) => o.appliedAny)) {
+    } else if (
+      runtimeAuditDispatch.deterministicFixes.some((o) => o.appliedAny)
+    ) {
       const fixed = runtimeAuditDispatch.deterministicFixes.filter(
         (o) => o.appliedAny,
       );
@@ -7132,7 +7291,9 @@ async function integrationVerifyAndFix(
           typeof parsed === "object" &&
           parsed !== null &&
           "classifications" in parsed &&
-          Array.isArray((parsed as { classifications: unknown[] }).classifications)
+          Array.isArray(
+            (parsed as { classifications: unknown[] }).classifications,
+          )
         ) {
           const classifications = (
             parsed as {
@@ -7181,8 +7342,8 @@ async function integrationVerifyAndFix(
   const runtimeAuditBlock = runtimeAuditDispatch
     ? formatRuntimeAuditTasksBlock(runtimeAuditDispatch)
     : runtimeAuditResult
-    ? formatRuntimeAuditBlock(runtimeAuditResult)
-    : "";
+      ? formatRuntimeAuditBlock(runtimeAuditResult)
+      : "";
 
   const adminRouteCoverageBlock = adminRouteCoverageResult
     ? formatAdminRouteCoverageBlock(adminRouteCoverageResult)
@@ -7738,7 +7899,6 @@ async function integrationVerifyAndFix(
         let validationGatePassed = !validationStale;
         let validationSummaryLine = "";
 
-
         if (reportedStatus === "pass" && validationStale) {
           console.log(
             `${label}: report_done(pass) requested while stale — running system final validation instead of rejecting.`,
@@ -7829,7 +7989,10 @@ async function integrationVerifyAndFix(
 
           // All gates pass — accept.
           finalStatus = "pass";
-          finalSummary = [String(args.summary ?? "").trim(), validationSummaryLine]
+          finalSummary = [
+            String(args.summary ?? "").trim(),
+            validationSummaryLine,
+          ]
             .filter(Boolean)
             .join("\n\n");
           doneSignaled = true;
@@ -7882,18 +8045,35 @@ async function integrationVerifyAndFix(
           continue;
         }
         if (!validationStale && isIntegrationMutationTool(tc.function.name)) {
-          const result =
-            "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
-          console.log(
-            `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
-          );
-          messages.push({
-            role: "tool",
-            content: result,
-            tool_call_id: tc.id,
-            name: tc.function.name,
+          // Freezing edits after fresh validation must be TDD-aware. Scoped
+          // validation (tsc/build/smoke) going green does NOT mean integration
+          // is complete: the INDEPENDENT TDD hard gate can still be red, and
+          // clearing it REQUIRES file edits (fix test mocks / the implementation
+          // they target / db.ts). Without this check the worker hit an
+          // unbreakable loop — this guard said "stop editing, report_done(pass)"
+          // while the report_done guard said "can't pass, the TDD gate is red,
+          // go edit files". Only freeze mutations when BOTH scoped validation is
+          // fresh AND the TDD hard gate is green.
+          const freshTddGate = await evaluateTddHardGate(state.outputDir, {
+            sessionId: state.sessionId,
           });
-          continue;
+          if (freshTddGate.pass) {
+            const result =
+              "REJECTED: validation is already fresh and passing. Do not mutate files; call report_done(status='pass') now.";
+            console.log(
+              `${label}: rejected mutation after fresh validation ${tc.function.name}:${mutationPath}`,
+            );
+            messages.push({
+              role: "tool",
+              content: result,
+              tool_call_id: tc.id,
+              name: tc.function.name,
+            });
+            continue;
+          }
+          console.log(
+            `${label}: allowing mutation despite fresh scoped validation — TDD hard gate still red (${freshTddGate.reasons.join("; ")}): ${tc.function.name}:${mutationPath}`,
+          );
         }
         if (
           tc.function.name === "bash" &&
@@ -7961,7 +8141,7 @@ async function integrationVerifyAndFix(
                   ...suiteTddGate.reasons.map((r) => `- ${r}`),
                   "Open the **TDD Repair Block** in the first user message and apply each concrete patch:",
                   "  • For a *missing* P0 test file: read `.ralph/test-manifest.json`, find the test by id, and write the `.test.ts` file yourself (real assertions, db mocked with sqlite::memory:).",
-                  "  • For an *unmocked ../db* import: add `vi.mock(\"../../../db\", …)` mirroring backend/src/models/index.test.ts.",
+                  '  • For an *unmocked ../db* import: add `vi.mock("../../../db", …)` mirroring backend/src/models/index.test.ts.',
                   "  • For a GREEN failure: run the test command via `bash`, read the failing assertion, and fix the test or the implementation it targets.",
                   "Then re-run `run_validation_suite` and call `report_done(pass)` only after the TDD gate is green.",
                 ].join("\n");
@@ -8000,13 +8180,13 @@ async function integrationVerifyAndFix(
           const validationKinds = detectScopedValidationKinds(command);
           if (validationKinds.length > 0) {
             for (const validationKind of validationKinds) {
-            const trendReason = noteValidationIssueTrend(
-              validationKind,
-              result,
-            );
-            if (trendReason) {
-              iterationValidationProgress = true;
-              iterationProgressReasons.push(trendReason);
+              const trendReason = noteValidationIssueTrend(
+                validationKind,
+                result,
+              );
+              if (trendReason) {
+                iterationValidationProgress = true;
+                iterationProgressReasons.push(trendReason);
               }
             }
           } else if (isMutatingSupervisorBashCommand(command)) {
@@ -8158,7 +8338,8 @@ async function integrationVerifyAndFix(
               const createdNow = stagnationStubResult.groups.filter(
                 (g) => g.created,
               ).length;
-              stagnationStubBlock = formatMissingRouteStubBlock(stagnationStubResult);
+              stagnationStubBlock =
+                formatMissingRouteStubBlock(stagnationStubResult);
               if (createdNow > 0) {
                 console.log(
                   `${label}: stagnation-escape stub generation — created ${createdNow} stub file(s) for ${routeAudit.missingContractEndpoints.length} missing contract endpoint(s).`,
@@ -8279,7 +8460,10 @@ async function integrationVerifyAndFix(
             iterationsConsumed: iterations - lastMeaningfulProgressIteration,
             chat: async (msgs) => {
               const replanChain = resolveModelChain(
-                resolveCodingModelConfigValue(state.codingMode, "taskBreakdown"),
+                resolveCodingModelConfigValue(
+                  state.codingMode,
+                  "taskBreakdown",
+                ),
                 resolveModel,
               );
               const resp = await chatCompletionWithFallback(
@@ -8398,7 +8582,10 @@ async function integrationVerifyAndFix(
           attempts: iterations,
           summary: `Stagnation fallback exhausted — LLM could not determine the right action${repeatedAction ? ` (most repeated: ${repeatedAction})` : ""}; escalating to human decision.`,
           evidence: [humanDecisionContext.slice(0, 500)],
-          artifacts: [".ralph/contract-usage-coverage.json", ".ralph/runtime-smoke.json"],
+          artifacts: [
+            ".ralph/contract-usage-coverage.json",
+            ".ralph/runtime-smoke.json",
+          ],
         });
         console.warn(
           `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
@@ -8819,7 +9006,33 @@ async function integrationVerifyAndFix(
   // surface) MUST refuse to present the output as ready when it is present.
   try {
     const markerRel = BUILD_FAILED_MARKER_REL;
-    if (finalStatus === "fail") {
+    // An infra / test-harness failure (a missing table from an unsynced TEST db,
+    // absent docker-compose, a missing test-runner dep, …) is NOT a broken build:
+    // the scoped compile + runtime-smoke gates already prove the app boots and
+    // creates its tables. Quarantining on it would mark an otherwise-correct build
+    // broken and — under subsystem orchestration — halt every remaining domain.
+    // So we do NOT quarantine on infra-class failures; we record them for
+    // visibility instead. (Root fix for the test-db case: the scaffolded backend
+    // test setup that syncs the schema — scaffolds/*/backend/src/test/setup.ts.)
+    // Precision guard: only treat the failure as infra-dominated (→ don't
+    // quarantine) when an infra signal is present AND every real code/
+    // structural gate passed — otherwise a genuinely broken build whose
+    // summary merely also mentions a test-infra signal would escape
+    // quarantine. Runtime-smoke is deliberately excluded (owned elsewhere);
+    // dependency-consistency too (a missing test dep is itself infra; a
+    // missing runtime dep already fails the build gate below).
+    const realCodeGatesPass =
+      finalGateResult.pass &&
+      !finalRouteAuditHardFail &&
+      !finalContractCompletenessHardFail &&
+      !finalApiClientUniquenessHardFail &&
+      runtimeAuditErrorFindings.length === 0;
+    const infraDominated = isInfraDominatedFailure({
+      finalStatusFail: finalStatus === "fail",
+      infraSignalPresent: hasInfraSignal(finalSummary),
+      realCodeGatesPass,
+    });
+    if (finalStatus === "fail" && !infraDominated) {
       await fsWrite(
         markerRel,
         JSON.stringify(
@@ -8836,6 +9049,20 @@ async function integrationVerifyAndFix(
       );
     } else {
       await fs.rm(path.join(state.outputDir, markerRel), { force: true });
+      if (infraDominated) {
+        console.warn(
+          `${label}: integration FAILED but the failure is infra/test-harness class — NOT quarantining so domain builds can proceed; recording it for visibility.`,
+        );
+        await recordUnresolvedProblem(state.outputDir, {
+          sessionId: state.sessionId,
+          category: "other",
+          gate: "integration-infra",
+          phase: "integration",
+          summary:
+            "Integration gate failed on infra / test-harness issues (not application code) — build NOT quarantined.",
+          evidence: [finalSummary.slice(0, 800)],
+        }).catch(() => {});
+      }
     }
   } catch (markerErr) {
     console.warn(
@@ -8900,11 +9127,11 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
   const coverage = (await tryReadJson(
     ".ralph/contract-usage-coverage.json",
   )) as {
-        pendingRepairTasks?: Array<{
-          method?: string;
-          endpoint?: string;
-          directive?: string;
-        }>;
+    pendingRepairTasks?: Array<{
+      method?: string;
+      endpoint?: string;
+      directive?: string;
+    }>;
   } | null;
   if (
     coverage?.pendingRepairTasks &&
@@ -8941,8 +9168,10 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     } | null;
     if (routeAuditSnap) {
       const lines: string[] = [];
-      for (const m of routeAuditSnap.unregisteredModules ?? []) lines.push(`unregistered: ${m}`);
-      for (const r of routeAuditSnap.unresolvedRegistrations ?? []) lines.push(`unresolved registration: ${r}`);
+      for (const m of routeAuditSnap.unregisteredModules ?? [])
+        lines.push(`unregistered: ${m}`);
+      for (const r of routeAuditSnap.unresolvedRegistrations ?? [])
+        lines.push(`unresolved registration: ${r}`);
       if (lines.length > 0) out.routeAudit = lines.slice(0, 10);
     }
   }
@@ -8962,14 +9191,14 @@ async function collectStagnationDiagnostics(outputDir: string): Promise<{
     directive?: string;
   }> | null;
   if (Array.isArray(runtimeTasks)) {
-    const errorTasks = runtimeTasks.filter(
-      (t) => t?.severity === "error",
-    );
+    const errorTasks = runtimeTasks.filter((t) => t?.severity === "error");
     if (errorTasks.length > 0) {
-      out.runtimeAuditErrors = errorTasks.slice(0, 8).map(
-        (t) =>
-          `[${t.ruleId ?? "?"}] ${t.file ?? "?"}:${t.line ?? 0} — ${t.directive ?? ""}`,
-      );
+      out.runtimeAuditErrors = errorTasks
+        .slice(0, 8)
+        .map(
+          (t) =>
+            `[${t.ruleId ?? "?"}] ${t.file ?? "?"}:${t.line ?? 0} — ${t.directive ?? ""}`,
+        );
     }
   }
 
@@ -9025,7 +9254,9 @@ async function backendReadinessGate(
   if (state.backendTasks.length === 0) return {}; // frontend-only project
 
   let notGreen = Boolean(state.scaffoldErrors && state.scaffoldErrors.trim());
-  let reason = notGreen ? "backend verify+fix ended with unresolved errors" : "";
+  let reason = notGreen
+    ? "backend verify+fix ended with unresolved errors"
+    : "";
   try {
     const tsc = await runBackendTscGate(state.outputDir);
     if (!tsc.skipped && !tsc.pass) {
@@ -9067,7 +9298,9 @@ async function backendReadinessGate(
     gate: "backend-readiness",
     phase: "backend",
     summary: `Backend not green before frontend phase — ${reason}`,
-    evidence: state.scaffoldErrors ? [state.scaffoldErrors.slice(0, 500)] : undefined,
+    evidence: state.scaffoldErrors
+      ? [state.scaffoldErrors.slice(0, 500)]
+      : undefined,
     artifacts: [".ralph/tsc-diagnostics.json", ".ralph/runtime-smoke.json"],
   });
   // Two modes once the backend is NOT green (both keep the quarantine marker above):
@@ -9105,10 +9338,135 @@ export function routeAfterBackendReadiness(state: SupervisorState): string {
   const decision = decideBackendReadinessRoute({
     flagOn: process.env.BLUEPRINT_BACKEND_GATE_BEFORE_FRONTEND === "1",
     hasBackendTasks: state.backendTasks.length > 0,
-    backendNotGreen: Boolean(state.scaffoldErrors && state.scaffoldErrors.trim()),
+    backendNotGreen: Boolean(
+      state.scaffoldErrors && state.scaffoldErrors.trim(),
+    ),
     hardStop: process.env.BLUEPRINT_BACKEND_GATE_MODE === "hard-stop",
   });
   return decision === "stop" ? "summary" : "extract_real_contracts";
+}
+
+/**
+ * schema_reconcile (Part B) — runs AFTER the frontend phase.
+ *
+ * The frontend phase can surface schema-change-requests (FE needs an endpoint the
+ * backend never built — the taskflow `GET /users` gap). The pre-FE schema_arbiter
+ * already handled BACKEND-discovered requests; this closes the FE→BE direction:
+ *   1. apply the now-pending (FE-discovered) requests to the shared schema (reuse
+ *      schemaArbiter — it amends schema.ts + records decisions);
+ *   2. re-derive API_CONTRACTS.json from the amended ENDPOINTS registry;
+ *   3. find endpoints the amendment ADDED that no task produces, and run a scoped
+ *      BACKEND repair pass to implement them (reuse dispatchAuditRepair — `ENDPOINT
+ *      …` ids are non-frontend, so they route to a backend worker).
+ *
+ * Flag-gated (CODEGEN_SCHEMA_RECONCILE, default OFF) → passthrough no-op. Gated
+ * again on "are there pending requests" so a clean build pays nothing. Runs LLM
+ * workers; validate on a real run before defaulting on.
+ */
+async function schemaReconcile(
+  state: SupervisorState,
+): Promise<Partial<SupervisorState>> {
+  if (!ENABLE_SCHEMA_RECONCILE) return {};
+
+  const emit = getRepairEmitter(state.sessionId);
+  let pending: SchemaChangeRequest[];
+  try {
+    const [requests, decisions] = await Promise.all([
+      readSchemaChangeRequests(state.outputDir),
+      readSchemaChangeDecisions(state.outputDir),
+    ]);
+    pending = pendingRequests(requests, decisions);
+  } catch {
+    return {};
+  }
+  if (pending.length === 0) return {};
+
+  console.log(
+    `[Supervisor] schemaReconcile: ${pending.length} pending schema-change-request(s) after FE phase — amending schema + backfilling implementation.`,
+  );
+
+  // 1. Apply the FE-discovered amendments to the shared schema (disk side-effect).
+  const arbiterDelta = await schemaArbiter(state);
+  const afterArbiter: SupervisorState = { ...state, ...arbiterDelta };
+
+  // 2. Re-derive API_CONTRACTS.json from the amended ENDPOINTS (disk side-effect).
+  try {
+    await generateApiContracts(afterArbiter);
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaReconcile: contract re-derivation failed (${err instanceof Error ? err.message : err}); skipping backfill.`,
+    );
+    return arbiterDelta;
+  }
+
+  // 3. Which endpoints does the amended contract now declare that no task builds?
+  const contractsRaw = await fsRead("API_CONTRACTS.json", state.outputDir);
+  let contracts: ContractEntryLike[] = [];
+  try {
+    const parsed = JSON.parse(contractsRaw);
+    if (Array.isArray(parsed)) contracts = parsed as ContractEntryLike[];
+  } catch {
+    return arbiterDelta;
+  }
+  if (contracts.length === 0 || state.tasks.length === 0) return arbiterDelta;
+
+  const gate = runContractCoverageGate(contracts, state.tasks);
+  if (gate.passed || gate.missingIds.length === 0) return arbiterDelta;
+
+  // 4. Implement the newly-added, unbuilt endpoints via a scoped backend repair.
+  const entries: AuditEntry[] = gate.missingIds.map((ep) => ({
+    id: `ENDPOINT ${ep}`,
+    verdict: "partial",
+    layer: "l2",
+    reason:
+      `The shared schema was amended (FE→BE reconciliation) to add endpoint \`${ep}\`, ` +
+      `but no backend code implements it. Implement this route per the amended shared ` +
+      `schema — use the request/response types named in its ENDPOINTS registry entry.`,
+    coveringTaskIds: [],
+    evidence: [],
+    category: "coverage",
+  }));
+  emit({
+    stage: "post-gen-audit",
+    event: "schema_reconcile_backfill",
+    missingIds: entries.map((e) => e.id),
+    details: { count: entries.length },
+  });
+
+  let disp;
+  try {
+    disp = await dispatchAuditRepair({
+      uncovered: entries,
+      outputDir: state.outputDir,
+      projectContext: state.projectContext,
+      fileRegistrySnapshot: state.fileRegistry,
+      apiContractsSnapshot: state.apiContracts,
+      scaffoldProtectedPaths: state.scaffoldProtectedPaths,
+      ralphConfig: state.ralphConfig,
+      sessionId: state.sessionId,
+      emitter: emit,
+    });
+  } catch (err) {
+    console.warn(
+      `[Supervisor] schemaReconcile: backend backfill dispatch failed (${err instanceof Error ? err.message : err}).`,
+    );
+    return arbiterDelta;
+  }
+
+  const newFiles: GeneratedFile[] = disp.backendGeneratedFiles.map((p) => ({
+    path: p,
+    role: "backend",
+    summary: "schema-reconcile: compensating endpoint implementation",
+  }));
+  console.log(
+    `[Supervisor] schemaReconcile: backfilled ${gate.missingIds.length} endpoint(s); +${newFiles.length} file(s), +$${disp.costUsd.toFixed(4)}.`,
+  );
+
+  return {
+    ...arbiterDelta,
+    fileRegistry: newFiles,
+    totalCostUsd: disp.costUsd,
+  };
 }
 
 // ─── Route B: parallel BACKEND + FRONTEND codegen (CODEGEN_PARALLEL_FE_BE) ───
@@ -9141,8 +9499,10 @@ function buildFrontendPhaseSubgraph() {
     .compile();
 }
 
-let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null = null;
-let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null = null;
+let _bePhaseSubgraph: ReturnType<typeof buildBackendPhaseSubgraph> | null =
+  null;
+let _fePhaseSubgraph: ReturnType<typeof buildFrontendPhaseSubgraph> | null =
+  null;
 
 async function parallelCodegenPhase(
   state: SupervisorState,
@@ -9185,7 +9545,8 @@ async function parallelCodegenPhase(
     ],
     // Summed channel: return the combined delta; the main-graph reducer adds it to
     // the base exactly once.
-    totalCostUsd: beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
+    totalCostUsd:
+      beOut.totalCostUsd - baseCost + (feOut.totalCostUsd - baseCost),
     fileRegistry: [...filesByPath.values()],
   };
 
@@ -9198,6 +9559,26 @@ async function parallelCodegenPhase(
 }
 
 export function createSupervisorGraph() {
+  // Pick the integration-fix implementation once per graph build. Both honour
+  // the same node contract, so routing + circuit-breaker are agnostic.
+  const integrationVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? integrationVerifyAndFix
+      : openIntegrationVerifyAndFix;
+  // In OPEN mode the TDD hard gate is bypassed at the graph level — tests are
+  // reference material, and the open node's `report_done` is the sole authority
+  // on done-ness (no loop-back, no session-fail override).
+  const tddGreenVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? tddGreenVerifyAndReview
+      : tddGreenVerifyPassthrough;
+  console.log(
+    `[Supervisor] integration_verify node bound to ${
+      INTEGRATION_FIX_MODE === "legacy"
+        ? "legacy IntegrationVerifyFix"
+        : "OpenIntegrationFix"
+    } (INTEGRATION_FIX_MODE=${INTEGRATION_FIX_MODE}).`,
+  );
   // ─── Route B (flag ON): BE + FE phases run concurrently in parallel_codegen,
   // then verify + extract run sequentially post-join. Built as a separate chain so
   // the flag-OFF path below stays byte-identical (zero regression).
@@ -9223,9 +9604,10 @@ export function createSupervisorGraph() {
       .addNode("be_readiness_gate", backendReadinessGate)
       .addNode("extract_real_contracts", extractRealContracts)
       .addNode("schema_arbiter", schemaArbiter)
+      .addNode("schema_reconcile", schemaReconcile)
       .addNode("sync_deps", syncDeps)
-      .addNode("integration_verify", integrationVerifyAndFix)
-      .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+      .addNode("integration_verify", integrationVerifyNode)
+      .addNode("tdd_green_verify", tddGreenVerifyNode)
       .addNode("e2e_verify", e2eVerifyAndFix)
       .addNode("summary", summary)
 
@@ -9256,7 +9638,8 @@ export function createSupervisorGraph() {
         summary: "summary",
       })
       .addEdge("extract_real_contracts", "schema_arbiter")
-      .addEdge("schema_arbiter", "sync_deps")
+      .addEdge("schema_arbiter", "schema_reconcile")
+      .addEdge("schema_reconcile", "sync_deps")
       .addEdge("sync_deps", "integration_verify")
       .addEdge("integration_verify", "tdd_green_verify")
       .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
@@ -9293,6 +9676,7 @@ export function createSupervisorGraph() {
     .addNode("be_readiness_gate", backendReadinessGate)
     .addNode("extract_real_contracts", extractRealContracts)
     .addNode("schema_arbiter", schemaArbiter)
+    .addNode("schema_reconcile", schemaReconcile)
     .addNode("fe_foundation", feFoundation)
     .addNode("fe_dispatch_gate", feDispatchGate)
     .addNode("fe_worker", parallelWorkerNode)
@@ -9301,8 +9685,8 @@ export function createSupervisorGraph() {
       phaseVerifyAndFix(s, { workerHintRoles: ["frontend"] }),
     )
     .addNode("sync_deps", syncDeps)
-    .addNode("integration_verify", integrationVerifyAndFix)
-    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+    .addNode("integration_verify", integrationVerifyNode)
+    .addNode("tdd_green_verify", tddGreenVerifyNode)
     .addNode("e2e_verify", e2eVerifyAndFix)
     .addNode("summary", summary)
 
@@ -9338,7 +9722,8 @@ export function createSupervisorGraph() {
     .addConditionalEdges("fe_dispatch_gate", dispatchFrontendWorkers)
     .addEdge("fe_worker", "fe_route_consolidation")
     .addEdge("fe_route_consolidation", "fe_phase_verify")
-    .addEdge("fe_phase_verify", "sync_deps")
+    .addEdge("fe_phase_verify", "schema_reconcile")
+    .addEdge("schema_reconcile", "sync_deps")
     .addEdge("sync_deps", "integration_verify")
     .addEdge("integration_verify", "tdd_green_verify")
     .addConditionalEdges("tdd_green_verify", routeAfterTddGreenVerify, {
@@ -9356,9 +9741,18 @@ export function createSupervisorGraph() {
 }
 
 export function createIntegrationRetryGraph() {
+  const integrationVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? integrationVerifyAndFix
+      : openIntegrationVerifyAndFix;
+  // OPEN mode bypasses the graph-level TDD hard gate (see createSupervisorGraph).
+  const tddGreenVerifyNode =
+    INTEGRATION_FIX_MODE === "legacy"
+      ? tddGreenVerifyAndReview
+      : tddGreenVerifyPassthrough;
   const graph = new StateGraph(SupervisorStateAnnotation)
-    .addNode("integration_verify", integrationVerifyAndFix)
-    .addNode("tdd_green_verify", tddGreenVerifyAndReview)
+    .addNode("integration_verify", integrationVerifyNode)
+    .addNode("tdd_green_verify", tddGreenVerifyNode)
     .addNode("summary", summary)
     .addEdge(START, "integration_verify")
     .addEdge("integration_verify", "tdd_green_verify")

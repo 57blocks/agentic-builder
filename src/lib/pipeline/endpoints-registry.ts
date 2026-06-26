@@ -68,13 +68,24 @@ export function parseEndpointsRegistry(
   const out: RegistryEndpoint[] = [];
   const seen = new Set<string>();
   // Each entry: "METHOD /path": { ...flat object... }
-  const entryRe =
-    /(["'`])\s*([A-Za-z]+)\s+(\/[^"'`]*?)\s*\1\s*:\s*\{([^{}]*)\}/g;
+  // The value object can itself contain `{` / `}` — e.g. an inline-object
+  // response type like `response: "ApiEnvelope<{ items: Course[] }>"`. A
+  // `\{([^{}]*)\}` body capture CANNOT match those entries (it forbids nested
+  // braces) and silently drops them, so we match only the KEY prefix here and
+  // read the value with a balanced-brace scan (braces inside string values are
+  // balanced in valid TS, so the scan terminates on the entry's real `}`).
+  const keyRe = /(["'`])\s*([A-Za-z]+)\s+(\/[^"'`]*?)\s*\1\s*:\s*\{/g;
   let m: RegExpExecArray | null;
-  while ((m = entryRe.exec(block)) !== null) {
+  while ((m = keyRe.exec(block)) !== null) {
     const method = m[2]!.toUpperCase();
     const endpoint = normalizePath(m[3]!);
-    const body = m[4] ?? "";
+    const braceStart = keyRe.lastIndex - 1; // index of the value's `{`
+    const valueBlock = braceBlock(block, braceStart);
+    if (valueBlock == null) continue;
+    // Resume scanning AFTER this value block so nested braces / the next entry
+    // are not re-matched from inside it.
+    keyRe.lastIndex = braceStart + valueBlock.length;
+    const body = valueBlock.slice(1, -1); // strip the outer braces
     const key = `${method} ${endpoint}`;
     if (seen.has(key)) continue;
     seen.add(key);

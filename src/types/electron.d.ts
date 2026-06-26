@@ -12,8 +12,15 @@ export interface ElectronAPI {
   getPlatform: () => Promise<string>;
   getAppVersion: () => Promise<string>;
   selectFolder: () => Promise<string | null>;
-  /** Render a reference URL in a hidden window; returns a full-page screenshot + extracted CSS tokens. */
-  renderReferenceUrl: (url: string) => Promise<ReferenceCaptureResult>;
+  /** Render a reference URL in a hidden window; returns a full-page screenshot + extracted CSS tokens.
+   *  `opts.localStorageSeed` is injected on the origin before navigation (role-correct
+   *  session for client-side-gated mockups, so /teacher/* /admin/* render the real page). */
+  renderReferenceUrl: (
+    url: string,
+    opts?: {
+      localStorageSeed?: { key: string; value?: string; clear?: boolean };
+    },
+  ) => Promise<ReferenceCaptureResult>;
   /** Capture a viewport screenshot of a (local) URL for use as a project cover. */
   captureUrl: (url: string) => Promise<CoverCaptureResult>;
   /** Force capture during interactive login (manual fallback when auto-detection misses). */

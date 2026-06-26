@@ -8,6 +8,29 @@ function projectRoot() {
 }
 
 /**
+ * Stable, filesystem-safe slug from a capture URL (host + path). Distinct URLs
+ * → distinct fileNames (distinct manifest entries); the SAME URL re-captured →
+ * same fileName → `addDesignReference` replaces it in place. Falls back to
+ * "url-capture" for empty/unparseable input.
+ */
+function urlToFileSlug(url: string | undefined): string {
+  const raw = (url ?? "").trim();
+  let base = raw;
+  try {
+    const u = new URL(raw);
+    base = `${u.host}${u.pathname}`;
+  } catch {
+    // not a parseable URL — slug the raw string
+  }
+  const slug = base
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return slug || "url-capture";
+}
+
+/**
  * Persists a URL-captured screenshot to .blueprint/design-references/ immediately.
  *
  * The client captures the screenshot (via Electron renderReferenceUrl or similar),
@@ -63,7 +86,13 @@ export async function POST(request: NextRequest) {
   // Node.js Buffer.from() is permissive with base64 — malformed input produces garbage bytes
   // rather than throwing. Corrupted files will be rejected by the Vision LLM downstream.
   const buffer = Buffer.from(dataUrlMatch[2]!, "base64");
-  const fileName = `url-capture.${ext}`;
+  // Derive a UNIQUE fileName from the source URL. `addDesignReference` dedups by
+  // fileName (re-capturing the same URL updates it in place), so a constant
+  // "url-capture.jpg" made EVERY page capture collapse onto a single manifest
+  // entry — fetch N pages → N image files but 1 entry → only one card ever bound
+  // and the rest were orphaned. Host+path slug keeps distinct URLs distinct while
+  // still replacing a re-capture of the same URL.
+  const fileName = `${urlToFileSlug(url)}.${ext}`;
   const isManual = typeof pageHint === "string" && pageHint.trim().length > 0;
 
   const result = await addDesignReference(projectRoot(), {

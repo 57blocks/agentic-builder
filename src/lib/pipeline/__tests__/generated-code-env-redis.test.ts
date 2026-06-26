@@ -2,7 +2,17 @@ import { describe, it, expect } from "vitest";
 import {
   upsertRedisUrlEnv,
   resolveBlueprintGeneratedRedisUrl,
+  formatGeneratedCodeDotEnv,
 } from "../generated-code-env";
+
+describe("formatGeneratedCodeDotEnv", () => {
+  it("includes TIMESCALE_DISABLED=1 so the backend boots on plain Postgres", () => {
+    const env = formatGeneratedCodeDotEnv("postgres://app:pw@db:5432/app");
+    expect(env).toMatch(/^TIMESCALE_DISABLED=1$/m);
+    expect(env).toMatch(/^PORT=\d+$/m);
+    expect(env).toContain("DATABASE_URL=");
+  });
+});
 
 describe("upsertRedisUrlEnv", () => {
   const url = "redis://default:pw@host.example:16777";

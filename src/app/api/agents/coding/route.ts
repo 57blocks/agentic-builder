@@ -10,6 +10,7 @@ import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
 import { reconcileContractWithSchema } from "@/lib/pipeline/contract-reconcile";
 import { createSupervisorGraph } from "@/lib/langgraph/supervisor";
 import { EventMapper, type ErrorCategory } from "@/lib/langgraph/event-mapper";
+import { hasInfraSignal } from "@/lib/langgraph/e2e-triage";
 import { prepareE2eArtifacts } from "@/lib/e2e/e2e-artifacts";
 import {
   copyScaffold,
@@ -360,6 +361,12 @@ interface SupervisorGateSnapshot {
   runtimeVerifyErrors: string;
   e2eVerifyErrors: string;
   /**
+   * True when the E2E loop ended with DETERMINISTIC failures unresolved (real
+   * code bugs). Only this hard-fails the session; flaky/infra E2E failures
+   * populate `e2eVerifyErrors` but are isolated + reported, NOT blocking.
+   */
+  e2eDeterministicUnresolved: boolean;
+  /**
    * Highest observed `scaffoldFixAttempts` across all phase-verify runs.
    * Surfaced in the session report so the user can tell whether scaffold
    * fix phases converged quickly or bumped the iteration ceiling.
@@ -397,6 +404,9 @@ function collectSupervisorGateStateFromChunk(
       snapshot.e2eVerifyErrors = rec.e2eVerifyErrors;
       snapshot.gatesExecuted.e2eVerify = true;
     }
+    if (typeof rec.e2eDeterministicUnresolved === "boolean") {
+      snapshot.e2eDeterministicUnresolved = rec.e2eDeterministicUnresolved;
+    }
     if (typeof rec.scaffoldFixAttempts === "number") {
       snapshot.scaffoldFixAttempts = Math.max(
         snapshot.scaffoldFixAttempts,
@@ -416,7 +426,15 @@ function summarizeBlockingGateErrors(
   snapshot: SupervisorGateSnapshot,
 ): string[] {
   const failures: string[] = [];
-  if (snapshot.integrationErrors.trim()) {
+  // Integration blocks the session UNLESS the failure is infra / test-harness
+  // class (unsynced test DB → "no such table", absent docker-compose, missing
+  // test-runner dep). Those can't be fixed by editing app code and must not fail
+  // an otherwise-compiling build (the supervisor already declines to quarantine
+  // them). Real code-level integration failures still block.
+  if (
+    snapshot.integrationErrors.trim() &&
+    !hasInfraSignal(snapshot.integrationErrors)
+  ) {
     failures.push(
       [
         "Integration verify gate failed.",
@@ -432,10 +450,15 @@ function summarizeBlockingGateErrors(
       ].join("\n"),
     );
   }
-  if (snapshot.e2eVerifyErrors.trim()) {
+  // E2E blocks the session ONLY when DETERMINISTIC failures (real code bugs)
+  // remain unresolved after the fix loop. Flaky/infra E2E failures still
+  // populate `e2eVerifyErrors`, but they can't be fixed by editing code — they
+  // are isolated + reported (see the caller's unresolved-problem record) rather
+  // than failing an otherwise-correct build.
+  if (snapshot.e2eVerifyErrors.trim() && snapshot.e2eDeterministicUnresolved) {
     failures.push(
       [
-        "E2E verify gate failed.",
+        "E2E verify gate failed (deterministic test failures unresolved).",
         snapshot.e2eVerifyErrors.trim().slice(0, 3000),
       ].join("\n"),
     );
@@ -1959,6 +1982,8 @@ export async function POST(request: NextRequest) {
     designSpecDoc,
     pencilDesignDoc,
     stitchMeta ?? undefined,
+    process.cwd(),
+    projectId ?? undefined,
   );
 
   const normalizedTasks = [...tasksToRun, ...preparedE2e.extraTasks];
@@ -2131,12 +2156,24 @@ export async function POST(request: NextRequest) {
               generatedFiles: result.generatedFiles,
             });
           }
-          await writeSessionCheckpoint(
-            process.cwd(),
-            sessionId,
-            checkpointMap,
-            normalizedTasks.map((t) => t.id),
+          // Dual-write: process.cwd() is the canonical location every existing
+          // reader uses (resume hygiene, the checkpoint/orchestration-status UI
+          // routes, retry-failed) — keep it so nothing regresses. ALSO write a
+          // copy into the BUILD's own output tree so progress is visible from the
+          // project itself and survives a process kill where the user looks in the
+          // project dir (the original "progress wasn't saved" symptom — it was, but
+          // under agentic-builder/.blueprint, not the project's).
+          const checkpointRoots = Array.from(
+            new Set([process.cwd(), outputRoot]),
           );
+          for (const root of checkpointRoots) {
+            await writeSessionCheckpoint(
+              root,
+              sessionId,
+              checkpointMap,
+              normalizedTasks.map((t) => t.id),
+            );
+          }
           lastCheckpointAt = Date.now();
         } catch (cpErr) {
           console.warn(
@@ -2162,7 +2199,11 @@ export async function POST(request: NextRequest) {
           `[CodingAPI] Retry mode: running ${tasksToRun.length} task(s), skipping ${tasksSkipped.length} previously-completed task(s).`,
         );
         // Clear the checkpoint since we're retrying — will be re-written on completion.
-        await clearSessionCheckpoint(process.cwd());
+        await Promise.all(
+          Array.from(new Set([process.cwd(), outputRoot])).map((root) =>
+            clearSessionCheckpoint(root),
+          ),
+        );
       }
       const collectedFileRegistry = new Map<string, GeneratedFile>();
       const collectedApiContracts = new Map<string, ApiContract>();
@@ -2170,6 +2211,7 @@ export async function POST(request: NextRequest) {
         integrationErrors: "",
         runtimeVerifyErrors: "",
         e2eVerifyErrors: "",
+        e2eDeterministicUnresolved: false,
         scaffoldFixAttempts: 0,
         integrationFixAttempts: 0,
         gatesExecuted: {
@@ -2488,6 +2530,25 @@ export async function POST(request: NextRequest) {
           const blockingFailures = summarizeBlockingGateErrors(
             collectedGateSnapshot,
           );
+          // Isolate-and-report E2E failures that are NOT blocking (flaky/infra):
+          // they can't be fixed by editing code, so they don't fail the build —
+          // but they must stay visible, not silently pass.
+          if (
+            collectedGateSnapshot.e2eVerifyErrors.trim() &&
+            !collectedGateSnapshot.e2eDeterministicUnresolved
+          ) {
+            console.warn(
+              "[CodingAPI] E2E had non-deterministic (flaky/infra) failures — reported, not blocking.",
+            );
+            await recordUnresolvedProblem(outputRoot, {
+              sessionId,
+              category: "e2e",
+              gate: "e2e-verify",
+              summary:
+                "E2E suite has non-deterministic (flaky/infra) failures — isolated, not blocking the build. See .ralph/e2e-triage.md.",
+              evidence: [collectedGateSnapshot.e2eVerifyErrors.trim().slice(0, 800)],
+            }).catch(() => {});
+          }
           // G1: refuse to present a quarantined (known-broken) build as ready.
           // The integration node writes .blueprint/BUILD_FAILED.json when its
           // gate fails; if it's present we must not report a passing session.

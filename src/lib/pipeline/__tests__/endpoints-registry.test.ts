@@ -67,6 +67,32 @@ describe("parseEndpointsRegistry", () => {
     } as const;`;
     expect(parseEndpointsRegistry(src)!).toHaveLength(1);
   });
+
+  it("parses entries whose request/response is an INLINE object literal", () => {
+    // Regression: a `\{([^{}]*)\}` body capture silently DROPS entries whose
+    // value contains nested braces (inline-object response types), so a registry
+    // mixing named + inline responses under-counts. The balanced-brace scan must
+    // capture all of them (the CSMA TRD lost ~26 endpoints this way).
+    const src = `export const ENDPOINTS = {
+      "GET /api/a": { request: null, response: "NamedResponse", auth: "bearer" },
+      "GET /api/courses": { request: null, response: "ApiEnvelope<{ items: Course[]; total: number; page: number }>", auth: "bearer" },
+      "POST /api/reschedule": { request: "{ newSlotId: string }", response: "{ nextLesson: string }", auth: "bearer" },
+      "GET /api/z": { request: null, response: "ZResponse", auth: "public" },
+    } as const;`;
+    const r = parseEndpointsRegistry(src)!;
+    // All four entries must survive — the two with inline braces and the two named.
+    expect(r.map((e) => `${e.method} ${e.endpoint}`)).toEqual([
+      "GET /api/a",
+      "GET /api/courses",
+      "POST /api/reschedule",
+      "GET /api/z",
+    ]);
+    const courses = r.find((e) => e.endpoint === "/api/courses")!;
+    expect(courses.response).toContain("ApiEnvelope<{ items: Course[]");
+    const reschedule = r.find((e) => e.endpoint === "/api/reschedule")!;
+    expect(reschedule.request).toBe("{ newSlotId: string }");
+    expect(reschedule.response).toBe("{ nextLesson: string }");
+  });
 });
 
 describe("summarizeEndpointsRegistry", () => {

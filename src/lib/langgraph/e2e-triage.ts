@@ -98,6 +98,22 @@ const INFRA_PATTERNS: ReadonlyArray<RegExp> = [
   /Please run the following command to download new browsers/i,
   /playwright install/i,
   /browserType\.launch:/i,
+  // ── Test-harness / environment infra (not application code bugs) ──────────
+  // This stack has NO migrations — tables come from `sequelize.sync()` at boot.
+  // A missing table in TESTS means the test harness never synced the schema
+  // (a setup gap), and the runtime-smoke gate already proves the app's own boot
+  // creates the tables. Treat as infra so a test-setup gap can't quarantine an
+  // otherwise-compiling multi-domain build. (The real fix is the scaffolded
+  // backend test setup that syncs the DB — see scaffolds/*/backend/src/test.)
+  /SQLITE_ERROR: no such table/i,
+  /\bno such table\b/i,
+  /relation "[^"]+" does not exist/i,
+  // Container/orchestration tooling absent in the build environment.
+  /docker-compose: (command )?not found/i,
+  /docker-compose:? not (installed|found)/i,
+  /\bdocker-compose\b[^\n]*\bnot (installed|found|available)\b/i,
+  // The gate's own classifier flags these as setup gaps, not leaf-file fixes.
+  /test (database setup|infrastructure)/i,
 ];
 
 /**

@@ -158,6 +158,8 @@ export async function developBySubsystem(
   }
   for (const s of subsystems) {
     if (s.status === "failed") errors.push(`subsystem ${s.subsystemId} failed: ${s.summary ?? ""}`);
+    else if (s.status === "blocked")
+      errors.push(`subsystem ${s.subsystemId} not built: ${s.summary ?? "blocked by a failed dependency"}`);
   }
 
   // P3.2 — cross-domain integration gate: only when everything else built, as a

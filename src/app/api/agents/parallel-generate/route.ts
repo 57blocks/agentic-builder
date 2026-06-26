@@ -67,10 +67,18 @@ function buildAgentMap(
   designKnowledgeContext?: string,
   authDecision?: AuthDecision | null,
   instruction?: string,
-  referenceImages?: Array<{ dataUrl: string; pageHint?: string; label?: string }>,
+  referenceImages?: Array<{
+    dataUrl: string;
+    pageHint?: string;
+    label?: string;
+  }>,
   subsystemManifest?: SubsystemManifest | null,
 ): Record<string, DocAgentFn> {
-  const designAdditional = [tierConstraint, designKnowledgeContext, designStyleMarkdown]
+  const designAdditional = [
+    tierConstraint,
+    designKnowledgeContext,
+    designStyleMarkdown,
+  ]
     .filter((s) => s && s.trim().length > 0)
     .join("\n\n");
   return {
@@ -103,11 +111,21 @@ function buildAgentMap(
       const ctx = designAdditional.trim() ? designAdditional : undefined;
       // Multi-image path: uploaded per-page screenshots take priority
       if (referenceImages && referenceImages.length > 0) {
-        return agent.generateDesignWithReferenceImages(prd, referenceImages, ctx, sid);
+        return agent.generateDesignWithReferenceImages(
+          prd,
+          referenceImages,
+          ctx,
+          sid,
+        );
       }
       // Single-image legacy path
       if (referenceImageBase64?.trim()) {
-        return agent.generateDesignWithReferenceImage(prd, referenceImageBase64, ctx, sid);
+        return agent.generateDesignWithReferenceImage(
+          prd,
+          referenceImageBase64,
+          ctx,
+          sid,
+        );
       }
       return agent.generateDesign(prd, ctx, sid, onChunk);
     },
@@ -127,7 +145,9 @@ function buildAgentMap(
           `- Key user interactions and state changes\n` +
           `- Navigation flow between screens\n` +
           `Use the design tokens and style direction from the Design Spec above. Do NOT output code.`,
-      ].filter(s => s.trim()).join("\n\n");
+      ]
+        .filter((s) => s.trim())
+        .join("\n\n");
       return new DesignAgent().generateDesign(prd, wireframeCtx, sid);
     },
   };
@@ -152,6 +172,19 @@ const DOC_LABELS: Record<string, string> = {
   qa: "QA Test Cases",
   verify: "Verification",
 };
+
+/**
+ * Max reference screenshots sent in ONE vision call for the Design Spec.
+ * The per-project upload cap is much higher (see MAX_TOTAL_REFERENCES), but
+ * sending all of them in a single request makes the payload large enough that
+ * OpenRouter's upstream times out and returns an empty body (observed at 32
+ * images / ~48s). Cap the vision batch and prefer route-bound images, which are
+ * the most representative of the visual system. Override with env if needed.
+ */
+const MAX_VISION_REFERENCE_IMAGES = (() => {
+  const raw = Number(process.env.DESIGN_VISION_MAX_IMAGES);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 12;
+})();
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -195,7 +228,10 @@ export async function POST(request: NextRequest) {
     | Array<{ variantId: string; directionPrompt: string }>
     | undefined;
 
-  if (!prdContent || (!designVariants?.length && (!selectedDocs || selectedDocs.length === 0))) {
+  if (
+    !prdContent ||
+    (!designVariants?.length && (!selectedDocs || selectedDocs.length === 0))
+  ) {
     return Response.json(
       { error: "prdContent and selectedDocs (or designVariants) are required" },
       { status: 400 },
@@ -206,7 +242,11 @@ export async function POST(request: NextRequest) {
     selectedDocs.includes("pencil") && !selectedDocs.includes("design");
   // Allow pencil-only when a designStyleId is provided — the style preset's
   // pencilPrompt carries enough design context without a full Design Spec doc.
-  if (hasPencilOnlyBatch && !designSpecContent?.trim() && !designStyleId?.trim()) {
+  if (
+    hasPencilOnlyBatch &&
+    !designSpecContent?.trim() &&
+    !designStyleId?.trim()
+  ) {
     return Response.json(
       {
         error:
@@ -225,16 +265,20 @@ export async function POST(request: NextRequest) {
   // default to its light-mode aesthetic.
   const stylePreset = findDesignStylePreset(designStyleId);
   // designDirectionPrompt overrides the preset's designSpecPrompt when provided
-  const designDirectionPrompt = typeof (body as Record<string, unknown>).designDirectionPrompt === "string"
-    ? (body as Record<string, unknown>).designDirectionPrompt as string
-    : undefined;
+  const designDirectionPrompt =
+    typeof (body as Record<string, unknown>).designDirectionPrompt === "string"
+      ? ((body as Record<string, unknown>).designDirectionPrompt as string)
+      : undefined;
 
   // ── Design knowledge recall ────────────────────────────────────────────────
   // Fetch industry-matched Style Specs and 57B library records to inject into
   // the DesignAgent prompt. Only runs when `design` is one of the selected docs.
   let designKnowledgeContext: string | undefined;
   let recalledKnowledgeIds: string[] = [];
-  if (selectedDocs.includes("design") || (designVariants && designVariants.length > 0)) {
+  if (
+    selectedDocs.includes("design") ||
+    (designVariants && designVariants.length > 0)
+  ) {
     try {
       const recall = await recallDesignContext({
         sessionId,
@@ -244,7 +288,10 @@ export async function POST(request: NextRequest) {
       designKnowledgeContext = recall.contextChunk || undefined;
       recalledKnowledgeIds = recall.recalledKnowledgeIds ?? [];
     } catch (e) {
-      console.warn("[parallel-generate] design recall failed (skipping):", (e as Error).message);
+      console.warn(
+        "[parallel-generate] design recall failed (skipping):",
+        (e as Error).message,
+      );
     }
   }
 
@@ -278,14 +325,22 @@ export async function POST(request: NextRequest) {
   // disk-persisted uploads:
   //   1. styleReferenceImages — inline base64 from client (style ref / rendered URL)
   //   2. useUploadedDesignReferences — read from .blueprint/design-references/
-  let referenceImages: Array<{ dataUrl: string; pageHint?: string; label?: string }> | undefined;
+  let referenceImages:
+    | Array<{ dataUrl: string; pageHint?: string; label?: string }>
+    | undefined;
 
   if (selectedDocs.includes("design")) {
-    const collected: Array<{ dataUrl: string; pageHint?: string; label?: string }> = [];
+    const collected: Array<{
+      dataUrl: string;
+      pageHint?: string;
+      label?: string;
+    }> = [];
 
     if (styleReferenceImages?.length) {
       for (const dataUrl of styleReferenceImages) collected.push({ dataUrl });
-      console.log(`[parallel-generate] Using ${styleReferenceImages.length} inline reference image(s) for Design Spec.`);
+      console.log(
+        `[parallel-generate] Using ${styleReferenceImages.length} inline reference image(s) for Design Spec.`,
+      );
     }
 
     if (useUploadedDesignReferences) {
@@ -303,18 +358,47 @@ export async function POST(request: NextRequest) {
               label: ref.label || ref.fileName,
             });
           } catch {
-            console.warn(`[parallel-generate] Could not load design reference image: ${ref.storedFileName}`);
+            console.warn(
+              `[parallel-generate] Could not load design reference image: ${ref.storedFileName}`,
+            );
           }
         }
         if (imageRefs.length > 0) {
-          console.log(`[parallel-generate] Loaded ${collected.length} total design reference image(s) for vision-based spec generation.`);
+          console.log(
+            `[parallel-generate] Loaded ${collected.length} total design reference image(s) for vision-based spec generation.`,
+          );
         }
       } catch (e) {
-        console.warn("[parallel-generate] Failed to load design references (falling back to text-only):", (e as Error).message);
+        console.warn(
+          "[parallel-generate] Failed to load design references (falling back to text-only):",
+          (e as Error).message,
+        );
       }
     }
 
-    if (collected.length > 0) referenceImages = collected;
+    if (collected.length > 0) {
+      // Cap the vision batch to avoid an oversized request that times out with
+      // an empty body. Prefer route-bound images (those with a pageHint) since
+      // they map directly to PRD pages and best represent the visual system;
+      // backfill with unbound images up to the limit, preserving order.
+      if (collected.length > MAX_VISION_REFERENCE_IMAGES) {
+        const bound = collected.filter((c) => c.pageHint && c.pageHint.trim());
+        const unbound = collected.filter(
+          (c) => !c.pageHint || !c.pageHint.trim(),
+        );
+        const selected = [...bound, ...unbound].slice(
+          0,
+          MAX_VISION_REFERENCE_IMAGES,
+        );
+        console.log(
+          `[parallel-generate] Capping vision reference images: ${collected.length} → ${selected.length} ` +
+            `(${bound.length} route-bound prioritized; set DESIGN_VISION_MAX_IMAGES to change the cap of ${MAX_VISION_REFERENCE_IMAGES}).`,
+        );
+        referenceImages = selected;
+      } else {
+        referenceImages = collected;
+      }
+    }
   }
 
   // Business-domain decomposition (if the PRD step already split subsystems).
@@ -380,7 +464,11 @@ export async function POST(request: NextRequest) {
             );
             try {
               const result = await variantAgentMap.design(
-                prdContent, "", "", "", sessionId,
+                prdContent,
+                "",
+                "",
+                "",
+                sessionId,
               );
               send({
                 type: "variant_complete",
@@ -441,7 +529,12 @@ export async function POST(request: NextRequest) {
           const agentFn = agentMap[docId];
           if (!agentFn) throw new Error(`Unknown doc: ${docId}`);
           result = await agentFn(
-            prdContent, trd, sys, ds, sessionId, prdSpec,
+            prdContent,
+            trd,
+            sys,
+            ds,
+            sessionId,
+            prdSpec,
             (chunk: string) => send({ type: "doc_stream", docId, chunk }),
           );
           results[docId] = {
@@ -491,7 +584,12 @@ export async function POST(request: NextRequest) {
                 console.warn(
                   "[parallel-generate] TRD schema has no ENDPOINTS registry — regenerating TRD once.",
                 );
-                send({ type: "doc_stream", docId, chunk: "\n\n_[regenerating: schema missing ENDPOINTS registry]_\n" });
+                send({
+                  type: "doc_stream",
+                  docId,
+                  chunk:
+                    "\n\n_[regenerating: schema missing ENDPOINTS registry]_\n",
+                });
                 const retry = await agentFn(
                   prdContent,
                   "",
@@ -542,10 +640,7 @@ export async function POST(request: NextRequest) {
                   persisted.written.pipelineDagYaml,
                 );
               }
-              if (
-                persisted.rulesValidation &&
-                !persisted.rulesValidation.ok
-              ) {
+              if (persisted.rulesValidation && !persisted.rulesValidation.ok) {
                 console.warn(
                   `[parallel-generate] business-rules.dsl.yaml has ${persisted.rulesValidation.warnings.length} warning(s):`,
                   persisted.rulesValidation.warnings
@@ -597,6 +692,14 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           const msg =
             error instanceof Error ? error.message : "Generation failed";
+          // Log server-side so the failure reason is visible in run.log — the
+          // client only receives `msg`, and a swallowed vision error (e.g.
+          // payload too large / token limit with many reference screenshots)
+          // is otherwise invisible.
+          console.error(
+            `[parallel-generate] doc "${docId}" failed: ${msg}`,
+            error,
+          );
           send({
             type: "doc_error",
             docId,

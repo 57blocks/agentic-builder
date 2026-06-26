@@ -252,12 +252,16 @@ export async function shellExec(
       ? { ...process.env, ...options.env }
       : process.env;
   try {
-    const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
-      cwd,
-      maxBuffer: MAX_BUFFER,
-      timeout,
-      env: childEnv,
-    });
+    const { stdout, stderr } = await execFileAsync(
+      "bash",
+      ["-o", "pipefail", "-c", command],
+      {
+        cwd,
+        maxBuffer: MAX_BUFFER,
+        timeout,
+        env: childEnv,
+      },
+    );
     return { stdout, stderr, exitCode: 0 };
   } catch (e) {
     const err = e as {

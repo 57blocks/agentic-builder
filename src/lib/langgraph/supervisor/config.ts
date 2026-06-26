@@ -59,7 +59,9 @@ export const CODING_WORKER_CAP = (() => {
  * phases, so contract completeness is unchanged.
  */
 export const ENABLE_PARALLEL_FOUNDATION = (() => {
-  const raw = (process.env.CODEGEN_PARALLEL_FOUNDATION ?? "0").trim().toLowerCase();
+  const raw = (process.env.CODEGEN_PARALLEL_FOUNDATION ?? "0")
+    .trim()
+    .toLowerCase();
   return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
 })();
 
@@ -94,6 +96,47 @@ export const FOUNDATION_WORKER_CAP = (() => {
  */
 export const ENABLE_PARALLEL_FE_BE = (() => {
   const raw = (process.env.CODEGEN_PARALLEL_FE_BE ?? "0").trim().toLowerCase();
+  return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
+})();
+
+/**
+ * Integration-fix implementation selector.
+ *
+ *  - "open"   → DEFAULT. The high-autonomy open integration fixer
+ *               (`openIntegrationVerifyAndFix`): a strong model
+ *               (claude-opus-4.8 by default), an open-ended prompt, layered
+ *               context compression, and NO procedural stagnation penalties —
+ *               only the cumulative budget circuit-breaker bounds the loop.
+ *  - "legacy" → the original `integrationVerifyAndFix` micro-managed loop,
+ *               kept byte-for-byte as a fallback.
+ *
+ * Both bind to the same `integration_verify` graph node and honour the same
+ * return contract (integrationErrors / integrationFixAttempts / totalCostUsd),
+ * so routing and the circuit-breaker are agnostic to which one runs.
+ */
+export type IntegrationFixMode = "open" | "legacy";
+export const INTEGRATION_FIX_MODE: IntegrationFixMode = (() => {
+  const raw = (process.env.INTEGRATION_FIX_MODE ?? "open").trim().toLowerCase();
+  return raw === "legacy" ? "legacy" : "open";
+})();
+
+/**
+ * Schema reconciliation flag (default OFF).
+ *
+ * When on, a `schema_reconcile` node runs AFTER the frontend phase: it applies
+ * any FRONTEND-discovered schema-change-requests (filed during the FE phase) to
+ * the shared schema, re-derives API_CONTRACTS, and runs a backend repair pass to
+ * IMPLEMENT any endpoint the amendment added but no task produces — closing the
+ * "FE needs an endpoint the backend never built" gap that today only gets filed
+ * to .ralph/schema-change-requests.jsonl and then ignored.
+ *
+ * Default OFF → `schema_reconcile` is a passthrough no-op (zero behaviour change).
+ * Runs LLM workers, so it must be validated on a real run before defaulting on.
+ */
+export const ENABLE_SCHEMA_RECONCILE = (() => {
+  const raw = (process.env.CODEGEN_SCHEMA_RECONCILE ?? "0")
+    .trim()
+    .toLowerCase();
   return raw !== "" && raw !== "0" && raw !== "false" && raw !== "off";
 })();
 
@@ -171,8 +214,21 @@ export function workersForRole(role: CodingAgentRole, count: number): number {
 
 // ─── Phase-level retry budgets ──────────────────────────────────────────
 
-/** Max number of automated fix attempts inside the e2e_verify node. */
-export const MAX_E2E_VERIFY_FIX_ATTEMPTS = 10;
+/**
+ * Max number of automated fix attempts inside the e2e_verify node for
+ * DETERMINISTIC failures (real code bugs). The loop keeps fixing + re-running
+ * until the suite is green or this cap is hit; hitting the cap with failures
+ * still present HARD-FAILS the session (see e2eVerifyAndFix → e2eDeterministicUnresolved).
+ * Flaky/infra failures exit the loop immediately and do NOT count against this.
+ * Raise via E2E_VERIFY_FIX_ATTEMPTS to push harder toward all-green.
+ */
+export const MAX_E2E_VERIFY_FIX_ATTEMPTS = (() => {
+  const raw = Number.parseInt(
+    (process.env.E2E_VERIFY_FIX_ATTEMPTS ?? "10").trim(),
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 10;
+})();
 
 /**
  * Hard circuit-breaker: the TOTAL number of IntegrationVerifyFix iterations

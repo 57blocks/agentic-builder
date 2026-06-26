@@ -68,7 +68,12 @@ const MANIFEST_FILE = "manifest.json";
 const MAX_BYTES_IMAGE = 6 * 1024 * 1024;
 // HTML often inlines base64 assets and CSS; allow more room than images.
 const MAX_BYTES_HTML = 8 * 1024 * 1024;
-const MAX_TOTAL_REFERENCES = 24;
+// Upper bound on total references per project. Sized to comfortably cover a
+// large multi-page PRD (one screenshot per route + a few modal/state variants)
+// — e.g. a 40+ route platform. This is a UX/storage guardrail only: auto-match
+// runs ONE Vision call per image (see autoMatchReferencesToPages), so a higher
+// cap means more sequential calls, never a larger single-request payload.
+const MAX_TOTAL_REFERENCES = 64;
 
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",

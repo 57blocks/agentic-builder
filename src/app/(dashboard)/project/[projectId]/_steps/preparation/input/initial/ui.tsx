@@ -16,14 +16,26 @@ export function InitialUI(props: StepUIProps) {
   const [prdDialogOpen, setPrdDialogOpen] = useState(false);
 
   const setFeatureBrief = useStepStore((s) => s.setFeatureBrief);
-  const isRunning       = useStepStore((s) => s.isRunning);
+  const isRunning = useStepStore((s) => s.isRunning);
+  const codeOutputDir = useStepStore((s) => s.codeOutputDir);
 
   // Reference screenshots → stored via the shared design-references store, so the
   // PRD intent pass summarizes functional requirements from them (and the Design
   // stage later reuses the same uploads for the visual system — single upload).
-  const uploadDesignReferences = usePipelineStore((s) => s.uploadDesignReferences);
-  const clearDesignReferences = usePipelineStore((s) => s.clearDesignReferences);
-  const setProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
+  const uploadDesignReferences = usePipelineStore(
+    (s) => s.uploadDesignReferences,
+  );
+  const clearDesignReferences = usePipelineStore(
+    (s) => s.clearDesignReferences,
+  );
+  const setProjectSlugForSync = usePipelineStore(
+    (s) => s.setProjectSlugForSync,
+  );
+  const setPipelineCodeOutputDir = usePipelineStore((s) => s.setCodeOutputDir);
+  const refreshImportedPrdStatus = usePipelineStore(
+    (s) => s.refreshImportedPrdStatus,
+  );
+  const importedPrd = usePipelineStore((s) => s.importedPrd);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [refCount, setRefCount] = useState(0);
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -46,6 +58,18 @@ export function InitialUI(props: StepUIProps) {
       .catch(() => {});
   }, [props.projectSlug, setProjectSlugForSync]);
 
+  // Mirror the project's codeOutputDir (hydrated into step-store from the DB by
+  // the project page) into pipeline-store. The PRD-import dialog and the pipeline
+  // run both read pipeline-store.codeOutputDir; without this mirror the import
+  // lands in the stale default dir while the run targets the project dir, so the
+  // imported PRD is never found and gets regenerated. Refresh the imported-PRD
+  // status against the resolved dir so the dialog reflects the right project.
+  useEffect(() => {
+    if (!codeOutputDir) return;
+    setPipelineCodeOutputDir(codeOutputDir);
+    refreshImportedPrdStatus();
+  }, [codeOutputDir, setPipelineCodeOutputDir, refreshImportedPrdStatus]);
+
   async function handleImagesSelected(e: ChangeEvent<HTMLInputElement>) {
     const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = ""; // allow re-selecting the same file
@@ -57,11 +81,13 @@ export function InitialUI(props: StepUIProps) {
       if (res && res.added.length > 0) {
         setRefCount((c) => c + res.added.length);
         if (res.skipped.length > 0) {
-          setImageMsg(`Skipped ${res.skipped.length}: ${res.skipped[0]?.reason ?? ""}`);
+          setImageMsg(
+            `Skipped ${res.skipped.length}: ${res.skipped[0]?.reason ?? ""}`,
+          );
         }
       } else {
-        // Surface why nothing was added (e.g. the 24-reference limit) instead of
-        // failing silently — the store also records designReferencesError.
+        // Surface why nothing was added (e.g. the per-project reference cap)
+        // instead of failing silently — the store also records designReferencesError.
         const reason =
           res?.skipped?.[0]?.reason ??
           usePipelineStore.getState().designReferencesError ??
@@ -75,12 +101,24 @@ export function InitialUI(props: StepUIProps) {
 
   async function handleClearImages() {
     if (refCount === 0) return;
-    if (!window.confirm(`Remove all ${refCount} reference image(s)? They are shared with the Design stage.`)) return;
+    if (
+      !window.confirm(
+        `Remove all ${refCount} reference image(s)? They are shared with the Design stage.`,
+      )
+    )
+      return;
     const ok = await clearDesignReferences();
-    if (ok) { setRefCount(0); setImageMsg(null); }
+    if (ok) {
+      setRefCount(0);
+      setImageMsg(null);
+    }
   }
 
-  function handleInitialize() { if (!prompt.trim() || isRunning) return; setFeatureBrief(prompt.trim()); props.onNavigate("intent"); }
+  function handleInitialize() {
+    if (!prompt.trim() || isRunning) return;
+    setFeatureBrief(prompt.trim());
+    props.onNavigate("intent");
+  }
 
   function handlePrdImported(content: string) {
     setPrompt(content);
@@ -91,33 +129,104 @@ export function InitialUI(props: StepUIProps) {
       <div className="flex flex-col justify-center items-center flex-1 h-full px-8 pt-8 pb-12 gap-10 overflow-auto">
         <div className="flex flex-col items-center w-full max-w-230 gap-8">
           <div className="flex flex-col items-center gap-3 text-center">
-            <h1 className="text-4xl font-bold tracking-tight text-[#0b1c30] leading-tight">Ready to build</h1>
-            <p className="text-[15px] text-[#7c839b] max-w-120 leading-7">Describe the objective of your autonomous agent. The pipeline will handle orchestration, coding, and deployment automatically.</p>
+            <h1 className="text-4xl font-bold tracking-tight text-[#0b1c30] leading-tight">
+              Ready to build
+            </h1>
+            <p className="text-[15px] text-[#7c839b] max-w-120 leading-7">
+              Describe the objective of your autonomous agent. The pipeline will
+              handle orchestration, coding, and deployment automatically.
+            </p>
           </div>
           <Card className="w-full shadow-[0_10px_40px_-8px_rgba(0,0,0,0.08)] overflow-hidden">
             <CardContent className="p-0">
               <div className="px-6 pt-6 pb-3">
-                <Textarea placeholder={"Describe what your agent should do…\ne.g. 'Build a market research agent that scrapes top tech news and summarizes them into a Slack report every morning.'"} value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isRunning} className="border-0 focus-visible:ring-0 text-[15px] text-[#0b1c30] placeholder:text-[#94a3b8] leading-6 h-40 max-h-40 overflow-y-auto resize-none px-0 py-0 shadow-none" />
+                <Textarea
+                  placeholder={
+                    "Describe what your agent should do…\ne.g. 'Build a market research agent that scrapes top tech news and summarizes them into a Slack report every morning.'"
+                  }
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  disabled={isRunning}
+                  className="border-0 focus-visible:ring-0 text-[15px] text-[#0b1c30] placeholder:text-[#94a3b8] leading-6 h-40 max-h-40 overflow-y-auto resize-none px-0 py-0 shadow-none"
+                />
               </div>
               <Separator />
               <div className="flex items-center justify-between bg-[#fafbfc] px-4 py-3">
                 <div className="text-xs min-w-0 pr-2 truncate">
                   {imageMsg ? (
                     <span className="text-[#e5484d]">{imageMsg}</span>
+                  ) : importedPrd?.exists ? (
+                    <span className="text-[#16a34a]">
+                      Imported PRD active for this project — generation will be
+                      skipped
+                    </span>
                   ) : refCount > 0 ? (
-                    <span className="text-[#64748b]">{refCount} reference image{refCount > 1 ? "s" : ""} will inform the PRD</span>
+                    <span className="text-[#64748b]">
+                      {refCount} reference image{refCount > 1 ? "s" : ""} will
+                      inform the PRD
+                    </span>
                   ) : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => setPrdDialogOpen(true)} className="text-xs text-[#64748b] h-7 px-2.5"><Paperclip className="size-3" /> PRD</Button>
-                    <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={handleImagesSelected} />
-                    <Button variant="ghost" size="sm" disabled={uploadingImages || isRunning} onClick={() => imageInputRef.current?.click()} className="text-xs text-[#64748b] h-7 px-2.5" title="Attach reference screenshots — the PRD step will summarize requirements from them"><ImagePlus className="size-3" /> {uploadingImages ? "Uploading…" : refCount > 0 ? `${refCount} image${refCount > 1 ? "s" : ""}` : "Images"}</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPrdDialogOpen(true)}
+                      className={
+                        importedPrd?.exists
+                          ? "text-xs text-[#16a34a] h-7 px-2.5"
+                          : "text-xs text-[#64748b] h-7 px-2.5"
+                      }
+                    >
+                      <Paperclip className="size-3" />{" "}
+                      {importedPrd?.exists ? "PRD imported" : "PRD"}
+                    </Button>
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      multiple
+                      className="hidden"
+                      onChange={handleImagesSelected}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={uploadingImages || isRunning}
+                      onClick={() => imageInputRef.current?.click()}
+                      className="text-xs text-[#64748b] h-7 px-2.5"
+                      title="Attach reference screenshots — the PRD step will summarize requirements from them"
+                    >
+                      <ImagePlus className="size-3" />{" "}
+                      {uploadingImages
+                        ? "Uploading…"
+                        : refCount > 0
+                          ? `${refCount} image${refCount > 1 ? "s" : ""}`
+                          : "Images"}
+                    </Button>
                     {refCount > 0 && (
-                      <Button variant="ghost" size="sm" disabled={uploadingImages || isRunning} onClick={handleClearImages} className="text-xs text-[#94a3b8] h-7 px-2" title="Remove all reference images (shared with the Design stage)">Clear</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={uploadingImages || isRunning}
+                        onClick={handleClearImages}
+                        className="text-xs text-[#94a3b8] h-7 px-2"
+                        title="Remove all reference images (shared with the Design stage)"
+                      >
+                        Clear
+                      </Button>
                     )}
                   </div>
-                  <Button disabled={!prompt.trim() || isRunning} onClick={handleInitialize} size="sm" className="text-[13px] font-bold px-5 h-9">{isRunning ? "Starting…" : "Start Generation"}<ArrowRight className="size-3" /></Button>
+                  <Button
+                    disabled={!prompt.trim() || isRunning}
+                    onClick={handleInitialize}
+                    size="sm"
+                    className="text-[13px] font-bold px-5 h-9"
+                  >
+                    {isRunning ? "Starting…" : "Start Generation"}
+                    <ArrowRight className="size-3" />
+                  </Button>
                 </div>
               </div>
             </CardContent>
@@ -125,12 +234,22 @@ export function InitialUI(props: StepUIProps) {
           <Card className="max-w-180 w-full shadow-sm bg-white/70">
             <CardContent className="flex items-center gap-3 px-5 py-3">
               <Info className="size-4 text-indigo-600 shrink-0" />
-              <p className="text-sm text-[#7c839b] leading-5">Upload existing project docs to accelerate the <strong className="font-semibold text-[#475569]">Preparation</strong> phase.</p>
+              <p className="text-sm text-[#7c839b] leading-5">
+                Upload existing project docs to accelerate the{" "}
+                <strong className="font-semibold text-[#475569]">
+                  Preparation
+                </strong>{" "}
+                phase.
+              </p>
             </CardContent>
           </Card>
         </div>
       </div>
-      <ImportPrdDialog isOpen={prdDialogOpen} onClose={() => setPrdDialogOpen(false)} onPrdImported={handlePrdImported} />
+      <ImportPrdDialog
+        isOpen={prdDialogOpen}
+        onClose={() => setPrdDialogOpen(false)}
+        onPrdImported={handlePrdImported}
+      />
     </>
   );
 }
