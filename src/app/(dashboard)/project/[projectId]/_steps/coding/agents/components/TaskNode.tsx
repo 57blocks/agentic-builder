@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { createContext, memo, useContext, useState } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { motion } from "motion/react";
@@ -24,6 +24,19 @@ import type { CodingTask, KickoffWorkItem } from "@/lib/pipeline/types";
 export type TaskNodeData = {
   task: CodingTask | KickoffWorkItem;
 };
+
+/**
+ * Node-level actions provided by the canvas owner (ui.tsx) without threading
+ * callbacks through each node's `data` (which would churn React Flow's diff on
+ * every rebuild). `onFocusDep` pans/selects an upstream dependency task.
+ */
+export const TaskNodeActionsContext = createContext<{
+  onFocusDep?: (depId: string) => void;
+  /** Id of the task to flash-highlight (e.g. just jumped to via a DEPS chip). */
+  flashTaskId?: string | null;
+  /** Bumped on every jump so the flash replays even for the same target. */
+  flashNonce?: number;
+}>({});
 
 // ─── Phase theme registry ─────────────────────────────────────────────────────
 // Each entry maps a regex pattern to a visual theme (colors + icon).
@@ -226,6 +239,18 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
   const duration = getDuration(task);
   const taskNum = getTaskNum(task.id);
 
+  // Upstream dependencies — surfaced as a chip on the card so the user can
+  // jump straight to a predecessor task without opening the detail panel.
+  // Multiple deps cycle through on repeated clicks.
+  const { onFocusDep, flashTaskId, flashNonce } = useContext(
+    TaskNodeActionsContext,
+  );
+  const deps =
+    ("dependencies" in task ? (task as CodingTask).dependencies : undefined) ??
+    [];
+  const [depCursor, setDepCursor] = useState(0);
+  const isFlashing = !!flashTaskId && flashTaskId === task.id;
+
   const progressStage =
     "progressStage" in task ? (task as CodingTask).progressStage : undefined;
 
@@ -341,6 +366,25 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
         </span>
       )}
 
+      {/* ── Jump-target flash (navigated here via a DEPS chip) ──────────── */}
+      {isFlashing && (
+        <motion.span
+          key={flashNonce}
+          className="pointer-events-none absolute inset-0 rounded-xl z-20"
+          initial={{ opacity: 0 }}
+          animate={{
+            opacity: [0, 1, 1, 0],
+            boxShadow: [
+              `0 0 0 0 ${phase.accent}00`,
+              `0 0 0 4px ${phase.accent}aa, 0 0 22px 8px ${phase.accent}66`,
+              `0 0 0 4px ${phase.accent}aa, 0 0 22px 8px ${phase.accent}66`,
+              `0 0 0 0 ${phase.accent}00`,
+            ],
+          }}
+          transition={{ duration: 1.5, times: [0, 0.2, 0.7, 1], ease: "easeOut" }}
+        />
+      )}
+
       <Handle
         type="target"
         position={Position.Left}
@@ -355,12 +399,38 @@ export const TaskNode = memo(function TaskNode({ data, selected }: NodeProps) {
       <div className="relative z-10 px-3 pt-2.5 pb-2.5">
         {/* ── Top row: badge + task id ──────────────────────────────────── */}
         <div className="flex items-center justify-between mb-2">
-          <span
-            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${badgeCls}`}
-            style={badgeStyle}
-          >
-            {sCfg.label}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${badgeCls}`}
+              style={badgeStyle}
+            >
+              {sCfg.label}
+            </span>
+            {deps.length > 0 && onFocusDep && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const idx = depCursor % deps.length;
+                  onFocusDep(deps[idx]);
+                  setDepCursor((c) => c + 1);
+                }}
+                title={
+                  deps.length === 1
+                    ? "Jump to the upstream dependency task"
+                    : `Jump through ${deps.length} upstream dependency tasks`
+                }
+                className={`nodrag nopan inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                  isActive
+                    ? "bg-white/20 text-white hover:bg-white/30"
+                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                }`}
+              >
+                <Link2 size={9} />
+                DEPS{deps.length > 1 ? ` ${deps.length}` : ""}
+              </button>
+            )}
+          </div>
           <span className={`text-[9px] font-mono ${taskNumCls}`}>
             #{`TASK-${taskNum}`}
           </span>
