@@ -14,6 +14,13 @@ function block(entries: Record<string, string>, prefix: string): string {
     .join("\n");
 }
 
+/** 原样透传：键已是完整变量名，渲染成 `--<name>: <value>;`。 */
+function rawBlock(entries: Record<string, string>): string {
+  return Object.entries(entries)
+    .map(([k, v]) => `  --${k}: ${v};`)
+    .join("\n");
+}
+
 /**
  * shadcn-ui 期望的标准颜色名（--color-background / --color-foreground /
  * --color-primary-foreground / --color-input / --color-ring / ...）映射到项目
@@ -55,6 +62,17 @@ export function renderTokensCss(tokens: DesignTokens): string {
     block(tokens.fontSizes, "text"),
     block(tokens.spacing, "spacing"),
     block(tokens.radius, "radius"),
-  ].join("\n");
+    tokens.shadows && Object.keys(tokens.shadows).length
+      ? block(tokens.shadows, "shadow")
+      : "",
+    tokens.lineHeights && Object.keys(tokens.lineHeights).length
+      ? block(tokens.lineHeights, "leading")
+      : "",
+    tokens.extras && Object.keys(tokens.extras).length
+      ? rawBlock(tokens.extras)
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   return `${HEADER}\n@theme {\n${lines}\n}\n`;
 }

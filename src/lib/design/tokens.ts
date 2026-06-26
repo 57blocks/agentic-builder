@@ -9,6 +9,16 @@ export interface DesignTokens {
   spacing: Record<string, string>;
   /** 圆角标度：sm/md/lg/xl/pill。 */
   radius: Record<string, string>;
+  /** 阴影标度（→ Tailwind `--shadow-*`，生成 shadow-* 工具类）。可选。 */
+  shadows?: Record<string, string>;
+  /** 行高标度（→ Tailwind `--leading-*`，生成 leading-* 工具类）。可选。 */
+  lineHeights?: Record<string, string>;
+  /**
+   * 透传项：键为完整 CSS 变量名（如 `hero-gradient`），原样渲染成 `--hero-gradient`。
+   * 用于 DesignSpec 里既非颜色、也不属于上述命名空间的变量（渐变等），避免污染
+   * `--color-*`。可选。
+   */
+  extras?: Record<string, string>;
 }
 
 /**
