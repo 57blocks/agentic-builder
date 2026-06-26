@@ -174,6 +174,10 @@ const READ_STALL_NUDGE_AFTER = 5; // nudge at round 5/10
 // At this point the model has had ample reads; we'd rather get imperfect code
 // than throw an iteration-exceeded error.
 const READ_STALL_FORCE_WRITE_AFTER = 8; // force-write at round 8/10
+// Once forceWrite is engaged (tool_choice:"none"), if this many consecutive
+// forceWrite rounds make no write progress, give up instead of spinning to the
+// iteration cap. Guards the agentic loop against the observed loop=300 hang.
+const FORCE_WRITE_GIVEUP_AFTER = 3;
 const CODEGEN_MULTI_ROUND_ENABLED = (() => {
   const raw = (process.env.CODEGEN_MULTI_ROUND_ENABLED ?? "1")
     .trim()
@@ -1485,7 +1489,8 @@ type CodegenAgentCompletionReason =
   | "status_done"
   | "task_complete"
   | "legacy_file_blocks"
-  | "max_iterations";
+  | "max_iterations"
+  | "read_stall_giveup";
 
 type CodegenAgentSessionResult = {
   content: string;
@@ -1561,6 +1566,15 @@ async function runCodegenAgentSession(
   // could spin to CODEGEN_AGENT_MAX_ITERATIONS (300) without ever writing —
   // observed as a ~75-min hang on a vision task over a 200-file project.
   let consecutiveReadRounds = 0;
+  // Deadlock breaker for the forceWrite state. Once consecutiveReadRounds hits
+  // READ_STALL_FORCE_WRITE_AFTER we set tool_choice="none", but if the model
+  // still produces no valid write (e.g. it keeps re-attempting a write_file
+  // that content-loss-guard REJECTs, which returns isWrite=false and never
+  // resets the counter), nothing pulls it back below the threshold and it spins
+  // to CODEGEN_AGENT_MAX_ITERATIONS. Count forceWrite rounds that make no write
+  // progress and bail out early.
+  let forceWriteNoProgressRounds = 0;
+  let writesAtLastForceWrite = 0;
   let writeToolCalls = 0;
   let lastModel = "unknown";
   let lastContent = "";
@@ -1590,9 +1604,27 @@ async function runCodegenAgentSession(
       );
     }
     if (forceWrite) {
+      // Track write progress across forceWrite rounds. If we've engaged
+      // tool_choice="none" but the model still isn't producing any successful
+      // write (e.g. repeatedly re-sending a content-loss-guard-rejected
+      // write_file), bail out rather than spin to CODEGEN_AGENT_MAX_ITERATIONS.
+      const totalWrites =
+        changedFiles.size + deletedFiles.size + movedFiles.length;
+      if (totalWrites > writesAtLastForceWrite) {
+        forceWriteNoProgressRounds = 0;
+        writesAtLastForceWrite = totalWrites;
+      } else {
+        forceWriteNoProgressRounds++;
+      }
       console.log(
-        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1})`,
+        `[Worker] Forcing tool_choice=none after ${consecutiveReadRounds} consecutive read-only round(s) (loop=${i + 1}, noProgress=${forceWriteNoProgressRounds})`,
       );
+      if (forceWriteNoProgressRounds >= FORCE_WRITE_GIVEUP_AFTER) {
+        console.log(
+          `[Worker] Giving up after ${forceWriteNoProgressRounds} forceWrite round(s) with no write progress (loop=${i + 1}).`,
+        );
+        break;
+      }
     }
     // Cheap, lossless context compaction: drop stale repeated read-only tool
     // results (same file read again later → earlier copy is superseded) before
@@ -1681,7 +1713,21 @@ async function runCodegenAgentSession(
     if (toolCalls.length > 0) {
       const toolResultTexts: string[] = [];
       let hadWriteTool = false;
+      // Did the model *try* to write this round (even if the write was rejected
+      // by content-loss-guard / protected-path)? A rejected write returns
+      // isWrite=false, but it is NOT a read-only round — treating it as one is
+      // what lets consecutiveReadRounds climb to forceWrite and then deadlock.
+      let attemptedWrite = false;
       for (const toolCall of toolCalls) {
+        const toolName = toolCall.function.name;
+        if (
+          toolName === "write_file" ||
+          toolName === "apply_patch" ||
+          toolName === "delete_file" ||
+          toolName === "move_file"
+        ) {
+          attemptedWrite = true;
+        }
         let args: Record<string, unknown>;
         try {
           args = JSON.parse(toolCall.function.arguments || "{}") as Record<
@@ -1717,11 +1763,24 @@ async function runCodegenAgentSession(
         toolResultTexts.push(result.content);
       }
 
-      if (!hadWriteTool) {
+      if (hadWriteTool) {
+        consecutiveReadRounds = 0;
+      } else if (attemptedWrite) {
+        // Write attempted but rejected (content-loss-guard / protected path).
+        // Not a read-only round: leave consecutiveReadRounds unchanged so the
+        // anti-spiral guard isn't tripped by a model that's actively (if
+        // wrongly) trying to write. Steer it toward the right tool instead.
+        console.log(
+          `[Worker] rejected-write round, not counting as read-only (loop=${i + 1}, consecutiveReadRounds=${consecutiveReadRounds})`,
+        );
+        messages.push({
+          role: "system",
+          content:
+            "Your write was REJECTED (most likely content-loss-guard: you tried to overwrite an existing file with much smaller content). To edit an existing file, use apply_patch for a local insertion, OR read_file to get the full current content and then write_file with the COMPLETE merged file. Do not re-send the same partial content.",
+        });
+      } else {
         readOnlyRounds++;
         consecutiveReadRounds++;
-      } else {
-        consecutiveReadRounds = 0;
       }
 
       if (recallCtx && !didSecondaryRecall) {
@@ -1848,7 +1907,10 @@ async function runCodegenAgentSession(
     deletedFiles: Array.from(deletedFiles),
     movedFiles,
     completed: false,
-    completionReason: "max_iterations",
+    completionReason:
+      forceWriteNoProgressRounds >= FORCE_WRITE_GIVEUP_AFTER
+        ? "read_stall_giveup"
+        : "max_iterations",
     secondaryInjectedIds,
   };
 }
