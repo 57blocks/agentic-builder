@@ -7,8 +7,9 @@
  *
  * The pattern, demonstrated below:
  *   1. `vi.mock("../db", ...)` BEFORE other imports — replace the real Sequelize
- *      connection with a fresh in-memory SQLite one. `sqlite::memory:` needs the
- *      `sqlite3` devDependency (already in package.json).
+ *      connection with a fresh in-memory SQLite one. Pass `dialectModule:
+ *      sqlite3Wasm` so it runs on the pure-WASM driver (no native `sqlite3`
+ *      build); WITHOUT it Sequelize throws "Please install sqlite3 package".
  *   2. Define / import the model(s) under test against that mocked `sequelize`.
  *   3. `await sequelize.sync({ force: true })` (or `syncModels()`) in `beforeAll`
  *      so the schema exists before any query — there are no migrations.
@@ -27,11 +28,13 @@ import { DataTypes, Model, Sequelize } from "sequelize";
 // (1) Replace ../db with an in-memory SQLite connection. The factory runs in
 // isolation, so the Sequelize instance is constructed inside the mock. Object
 // form (not a `sqlite::memory:` URL) avoids Node's DEP0170 deprecation warning.
-vi.mock("../db", () => {
+vi.mock("../db", async () => {
+  const { sqlite3Wasm } = await import("../test-support/sqlite3-wasm");
   const sequelize = new Sequelize({
     dialect: "sqlite",
     storage: ":memory:",
     logging: false,
+    dialectModule: sqlite3Wasm,
   });
   return { sequelize, isInMemorySqlite: true };
 });

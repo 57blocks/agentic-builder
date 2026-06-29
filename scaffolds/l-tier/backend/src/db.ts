@@ -1,5 +1,6 @@
 import { config as loadDotenv } from "dotenv";
 import { Sequelize } from "sequelize";
+import { sqlite3Wasm } from "./test-support/sqlite3-wasm";
 
 // In dev / test the project-local `.env` MUST win over whatever the parent
 // shell (or IDE startup hooks like `.zshrc`) already exported. Otherwise a
@@ -36,9 +37,9 @@ function isTestEnv(): boolean {
  *      run, instead of crashing every test at import with a hard throw.
  *   3. No URL in dev / prod → a genuine misconfiguration: fail loud.
  *
- * SQLite requires the `sqlite3` driver (a devDependency); it is only loaded
- * lazily by Sequelize when the sqlite dialect is selected, so production
- * Postgres builds never need it at runtime.
+ * The sqlite dialect runs on the pure-WASM `node-sqlite3-wasm` engine (passed as
+ * `dialectModule`), so there is no native `sqlite3` build — identical on every
+ * OS/arch, offline-OK. Production selects Postgres and never touches it.
  */
 function resolveConnection(): { dialect: "postgres" | "sqlite"; url?: string } {
   const explicit = process.env.DATABASE_URL?.trim();
@@ -68,12 +69,14 @@ export const sequelize =
               : false,
         },
       })
-    : // In-memory SQLite test fallback. Object form (not a `sqlite::memory:`
-      // URL) avoids the Node `DEP0170` invalid-URL deprecation warning.
+    : // In-memory SQLite test fallback on the pure-WASM driver (`dialectModule`)
+      // — no native build. Object form (not a `sqlite::memory:` URL) avoids the
+      // Node `DEP0170` invalid-URL deprecation warning.
       new Sequelize({
         dialect: "sqlite",
         storage: ":memory:",
         logging: false,
+        dialectModule: sqlite3Wasm,
       });
 
 /** True when the active connection is the in-memory SQLite test fallback. */

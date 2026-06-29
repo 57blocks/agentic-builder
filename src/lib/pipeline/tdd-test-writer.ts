@@ -230,7 +230,7 @@ async function executeTool(input: {
     }
     const type = input.typeByFile.get(file) ?? "";
     if (lacksUnmockedDbGuard(file, content)) {
-      return `REJECTED: ${file} imports from "../db" without mocking it. Backend tests MUST \`vi.mock("../db")\` (or its relative equivalent) and substitute an in-memory SQLite Sequelize. See backend/src/models/index.test.ts for the canonical pattern.`;
+      return `REJECTED: ${file} imports from "../db" without mocking it. Backend tests MUST \`vi.mock("../db")\` (or its relative equivalent) and substitute an in-memory SQLite Sequelize constructed with \`dialectModule: sqlite3Wasm\` (imported from the test-support/sqlite3-wasm module) — without it Sequelize throws "Please install sqlite3". See backend/src/models/index.test.ts for the canonical pattern.`;
     }
     if (lacksRealHttpMock(file, content)) {
       return `REJECTED: ${file} calls fetch/axios without a network mock. External API client tests MUST mock \`globalThis.fetch\` (or use msw/nock). Live network access is not permitted.`;
@@ -300,7 +300,7 @@ export async function runTddTestWriter(input: {
         "FORBIDDEN (these pass before implementation and are NOT valid RED tests): asserting only that a component renders / mounts without error; `expect(x).toBeTruthy()` / `toBeDefined()` on something the scaffold already provides; `expect(true).toBe(true)`; asserting a module is merely importable; snapshot-only tests; asserting an empty/placeholder state that already holds. If your assertion would pass against an empty implementation, it is wrong — tighten it to the real expected behaviour.",
         // HARD requirements — `write_file` will REJECT content that violates these.
         "HARD REQUIREMENT — every test file MUST cite at least one of its `coversRequirementIds` (e.g. FR-AU01, AC-09) verbatim as a string inside the file. Put it in a top-of-file JSDoc comment such as `/** coversRequirementIds: FR-AU01, AC-09 */`. Without this the file is rejected.",
-        "HARD REQUIREMENT — backend tests that import from `../db` MUST `vi.mock(\"<relative>/db\")` and substitute an in-memory SQLite Sequelize. Canonical example: `backend/src/models/index.test.ts`. Without this the file is rejected (real Postgres is not available in the test runner).",
+        "HARD REQUIREMENT — backend tests that import from `../db` MUST `vi.mock(\"<relative>/db\")` and substitute an in-memory SQLite Sequelize built with `dialectModule: sqlite3Wasm` (import `{ sqlite3Wasm }` from the `test-support/sqlite3-wasm` module). The test DB runs on a pure-WASM driver, so WITHOUT that `dialectModule` Sequelize throws \"Please install sqlite3\". Canonical example: `backend/src/models/index.test.ts`. Without this the file is rejected (real Postgres is not available in the test runner).",
         "HARD REQUIREMENT — external-API client tests (paths under `services/externalApis/`) MUST mock `globalThis.fetch` (or use msw / nock). Live network access is not permitted; assume rate-limit / offline. Without a mock the file is rejected.",
         "HARD REQUIREMENT — frontend `frontend-service` tests that assert on a literal `/api/...` URL MUST either `vi.stubEnv(\"VITE_API_BASE_URL\", \"\")` before the assertion, or use `expect.stringContaining(\"/api/...\")`. Otherwise the assertion drifts when the env injects a base URL.",
         "Each test must import or reference the declared target route/service/API client/task-owned file, or assert against the declared endpoint string.",

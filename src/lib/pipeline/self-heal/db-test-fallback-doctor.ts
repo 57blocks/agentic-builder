@@ -106,6 +106,25 @@ export function rewriteDbSource(source: string): {
   // from a postgres URL. SSL dialectOptions are harmless on sqlite (ignored).
   next = next.replace(/\n\s*dialect:\s*["']postgres["']\s*,?/i, "");
 
+  // (4) The in-memory sqlite fallback runs on the pure-WASM driver
+  // (`node-sqlite3-wasm`), not the native `sqlite3` package — so it must be
+  // passed as `dialectModule`, or Sequelize throws "Please install sqlite3".
+  // Import it once, then inject it CONDITIONALLY so a real Postgres URL (which
+  // uses the `pg` driver) is never handed the sqlite module.
+  const WASM_IMPORT = `import { sqlite3Wasm } from "./test-support/sqlite3-wasm";`;
+  if (!/test-support\/sqlite3-wasm/.test(next)) {
+    next = /^import .*\bsequelize\b.*$/m.test(next)
+      ? next.replace(/(^import .*\bsequelize\b.*$)/m, `$1\n${WASM_IMPORT}`)
+      : `${WASM_IMPORT}\n${next}`;
+  }
+  // Targets the canonical `new Sequelize(DATABASE_URL, { … })` shape (tolerates a
+  // `!` / `as string` between the URL and the options object).
+  next = next.replace(
+    /new Sequelize\(\s*DATABASE_URL[^,{]*,\s*\{/,
+    (m) =>
+      `${m}\n      ...(DATABASE_URL === "sqlite::memory:" ? { dialectModule: sqlite3Wasm } : {}),`,
+  );
+
   return { changed: next !== source, source: next };
 }
 

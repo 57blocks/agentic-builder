@@ -14,9 +14,14 @@
   "author": "fangxiaolin",
   "license": "ISC",
   "packageManager": "pnpm@10.12.4",
+  "pnpm": {
+    "//": "pnpm v10 blocks dependency build scripts by default. The test DB runs on pure-WASM node-sqlite3-wasm (no native build), so there is no sqlite3 to allowlist; esbuild/msgpackr-extract still ship prebuilt binaries via build scripts.",
+    "onlyBuiltDependencies": ["esbuild", "msgpackr-extract"]
+  },
   "dependencies": {
     "@koa/router": "^15.4.0",
     "bcryptjs": "^3.0.3",
+    "node-sqlite3-wasm": "^0.8.59",
     "bullmq": "^5.34.0",
     "dotenv": "^17.4.2",
     "ioredis": "^5.4.1",
@@ -39,7 +44,6 @@
     "@types/koa-bodyparser": "^4.3.12",
     "@types/koa__router": "^12.0.4",
     "@types/node": "^24.12.2",
-    "sqlite3": "^5.1.7",
     "tsx": "^4.20.6",
     "typescript": "^5.8.3",
     "vitest": "^2.1.4"

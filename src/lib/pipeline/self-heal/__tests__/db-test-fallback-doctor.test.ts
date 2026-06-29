@@ -100,4 +100,20 @@ describe("rewriteDbSource", () => {
     // Sanity: the generated source embeds exactly this resolution logic.
     expect(source).toContain('? "sqlite::memory:" : undefined');
   });
+
+  it("routes the sqlite fallback through the pure-WASM driver, not native sqlite3", () => {
+    const { changed, source } = rewriteDbSource(CSMA_DB_TS);
+    expect(changed).toBe(true);
+    // Imports the WASM driver…
+    expect(source).toContain(
+      'import { sqlite3Wasm } from "./test-support/sqlite3-wasm"',
+    );
+    // …and hands it to Sequelize as `dialectModule` ONLY for the in-memory
+    // sqlite URL, so a real Postgres URL still uses the `pg` driver.
+    expect(source).toContain(
+      'DATABASE_URL === "sqlite::memory:" ? { dialectModule: sqlite3Wasm } : {}',
+    );
+    // The hard-coded postgres dialect is dropped so the URL drives dialect choice.
+    expect(source).not.toMatch(/dialect:\s*"postgres"/);
+  });
 });
