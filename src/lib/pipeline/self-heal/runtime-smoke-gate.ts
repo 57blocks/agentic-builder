@@ -6,7 +6,7 @@
  * ship something runnable" check before the verify-fix worker calls it
  * done:
  *
- *   1. `GET /api/health` returns 2xx.
+ *   1. `GET /api/v1/health` returns 2xx.
  *   2. Every endpoint declared in `API_CONTRACTS.json` (and exempt list,
  *      see CONTRACT_AUDIT_EXEMPT_ENDPOINTS) is reachable, i.e. NEVER
  *      returns 404. 401/403 are fine — they prove auth middleware is in
@@ -32,7 +32,10 @@ import { spawn, execFile, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { fsRead, fsWrite, listFiles } from "@/lib/langgraph/tools";
 import type { RepairEmitter } from "./events";
-import { runDataAssertions, type DataGateFailureCode } from "./integration-data-gate";
+import {
+  runDataAssertions,
+  type DataGateFailureCode,
+} from "./integration-data-gate";
 import { healBootEnvFromStderr } from "./boot-env-doctor";
 import {
   readActiveScope,
@@ -144,7 +147,7 @@ const MAX_ENDPOINT_PROBES = 60;
  * keep these two lists in sync.
  */
 const EXEMPT_ENDPOINTS: ReadonlyArray<{ method: string; pathRe: RegExp }> = [
-  { method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ },
+  { method: "GET", pathRe: /^\/(?:api\/(?:v\d+\/)?)?health\/?$/ },
 ];
 
 function isExemptEndpoint(method: string, endpoint: string): boolean {
@@ -191,9 +194,7 @@ async function readContractEndpoints(
     return parsed
       .filter(
         (c): c is { method: string; endpoint: string } =>
-          c &&
-          typeof c.method === "string" &&
-          typeof c.endpoint === "string",
+          c && typeof c.method === "string" && typeof c.endpoint === "string",
       )
       .map((c) => ({
         method: c.method.toUpperCase(),
@@ -223,7 +224,10 @@ async function readImplementedEndpoints(
   const out: Array<{ method: string; endpoint: string }> = [];
   for (const rel of allFiles) {
     const content = await fsRead(rel, outputDir);
-    if (content.startsWith("FILE_NOT_FOUND") || content.startsWith("REJECTED")) {
+    if (
+      content.startsWith("FILE_NOT_FOUND") ||
+      content.startsWith("REJECTED")
+    ) {
       continue;
     }
     const re =
@@ -457,9 +461,11 @@ export async function runRuntimeSmokeGate(
   // turn. Stops when a heal applies nothing new (cap 2 → at most 3 boots total).
   for (let healAttempt = 1; !boot.child && healAttempt <= 2; healAttempt++) {
     const bootOutput = boot.output || boot.bootError || "";
-    const heal = await healBootEnvFromStderr(outputDir, bootOutput).catch(() => ({
-      applied: [] as string[],
-    }));
+    const heal = await healBootEnvFromStderr(outputDir, bootOutput).catch(
+      () => ({
+        applied: [] as string[],
+      }),
+    );
     if (heal.applied.length === 0) break; // nothing fixable → stop, don't spin
     if (emitter) {
       emitter({
@@ -488,37 +494,35 @@ export async function runRuntimeSmokeGate(
       directive:
         "Backend `pnpm dev` did not reach a listening state. Inspect the stderr tail in `evidence` — common causes: missing PORT/DATABASE_URL/PRIVY_APP_ID in `backend/.env`, Sequelize model init throwing, or a TS error that crashed `tsx`.",
       evidence:
-        boot.bootError ??
-        boot.output.slice(-1500) ??
-        "(no output captured)",
+        boot.bootError ?? boot.output.slice(-1500) ?? "(no output captured)",
     });
     await persistAndEmit(outputDir, result, emitter, sessionId);
     return result;
   }
 
   try {
-    // Step 1: /api/health
-    const healthUrl = `http://127.0.0.1:${port}/api/health`;
+    // Step 1: /api/v1/health
+    const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
     const health = await probeWithRetry(healthUrl, { method: "GET" });
     if (health.error || health.status === 0) {
       result.failures.push({
         code: "health_probe_failed",
-        target: "GET /api/health",
+        target: "GET /api/v1/health",
         directive:
-          "Backend booted but `/api/health` is unreachable. Confirm `registerHealthRoutes(apiRouter)` is called in `backend/src/api/modules/index.ts` and the route file exists at `backend/src/api/modules/health/health.routes.ts`.",
+          "Backend booted but `/api/v1/health` is unreachable. Confirm `registerHealthRoutes(apiRouter)` is called in `backend/src/api/modules/index.ts` and the route file exists at `backend/src/api/modules/health/health.routes.ts`.",
         evidence: health.error ?? `status=${health.status} body=${health.body}`,
       });
     } else if (health.status >= 400) {
       result.failures.push({
         code: "health_probe_failed",
-        target: "GET /api/health",
+        target: "GET /api/v1/health",
         directive:
-          "`/api/health` responded with an error status. Check the health controller for an unconditional auth gate or an exception thrown before the JSON write.",
+          "`/api/v1/health` responded with an error status. Check the health controller for an unconditional auth gate or an exception thrown before the JSON write.",
         evidence: `status=${health.status} body=${health.body}`,
       });
     } else {
       result.successes.push({
-        target: "GET /api/health",
+        target: "GET /api/v1/health",
         detail: `reachable (${health.status})`,
       });
     }
@@ -577,7 +581,7 @@ export async function runRuntimeSmokeGate(
             "Likely causes (in order of frequency): " +
             "(a) a guard function (e.g. `requirePrivyAuth`) was used directly as middleware without `next()` — switch to `requirePrivyAuthMiddleware`; " +
             "(b) the `*Handler` is exported in a controller but the corresponding `*.routes.ts` never registers it; " +
-            "(c) `authGate` calls `ctx.throw(404, \"User not found\")` when the DB row is missing — replace with `resolveOrCreateDbUser(ctx)` (auto-upsert).",
+            '(c) `authGate` calls `ctx.throw(404, "User not found")` when the DB row is missing — replace with `resolveOrCreateDbUser(ctx)` (auto-upsert).',
           evidence: `status=404 body=${r.body}`,
         });
       } else if (r.status >= 500) {

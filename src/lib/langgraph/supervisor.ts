@@ -1737,7 +1737,7 @@ export default defineConfig({
   webServer: [
     {
       command: "cd ../backend && pnpm dev",
-      url: "http://localhost:4000/api/health",
+      url: "http://localhost:4000/api/v1/health",
       reuseExistingServer: true,
       timeout: 120_000,
       stdout: "pipe",
@@ -1845,7 +1845,7 @@ async function auditBackendHealthRoute(
     apiIndex.startsWith("FILE_NOT_FOUND") ||
     apiIndex.startsWith("REJECTED")
   ) {
-    return "backend/src/api/modules/index.ts is missing — the e2e webServer health probe at /api/health will fail.";
+    return "backend/src/api/modules/index.ts is missing — the e2e webServer health probe at /api/v1/health will fail.";
   }
   if (!/registerHealthRoutes\s*\(/.test(apiIndex)) {
     return "backend/src/api/modules/index.ts no longer calls registerHealthRoutes(...) — the /api/health probe used by the Playwright webServer will fail.";
@@ -2178,7 +2178,9 @@ async function e2eVerifyAndFix(
                 "Generate one spec file per PRD section/route group (e.g. frontend/e2e/auth.spec.ts).",
                 "",
                 "## PRD E2E Specification",
-                e2eSpecDoc.slice(0, 12000),
+                // Inject the full E2E spec — truncating it dropped later
+                // scenarios from the one-shot fallback path.
+                e2eSpecDoc,
                 "",
                 unfilledKeysBlock,
                 state.projectContext
@@ -2194,7 +2196,7 @@ async function e2eVerifyAndFix(
             genModelChain,
             {
               temperature: 0.1,
-              max_tokens: 16000,
+              max_tokens: 32000,
               forceOpenRouter: forceOpenRouterForMode(state.codingMode),
             },
           );
@@ -2532,8 +2534,8 @@ async function e2eVerifyAndFix(
         "",
         "## Rules",
         "- NEVER modify any file that matches *.spec.ts, *.spec.tsx, *.test.ts, *.test.tsx.",
-        "- NEVER modify `frontend/playwright.config.ts`'s `webServer` field for M-tier projects (projects that have a `backend/` directory). For those projects it MUST stay an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/health`) AND the frontend (`pnpm dev`). Collapsing it into a single object is the #1 cause of `infra: ECONNREFUSED` failures and the supervisor will rewrite it back. For S-tier projects (no `backend/` directory), the `webServer` field SHOULD be a single frontend-only object — do NOT add a backend entry.",
-        "- NEVER delete `backend/src/api/modules/health/health.routes.ts` or remove the `registerHealthRoutes(...)` call in `backend/src/api/modules/index.ts` in M-tier projects. The Playwright `webServer` health probe at `/api/health` depends on it.",
+        "- NEVER modify `frontend/playwright.config.ts`'s `webServer` field for M-tier projects (projects that have a `backend/` directory). For those projects it MUST stay an ARRAY that starts BOTH the backend (`cd ../backend && pnpm dev`, health probe `http://localhost:4000/api/v1/health`) AND the frontend (`pnpm dev`). Collapsing it into a single object is the #1 cause of `infra: ECONNREFUSED` failures and the supervisor will rewrite it back. For S-tier projects (no `backend/` directory), the `webServer` field SHOULD be a single frontend-only object — do NOT add a backend entry.",
+        "- NEVER delete `backend/src/api/modules/health/health.routes.ts` or remove the `registerHealthRoutes(...)` call in `backend/src/api/modules/index.ts` in M-tier projects. The Playwright `webServer` health probe at `/api/v1/health` depends on it.",
         "- Treat every locator, URL, button label, and aria-label in the test files as the ground truth for what the UI must render.",
         "- When a test expects a button named 'Go Home', the source component MUST render a button with that exact accessible name.",
         "- When a test navigates to /dashboard or /settings, those routes MUST exist and render the correct page.",

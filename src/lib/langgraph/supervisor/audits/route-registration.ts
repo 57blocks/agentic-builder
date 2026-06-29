@@ -375,12 +375,12 @@ function normaliseApiPath(p: string): string {
  * runtime smoke gate's auth-required-route assertions.
  *
  * Currently exempt:
- *   - `GET /api/health` and `GET /health` (Playwright webServer probe).
+ *   - `GET /api/v1/health`, `GET /api/health` and `GET /health` (Playwright webServer probe).
  */
 const CONTRACT_AUDIT_EXEMPT_ENDPOINTS: ReadonlyArray<{
   method: string;
   pathRe: RegExp;
-}> = [{ method: "GET", pathRe: /^\/(?:api\/)?health\/?$/ }];
+}> = [{ method: "GET", pathRe: /^\/(?:api\/(?:v\d+\/)?)?health\/?$/ }];
 
 export function isContractAuditExempt(
   method: string,

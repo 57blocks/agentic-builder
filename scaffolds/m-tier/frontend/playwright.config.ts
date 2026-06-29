@@ -38,7 +38,7 @@ export default defineConfig({
   webServer: [
     {
       command: "cd ../backend && pnpm dev",
-      url: "http://localhost:4000/api/health",
+      url: "http://localhost:4000/api/v1/health",
       reuseExistingServer: true,
       timeout: 120_000,
       stdout: "pipe",
