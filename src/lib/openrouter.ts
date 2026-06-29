@@ -90,6 +90,7 @@ export const MODELS = {
   "gpt-5-mini": "openai/gpt-5-mini",
   "gemini-3-pro-preview": "google/gemini-2.5-pro",
   "claude-sonnet": "anthropic/claude-sonnet-4",
+  "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
   "claude-opus": "anthropic/claude-opus-4",
   "claude-opus-4.8": "anthropic/claude-opus-4.8",
   "gpt-4o": "openai/gpt-4o",
@@ -111,6 +112,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     "openai/gpt-5-mini": { input: 0.3, output: 1.2 },
     "qwen/qwen3.6-plus": { input: 0.325, output: 1.95 },
     "anthropic/claude-sonnet-4": { input: 3, output: 15 },
+    "anthropic/claude-sonnet-4.6": { input: 3, output: 15 },
     "anthropic/claude-opus-4": { input: 15, output: 75 },
     "anthropic/claude-opus-4.8": { input: 15, output: 75 },
     /** z-ai GLM via OpenRouter — approximate; update if OpenRouter pricing shifts. */

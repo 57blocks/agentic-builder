@@ -696,7 +696,7 @@ async function matchImageToPage(
           ],
         },
       ],
-      { model: "openai/gpt-4o", max_tokens: 80 },
+      { model: "anthropic/claude-sonnet-4.6", max_tokens: 80 },
     );
 
     const raw = resp.choices[0]?.message?.content;
@@ -870,7 +870,7 @@ export async function buildVisionDescriptionsFromDir(
             ],
           },
         ],
-        { model: "openai/gpt-4o", max_tokens: 1500 },
+        { model: "anthropic/claude-sonnet-4.6", max_tokens: 1500 },
       );
 
       const description = resp.choices[0]?.message?.content;
@@ -934,11 +934,18 @@ export function formatVisionDescriptionsBlock(
 
 const BLUEPRINT_CACHE_FILE = "layout-blueprint-cache.json";
 
+/** Vision model used for layout-blueprint extraction. Part of the cache key —
+ *  switching it invalidates stale digests so the new model actually re-parses. */
+const LAYOUT_BLUEPRINT_MODEL = "anthropic/claude-sonnet-4.6";
+
 interface BlueprintCacheEntry {
   storedFileName: string;
   bytes: number;
   blueprint: string;
   generatedAt: string;
+  /** Model that produced this blueprint. Absent on entries written before models
+   *  were keyed → treated as a miss so they get re-parsed by the current model. */
+  model?: string;
 }
 
 async function readBlueprintCache(
@@ -1001,14 +1008,14 @@ export async function extractReferenceLayoutBlueprint(opts: {
 
   const cache = await readBlueprintCache(opts.cacheDir);
   const cached = cache.get(opts.storedFileName);
-  if (cached && cached.bytes === opts.bytes) {
+  if (cached && cached.bytes === opts.bytes && cached.model === LAYOUT_BLUEPRINT_MODEL) {
     console.log(
-      `[LayoutBlueprint] ${opts.storedFileName}: CACHE HIT (${cached.bytes}B) — reusing, no vision call.`,
+      `[LayoutBlueprint] ${opts.storedFileName}: CACHE HIT (${cached.bytes}B, ${LAYOUT_BLUEPRINT_MODEL}) — reusing, no vision call.`,
     );
     return cached.blueprint;
   }
   console.log(
-    `[LayoutBlueprint] ${opts.storedFileName}: cache miss (cached=${cached ? `${cached.bytes}B` : "none"}, want=${opts.bytes}B) — calling vision (gpt-4o)…`,
+    `[LayoutBlueprint] ${opts.storedFileName}: cache miss (cached=${cached ? `${cached.bytes}B/${cached.model ?? "no-model"}` : "none"}, want=${opts.bytes}B/${LAYOUT_BLUEPRINT_MODEL}) — calling vision (${LAYOUT_BLUEPRINT_MODEL})…`,
   );
 
   try {
@@ -1042,7 +1049,7 @@ export async function extractReferenceLayoutBlueprint(opts: {
           ],
         },
       ],
-      { model: "openai/gpt-4o", max_tokens: 1600 },
+      { model: LAYOUT_BLUEPRINT_MODEL, max_tokens: 1600 },
     );
 
     const blueprint = resp.choices[0]?.message?.content;
@@ -1053,6 +1060,7 @@ export async function extractReferenceLayoutBlueprint(opts: {
         bytes: opts.bytes,
         blueprint: text,
         generatedAt: new Date().toISOString(),
+        model: LAYOUT_BLUEPRINT_MODEL,
       });
       await writeBlueprintCache(opts.cacheDir, cache).catch(() => {});
       return text;
