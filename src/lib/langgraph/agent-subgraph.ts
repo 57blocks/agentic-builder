@@ -77,6 +77,10 @@ import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
 import { withTaskLogContext } from "@/lib/server-log-capture";
+import {
+  readProjectProfile,
+  type ProjectProfile,
+} from "@/lib/pipeline/project-profile";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -578,9 +582,100 @@ function buildSearchMatcher(pattern: string): (line: string) => boolean {
  * that tells every worker the key architectural facts they need before writing any code.
  * This prevents systematic errors like double /api prefix, wrong directory names, etc.
  */
+/**
+ * Convention Card for an IMPORTED external project: describe ITS conventions
+ * (from the analyzer's profile) instead of dictating our scaffold's. Stack-
+ * agnostic — works for any imported stack. Pure function of the profile.
+ */
+function buildImportedConventionCard(profile: ProjectProfile): string {
+  const { stack, designSystem, detectedEndpoints, notes } = profile;
+  const pre = (rootDir: string) => (rootDir === "." ? "" : `${rootDir}/`);
+  const lines: string[] = [
+    "## Project Convention Card — IMPORTED PROJECT",
+    "This is an EXISTING external codebase. Match its architecture, directory layout, naming and patterns EXACTLY. Do NOT impose scaffold-specific conventions (no forced `frontend/src/views/`, no `/api/v1` assumption, no Sequelize/no-migrations rule) unless the project already follows them. When unsure, open a sibling file and mirror it.",
+    `- **Layout**: ${stack.monorepo}`,
+    `- **Package manager**: \`${stack.packageManager}\` — use it for every install/run command.`,
+  ];
+
+  const fe = stack.frontend;
+  if (fe) {
+    lines.push(`- **Frontend**: ${fe.framework} (${fe.language})`);
+    if (fe.pageDir)
+      lines.push(
+        `- **Pages/components directory**: \`${pre(fe.rootDir)}${fe.pageDir}\` — put new pages/components here, mirroring the existing file style. Do NOT invent a different directory.`,
+      );
+    if (fe.routerFile)
+      lines.push(
+        `- **Routing**: register new routes the same way existing ones are (see \`${pre(fe.rootDir)}${fe.routerFile}\`).`,
+      );
+    if (fe.apiClient) {
+      const base = fe.apiClient.baseUrl;
+      const prefixNote =
+        fe.apiClient.baseIncludesPrefix && base
+          ? ` The base already includes the API prefix (\`${base}\`) — pass ONLY the business path, never repeat \`${base}\`.`
+          : "";
+      lines.push(
+        `- **API client**: call the backend through \`${pre(fe.rootDir)}${fe.apiClient.path}\`.${prefixNote} Do NOT create a parallel HTTP wrapper.`,
+      );
+    } else {
+      lines.push(
+        "- **API calls**: no centralized API client detected — follow the exact fetch/axios pattern the existing pages use.",
+      );
+    }
+  }
+
+  const be = stack.backend;
+  if (be) {
+    lines.push(
+      `- **Backend**: ${be.framework} (${be.language})${be.orm && be.orm !== "none" ? `, ORM: ${be.orm}` : ""}`,
+    );
+    if (be.dirs?.routes)
+      lines.push(
+        `- **Routes**: add new endpoints under \`${pre(be.rootDir)}${be.dirs.routes}\`, following the existing registration pattern there.`,
+      );
+    if (be.dirs?.models)
+      lines.push(
+        `- **Models/entities**: \`${pre(be.rootDir)}${be.dirs.models}\` — extend existing models and match the project's existing schema/migration workflow (do NOT assume "no migrations").`,
+      );
+    if (be.dirs?.middleware)
+      lines.push(`- **Middleware**: \`${pre(be.rootDir)}${be.dirs.middleware}\`.`);
+  }
+
+  if (detectedEndpoints.length > 0) {
+    lines.push(
+      `- **Existing API**: \`API_CONTRACTS.json\` lists ${detectedEndpoints.length} endpoint(s) reverse-extracted from this project. Reuse existing endpoints; only ADD endpoints the new PRD requires, matching the existing route style.`,
+    );
+  }
+
+  if (designSystem.tokensFile) {
+    lines.push(
+      `- **Design tokens**: \`${designSystem.tokensFile}\` (${designSystem.approach}) — reuse existing tokens/variables; do not hardcode divergent values.`,
+    );
+  } else if (designSystem.approach !== "unknown") {
+    lines.push(
+      `- **Styling**: ${designSystem.approach} — follow the existing styling approach; do not introduce a different one.`,
+    );
+  }
+
+  for (const n of notes ?? []) lines.push(`- ⚠️ ${n}`);
+
+  lines.push(
+    "**Stack-agnostic rules (always)**: wire every interactive control to a real handler that performs its effect; normalize possibly-undefined arrays before `.map`/spread; never leave `Not implemented` stubs; keep every new file consistent with the file you are editing.",
+  );
+
+  return lines.join("\n");
+}
+
 export async function buildProjectConventionCard(
   outputDir: string,
 ): Promise<string> {
+  // Imported project (analyzer wrote a profile) → adapt to ITS conventions.
+  // Non-imported projects have no profile and fall through to the scaffold-based
+  // runtime detection below (unchanged, fully backward compatible).
+  const importedProfile = await readProjectProfile(outputDir);
+  if (importedProfile?.imported) {
+    return buildImportedConventionCard(importedProfile);
+  }
   const lines: string[] = [
     "## Project Convention Card (read before writing any code)",
   ];

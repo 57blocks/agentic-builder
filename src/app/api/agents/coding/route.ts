@@ -27,6 +27,7 @@ import {
   getTierScaffoldSpecForCodingContext,
   writeScaffoldSpecFile,
 } from "@/lib/pipeline/scaffold-spec";
+import { hasProjectProfile } from "@/lib/pipeline/project-profile";
 import {
   formatGeneratedCodeDotEnv,
   upsertRedisUrlEnv,
@@ -1306,50 +1307,61 @@ export async function POST(request: NextRequest) {
   // user picked password-rbac).
   const authDecision = await readAuthDecision(process.cwd());
 
+  // Imported external project (analyzer wrote .blueprint/project-profile.json):
+  // do NOT copy our scaffold over the user's code. Skip every scaffold-specific
+  // write — the Convention Card + role-prompts adapt to the existing structure.
+  const isImported = await hasProjectProfile(outputRoot);
+
   // Always overwrite scaffold files so fresh copies are guaranteed even if cleanup was partial.
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
-  try {
-    const result = await copyScaffold(scaffoldTier, outputRoot, {
-      forceOverwrite: true,
-      resourceRequirements,
-      authDecision,
-    });
-    scaffoldCopied = result.copied;
-    appliedOptionalScaffolds = result.optional.applied;
+  if (isImported) {
     console.log(
-      `[CodingAPI] Scaffold (${tier} tier): wrote ${scaffoldCopied.length} base file(s) + ${result.optional.copiedFiles.length} optional file(s) (${appliedOptionalScaffolds.length} feature(s) applied) to ${outputRoot}`,
+      `[CodingAPI] Imported project — skipping scaffold copy; adapting to existing structure at ${outputRoot}.`,
     );
-  } catch (e) {
-    console.warn(
-      `[CodingAPI] Scaffold copy warning: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
-
-  // Persist the applied optional-scaffold list so downstream stages
-  // (task-breakdown, worker prompts, post-gen audits) can reference it
-  // without re-deriving from triggers.
-  if (appliedOptionalScaffolds.length > 0) {
+  } else {
     try {
-      await fs.mkdir(path.join(outputRoot, ".blueprint"), { recursive: true });
-      await fs.writeFile(
-        path.join(outputRoot, ".blueprint", "scaffold-applied.json"),
-        JSON.stringify(
-          {
-            tier: scaffoldTier,
-            scopeTier: tier,
-            generatedAt: new Date().toISOString(),
-            appliedOptionalFeatures: appliedOptionalScaffolds,
-          },
-          null,
-          2,
-        ) + "\n",
-        "utf-8",
+      const result = await copyScaffold(scaffoldTier, outputRoot, {
+        forceOverwrite: true,
+        resourceRequirements,
+        authDecision,
+      });
+      scaffoldCopied = result.copied;
+      appliedOptionalScaffolds = result.optional.applied;
+      console.log(
+        `[CodingAPI] Scaffold (${tier} tier): wrote ${scaffoldCopied.length} base file(s) + ${result.optional.copiedFiles.length} optional file(s) (${appliedOptionalScaffolds.length} feature(s) applied) to ${outputRoot}`,
       );
     } catch (e) {
       console.warn(
-        `[CodingAPI] Failed to persist scaffold-applied.json: ${e instanceof Error ? e.message : String(e)}`,
+        `[CodingAPI] Scaffold copy warning: ${e instanceof Error ? e.message : String(e)}`,
       );
+    }
+
+    // Persist the applied optional-scaffold list so downstream stages
+    // (task-breakdown, worker prompts, post-gen audits) can reference it
+    // without re-deriving from triggers.
+    if (appliedOptionalScaffolds.length > 0) {
+      try {
+        await fs.mkdir(path.join(outputRoot, ".blueprint"), { recursive: true });
+        await fs.writeFile(
+          path.join(outputRoot, ".blueprint", "scaffold-applied.json"),
+          JSON.stringify(
+            {
+              tier: scaffoldTier,
+              scopeTier: tier,
+              generatedAt: new Date().toISOString(),
+              appliedOptionalFeatures: appliedOptionalScaffolds,
+            },
+            null,
+            2,
+          ) + "\n",
+          "utf-8",
+        );
+      } catch (e) {
+        console.warn(
+          `[CodingAPI] Failed to persist scaffold-applied.json: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
   }
 
@@ -1386,15 +1398,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 把 design 阶段生成的 tokens.css 复制到 tier 对应位置（在 copyScaffold 之后）。
-  await copyDesignTokens(outputRoot, scaffoldTier);
+  // Scaffold-specific design/spec writes — skipped for imported projects
+  // (they have their own design system; our tokens.css / SCAFFOLD_SPEC would be
+  // foreign artifacts).
+  if (!isImported) {
+    // 把 design 阶段生成的 tokens.css 复制到 tier 对应位置（在 copyScaffold 之后）。
+    await copyDesignTokens(outputRoot, scaffoldTier);
 
-  try {
-    await writeScaffoldSpecFile(outputRoot, scaffoldTier);
-  } catch (e) {
-    console.warn(
-      `[CodingAPI] writeScaffoldSpecFile warning: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    try {
+      await writeScaffoldSpecFile(outputRoot, scaffoldTier);
+    } catch (e) {
+      console.warn(
+        `[CodingAPI] writeScaffoldSpecFile warning: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   // ── Infra step (deployment-ready Dockerfile + docker-compose) ───────────
@@ -1659,8 +1676,29 @@ export async function POST(request: NextRequest) {
   // Use scaffoldTier (not the scope tier) so the protected-paths list matches
   // the scaffold we actually copied — otherwise S+backend would copy the M
   // scaffold's backend files but fail to protect them from worker overwrites.
-  const scaffoldProtectedPaths =
-    await listScaffoldTemplateRelativePaths(scaffoldTier);
+  const scaffoldProtectedPaths = isImported
+    ? // Imported project: there are no scaffold templates to protect. Protect
+      // only the project SKELETON (manifests / lockfiles / build configs) so a
+      // worker can't delete the project's structure; source files stay editable
+      // for second-iteration changes, with the git baseline as the safety net.
+      [
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "tsconfig.json",
+        "vite.config.ts",
+        "next.config.js",
+        "next.config.mjs",
+        "next.config.ts",
+        "frontend/package.json",
+        "frontend/pnpm-lock.yaml",
+        "frontend/package-lock.json",
+        "backend/package.json",
+        "backend/pnpm-lock.yaml",
+        "backend/package-lock.json",
+      ]
+    : await listScaffoldTemplateRelativePaths(scaffoldTier);
   // Distributed shared-schema files are written outside the scaffold
   // template walker, so merge them in explicitly. Workers must not
   // overwrite the canonical TRD-frozen schema.

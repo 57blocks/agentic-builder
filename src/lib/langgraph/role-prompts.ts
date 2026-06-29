@@ -41,6 +41,7 @@
 import path from "node:path";
 import * as nodeFs from "fs/promises";
 import type { CodingAgentRole } from "@/lib/pipeline/types";
+import { readProjectProfile } from "@/lib/pipeline/project-profile";
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -59,6 +60,10 @@ export interface PromptContext {
    *  prompt. Empty / undefined when no skill applied. Conditional codegen rules
    *  live as skills under `.blueprint/skills/<role>/` rather than inline here. */
   skillsBlock?: string;
+  /** True when this is an IMPORTED external project (a project-profile.json
+   *  exists). Switches role prompts to a stack-agnostic "follow the existing
+   *  project" mode instead of dictating our scaffold's conventions. */
+  imported?: boolean;
 }
 
 const EMPTY_CONTEXT: PromptContext = {
@@ -616,6 +621,57 @@ function buildTestPrompt(): string {
   ].join("\n");
 }
 
+// ─── Imported-project mode (stack-agnostic) ─────────────────────────────────
+
+const IMPORTED_ROLE_INTRO: Record<CodingAgentRole, string> = {
+  architect:
+    "You are a Senior Software Architect working on an EXISTING, imported codebase.",
+  frontend:
+    "You are a Senior Frontend Engineer working on an EXISTING, imported codebase.",
+  backend:
+    "You are a Senior Backend Engineer working on an EXISTING, imported codebase.",
+  fullstack:
+    "You are a Senior Full-Stack Engineer working on an EXISTING, imported codebase.",
+  test: "You are a Senior QA / Test Engineer working on an EXISTING, imported codebase.",
+};
+
+/**
+ * Prompt for IMPORTED projects. The project's real conventions live in the
+ * `Project Convention Card` (built from its profile and injected into context),
+ * so here we deliberately DROP all scaffold-specific HARD RULES (views/ dir,
+ * `/api/v1` client base, Sequelize-no-migrations, respond.ts, …) and keep only
+ * stack-agnostic engineering rules + "match what's already there".
+ */
+function buildImportedRolePrompt(
+  role: CodingAgentRole,
+  ctx: PromptContext,
+): string {
+  const sections: string[] = [
+    IMPORTED_ROLE_INTRO[role],
+    "",
+    "**This is a second-iteration change on a real, pre-existing project — NOT a fresh scaffold. Your #1 job is to match what is already there.**",
+    "",
+    "**Hard rules (stack-agnostic):**",
+    "- READ the `Project Convention Card` in context FIRST — it describes this project's actual stack, directories, API client, and patterns. Follow it exactly.",
+    "- Before creating any file, open a sibling/related existing file and MIRROR its conventions: language, imports, directory, naming, response shape, error handling, styling.",
+    "- REUSE existing utilities, components, models, the existing API client and existing endpoints. Do NOT introduce a parallel implementation or a different architecture/framework.",
+    "- Make the SMALLEST change that satisfies the task. Add new files in the directories the project already uses; extend existing files in place. NEVER delete or rewrite unrelated existing code.",
+    "- Every interactive control you add MUST have a real handler that performs its declared effect (call the real endpoint via the existing client, navigate, or update state). No inert controls, no `Not implemented` stubs.",
+    "- Arrays sourced from API responses may be undefined before the first fetch — normalize (`const safe = items ?? []`) before `.map` / spread.",
+    "- If the project has a test setup, follow ITS framework and conventions; do not impose a different one.",
+    WORKER_READONLY_TOOLS_GUIDE,
+    "",
+    "You may write a brief plan (≤10 lines) before outputting files.",
+    `For each file: \`\`\`file:<relative-path>\n<contents>\n\`\`\``,
+    "",
+    `When done: ${RALPH_COMPLETE_TOKEN}`,
+    `On failure: <promise>TASK_FAILED: <reason></promise>`,
+  ];
+  return [sections.join("\n"), ctx.skillsBlock?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export function buildRolePrompt(
@@ -623,6 +679,9 @@ export function buildRolePrompt(
   ctx?: PromptContext,
 ): string {
   const context = ctx ?? EMPTY_CONTEXT;
+  // Imported external project → stack-agnostic "follow the existing project"
+  // prompt instead of our scaffold-specific role prompts.
+  if (context.imported) return buildImportedRolePrompt(role, context);
   switch (role) {
     case "architect":
       return buildArchitectPrompt();
@@ -658,16 +717,18 @@ export async function loadPromptContext(
   const cached = contextCache.get(outputDir);
   if (cached) return cached;
 
-  const [applied, envKeys, flags] = await Promise.all([
+  const [applied, envKeys, flags, profile] = await Promise.all([
     loadAppliedFeatures(outputDir),
     loadDeclaredEnvKeys(outputDir),
     detectRuntimeFlags(outputDir),
+    readProjectProfile(outputDir),
   ]);
 
   const ctx: PromptContext = {
     appliedOptionalFeatures: applied,
     declaredEnvKeys: envKeys,
     flags,
+    imported: profile?.imported ?? false,
   };
   contextCache.set(outputDir, ctx);
   return ctx;
