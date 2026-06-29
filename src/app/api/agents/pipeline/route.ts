@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
-import fs from "fs/promises";
-import path from "path";
 import { PipelineEngine } from "@/lib/pipeline/engine";
+import { savePipelineSnapshot } from "@/lib/pipeline/pipeline-snapshot";
 import type { PipelineEvent } from "@/lib/pipeline/types";
 import { wrapPipelineEventHandler } from "@/lib/memory/event-bridge";
 import type {
@@ -105,26 +104,16 @@ export async function POST(request: NextRequest) {
               : undefined,
         });
 
-        // Auto-save pipeline snapshot for debug reuse
+        // Auto-save pipeline snapshot for debug reuse AND into the generated
+        // project dir so it can later be re-imported with PRD/TRD/design/tasks.
         if (result.steps.kickoff?.status === "completed") {
-          try {
-            const snapshotDir = path.resolve(process.cwd(), ".blueprint");
-            await fs.mkdir(snapshotDir, { recursive: true });
-            const snapshot = {
-              savedAt: new Date().toISOString(),
-              featureBrief,
-              codeOutputDir: codeOutputDir || "",
-              totalCostUsd: result.totalCostUsd,
-              steps: result.steps,
-            };
-            await fs.writeFile(
-              path.join(snapshotDir, "pipeline-snapshot.json"),
-              JSON.stringify(snapshot, null, 2),
-              "utf-8",
-            );
-          } catch {
-            /* non-critical */
-          }
+          await savePipelineSnapshot({
+            savedAt: new Date().toISOString(),
+            featureBrief,
+            codeOutputDir: codeOutputDir || "",
+            totalCostUsd: result.totalCostUsd,
+            steps: result.steps,
+          });
         }
 
         controller.enqueue(

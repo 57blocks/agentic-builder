@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { PipelineEngine } from "@/lib/pipeline/engine";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
+import { savePipelineSnapshot } from "@/lib/pipeline/pipeline-snapshot";
 import type { PipelineEvent, PipelineStepId, StepResult } from "@/lib/pipeline/types";
 import { wrapPipelineEventHandler } from "@/lib/memory/event-bridge";
 import { fetchStitchScreenHtml } from "@/lib/stitch-api";
@@ -230,25 +231,15 @@ export async function POST(request: NextRequest) {
 
         console.log("[KickoffAPI] done, run.status=", result.status, "kickoff.status=", result.steps.kickoff?.status);
 
-        // Auto-save pipeline snapshot for debug reuse
-        try {
-          const snapshotDir = path.resolve(process.cwd(), ".blueprint");
-          await fs.mkdir(snapshotDir, { recursive: true });
-          const snapshot = {
-            savedAt: new Date().toISOString(),
-            featureBrief: featureBrief || "",
-            codeOutputDir: codeOutputDir || "",
-            totalCostUsd: result.totalCostUsd,
-            steps: result.steps,
-          };
-          await fs.writeFile(
-            path.join(snapshotDir, "pipeline-snapshot.json"),
-            JSON.stringify(snapshot, null, 2),
-            "utf-8",
-          );
-        } catch {
-          /* non-critical: skip if write fails */
-        }
+        // Auto-save pipeline snapshot for debug reuse AND into the generated
+        // project dir so it can later be re-imported with PRD/TRD/design/tasks.
+        await savePipelineSnapshot({
+          savedAt: new Date().toISOString(),
+          featureBrief: featureBrief || "",
+          codeOutputDir: codeOutputDir || "",
+          totalCostUsd: result.totalCostUsd,
+          steps: result.steps,
+        });
 
         let donePayload: string;
         try {

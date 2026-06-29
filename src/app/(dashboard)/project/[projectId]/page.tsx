@@ -33,6 +33,17 @@ async function persistActiveStep(projectId: string, stepId: StepId, tier?: Proje
   });
 }
 
+/** Legacy/stage activeStep ids → a real registry StepId. "kickoff" is a stage,
+ *  not a step; older imports persisted it as activeStep. Falls back to a valid
+ *  step so the page never renders the "not found in registry" dead end. */
+const ACTIVE_STEP_ALIASES: Partial<Record<string, StepId>> = { kickoff: "task-breakdown" };
+function resolveActiveStep(step: string): StepId {
+  if (step in STEP_REGISTRY) return step as StepId;
+  const aliased = ACTIVE_STEP_ALIASES[step];
+  if (aliased && aliased in STEP_REGISTRY) return aliased;
+  return "task-breakdown";
+}
+
 // ─── Page (thin shell, owns activeStep state from API) ────────────────────
 
 export default function ProjectPage() {
@@ -123,8 +134,12 @@ export default function ProjectPage() {
         }
 
         if (nav) {
-          setActiveStep(nav.activeStep);
-          activeStepRef.current = nav.activeStep;
+          // Defensive: a persisted activeStep may be a legacy/stage id with no
+          // registry entry (e.g. "kickoff" from an older import) — remap it so the
+          // page recovers instead of rendering "Step '…' not found in registry".
+          const resolvedStep = resolveActiveStep(nav.activeStep);
+          setActiveStep(resolvedStep);
+          activeStepRef.current = resolvedStep;
           useStepNavigationStore.getState().setTier(nav.tier);
           // Load ALL step snapshots first, then mark hydrated — prevents auto-start racing
           await loadAllStepSnapshots(projectId);
