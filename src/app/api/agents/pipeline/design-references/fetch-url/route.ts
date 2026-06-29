@@ -63,6 +63,20 @@ export async function POST(request: NextRequest) {
       ? body.projectId
       : undefined);
 
+  // References are stored per-project under
+  // `.blueprint/projects/<projectId>/design-references/`; reject early when no
+  // projectId so we never fall back to the shared root and pollute other builds.
+  if (!projectId) {
+    return NextResponse.json(
+      {
+        error:
+          "projectId is required (pass ?projectId=… or a `projectId` body field). " +
+          "Design references are stored per project; the shared root is not a valid target.",
+      },
+      { status: 400 },
+    );
+  }
+
   if (!screenshotDataUrl || typeof screenshotDataUrl !== "string") {
     return NextResponse.json(
       { error: "screenshotDataUrl is required." },

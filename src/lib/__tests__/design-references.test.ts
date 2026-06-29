@@ -23,7 +23,7 @@ describe("addDesignReference — new fields", () => {
   it("writes source=upload and matchedBy=auto", async () => {
     const r = await addDesignReference(tmpDir, {
       fileName: "a.png", mime: "image/png", bytes: fakePng,
-      source: "upload", matchedBy: "auto",
+      source: "upload", matchedBy: "auto", projectId: "proj-1",
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -38,6 +38,7 @@ describe("addDesignReference — new fields", () => {
       fileName: "shot.png", mime: "image/png", bytes: fakePng,
       source: "url", matchedBy: "manual",
       cssToken: { "--color-primary": "#3b82f6" },
+      projectId: "proj-1",
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -48,11 +49,22 @@ describe("addDesignReference — new fields", () => {
   it("defaults source=upload matchedBy=auto when omitted", async () => {
     const r = await addDesignReference(tmpDir, {
       fileName: "b.png", mime: "image/png", bytes: fakePng,
+      projectId: "proj-1",
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.entry.source).toBe("upload");
     expect(r.entry.matchedBy).toBe("auto");
+  });
+
+  it("rejects a write without a projectId (no shared-root fallback)", async () => {
+    const r = await addDesignReference(tmpDir, {
+      fileName: "orphan.png", mime: "image/png", bytes: fakePng,
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/projectId is required/i);
   });
 });
 
@@ -60,7 +72,7 @@ describe("updateDesignReference — new fields", () => {
   it("can set pageHint, matchedBy, matchConfidence together", async () => {
     const add = await addDesignReference(tmpDir, {
       fileName: "c.png", mime: "image/png", bytes: fakePng,
-      source: "upload", matchedBy: "auto",
+      source: "upload", matchedBy: "auto", projectId: "proj-1",
     });
     expect(add.ok).toBe(true);
     if (!add.ok) return;
@@ -68,7 +80,7 @@ describe("updateDesignReference — new fields", () => {
       pageHint: "PAGE-001",
       matchedBy: "auto",
       matchConfidence: "high",
-    });
+    }, "proj-1");
     expect(updated?.pageHint).toBe("PAGE-001");
     expect(updated?.matchedBy).toBe("auto");
     expect(updated?.matchConfidence).toBe("high");
@@ -77,17 +89,17 @@ describe("updateDesignReference — new fields", () => {
   it("can overwrite matchedBy from auto to manual (clears matchConfidence)", async () => {
     const add = await addDesignReference(tmpDir, {
       fileName: "d.png", mime: "image/png", bytes: fakePng,
-      source: "upload", matchedBy: "auto",
+      source: "upload", matchedBy: "auto", projectId: "proj-1",
     });
     expect(add.ok).toBe(true);
     if (!add.ok) return;
     await updateDesignReference(tmpDir, add.entry.id, {
       pageHint: "PAGE-001", matchedBy: "auto", matchConfidence: "medium",
-    });
+    }, "proj-1");
     const u2 = await updateDesignReference(tmpDir, add.entry.id, {
       matchedBy: "manual",
       matchConfidence: null,
-    });
+    }, "proj-1");
     expect(u2?.matchedBy).toBe("manual");
     expect(u2?.matchConfidence).toBeUndefined();
   });
@@ -98,6 +110,7 @@ describe("autoMatchReferencesToPages — manual skip", () => {
     const r = await addDesignReference(tmpDir, {
       fileName: "manual.png", mime: "image/png", bytes: fakePng,
       source: "upload", matchedBy: "manual", pageHint: "PAGE-001",
+      projectId: "proj-1",
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -108,6 +121,7 @@ describe("autoMatchReferencesToPages — manual skip", () => {
       tmpDir,
       [{ id: "PAGE-001", name: "Dashboard" }],
       { force: true },
+      "proj-1",
     );
 
     const manualEntry = results.find((res) => res.referenceId === r.entry.id);

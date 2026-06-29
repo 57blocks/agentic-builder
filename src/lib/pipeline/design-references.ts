@@ -285,7 +285,23 @@ export async function addDesignReference(
   projectRoot: string,
   input: AddDesignReferenceInput,
 ): Promise<AddDesignReferenceResult | AddDesignReferenceFailure> {
-  const projectId = input.projectId;
+  const projectId = input.projectId?.trim();
+  // Design references MUST be scoped to a project so they land under
+  // `.blueprint/projects/<projectId>/design-references/`. Writing without a
+  // projectId used to silently fall back to the shared root
+  // `.blueprint/design-references/`, which let one project's uploads pollute
+  // every other build (the "CSMA Donezo contamination"). Reject the write
+  // instead so the caller is forced to pass the active projectId.
+  if (!projectId) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "projectId is required to store a design reference. References are " +
+        "persisted under .blueprint/projects/<projectId>/design-references/; " +
+        "the shared root is no longer a valid write target.",
+    };
+  }
   const resolved = resolveKindAndMime(input.mime, input.fileName);
   if (!resolved) {
     return {

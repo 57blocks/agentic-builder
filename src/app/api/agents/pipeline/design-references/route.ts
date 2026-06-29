@@ -43,6 +43,21 @@ export async function POST(request: NextRequest) {
       ? formProjectId
       : undefined);
 
+  // References are stored per-project under
+  // `.blueprint/projects/<projectId>/design-references/`. Without a projectId
+  // the write would have fallen back to the shared root and polluted other
+  // builds — reject up front with a clear error instead of per-file skips.
+  if (!effectiveProjectId) {
+    return NextResponse.json(
+      {
+        error:
+          "projectId is required (pass ?projectId=… or a `projectId` form field). " +
+          "Design references are stored per project; the shared root is not a valid target.",
+      },
+      { status: 400 },
+    );
+  }
+
   const files = form.getAll("file");
   if (files.length === 0) {
     return NextResponse.json(
