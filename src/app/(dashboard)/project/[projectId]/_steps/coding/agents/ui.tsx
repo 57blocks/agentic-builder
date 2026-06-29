@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -25,8 +25,10 @@ import {
   RefreshCw,
   ListChecks,
   Bug,
+  ChevronDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { DropdownMenu } from "radix-ui";
 
 import { useCodingStore } from "@/store/coding-store";
 import type { CodingSessionSnapshot } from "@/store/coding-store";
@@ -36,6 +38,7 @@ import { useStageStore } from "@/store/stage-store";
 import { parseKickoffTaskBreakdownFromMetadata } from "@/lib/pipeline/kickoff-task-breakdown";
 import type { StepUIProps } from "../../_shared/types";
 import type {
+  AgentLogEntry,
   CodingAgentRole,
   CodingTask,
   KickoffWorkItem,
@@ -43,12 +46,16 @@ import type {
 import type { CodingMode } from "@/lib/pipeline/coding-mode";
 import { inferRole } from "@/lib/langgraph/supervisor/role-mapping";
 
-import { TaskNode, type TaskNodeData } from "./components/TaskNode";
+import {
+  TaskNode,
+  TaskNodeActionsContext,
+  type TaskNodeData,
+} from "./components/TaskNode";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskRerunPicker } from "./components/TaskRerunPicker";
 import { AgentBubbles } from "./components/AgentBubbles";
-import { StatusBar } from "./components/StatusBar";
 import { TaskSearchBox } from "./components/TaskSearchBox";
+import { ServerConsolePanel } from "./components/ServerConsolePanel";
 import { useElapsedTimer } from "./use-elapsed-timer";
 
 // ─── React Flow node type registry ───────────────────────────────────────────
@@ -665,14 +672,26 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDone, isFailed]);
 
-  // ── Agent logs (flat, all agents) + TDD per-test logs, ordered by time ──────
+  // ── Agent logs + TDD per-test logs + task-tagged server console lines ──────
   const allAgentLogs = useMemo(
     () =>
       [
         ...codingState.agents.flatMap((a) => a.logs),
         ...codingState.tddLogs,
+        // Server console lines attributed to a task (via withTaskLogContext)
+        // surface inside that task's REAL-TIME LOGS.
+        ...codingState.serverLogs
+          .filter((l) => l.taskId)
+          .map(
+            (l): AgentLogEntry => ({
+              timestamp: l.timestamp,
+              type: "info",
+              taskId: l.taskId,
+              message: `[console:${l.level}] ${l.message}`,
+            }),
+          ),
       ].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-    [codingState.agents, codingState.tddLogs],
+    [codingState.agents, codingState.tddLogs, codingState.serverLogs],
   );
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -685,6 +704,17 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // canvas to centre it. NODE_W/NODE_H offsets are added so the camera lands
   // on the card's centre, not its top-left corner.
   const reactFlow = useReactFlow();
+  // Transient "flash" highlight on the task we just centred on, so after the
+  // canvas pans the user can SEE which card is the dependency. `nonce` lets the
+  // animation replay even when the same task is targeted twice in a row.
+  const [flash, setFlash] = useState<{ id: string; nonce: number } | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
   const focusTask = useCallback(
     (taskId: string) => {
       const node = reactFlow.getNode(taskId);
@@ -693,8 +723,23 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       const cx = node.position.x + NODE_W / 2;
       const cy = node.position.y + NODE_H / 2;
       reactFlow.setCenter(cx, cy, { zoom: 1, duration: 350 });
+      setFlash((prev) => ({ id: taskId, nonce: (prev?.nonce ?? 0) + 1 }));
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlash(null), 1600);
     },
     [reactFlow],
+  );
+
+  // Stable actions object handed to every TaskNode via context (so the DEPS
+  // chip on a card can jump to an upstream dependency, and the jumped-to card
+  // can flash). focusTask is stable; `flash` changes only on a jump.
+  const nodeActions = useMemo(
+    () => ({
+      onFocusDep: focusTask,
+      flashTaskId: flash?.id ?? null,
+      flashNonce: flash?.nonce ?? 0,
+    }),
+    [focusTask, flash],
   );
 
   const handleStart = useCallback(() => {
@@ -865,47 +910,71 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           </button>
         )}
 
-        {/* Re-run a hand-picked subset — available whenever a run is not in
-            flight (idle, done or failed). Mid-flight is excluded so it can't
-            race the active session. */}
-        {!isRunning && kickoffTasks.length > 0 && (
-          <button
-            onClick={() => setPickerOpen(true)}
-            title="Pick specific tasks to re-run"
-            className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
-          >
-            <ListChecks size={13} />
-            Pick to re-run
-          </button>
-        )}
-
-        {/* Rerun — always available once the user has triggered at least one
-            coding run, regardless of success / failure / in-flight. Confirm
-            dialog inside handleRerun prevents accidental clicks. */}
-        {hasStarted && kickoffTasks.length > 0 && (
-          <button
-            onClick={handleRerun}
-            title="Rerun the entire coding pipeline from task #1"
-            className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors"
-          >
-            <RefreshCw size={13} />
-            {isRunning ? "Abort & Rerun" : "Rerun"}
-          </button>
-        )}
-
-        {/* Debug — trigger ONLY the integration-fix stage against the existing
-            generated output (no codegen rerun). Dev aid; verbose stage logs are
-            printed server-side. Hidden mid-run so it can't race the session. */}
-        {hasStarted && !isRunning && kickoffTasks.length > 0 && (
-          <button
-            onClick={handleDebugIntegrationFix}
-            title="Debug: trigger the integration-fix stage directly (verbose server logs)"
-            className="flex items-center gap-2 px-4 py-2 border border-amber-300 hover:border-amber-400 hover:bg-amber-50 text-amber-700 text-[12px] font-semibold rounded-lg transition-colors"
-          >
-            <Bug size={13} />
-            Debug: Integration Fix
-          </button>
-        )}
+        {/* Re-run / debug actions — collapsed into ONE menu so the toolbar
+            stays tidy instead of spreading 3 buttons. Each item keeps its
+            original availability rule:
+              • Pick to re-run  — any time a run is not in flight
+              • Rerun all       — once at least one run has been triggered
+              • Debug: …        — dev aid, hidden mid-run
+            The trigger only renders when at least one item is available, and
+            collapses to a single chevron-less label when only one applies. */}
+        {(() => {
+          const canPick = !isRunning && kickoffTasks.length > 0;
+          const canRerun = hasStarted && kickoffTasks.length > 0;
+          const canDebug = hasStarted && !isRunning && kickoffTasks.length > 0;
+          if (!canPick && !canRerun && !canDebug) return null;
+          const itemCls =
+            "flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-slate-700 rounded-md outline-none cursor-pointer transition-colors hover:bg-slate-50 focus:bg-slate-50";
+          return (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  title="Re-run actions"
+                  className="flex items-center gap-1.5 px-4 py-2 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg transition-colors outline-none"
+                >
+                  <RefreshCw size={13} />
+                  Re-run
+                  <ChevronDown size={13} className="text-slate-400" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="end"
+                  sideOffset={6}
+                  className="z-50 min-w-[200px] rounded-lg border border-slate-200 bg-white p-1 shadow-lg"
+                >
+                  {canPick && (
+                    <DropdownMenu.Item
+                      onSelect={() => setPickerOpen(true)}
+                      className={itemCls}
+                    >
+                      <ListChecks size={13} />
+                      Pick to re-run
+                    </DropdownMenu.Item>
+                  )}
+                  {canRerun && (
+                    <DropdownMenu.Item onSelect={handleRerun} className={itemCls}>
+                      <RefreshCw size={13} />
+                      {isRunning ? "Abort & Rerun" : "Rerun all"}
+                    </DropdownMenu.Item>
+                  )}
+                  {canDebug && (
+                    <>
+                      <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
+                      <DropdownMenu.Item
+                        onSelect={handleDebugIntegrationFix}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-amber-700 rounded-md outline-none cursor-pointer transition-colors hover:bg-amber-50 focus:bg-amber-50"
+                      >
+                        <Bug size={13} />
+                        Debug: Integration Fix
+                      </DropdownMenu.Item>
+                    </>
+                  )}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          );
+        })()}
 
         {isDone && failedTaskIds.length === 0 && (
           <button
@@ -925,34 +994,36 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           {mergedTasks.length > 0 && (
             <TaskSearchBox tasks={mergedTasks} onLocate={focusTask} />
           )}
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={handleNodeClick}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.3, maxZoom: 1.2 }}
-            minZoom={0.3}
-            maxZoom={2}
-            proOptions={{ hideAttribution: true }}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable
-            className="bg-[#f8fafc]"
-          >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
-              color="#e2e8f0"
-            />
-            <Controls
-              showInteractive={false}
-              className="border-slate-200! shadow-sm!"
-            />
-          </ReactFlow>
+          <TaskNodeActionsContext.Provider value={nodeActions}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={handleNodeClick}
+              nodeTypes={nodeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.3, maxZoom: 1.2 }}
+              minZoom={0.3}
+              maxZoom={2}
+              proOptions={{ hideAttribution: true }}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable
+              className="bg-[#f8fafc]"
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={20}
+                size={1}
+                color="#e2e8f0"
+              />
+              <Controls
+                showInteractive={false}
+                className="border-slate-200! shadow-sm!"
+              />
+            </ReactFlow>
+          </TaskNodeActionsContext.Provider>
         </div>
 
         {/* Task detail panel — slides in from right */}
@@ -970,10 +1041,8 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
                 <TaskDetailPanel
                   task={selectedTask}
                   allAgentLogs={allAgentLogs}
-                  allTasks={mergedTasks}
                   onClose={() => setSelectedTaskId(null)}
                   onRetry={!isRunning ? handleRetryTask : undefined}
-                  onSelectTask={focusTask}
                 />
               </div>
             </motion.div>
@@ -981,8 +1050,10 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
         </AnimatePresence>
       </div>
 
-      {/* ─── Bottom status bar ──────────────────────────────────────────────── */}
-      <StatusBar
+      {/* ─── Bottom bar: system status + live server console (merged) ───────── */}
+      <ServerConsolePanel
+        logs={codingState.serverLogs}
+        onClear={() => useCodingStore.setState({ serverLogs: [] })}
         isRunning={isRunning}
         isCompleted={isDone}
         isFailed={isFailed}

@@ -47,6 +47,7 @@ import {
   prdSignalsBackend,
 } from "@/lib/agents/shared/project-classifier";
 import { readAuthDecision } from "@/lib/pipeline/auth-decision-io";
+import { copyDesignTokens } from "@/lib/pipeline/copy-design-tokens";
 import { InfraAgent } from "@/lib/agents/infra/infra-agent";
 import { applyInfra } from "@/lib/pipeline/infra/apply";
 import { buildInfraSpecFromKickoff } from "@/lib/pipeline/infra/from-kickoff";
@@ -105,6 +106,11 @@ import {
   registerWorkerChunkSink,
   unregisterWorkerChunkSink,
 } from "@/lib/langgraph/worker-event-bridge";
+import { installServerLogCapture, logContext } from "@/lib/server-log-capture";
+import {
+  registerLogSink,
+  unregisterLogSink,
+} from "@/lib/langgraph/server-log-bridge";
 import {
   runEvidenceGate,
   collectCodingStageEvidence,
@@ -895,6 +901,15 @@ function runGoalModeCodingResponse(args: {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
+
+  // Server-console capture: install the console patch and open a session-scoped
+  // log context BEFORE any prep work (clean dir, scaffold, pnpm install, …) so
+  // those lines are buffered and flushed to the Server Console panel once the
+  // SSE sink attaches in the stream's start(). The main coding stream below
+  // reuses this same sessionId. See src/lib/server-log-capture.ts.
+  const sessionId = uuidv4();
+  installServerLogCapture();
+  logContext.enterWith({ sessionId });
   const {
     runId,
     tasks,
@@ -1370,6 +1385,9 @@ export async function POST(request: NextRequest) {
       `[CodingAPI] Failed to mirror design references: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
+
+  // 把 design 阶段生成的 tokens.css 复制到 tier 对应位置（在 copyScaffold 之后）。
+  await copyDesignTokens(outputRoot, scaffoldTier);
 
   try {
     await writeScaffoldSpecFile(outputRoot, scaffoldTier);
@@ -1975,7 +1993,8 @@ export async function POST(request: NextRequest) {
     codingStatus: "pending" as const,
   }));
 
-  const sessionId = uuidv4();
+  // sessionId is created at the top of POST (above) so prep-phase console
+  // output is captured under the same id this stream registers its sink with.
   const mapper = new EventMapper(sessionId);
   const encoder = new TextEncoder();
 
@@ -2080,6 +2099,16 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       registerRepairEmitter(sessionId, repairEmitter);
+
+      // Mirror server console output into the SSE pipe for the live Server
+      // Console panel. enterWith tags every console.* on this request's async
+      // tree with the sessionId; worker nodes refine taskId via
+      // withTaskLogContext. See src/lib/server-log-capture.ts.
+      installServerLogCapture();
+      logContext.enterWith({ sessionId });
+      registerLogSink(sessionId, (entry) =>
+        send({ type: "server_log", sessionId, data: entry }),
+      );
 
       // Register a sink that forwards worker sub-graph chunks (emitted by
       // invokeWorkerBatched via workerGraph.stream) back into this SSE pipe.
@@ -2771,6 +2800,7 @@ export async function POST(request: NextRequest) {
         clearCodingSessionLlmUsage(sessionId);
         unregisterRepairEmitter(sessionId);
         unregisterWorkerChunkSink(sessionId);
+        unregisterLogSink(sessionId);
         // Remove from registry only if we are still the active session
         // (a newer session may have already replaced us).
         if (activeCodingSessions.get(outputRoot) === sessionAbortController) {

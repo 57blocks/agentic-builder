@@ -76,6 +76,7 @@ import { recordCodingSessionLlmUsage } from "@/lib/pipeline/coding-session-repor
 import { buildRolePrompt, loadPromptContext } from "./role-prompts";
 import { loadSkillsForAgent, formatAppliedSkills } from "@/lib/agents/skills";
 import { logTaskContext } from "./task-context-logger";
+import { withTaskLogContext } from "@/lib/server-log-capture";
 
 const DEFAULT_WORKER_CODEGEN_MAX_OUTPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = (() => {
@@ -1748,7 +1749,21 @@ async function runCodegenAgentSession(
     if (toolCalls.length > 0) {
       const toolResultTexts: string[] = [];
       let hadWriteTool = false;
+      // Did the model *try* to write this round (even if the write was rejected
+      // by content-loss-guard / protected-path)? A rejected write returns
+      // isWrite=false, but it is NOT a read-only round — treating it as one is
+      // what lets consecutiveReadRounds climb to forceWrite and then deadlock.
+      let attemptedWrite = false;
       for (const toolCall of toolCalls) {
+        const toolName = toolCall.function.name;
+        if (
+          toolName === "write_file" ||
+          toolName === "apply_patch" ||
+          toolName === "delete_file" ||
+          toolName === "move_file"
+        ) {
+          attemptedWrite = true;
+        }
         let args: Record<string, unknown>;
         try {
           args = JSON.parse(toolCall.function.arguments || "{}") as Record<
@@ -1789,11 +1804,24 @@ async function runCodegenAgentSession(
         toolResultTexts.push(result.content);
       }
 
-      if (!hadWriteTool) {
+      if (hadWriteTool) {
+        consecutiveReadRounds = 0;
+      } else if (attemptedWrite) {
+        // Write attempted but rejected (content-loss-guard / protected path).
+        // Not a read-only round: leave consecutiveReadRounds unchanged so the
+        // anti-spiral guard isn't tripped by a model that's actively (if
+        // wrongly) trying to write. Steer it toward the right tool instead.
+        console.log(
+          `[Worker] rejected-write round, not counting as read-only (loop=${i + 1}, consecutiveReadRounds=${consecutiveReadRounds})`,
+        );
+        messages.push({
+          role: "system",
+          content:
+            "Your write was REJECTED (most likely content-loss-guard: you tried to overwrite an existing file with much smaller content). To edit an existing file, use apply_patch for a local insertion, OR read_file to get the full current content and then write_file with the COMPLETE merged file. Do not re-send the same partial content.",
+        });
+      } else {
         readOnlyRounds++;
         consecutiveReadRounds++;
-      } else {
-        consecutiveReadRounds = 0;
       }
 
       if (recallCtx && !didSecondaryRecall) {
@@ -3312,7 +3340,7 @@ async function generateCode(state: WorkerState) {
         ? `\n\nMULTI-ROUND OUTPUT MODE:\n- In this round, output at most ${CODEGEN_FILE_BATCH_SIZE} file block(s) using \`\`\`file:path\`\`\` format.\n- Prefer continuing with files not yet generated in this task.\n- However, if any previously generated file needs correction, completion, API wiring, import/export alignment, consistency fixes, or error fixes, you SHOULD rewrite that file in this round.\n- Do NOT preserve an incorrect earlier version just to avoid rewriting.\n- If more files are still needed for this task, end your response with: STATUS: CONTINUE\n- If task implementation is complete, end your response with: STATUS: DONE`
         : "";
 
-    const userTaskText = `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${agenticInstruction}${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available tools (\`read_file\`, \`read_many_files\`, \`list_files\`, \`grep\`) to inspect the generated project before coding. Prefer \`write_file\` for new files or full-file rewrites. For small edits to existing generated files, prefer \`apply_patch\`; use \`delete_file\` or \`move_file\` only to remove duplicates or fix incorrect generated paths.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, match every color, size, gap, padding, radius, and font exactly using Tailwind arbitrary values.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`;
+    const userTaskText = `## Task: ${task.title}\n\n${task.description}${fileHint}${subStepsHint}${tddPlanHint}\n\nFirst, output a brief implementation plan inside <plan> tags (one numbered step per line).\nThen generate code for this task.${agenticInstruction}${multiRoundInstruction}${citeHint}\n\nBefore writing, read and follow existing file contracts in context (imports, exports, naming, and paths). Extend existing modules instead of creating duplicate paths when possible. When context is insufficient, use the available tools (\`read_file\`, \`read_many_files\`, \`list_files\`, \`grep\`) to inspect the generated project before coding. Prefer \`write_file\` for new files or full-file rewrites. For small edits to existing generated files, prefer \`apply_patch\`; use \`delete_file\` or \`move_file\` only to remove duplicates or fix incorrect generated paths.\n\nACCEPTANCE CRITERIA:\n1. Every button has a real onClick handler that updates state or triggers navigation.\n2. Every form has onSubmit with validation logic.\n3. Every input/toggle/select is controlled with useState + onChange.\n4. Links navigate to real routes (React Router Link or useNavigate).\n5. Timer/counter/animation logic uses real useEffect + setInterval/setTimeout.\n6. If Design Tokens are in context, prefer the matching semantic token utility (bg-primary, text-*, p-*, rounded-md) for every color/size/gap/padding/radius/font; ONLY fall back to a Tailwind arbitrary value when no token matches. Never approximate.\n7. [FRONTEND DATA RULE] If this task renders any list, table, card grid, or detail view that displays backend data: ALL data MUST be fetched from the real API endpoint via the API client. ZERO hardcoded arrays, ZERO mock objects, ZERO placeholder data. Use useEffect + loading/error state. Read \`frontend/src/api/client.ts\` with read_file before coding to get the correct method signatures.`;
 
     // ── Vision: inject matching design-reference image for frontend tasks ──────
     // When the user uploaded a per-page screenshot, read the mirrored copy from
@@ -4966,13 +4994,13 @@ export function hasConfigErrors(errors: string): boolean {
 
 export function createWorkerSubGraph() {
   const graph = new StateGraph(WorkerStateAnnotation)
-    .addNode("pick_next_task", pickNextTask)
-    .addNode("generate_code", generateCode)
-    .addNode("verify", verifyCode)
-    .addNode("local_tdd", localTdd)
-    .addNode("task_fix", taskFix)
-    .addNode("task_done", taskDone)
-    .addNode("task_failed", taskFailed)
+    .addNode("pick_next_task", withTaskLogContext(pickNextTask))
+    .addNode("generate_code", withTaskLogContext(generateCode))
+    .addNode("verify", withTaskLogContext(verifyCode))
+    .addNode("local_tdd", withTaskLogContext(localTdd))
+    .addNode("task_fix", withTaskLogContext(taskFix))
+    .addNode("task_done", withTaskLogContext(taskDone))
+    .addNode("task_failed", withTaskLogContext(taskFailed))
 
     .addEdge(START, "pick_next_task")
     .addConditionalEdges("pick_next_task", shouldContinueOrEnd, {

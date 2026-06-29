@@ -53,7 +53,10 @@ export function AgentBubbles({ agents, placeholderRoles }: AgentBubblesProps) {
   const activeByRole = new Map<CodingAgentRole, number>();
   for (const agent of agents) {
     presentRoles.add(agent.role);
-    if (agent.status === "working") {
+    // Require BOTH a "working" status and a live currentTaskId. A missed task
+    // or phase end-signal can orphan an instance in "working" with no task; the
+    // currentTaskId guard stops those phantoms from inflating the active count.
+    if (agent.status === "working" && agent.currentTaskId != null) {
       activeByRole.set(agent.role, (activeByRole.get(agent.role) ?? 0) + 1);
     }
   }

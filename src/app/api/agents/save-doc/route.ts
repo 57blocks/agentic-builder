@@ -3,16 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import { resolveCodeOutputRoot } from "@/lib/pipeline/code-output";
 import { maybeExtractAndPersistPlan } from "@/lib/agentic-build";
-
-const DOC_FILENAME: Record<string, string> = {
-  prd: "PRD.md",
-  trd: "TRD.md",
-  sysdesign: "SystemDesign.md",
-  implguide: "ImplementationGuide.md",
-  design: "DesignSpec.md",
-  pencil: "PencilDesign.md",
-  qa: "QATestCases.md",
-};
+import { DOC_FILENAME } from "./doc-filenames";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();

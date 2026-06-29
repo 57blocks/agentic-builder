@@ -1,3 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/**
+ * Tailwind v4 changed the default `border`/`divide`/`ring` colour from gray-200
+ * to `currentColor`, so a bare `border` utility renders ~black. Default these to
+ * the design's border token (shadcn components use bare `border`). Lives in the
+ * base layer, so explicit `border-<color>` utilities still win.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border, currentColor);
+  }
+}

@@ -241,7 +241,7 @@ export async function buildFrontendDesignContextForCodegen(
           : "",
         "",
         "**THIS IS THE PRIMARY DESIGN REFERENCE.** You MUST reproduce the UI exactly as shown in the Stitch design.",
-        "Match every component, layout section, color, spacing, and design token precisely using Tailwind arbitrary values.",
+        "For every component, layout section, color, spacing, and design token: FIRST use the matching semantic token utility; only fall back to a Tailwind arbitrary value when no token matches.",
         "Do NOT deviate from the Stitch design unless the Design Specification explicitly contradicts it.",
         "",
         stitchText,
@@ -320,7 +320,81 @@ export async function buildFrontendDesignContextForCodegen(
     console.warn("[FrontendDesignContext] Failed to build vision descriptions (ignored):", err instanceof Error ? err.message : err);
   }
 
-  return [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets]
-    .filter(Boolean)
-    .join("\n\n---\n\n");
+  // ── (REQUIRED) Fidelity + component-system rule ───────────────────────────
+  // Two goals that must BOTH hold — they are not a trade-off:
+  //   (1) faithfully reproduce the reference (layout, background incl. gradients,
+  //       type scale, radius, shadow, spacing), and
+  //   (2) implement it by composing the pre-installed shadcn-ui components + tokens.
+  // Earlier wording ("references define the target, NOT the markup") was read as
+  // permission to simplify/deviate from the layout — removed.
+  const componentSystemBlock = [
+    "## (REQUIRED) Reproduce the design faithfully — built from shadcn + tokens",
+    "",
+    "Two requirements that BOTH must hold (not a trade-off):",
+    "",
+    "**A. Visual fidelity — match the design reference closely.**",
+    "Reproduce the reference's layout, section structure, page background,",
+    "typography scale, border-radius, shadows and spacing as faithfully as you",
+    "can. Do NOT simplify, genericise, or drop sections. Specifically:",
+    "- Keep the page's real title / headings exactly as the reference shows them;",
+    "  do NOT substitute a generic placeholder (e.g. relabelling the page",
+    "  \"Dashboard\"/\"Home\" when the reference shows a specific title).",
+    "- Apply the page-level BACKGROUND from the design. If a gradient token exists",
+    "  (`--page-gradient`, `--*-gradient`) use it via",
+    "  `style={{ background: \"var(--page-gradient)\" }}`; never leave a page on a",
+    "  bare white background when the reference has a tinted/gradient backdrop.",
+    "- Match the reference's radius (rounded-xl/2xl if cards are soft), shadow",
+    "  depth, and type scale — use the `--radius-*`, `--shadow-*`, `--text-*` tokens.",
+    "- Reproduce filters/tabs/tables with their real options/columns and wire them",
+    "  up; do not render an empty or non-functional version.",
+    "",
+    "**B. Build it from the pre-installed shadcn-ui components.**",
+    "This project ships shadcn-ui components in `@/components/ui` (Button, Card,",
+    "Input, Textarea, Label, Select, Dropdown-menu, Checkbox, Tabs, Tooltip,",
+    "Dialog, Badge, Table, Form, Sonner). Compose them to hit the target above:",
+    "- Interactive elements → the matching shadcn component; do NOT hand-roll raw",
+    "  `<button>`/`<input>`/`<select>`/`<textarea>`.",
+    "- Tab bars → `<Tabs>`/`<TabsList>`/`<TabsTrigger>` (not a row of plain buttons).",
+    "- Status pills, tags, labels, chips → `<Badge>` (closest variant), not a",
+    "  styled `<span>`.",
+    "- Tabular data → `<Table>` (TableHeader/TableRow/TableHead/TableCell), not a",
+    "  raw `<table>`.",
+    "- Drop to a plain `<div>`/`<span>`/`<section>` ONLY for layout structure no",
+    "  component covers. Missing a component? add it under `components/ui/` (or",
+    "  `npx shadcn@latest add <name>`) instead of hand-rolling.",
+    "",
+    "### Styling: tokens first, NO inlined design values",
+    "- `tokens.css` encodes the design's exact palette/scale: `--color-*`",
+    "  (→ bg-primary, text-muted, border-input …), `--radius-*`, `--spacing-*`",
+    "  (→ p-4, gap-6), `--text-*`, `--shadow-*` (→ shadow-sm), `--leading-*`, plus",
+    "  passthrough gradients (`--page-gradient`, `--*-gradient`). ALWAYS use the",
+    "  matching token; do not approximate with `text-gray-500` etc.",
+    "- Gradient/background that has a token → apply it via an inline style, e.g.",
+    "  style={{ background: \"var(--page-gradient)\" }} (use whichever",
+    "  --*-gradient token the design defines). NEVER paste the literal",
+    "  linear-gradient(...) when a token already covers it.",
+    "- Only when NO token matches may you use a Tailwind arbitrary value",
+    "  (`bg-[#1e293b]`). Never paste raw hex that a token already covers.",
+    "",
+    "### Detail fidelity (match the reference, common pitfalls)",
+    "- Form fields: give Input/Select/Textarea a SOLID fill matching the",
+    "  reference (usually white / a light surface) so they don't show the page",
+    "  gradient through them. Keep Input and Select the SAME height — if you set a",
+    "  height, set the identical class on both (they align at the default height",
+    "  otherwise).",
+    "- Badge/tag colour: pick the variant whose colour MATCHES the reference. A",
+    "  neutral grey chip is `variant=\"outline\"` or a muted/secondary style — do",
+    "  NOT use a saturated brand colour for a chip the reference shows as neutral.",
+    "- Font sizes: take sizes from the reference; meta/price/label text is usually",
+    "  small (~text-sm/text-base), not text-xl. Read the reference rather than",
+    "  defaulting large. Never emit a unitless arbitrary size like `text-[26]`",
+    "  (use `text-[26px]` or a `--text-*` token).",
+  ].join("\n");
+
+  const referenceBlocks = [visionBlock, stitchBlock, designSpecBlock, pencilBlock, assets].filter(Boolean);
+  // Preserve original "nothing to inject" semantics: only emit the component-system
+  // rule when there is at least one design reference to frame.
+  if (referenceBlocks.length === 0) return "";
+
+  return [componentSystemBlock, ...referenceBlocks].join("\n\n---\n\n");
 }
