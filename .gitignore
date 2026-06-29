@@ -96,4 +96,5 @@ agentic-builds/
 /*.png
 
 .projects/
+cmsa/
 run.log

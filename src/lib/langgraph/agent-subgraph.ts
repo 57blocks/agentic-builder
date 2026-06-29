@@ -236,6 +236,11 @@ const CODEGEN_WRITE_TOOL_RESULT_MAX_CHARS = (() => {
 const DEFAULT_WORKER_TSC_FIX_MAX_ATTEMPTS = 1;
 const DEFAULT_WORKER_TSC_FIX_MAX_ATTEMPTS_RALPH_CAP = 1;
 const DEFAULT_WORKER_TSC_ERROR_CONTEXT_MAX_CHARS = 3000;
+// best-effort local-TDD: how many full repair rounds the producing worker may
+// spend on its own scope=local GREEN failures before giving up and deferring to
+// the integration stage. Decoupled from the tsc fix budget so local-TDD can
+// never starve tsc repairs nor loop unbounded. Default 1 = try once, then defer.
+const DEFAULT_WORKER_LOCAL_TDD_FIX_MAX_ATTEMPTS = 1;
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
@@ -2871,6 +2876,7 @@ async function pickNextTask(state: WorkerState) {
     workerLabel: state.workerLabel,
     verifyErrors: "",
     fixAttempts: 0,
+    localTddFixAttempts: 0,
     currentTaskRetryCount: 0,
     currentTaskLastError: "",
     currentTaskLastRawContent: "",
@@ -4209,6 +4215,22 @@ function computeWorkerMaxFix(state: WorkerState): number {
     : cfg.maxFixAttempts;
 }
 
+/**
+ * Best-effort budget (in full repair rounds) for a worker's own scope=local TDD
+ * GREEN failures. Independent of {@link computeWorkerMaxFix} so local-TDD repairs
+ * never starve tsc fixes. Capped by the RALPH per-task iteration limit when RALPH
+ * is enabled, mirroring the tsc path.
+ */
+function computeWorkerLocalTddMaxFix(state: WorkerState): number {
+  const configured = readPositiveIntEnv(
+    "WORKER_LOCAL_TDD_FIX_MAX_ATTEMPTS",
+    DEFAULT_WORKER_LOCAL_TDD_FIX_MAX_ATTEMPTS,
+  );
+  return state.ralphConfig.enabled
+    ? Math.min(state.ralphConfig.maxIterationsPerTask, configured)
+    : configured;
+}
+
 function routeAfterVerify(state: WorkerState): string {
   // tsc/file verify is clean → run the worker-owned (scope=local) TDD tests
   // before declaring the task done. Cross-cutting (integration-scope) tests
@@ -4231,8 +4253,16 @@ function routeAfterVerify(state: WorkerState): string {
   return "task_fix";
 }
 
-/** Marker prefix so a local-TDD failure is distinguishable in logs / fix context. */
-const WORKER_LOCAL_TDD_FAIL_PREFIX = "[local-tdd] P0 local test(s) failing:";
+/** Marker prefix so a local-TDD failure is distinguishable in logs / fix context.
+ *  Exported so the supervisor's phase-verify warning aggregation can filter these
+ *  out (local-TDD is best-effort and handed to the integration stage, not re-driven
+ *  as a phase-verify "fix all issues" item). */
+export const WORKER_LOCAL_TDD_FAIL_PREFIX =
+  "[local-tdd] P0 local test(s) failing:";
+
+/** Cap the local-TDD failure message (prefix + assertion excerpts) so it never
+ *  bloats the codeFix prompt or the task warning. Matches taskDone's warning cap. */
+const WORKER_LOCAL_TDD_MSG_MAX_CHARS = 8000;
 
 /**
  * Run the current task's `scope=local` TDD tests (GREEN). These are
@@ -4241,9 +4271,12 @@ const WORKER_LOCAL_TDD_FAIL_PREFIX = "[local-tdd] P0 local test(s) failing:";
  * feedback, instead of deferring every red to the integration stage.
  *
  * Reached only when tsc/file verify is already clean. On P0 failure it records a
- * TDD-flavoured `verifyErrors` so the shared fix loop (`task_fix` → `verify` →
- * `local_tdd`) engages; the loop reuses the existing `fixAttempts` / maxFix
- * budget, so it can never spin unbounded (see routeAfterLocalTdd).
+ * TDD-flavoured `verifyErrors` (with the failing assertion excerpts inline so the
+ * single codeFix round can see the real WHY) and bumps `localTddFixAttempts` to
+ * drive a bounded, best-effort fix loop (`task_fix` → `verify` → `local_tdd`).
+ * This budget is INDEPENDENT of the tsc `fixAttempts` budget and defaults to a
+ * single round; once spent, routeAfterLocalTdd proceeds to task_done and the
+ * failure is deferred to the integration TDD stage (see formatTddRepairBlock).
  */
 async function localTdd(state: WorkerState) {
   const task = state.tasks[state.currentTaskIndex];
@@ -4267,20 +4300,42 @@ async function localTdd(state: WorkerState) {
     return { verifyErrors: "" };
   }
 
-  const msg = `${WORKER_LOCAL_TDD_FAIL_PREFIX} ${result.p0Failures.join(", ")}. ${result.summary}`;
-  console.log(`[Worker:${state.workerLabel}] local-tdd: ${msg}`);
+  // Surface the real failing-assertion output so the (single) best-effort codeFix
+  // round can act on the WHY, not just a "0/1 passed" count. The prefix MUST stay
+  // on the first line (routeAfterLocalTdd + phase-verify filtering depend on it).
+  const excerptBlock = result.p0FailureExcerpts
+    .map(({ testId, excerpt }) => `### ${testId}\n${excerpt.trim()}`)
+    .join("\n\n");
+  const msg = [
+    `${WORKER_LOCAL_TDD_FAIL_PREFIX} ${result.p0Failures.join(", ")}. ${result.summary}`,
+    excerptBlock
+      ? `\n\nFailing assertion output (fix EITHER the implementation or the test):\n${excerptBlock}`
+      : "",
+  ]
+    .join("")
+    .slice(0, WORKER_LOCAL_TDD_MSG_MAX_CHARS);
+  console.log(
+    `[Worker:${state.workerLabel}] local-tdd: ${WORKER_LOCAL_TDD_FAIL_PREFIX} ${result.p0Failures.join(", ")}. ${result.summary}`,
+  );
+  // NOTE: the local-TDD repair-round counter is bumped in `taskFix` (only for
+  // local-TDD-triggered fixes), NOT here — mirroring how tsc bumps `fixAttempts`
+  // in taskFix. This makes `WORKER_LOCAL_TDD_FIX_MAX_ATTEMPTS=1` mean exactly one
+  // full repair round (detect → fix → re-detect), identical to the tsc budget.
   return { verifyErrors: msg };
 }
 
 function routeAfterLocalTdd(state: WorkerState): string {
   // Clean (no local failures recorded) → done.
   if (!state.verifyErrors) return "task_done";
-  // A local-TDD failure was recorded. Retry via the shared fix loop while
-  // budget remains; otherwise give up with a warning (completed_with_warnings).
-  const maxFix = computeWorkerMaxFix(state);
-  if (state.fixAttempts >= maxFix) {
+  // A local-TDD failure was recorded. This is BEST-EFFORT: retry via the shared
+  // fix loop for a bounded number of full rounds (its OWN budget, independent of
+  // the tsc `fixAttempts` budget so it can neither starve tsc fixes nor loop
+  // unbounded). Once spent, proceed to task_done with the failure preserved as a
+  // warning and deferred to the integration TDD stage (formatTddRepairBlock).
+  const maxFix = computeWorkerLocalTddMaxFix(state);
+  if (state.localTddFixAttempts >= maxFix) {
     console.log(
-      `[Worker:${state.workerLabel}] local-tdd: max fix attempts (${maxFix}) reached, continuing with warnings (integration gate will re-check).`,
+      `[Worker:${state.workerLabel}] local-tdd: best-effort fix budget (${maxFix} round(s)) spent, deferring remaining local-TDD failures to the integration stage.`,
     );
     return "task_done";
   }
@@ -4310,6 +4365,15 @@ async function taskFix(state: WorkerState) {
   const task = state.tasks[state.currentTaskIndex];
   const attempt = state.fixAttempts + 1;
   const cfg = getWorkerTscFixConfig();
+  // A local-TDD failure routes here too (best-effort). Track its repair rounds on
+  // a SEPARATE counter so `WORKER_LOCAL_TDD_FIX_MAX_ATTEMPTS=1` means exactly one
+  // full round (detect → fix → re-detect), exactly like tsc's `fixAttempts`.
+  const isLocalTddFix = state.verifyErrors.startsWith(
+    WORKER_LOCAL_TDD_FAIL_PREFIX,
+  );
+  const localTddAttempt = isLocalTddFix
+    ? state.localTddFixAttempts + 1
+    : state.localTddFixAttempts;
   const isFilePlanFix = TASK_FILE_PLAN_UNFULFILLED_REGEX.test(
     state.verifyErrors,
   );
@@ -4355,7 +4419,11 @@ async function taskFix(state: WorkerState) {
     console.warn(
       `[Worker:${state.workerLabel}] codeFix: skip LLM — no currentTaskGeneratedFiles for task ${task.id}.`,
     );
-    return { fixAttempts: attempt, verifyErrors: state.verifyErrors };
+    return {
+      fixAttempts: attempt,
+      localTddFixAttempts: localTddAttempt,
+      verifyErrors: state.verifyErrors,
+    };
   }
 
   console.log(
@@ -4574,6 +4642,7 @@ async function taskFix(state: WorkerState) {
 
     return {
       fixAttempts: attempt,
+      localTddFixAttempts: localTddAttempt,
       verifyErrors: "",
       currentTaskGeneratedFiles: mergedTaskFiles,
       currentTaskCostUsd: state.currentTaskCostUsd + costUsd,
@@ -4583,7 +4652,11 @@ async function taskFix(state: WorkerState) {
     console.warn(
       `[Worker:${state.workerLabel}] Per-task tsc fix failed: ${e instanceof Error ? e.message : String(e)}`,
     );
-    return { fixAttempts: attempt, verifyErrors: state.verifyErrors };
+    return {
+      fixAttempts: attempt,
+      localTddFixAttempts: localTddAttempt,
+      verifyErrors: state.verifyErrors,
+    };
   }
 }
 
@@ -4709,6 +4782,7 @@ async function taskDone(state: WorkerState) {
     currentTaskIndex: state.currentTaskIndex + 1,
     verifyErrors: "",
     fixAttempts: 0,
+    localTddFixAttempts: 0,
     currentTaskGeneratedFiles: [],
     currentTaskCostUsd: 0,
     currentTaskDurationMs: 0,
@@ -4796,6 +4870,7 @@ async function taskFailed(state: WorkerState) {
     currentTaskIndex: state.currentTaskIndex + 1,
     verifyErrors: "",
     fixAttempts: 0,
+    localTddFixAttempts: 0,
     currentTaskGeneratedFiles: [],
     currentTaskCostUsd: 0,
     currentTaskDurationMs: 0,

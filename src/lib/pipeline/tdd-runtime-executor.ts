@@ -75,6 +75,10 @@ export interface TddRuntimeExecutorResult {
   failed: number;
   skipped: number;
   p0Failures: string[];
+  /** Per-P0-blocking-failure assertion excerpts (testId → trimmed failure output),
+   *  so a caller (e.g. worker local-tdd) can surface the real WHY in its repair
+   *  prompt instead of only a "0/1 passed" summary. */
+  p0FailureExcerpts: Array<{ testId: string; excerpt: string }>;
   /** RED-phase test FILES that passed before implementation (invalid RED — a
    *  test that already passes proves nothing). Used to delete + regenerate. */
   redPassedTooEarlyFiles: string[];
@@ -475,6 +479,7 @@ export async function runTddRuntimePhase(input: {
       failed: 0,
       skipped: 0,
       p0Failures: [],
+      p0FailureExcerpts: [],
       redPassedTooEarlyFiles: [],
       summary,
     };
@@ -485,6 +490,7 @@ export async function runTddRuntimePhase(input: {
   let failed = 0;
   let skipped = 0;
   const p0Failures: string[] = [];
+  const p0FailureExcerpts: Array<{ testId: string; excerpt: string }> = [];
   const redPassedTooEarlyFiles: string[] = [];
 
   // Neutralize the real DATABASE_URL for the whole phase so any test that
@@ -543,7 +549,15 @@ export async function runTddRuntimePhase(input: {
           priority === "P0" &&
           ((input.phase === "red" && event.status !== "expected_fail") ||
             (input.phase === "green" && event.status !== "pass"));
-        if (isBlocking) p0Failures.push(test.id);
+        if (isBlocking) {
+          p0Failures.push(test.id);
+          if (event.failureExcerpt) {
+            p0FailureExcerpts.push({
+              testId: test.id,
+              excerpt: event.failureExcerpt,
+            });
+          }
+        }
       }
     } finally {
       await restoreDbUrl();
@@ -580,6 +594,7 @@ export async function runTddRuntimePhase(input: {
     failed,
     skipped,
     p0Failures,
+    p0FailureExcerpts,
     redPassedTooEarlyFiles,
     summary,
   };

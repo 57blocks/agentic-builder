@@ -113,6 +113,8 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     "anthropic/claude-sonnet-4": { input: 3, output: 15 },
     "anthropic/claude-opus-4": { input: 15, output: 75 },
     "anthropic/claude-opus-4.8": { input: 15, output: 75 },
+    /** z-ai GLM via OpenRouter — approximate; update if OpenRouter pricing shifts. */
+    "z-ai/glm-5.2": { input: 0.6, output: 2.2 },
     "openai/gpt-4o": { input: 2.5, output: 10 },
     "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
     "google/gemini-2.5-pro": { input: 1.25, output: 10 },

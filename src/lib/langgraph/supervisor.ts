@@ -21,6 +21,7 @@ import {
   hasConfigErrors,
   findBestTsconfigForFiles,
   buildVersionConstraints,
+  WORKER_LOCAL_TDD_FAIL_PREFIX,
 } from "./agent-subgraph";
 import {
   formatGeneratedCodeDotEnv,
@@ -4664,7 +4665,14 @@ function formatWorkerTscWarningsForRoles(
       if (tr.status !== "completed_with_warnings" || !tr.warnings?.length) {
         continue;
       }
-      const text = tr.warnings.join("\n").trim();
+      // Best-effort local-TDD failures are NOT re-driven here — they are handed
+      // to the integration TDD stage (formatTddRepairBlock). Drop any warning
+      // entry that is a local-TDD failure so phase-verify only sees tsc/file-plan
+      // issues it actually owns.
+      const text = tr.warnings
+        .filter((w) => !w.trimStart().startsWith(WORKER_LOCAL_TDD_FAIL_PREFIX))
+        .join("\n")
+        .trim();
       if (!text) continue;
       chunks.push(
         `### ${tr.taskId} (${pr.workerLabel})\n${text.slice(0, 6000)}`,

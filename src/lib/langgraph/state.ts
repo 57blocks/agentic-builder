@@ -336,6 +336,10 @@ export const WorkerStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
+  localTddFixAttempts: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => 0,
+  }),
 
   taskResults: Annotation<TaskResult[]>({
     reducer: (prev, next) => [...prev, ...next],

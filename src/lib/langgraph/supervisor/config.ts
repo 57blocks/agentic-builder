@@ -104,7 +104,7 @@ export const ENABLE_PARALLEL_FE_BE = (() => {
  *
  *  - "open"   → DEFAULT. The high-autonomy open integration fixer
  *               (`openIntegrationVerifyAndFix`): a strong model
- *               (claude-opus-4.8 by default), an open-ended prompt, layered
+ *               (z-ai/glm-5.2 by default), an open-ended prompt, layered
  *               context compression, and NO procedural stagnation penalties —
  *               only the cumulative budget circuit-breaker bounds the loop.
  *  - "legacy" → the original `integrationVerifyAndFix` micro-managed loop,

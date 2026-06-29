@@ -5,7 +5,7 @@
  * the legacy `integrationVerifyAndFix` (selected by `INTEGRATION_FIX_MODE`).
  *
  * Design philosophy — the OPPOSITE of the legacy micro-managed loop:
- *   - A strong model (claude-opus-4.8 by default), pinned independently of
+ *   - A strong model (z-ai/glm-5.2 by default), pinned independently of
  *     `codingMode` and routed straight through OpenRouter (no DeepSeek bypass).
  *   - The model is handed the AUTHORITATIVE spec — the PRD and the page/design
  *     references (screenshot vision descriptions + Stitch UI + design spec) —
@@ -21,7 +21,7 @@
  *     any objective gate to override it.
  *   - NO procedural stagnation penalties whatsoever. The ONLY loop safety bound
  *     is the cumulative iteration budget circuit-breaker (shared with legacy).
- *   - Layered context compression sized for a 200k-context strong model.
+ *   - Layered context compression sized for a 1M-context strong model.
  *
  * It honours the same node contract as the legacy node — returns
  * { integrationErrors, integrationFixAttempts, totalCostUsd } — so the graph
@@ -61,7 +61,6 @@ import {
 } from "./conversation-semantic-compact";
 import { supersedeStaleReadResults } from "./worker-tool-history-compaction";
 import { isContextLengthError } from "./supervisor/shared/llm-call";
-import { pickRelevantSections } from "./doc-section-picker";
 import { detectPackageManager, fsRead } from "./tools";
 import { getRepairEmitter } from "@/lib/pipeline/self-heal";
 import { recordUnresolvedProblem } from "@/lib/pipeline/unresolved-problems";
@@ -69,13 +68,13 @@ import { recordSupervisorLlmUsage } from "./supervisor/usage-tracking";
 import { BUILD_FAILED_MARKER_REL } from "@/lib/pipeline/build-quarantine";
 
 const LABEL = "[Supervisor] OpenIntegrationFix";
-const OPEN_INTEGRATION_DEFAULT_MODEL = "claude-opus-4.8";
+const OPEN_INTEGRATION_DEFAULT_MODEL = "z-ai/glm-5.2";
 
 /**
  * DEBUG: route this stage straight to the directly-connected DeepSeek V4 Pro
  * (api.deepseek.com) instead of the OpenRouter strong-model chain.
  *
- * OFF by default — this stage runs claude-opus-4.8 via OpenRouter. Opt into the
+ * OFF by default — this stage runs z-ai/glm-5.2 via OpenRouter. Opt into the
  * DeepSeek-direct debug path with `INTEGRATION_VERIFY_FIX_USE_DEEPSEEK_DIRECT=1`
  * (still requires `DEEPSEEK_API_KEY`, the direct provider's own precondition).
  */
@@ -157,9 +156,9 @@ function readMaxIterations(): number {
 
 function readContextTokens(): number {
   const raw = Number(
-    process.env.INTEGRATION_VERIFY_FIX_CONTEXT_TOKENS ?? "200000",
+    process.env.INTEGRATION_VERIFY_FIX_CONTEXT_TOKENS ?? "1000000",
   );
-  if (!Number.isFinite(raw) || raw <= 0) return 200000;
+  if (!Number.isFinite(raw) || raw <= 0) return 1_000_000;
   return Math.floor(raw);
 }
 
@@ -210,7 +209,7 @@ function readBashTimeoutMs(): number {
  *
  * DEBUG default: when `useDeepSeekDirect()` is on, this returns the
  * directly-connected DeepSeek V4 Pro model id (routed through
- * api.deepseek.com, NOT OpenRouter). Otherwise the default is claude-opus-4.8;
+ * api.deepseek.com, NOT OpenRouter). Otherwise the default is z-ai/glm-5.2;
  * `INTEGRATION_VERIFY_FIX_MODEL` overrides the primary and
  * `INTEGRATION_VERIFY_FIX_FALLBACK_MODEL` overrides the cross-vendor fallback.
  */
@@ -468,30 +467,12 @@ export async function openIntegrationVerifyAndFix(
   ).startsWith("FILE_NOT_FOUND");
   const protectedPaths = state.scaffoldProtectedPaths ?? [];
 
-  const prdTrimmed = state.projectContext
-    ? pickRelevantSections(
-        state.projectContext,
-        {
-          keywords: [
-            "feature",
-            "requirement",
-            "acceptance",
-            "criteria",
-            "page",
-            "component",
-            "endpoint",
-            "flow",
-            "scenario",
-          ],
-        },
-        {
-          budget: 18_000,
-          label: "open-integration-review",
-          stage: "worker-context",
-          emitter,
-        },
-      )
-    : "";
+  // Inject the FULL PRD verbatim — the integration pass is the last place the
+  // model can close PRD feature gaps, so it must see the complete spec, not a
+  // keyword-relevance excerpt. The 1M-context model (z-ai/glm-5.2 by default)
+  // comfortably holds the whole PRD, and the token-watermark compactor reclaims
+  // space later from tool chatter, not from this authoritative spec.
+  const prdTrimmed = state.projectContext?.trim() ?? "";
   const prdBlock = prdTrimmed
     ? `\n## Product Requirements (PRD)\nAuthoritative spec for feature completeness.\n\n${prdTrimmed}`
     : "";
@@ -554,10 +535,11 @@ export async function openIntegrationVerifyAndFix(
   const compactRatio = readCompactRatio();
   const triggerTokens = Math.floor(contextTokens * compactRatio);
   // Char-estimate fallback aligned to the SAME token watermark (~4 chars/token),
-  // so the char path no longer fires far below the real token trigger (the
-  // 80k-char default ≈ 20k tokens caused premature compaction at ~10% of the
-  // 200k window). With this, the real prompt-token watermark drives compaction
-  // and the char estimate is only a coarse backup at the same level.
+  // so the char path no longer fires far below the real token trigger (an old
+  // fixed 80k-char default ≈ 20k tokens caused premature compaction at a tiny
+  // fraction of the real window). With this, the real prompt-token watermark
+  // drives compaction and the char estimate is only a coarse backup at the same
+  // level — and it scales with the configured window (1M by default).
   const compactThresholdChars = triggerTokens * 4;
   const compactCooldown = readCompactCooldown();
   const keepTail = readKeepTail();
