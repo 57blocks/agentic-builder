@@ -253,9 +253,30 @@ async function runDomainBreakdownWithManifest({
   // reached here — so backfill (idempotent) ourselves and use the id-tagged PRD
   // for the per-domain docs, guaranteeing the domains resolve their ids.
   const filledPrd = backfillPrdIds(params.prd).prd;
-  const { byDomain } = resolveDomainRequirementIds(filledPrd, manifest);
+  const resolution = resolveDomainRequirementIds(filledPrd, manifest);
+  const { byDomain } = resolution;
   const totalResolved = [...byDomain.values()].reduce((n, ids) => n + ids.length, 0);
   console.log(`[Subsystems] resolved ${totalResolved} requirement id(s) across ${byDomain.size} domain(s).`);
+
+  // Coverage safety net: any requirement id no subsystem claimed (via route,
+  // endpoint, or owned section) reaches no per-domain breakdown and is silently
+  // dropped from the build — the root cause of large "uncovered AC" gate
+  // failures. Orphans are rescued into the nearest domain so they still get a
+  // task; truly unplaceable ids fail the breakdown now rather than post-gen.
+  if (resolution.orphanRequirementIds.length > 0) {
+    console.warn(
+      `[Subsystems] rescued ${resolution.orphanRequirementIds.length} orphan requirement id(s) ` +
+        `unclaimed by any subsystem section → routed to nearest domain so they get tasks: ` +
+        resolution.orphanRequirementIds.join(", "),
+    );
+  }
+  if (resolution.unrescuableRequirementIds.length > 0) {
+    throw new Error(
+      `Task breakdown coverage gate failed: ${resolution.unrescuableRequirementIds.length} ` +
+        `requirement id(s) could not be assigned to any subsystem: ` +
+        resolution.unrescuableRequirementIds.join(", "),
+    );
+  }
 
   let foundationFull: BreakdownResult | null = null;
   const breakdownFn: BreakdownFn = async (input) => {

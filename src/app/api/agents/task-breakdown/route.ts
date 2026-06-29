@@ -99,7 +99,33 @@ export async function POST(request: NextRequest) {
     });
 
     if (decision.split) {
-      const { byDomain } = resolveDomainRequirementIds(prd, decomposed.manifest);
+      const resolution = resolveDomainRequirementIds(prd, decomposed.manifest);
+      const { byDomain } = resolution;
+
+      // Coverage visibility + gate. Orphans are requirement ids no subsystem
+      // claimed; they were rescued into the nearest domain so they still get a
+      // task (previously they were silently dropped → "uncovered AC" at the end).
+      if (resolution.orphanRequirementIds.length > 0) {
+        console.warn(
+          `[task-breakdown] rescued ${resolution.orphanRequirementIds.length} orphan requirement id(s) ` +
+            `unclaimed by any subsystem section — routed to nearest domain so they get tasks: ` +
+            resolution.orphanRequirementIds.join(", "),
+        );
+      }
+      if (resolution.unrescuableRequirementIds.length > 0) {
+        // A requirement that reaches no domain breakdown is dropped from the
+        // build. Fail loudly at planning time instead of discovering it
+        // post-generation as an uncovered acceptance criterion.
+        return Response.json(
+          {
+            error:
+              `Task breakdown coverage gate failed: ` +
+              `${resolution.unrescuableRequirementIds.length} requirement id(s) could not be ` +
+              `assigned to any subsystem: ${resolution.unrescuableRequirementIds.join(", ")}`,
+          },
+          { status: 422 },
+        );
+      }
       const breakdownFn: BreakdownFn = async (input) => {
         const r = await buildTaskBreakdownFromDocuments({
           prd: input.prd,

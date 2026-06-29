@@ -63,6 +63,58 @@ function sectionRefMatches(ref: string, key: string): boolean {
   return key === ref || key.startsWith(ref + ".");
 }
 
+/** Leading top-level section number as an int, e.g. "10.2.3" → 10. Used to route
+ *  orphaned requirements to the numerically-nearest domain (PRDs cluster related
+ *  features by section number). Unparseable keys sort last. */
+function topLevelSection(key: string): number {
+  const n = Number.parseInt(key.split(".")[0] ?? "", 10);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
+/** Every FR-/AC-/CMP- id that appears under any numbered PRD section. */
+function allSectionRequirementIds(
+  sectionReqIds: Map<string, Set<string>>,
+): Set<string> {
+  const all = new Set<string>();
+  for (const ids of sectionReqIds.values()) for (const id of ids) all.add(id);
+  return all;
+}
+
+/**
+ * Choose the domain that should absorb an orphaned requirement id (one no domain
+ * claimed via route/endpoint/section). Picks the domain whose owned PRD sections
+ * are numerically nearest the orphan's own section(s). Deterministic tie-break:
+ * nearer wins → more owned sections wins → smallest id wins. Returns null only
+ * when the manifest has no subsystems at all.
+ */
+function pickRescueDomain(
+  id: string,
+  idSections: Map<string, string[]>,
+  manifest: SubsystemManifest,
+  domainTopSections: Map<string, number[]>,
+): string | null {
+  const orphanTops = (idSections.get(id) ?? []).map(topLevelSection);
+  let best: { id: string; dist: number; owned: number } | null = null;
+  for (const s of manifest.subsystems) {
+    const tops = domainTopSections.get(s.id) ?? [];
+    let dist = Number.MAX_SAFE_INTEGER;
+    if (orphanTops.length && tops.length) {
+      for (const a of orphanTops)
+        for (const b of tops) dist = Math.min(dist, Math.abs(a - b));
+    }
+    const cand = { id: s.id, dist, owned: tops.length };
+    if (
+      !best ||
+      cand.dist < best.dist ||
+      (cand.dist === best.dist && cand.owned > best.owned) ||
+      (cand.dist === best.dist && cand.owned === best.owned && cand.id < best.id)
+    ) {
+      best = cand;
+    }
+  }
+  return best ? best.id : null;
+}
+
 /** route path → PAGE-id, parsed from backfilled §7.1 route-table rows. */
 export function buildRouteIdMap(prd: string): Map<string, string> {
   const map = new Map<string, string>();
@@ -98,6 +150,16 @@ export interface DomainRequirementResolution {
   byDomain: Map<string, string[]>;
   /** owned routes/endpoints that had no id in the PRD (PRD-ID gate should prevent this). */
   unresolved: string[];
+  /** Every FR-/AC-/CMP- id found under a numbered PRD section — the universe the
+   *  task breakdown must cover. */
+  allRequirementIds: string[];
+  /** IDs no domain claimed via routes/endpoints/sections. Each was rescued into
+   *  the nearest domain (see byDomain) so it still produces a task; this list is
+   *  the audit trail of what would otherwise have been silently dropped. */
+  orphanRequirementIds: string[];
+  /** Orphans that could not be placed at all (only when the manifest has zero
+   *  subsystems). A non-empty list must fail the breakdown coverage gate. */
+  unrescuableRequirementIds: string[];
 }
 
 export function resolveDomainRequirementIds(
@@ -141,5 +203,60 @@ export function resolveDomainRequirementIds(
     byDomain.set(s.id, [...ids].sort());
   }
 
-  return { byDomain, unresolved };
+  // ── Orphan rescue ──────────────────────────────────────────────────────────
+  // Requirement assignment above is driven by what each domain claims (routes,
+  // endpoints, sections). Any FR-/AC-/CMP- id sitting in a PRD section that NO
+  // domain claims reaches no per-domain breakdown — so the coding stage never
+  // receives it and the feature is silently dropped (the root cause of large
+  // "uncovered AC" gate failures: secondary UI states, secondary modals, and
+  // whole secondary pages live in unclaimed subsections). Rescue every such
+  // orphan into the numerically-nearest domain so a real task is generated.
+  const allReqIds = allSectionRequirementIds(sectionReqIds);
+  const assigned = new Set<string>();
+  for (const list of byDomain.values()) for (const id of list) assigned.add(id);
+
+  // id → section keys it appears in (for proximity routing).
+  const idSections = new Map<string, string[]>();
+  for (const [key, ids] of sectionReqIds) {
+    for (const id of ids) {
+      const arr = idSections.get(id);
+      if (arr) arr.push(key);
+      else idSections.set(id, [key]);
+    }
+  }
+
+  // Each domain's claimed top-level section numbers (computed once).
+  const domainTopSections = new Map<string, number[]>();
+  for (const s of manifest.subsystems) {
+    const tops: number[] = [];
+    for (const ref of s.prdSections ?? []) {
+      const norm = normalizeSectionRef(ref);
+      if (norm) tops.push(topLevelSection(norm));
+    }
+    domainTopSections.set(s.id, tops);
+  }
+
+  const orphanRequirementIds: string[] = [];
+  const unrescuableRequirementIds: string[] = [];
+  for (const id of allReqIds) {
+    if (assigned.has(id)) continue;
+    orphanRequirementIds.push(id);
+    const home = pickRescueDomain(id, idSections, manifest, domainTopSections);
+    if (home) {
+      const list = byDomain.get(home)!;
+      list.push(id);
+      list.sort();
+      assigned.add(id);
+    } else {
+      unrescuableRequirementIds.push(id);
+    }
+  }
+
+  return {
+    byDomain,
+    unresolved,
+    allRequirementIds: [...allReqIds].sort(),
+    orphanRequirementIds: orphanRequirementIds.sort(),
+    unrescuableRequirementIds: unrescuableRequirementIds.sort(),
+  };
 }

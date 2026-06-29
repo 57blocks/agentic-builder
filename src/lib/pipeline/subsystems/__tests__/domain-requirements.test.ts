@@ -80,3 +80,58 @@ describe("resolveDomainRequirementIds", () => {
     expect(resolveDomainRequirementIds(prd, m).byDomain.get("d")).toEqual(["FR-A01", "FR-B01"]);
   });
 });
+
+describe("resolveDomainRequirementIds — orphan rescue (coverage safety net)", () => {
+  // §10 (family) and §11 (teacher) are claimed; §28 (marketing) is claimed by no
+  // subsystem — its acceptance criteria used to be silently dropped from the build.
+  const ORPHAN_PRD = [
+    "## 10. Family",
+    "### 10.1 Dashboard",
+    "- (AC-041) profile switch re-filters cards",
+    "- (AC-045) course color hashing",
+    "### 10.2 Courses",
+    "- (AC-057) filtered no-result shows Reset",
+    "## 11. Teacher",
+    "- (AC-130) teacher schedule view (FR-100)",
+    "## 28. Marketing Sync",
+    "- (AC-154) Run Full Sync shows toast",
+    "- (AC-155) View Field Mapping modal",
+    "- backed by FR-400",
+  ].join("\n");
+
+  const sub = (id: string, prdSections: string[]): SubsystemManifest["subsystems"][number] => ({
+    id, name: id, ownedRoutes: [], ownedApiEndpoints: [], ownedCollections: [], ownedModules: ["m"], dependsOn: [], prdSections,
+  });
+  const orphanManifest: SubsystemManifest = {
+    version: 1,
+    subsystems: [sub("family", ["§10"]), sub("teacher", ["§11"])],
+  };
+  const flat = (res: { byDomain: Map<string, string[]> }) => [...res.byDomain.values()].flat();
+
+  it("keeps section-claimed ids on their owning domain", () => {
+    const { byDomain } = resolveDomainRequirementIds(ORPHAN_PRD, orphanManifest);
+    expect(byDomain.get("family")).toEqual(["AC-041", "AC-045", "AC-057"]);
+    expect(byDomain.get("teacher")).toEqual(expect.arrayContaining(["AC-130", "FR-100"]));
+  });
+
+  it("rescues ids from unclaimed sections into the numerically-nearest domain", () => {
+    const res = resolveDomainRequirementIds(ORPHAN_PRD, orphanManifest);
+    expect(res.orphanRequirementIds).toEqual(["AC-154", "AC-155", "FR-400"]);
+    // |28-11| = 17 beats |28-10| = 18, so teacher absorbs the marketing orphans.
+    expect(res.byDomain.get("teacher")).toEqual(expect.arrayContaining(["AC-154", "AC-155", "FR-400"]));
+  });
+
+  it("covers every PRD requirement id with nothing unrescuable", () => {
+    const res = resolveDomainRequirementIds(ORPHAN_PRD, orphanManifest);
+    expect(res.allRequirementIds).toEqual([
+      "AC-041", "AC-045", "AC-057", "AC-130", "AC-154", "AC-155", "FR-100", "FR-400",
+    ]);
+    expect(res.unrescuableRequirementIds).toEqual([]);
+    expect([...new Set(flat(res))].sort()).toEqual(res.allRequirementIds);
+  });
+
+  it("flags orphans as unrescuable when there are zero subsystems (gate trips)", () => {
+    const res = resolveDomainRequirementIds(ORPHAN_PRD, { version: 1, subsystems: [] });
+    expect(res.unrescuableRequirementIds).toEqual(res.allRequirementIds);
+  });
+});
