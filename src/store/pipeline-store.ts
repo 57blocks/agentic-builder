@@ -268,6 +268,13 @@ interface PipelineState {
     cssToken?: Record<string, string>,
     pageHint?: string,
   ) => Promise<{ referenceId: string; pageHint: string | null } | null>;
+  /** Persist a captured self-contained HTML snapshot as a kind:html reference
+   *  bound to the page's PAGE-id (manual). Sibling to fetchUrlDesignReference. */
+  fetchUrlHtmlReference: (
+    url: string,
+    html: string,
+    pageHint?: string,
+  ) => Promise<{ referenceId: string; pageHint: string | null } | null>;
   /** Patch metadata (label / pageHint / matchedBy / matchConfidence) on a single reference. */
   updateDesignReferenceMeta: (
     id: string,
@@ -1807,6 +1814,46 @@ export const usePipelineStore = create<PipelineState>()(
             referenceId: data.referenceId ?? "",
             pageHint: data.pageHint ?? null,
           };
+        } catch (err) {
+          set({
+            designReferencesLoading: "idle",
+            designReferencesError: err instanceof Error ? err.message : "Network error.",
+          });
+          return null;
+        }
+      },
+
+      fetchUrlHtmlReference: async (url, html, pageHint) => {
+        set({ designReferencesLoading: "uploading", designReferencesError: null });
+        try {
+          const pid = designReferenceProjectIdParam();
+          const resp = await fetch(
+            `/api/agents/pipeline/design-references/fetch-html${pid ? `?${pid}` : ""}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url, html, pageHint }),
+            },
+          );
+          const data = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+            referenceId?: string;
+            pageHint?: string | null;
+            references?: DesignReferenceSummary[];
+          };
+          if (!resp.ok) {
+            set({
+              designReferencesLoading: "idle",
+              designReferencesError: data.error || "Failed to persist HTML snapshot.",
+            });
+            return null;
+          }
+          if (Array.isArray(data.references)) {
+            set({ designReferences: data.references, designReferencesLoading: "idle", designReferencesError: null });
+          } else {
+            set({ designReferencesLoading: "idle", designReferencesError: null });
+          }
+          return { referenceId: data.referenceId ?? "", pageHint: data.pageHint ?? null };
         } catch (err) {
           set({
             designReferencesLoading: "idle",
