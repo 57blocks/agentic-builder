@@ -859,9 +859,14 @@ function HumanDecisionOverlay({
   onSubmit,
 }: {
   decision: PendingHumanDecision;
-  onSubmit: (decisionId: string) => Promise<void>;
+  onSubmit: (decisionId: string, directive?: string) => Promise<void>;
 }) {
   const [submitting, setSubmitting] = useState<string | null>(null);
+  // Option awaiting a free-text directive before it can be submitted.
+  const [awaitingDirectiveFor, setAwaitingDirectiveFor] = useState<string | null>(
+    null,
+  );
+  const [directive, setDirective] = useState("");
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, Math.floor((new Date(decision.expiresAt).getTime() - Date.now()) / 1000)),
   );
@@ -877,9 +882,15 @@ function HumanDecisionOverlay({
     return () => clearInterval(id);
   }, [decision.expiresAt]);
 
-  async function handlePick(id: string) {
-    setSubmitting(id);
-    await onSubmit(id);
+  async function handlePick(opt: PendingHumanDecision["options"][number]) {
+    // Options that need a correction (e.g. "the test is wrong") reveal a
+    // free-text box first; the directive is the authoritative fix guidance.
+    if (opt.requiresDirective && awaitingDirectiveFor !== opt.id) {
+      setAwaitingDirectiveFor(opt.id);
+      return;
+    }
+    setSubmitting(opt.id);
+    await onSubmit(opt.id, opt.requiresDirective ? directive.trim() : undefined);
     setSubmitting(null);
   }
 
@@ -927,11 +938,11 @@ function HumanDecisionOverlay({
 
         <div className="flex flex-col gap-2 p-5">
           {decision.options.map((opt) => (
+            <div key={opt.id} className="flex flex-col gap-2">
             <button
-              key={opt.id}
               type="button"
               disabled={submitting !== null}
-              onClick={() => handlePick(opt.id)}
+              onClick={() => handlePick(opt)}
               className={[
                 "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all duration-150",
                 opt.id === "abort"
@@ -979,6 +990,30 @@ function HumanDecisionOverlay({
                 </span>
               )}
             </button>
+            {opt.requiresDirective && awaitingDirectiveFor === opt.id && (
+              <div className="rounded-xl border border-sky-500/30 bg-zinc-800/40 p-3">
+                <label className="text-[10px] font-semibold uppercase tracking-widest text-sky-400">
+                  Your correction — authoritative; the fix will follow this exactly
+                </label>
+                <textarea
+                  autoFocus
+                  value={directive}
+                  onChange={(e) => setDirective(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. The test is wrong: a completed checkout's status is 'paid' per AC-074 — fix the assertion, keep the controller as-is."
+                  className="mt-2 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-[12px] text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={!directive.trim() || submitting !== null}
+                  onClick={() => handlePick(opt)}
+                  className="mt-2 w-full rounded-lg bg-sky-600 px-4 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Submit correction &amp; resume
+                </button>
+              </div>
+            )}
+            </div>
           ))}
         </div>
       </motion.div>

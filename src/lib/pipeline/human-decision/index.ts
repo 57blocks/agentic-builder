@@ -18,6 +18,23 @@ export interface HumanDecisionOption {
   label: string;
   /** One-sentence explanation of what the system will do if this is chosen. */
   description: string;
+  /**
+   * When true, the UI shows a free-text box and the human's `directive` is
+   * REQUIRED before submitting. The directive is the authoritative correction
+   * fed back into the next fix attempt (e.g. "the test is wrong: a completed
+   * checkout's status is 'paid' per AC-074 — fix the assertion"). This is what
+   * lets HITL achieve "get the code actually fixed", not just unblock the flow.
+   */
+  requiresDirective?: boolean;
+}
+
+/** What a resolved human decision carries back to the waiting pipeline node. */
+export interface HumanDecisionResult {
+  /** Chosen option id, or "timeout" when auto-resolved with no response. */
+  optionId: string;
+  /** Free-text corrective guidance the human typed (authoritative; fed into the
+   *  next fix attempt's prompt). Undefined when the option needs none. */
+  directive?: string;
 }
 
 export interface PendingDecision {
@@ -26,11 +43,22 @@ export interface PendingDecision {
   context: string;
   /** ISO timestamp when this decision will auto-resolve if no response. */
   expiresAt: string;
-  resolve: (decisionId: string) => void;
+  resolve: (result: HumanDecisionResult) => void;
   reject: (reason?: unknown) => void;
 }
 
-const DECISION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
+/**
+ * How long a pending decision waits before auto-resolving to "timeout".
+ * Infra/setup escalations (start a DB, fix creds, install a dep) need real time,
+ * so this is deliberately long and overridable per call via `requestHumanDecision`.
+ */
+const DECISION_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(
+    (process.env.HUMAN_DECISION_TIMEOUT_MS ?? "1800000").trim(), // 30 min default
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 30 * 60 * 1000;
+})();
 
 const _pending = new Map<string, PendingDecision>();
 
@@ -43,21 +71,22 @@ export function requestHumanDecision(
   sessionId: string,
   options: HumanDecisionOption[],
   context: string,
-): Promise<string> {
+  timeoutMs: number = DECISION_TIMEOUT_MS,
+): Promise<HumanDecisionResult> {
   // Cancel any prior pending decision for this session before registering a
   // new one (defensive — only one should ever be in-flight at a time).
   clearHumanDecision(sessionId);
 
-  return new Promise<string>((resolve, reject) => {
-    const expiresAt = new Date(Date.now() + DECISION_TIMEOUT_MS).toISOString();
+  return new Promise<HumanDecisionResult>((resolve, reject) => {
+    const expiresAt = new Date(Date.now() + timeoutMs).toISOString();
     _pending.set(sessionId, { options, context, expiresAt, resolve, reject });
 
     const timer = setTimeout(() => {
       if (_pending.has(sessionId)) {
         _pending.delete(sessionId);
-        resolve("timeout");
+        resolve({ optionId: "timeout" });
       }
-    }, DECISION_TIMEOUT_MS);
+    }, timeoutMs);
 
     // Don't let the timer prevent clean process exit.
     if (typeof timer === "object" && timer !== null && "unref" in timer) {
@@ -74,11 +103,15 @@ export function requestHumanDecision(
 export function resolveHumanDecision(
   sessionId: string,
   decisionId: string,
+  directive?: string,
 ): boolean {
   const pending = _pending.get(sessionId);
   if (!pending) return false;
   _pending.delete(sessionId);
-  pending.resolve(decisionId);
+  pending.resolve({
+    optionId: decisionId,
+    directive: directive?.trim() ? directive.trim() : undefined,
+  });
   return true;
 }
 

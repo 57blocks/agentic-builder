@@ -155,7 +155,7 @@ interface CodingState {
   ) => void;
   selectAgent: (agentId: string | null) => void;
   /** Called by the decision UI when the user picks an option. */
-  submitHumanDecision: (decisionId: string) => Promise<void>;
+  submitHumanDecision: (decisionId: string, directive?: string) => Promise<void>;
   /** Rebuild task list and session status from a persisted checkpoint.
    *  Called on page load so the user sees last-session results without waiting
    *  for a re-run. Safe to call when status is "idle" or "failed". */
@@ -341,7 +341,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
 
   setCodingMode: (mode) => set({ codingMode: mode }),
 
-  submitHumanDecision: async (decisionId: string) => {
+  submitHumanDecision: async (decisionId: string, directive?: string) => {
     const { sessionId, pendingHumanDecision } = get();
     if (!sessionId || !pendingHumanDecision) return;
     set({ pendingHumanDecision: null });
@@ -349,7 +349,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       await fetch("/api/agents/coding/decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, decisionId }),
+        body: JSON.stringify({ sessionId, decisionId, directive }),
       });
     } catch (err) {
       console.error("[coding-store] submitHumanDecision failed:", err);

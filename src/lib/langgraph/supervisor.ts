@@ -110,6 +110,7 @@ import {
 import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
+  type HumanDecisionResult,
 } from "@/lib/pipeline/human-decision";
 import {
   readResourceRequirements,
@@ -8648,7 +8649,7 @@ async function integrationVerifyAndFix(
           `${label}: stagnation fallback exhausted — awaiting human decision (5 min timeout).`,
         );
 
-        let humanDecision: string;
+        let humanDecision: HumanDecisionResult;
         try {
           humanDecision = await requestHumanDecision(
             state.sessionId,
@@ -8656,23 +8657,27 @@ async function integrationVerifyAndFix(
             humanDecisionContext,
           );
         } catch {
-          humanDecision = "abort";
+          humanDecision = { optionId: "abort" };
         }
 
         getRepairEmitter(state.sessionId)({
           stage: "integration-gate",
           event: "human_decision_received",
           details: {
-            decisionId: humanDecision,
+            decisionId: humanDecision.optionId,
+            hasDirective: Boolean(humanDecision.directive),
             triggeredAtIteration: iterations,
           },
         });
 
-        if (humanDecision === "abort" || humanDecision === "timeout") {
+        if (
+          humanDecision.optionId === "abort" ||
+          humanDecision.optionId === "timeout"
+        ) {
           finalStatus = "fail";
           finalSummary = [
-            humanDecision === "timeout"
-              ? "Human decision timed out (5 min); aborting integration fix."
+            humanDecision.optionId === "timeout"
+              ? "Human decision timed out; aborting integration fix."
               : "Human chose to abort the integration fix stage.",
             `No mutation for ${consecutiveNoMutationIterations} consecutive iteration(s).`,
             `Dynamic stagnation threshold: abortAt=${abortAt}, progressScore=${progressScore}/${MAX_INTEGRATION_PROGRESS_SCORE}.`,
@@ -8680,19 +8685,28 @@ async function integrationVerifyAndFix(
             .filter(Boolean)
             .join("\n");
           console.warn(
-            `${label}: aborting on human decision (${humanDecision}).`,
+            `${label}: aborting on human decision (${humanDecision.optionId}).`,
           );
           break;
         }
 
-        // Human picked an actionable option — find its label/description and
-        // inject a targeted instruction so the worker acts in the next turn.
+        // Human picked an actionable option — inject a targeted instruction so
+        // the worker acts in the next turn. The free-text `directive` (when the
+        // human typed one) is the AUTHORITATIVE correction and is appended so the
+        // model treats it as the source of truth, not just the option label.
         const chosenOption = INTEGRATION_DECISION_OPTIONS.find(
-          (o) => o.id === humanDecision,
+          (o) => o.id === humanDecision.optionId,
         );
-        const humanInstruction = chosenOption
-          ? `HUMAN DECISION: ${chosenOption.label} — ${chosenOption.description}`
-          : `HUMAN DECISION: ${humanDecision}`;
+        const humanInstruction = [
+          chosenOption
+            ? `HUMAN DECISION: ${chosenOption.label} — ${chosenOption.description}`
+            : `HUMAN DECISION: ${humanDecision.optionId}`,
+          humanDecision.directive
+            ? `HUMAN GUIDANCE (authoritative — follow this exactly): ${humanDecision.directive}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
         messages.push({
           role: "user",
