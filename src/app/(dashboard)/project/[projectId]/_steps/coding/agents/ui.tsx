@@ -328,6 +328,7 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   }, []);
 
   const [isRerunning, setIsRerunning] = useState(false);
+  const [showRerunConfirm, setShowRerunConfirm] = useState(false);
 
   // Clear rerunning state once the new session actually starts
   useEffect(() => {
@@ -538,25 +539,15 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
   // success/failure / in-progress) and re-trigger the full coding pipeline
   // against the latest task breakdown. Always behind a confirm prompt because
   // it aborts any active SSE and overwrites generated files.
+  // Open the styled confirm modal (was a native window.confirm). The actual
+  // rerun runs from `confirmRerun` once the user confirms in the modal.
   const handleRerun = useCallback(() => {
     if (kickoffTasks.length === 0) return;
-    const completedCount = codingState.tasks.filter(
-      (t) => t.codingStatus === "completed",
-    ).length;
-    const summary =
-      codingState.tasks.length > 0
-        ? `${completedCount}/${codingState.tasks.length} tasks completed in the current session.\n\n`
-        : "";
-    const ok = window.confirm(
-      `Rerun the entire coding pipeline from task #1?\n\n` +
-        summary +
-        `This will:\n` +
-        `  • Abort the current run (if any)\n` +
-        `  • Reset every task back to pending and start a fresh session\n` +
-        `  • Overwrite previously generated files as the new run produces them\n\n` +
-        `Already-saved kickoff artifacts (PRD / TRD / task breakdown / env / auth decision) are NOT touched.`,
-    );
-    if (!ok) return;
+    setShowRerunConfirm(true);
+  }, [kickoffTasks.length]);
+
+  const confirmRerun = useCallback(() => {
+    setShowRerunConfirm(false);
     setIsRerunning(true);
     rerunCoding(
       runId,
@@ -568,7 +559,6 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
       stitchMeta ?? undefined,
     );
   }, [
-    codingState.tasks,
     kickoffTasks,
     rerunCoding,
     runId,
@@ -1069,6 +1059,73 @@ function AgentsFlowInner({ onNavigate }: StepUIProps) {
           onRun={handleRunSelected}
           onClose={() => setPickerOpen(false)}
         />
+      )}
+
+      {/* Rerun-the-whole-pipeline confirm (styled, replaces window.confirm) */}
+      {showRerunConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRerunConfirm(false);
+          }}
+        >
+          <div className="w-[460px] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <div className="px-6 pt-6 pb-2">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50">
+                  <RotateCcw size={16} className="text-amber-600" />
+                </div>
+                <h3 className="text-[16px] font-semibold text-slate-900">
+                  Rerun the entire coding pipeline?
+                </h3>
+              </div>
+              {codingState.tasks.length > 0 && (
+                <p className="mb-2 text-[13px] leading-5 text-slate-600">
+                  <span className="font-medium text-slate-900">
+                    {
+                      codingState.tasks.filter(
+                        (t) => t.codingStatus === "completed",
+                      ).length
+                    }
+                    /{codingState.tasks.length}
+                  </span>{" "}
+                  tasks completed in the current session.
+                </p>
+              )}
+              <p className="mb-2 text-[13px] leading-5 text-slate-600">
+                This will:
+              </p>
+              <ul className="mb-2 list-disc space-y-0.5 pl-5 text-[13px] leading-5 text-slate-600">
+                <li>Abort the current run (if any)</li>
+                <li>Reset every task back to pending and start a fresh session</li>
+                <li>Overwrite previously generated files as the new run produces them</li>
+              </ul>
+              <p className="text-[12px] text-slate-500">
+                Already-saved kickoff artifacts (PRD / TRD / task breakdown / env /
+                auth decision) are{" "}
+                <span className="font-medium text-slate-700">not</span> touched.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowRerunConfirm(false)}
+                className="h-9 rounded-lg px-4 text-sm font-medium text-slate-600 hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRerun}
+                className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500"
+              >
+                Rerun pipeline
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
