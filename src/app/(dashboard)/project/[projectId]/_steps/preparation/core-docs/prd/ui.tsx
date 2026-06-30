@@ -285,6 +285,38 @@ export function PrdUI(props: StepUIProps) {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSavingDoc, setIsSavingDoc] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
+  // ── Imported project: reverse-engineered baseline PRD ────────────────
+  const [isImported, setIsImported] = useState(false);
+  const [generatingBaseline, setGeneratingBaseline] = useState(false);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!props.projectSlug) return;
+    fetch(`/api/projects/${props.projectSlug}/step-navigation`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((nav) => {
+        if (nav?.imported) setIsImported(true);
+      })
+      .catch(() => {});
+  }, [props.projectSlug]);
+  const handleGenerateBaseline = async () => {
+    if (!props.projectSlug || generatingBaseline) return;
+    setGeneratingBaseline(true);
+    setBaselineError(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${props.projectSlug}/baseline-prd`,
+        { method: "POST" },
+      );
+      const data = (await res.json()) as { content?: string; message?: string };
+      if (!res.ok)
+        throw new Error(data.message ?? "Failed to generate baseline PRD.");
+      setStepContent("prd", data.content ?? "");
+    } catch (e) {
+      setBaselineError(e instanceof Error ? e.message : "Failed to generate.");
+    } finally {
+      setGeneratingBaseline(false);
+    }
+  };
   // ── Manual edit mode (raw markdown textarea) ──────────────────────────
   const [isManualEditing, setIsManualEditing] = useState(false);
   const [manualDraft, setManualDraft] = useState("");
@@ -315,11 +347,14 @@ export function PrdUI(props: StepUIProps) {
     if (autoStartedRef.current) return;
     if (isRunning) return;
     if (step?.content) return;
+    // Imported projects generate a baseline PRD from code (explicit button),
+    // never the brief→PRD path.
+    if (isImported) return;
     if (!featureBrief.trim()) return;
     autoStartedRef.current = true;
     void executeStep("prd");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHydrated, featureBrief, step?.content]);
+  }, [isHydrated, featureBrief, step?.content, isImported]);
 
   // ── Load persisted version history on hydration ─────────────────────
   useEffect(() => {
@@ -889,6 +924,42 @@ export function PrdUI(props: StepUIProps) {
               <ShieldCheck size={15} /> {qualityRan && subsystemRan ? "Prepared ✓" : "Prepare PRD"}
             </button>
           </div>
+        </div>
+      )}
+      {isImported && (
+        <div className="flex items-center gap-3 px-8 py-3 border-b border-indigo-200 bg-indigo-50 shrink-0">
+          <ShieldCheck size={16} className="text-indigo-600 shrink-0" />
+          {content ? (
+            <span className="text-[13px] text-indigo-800">
+              This PRD was reverse-engineered from your imported project (its
+              current state). Enter what to change below to start the next
+              iteration.
+            </span>
+          ) : (
+            <>
+              <span className="text-[13px] text-indigo-800">
+                Imported project — generate a baseline PRD from the existing
+                code to start iterating on it.
+              </span>
+              <button
+                type="button"
+                onClick={handleGenerateBaseline}
+                disabled={generatingBaseline}
+                className="ml-auto flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-semibold border border-indigo-400 text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 shrink-0"
+              >
+                {generatingBaseline ? (
+                  <>
+                    <SpinnerIcon /> Generating…
+                  </>
+                ) : (
+                  "Generate project PRD"
+                )}
+              </button>
+            </>
+          )}
+          {baselineError && (
+            <span className="text-[12px] text-red-600">{baselineError}</span>
+          )}
         </div>
       )}
       <div className="flex-1 overflow-auto px-8 py-8">

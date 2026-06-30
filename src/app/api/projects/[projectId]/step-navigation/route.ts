@@ -4,13 +4,35 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import fs from "fs";
+import path from "path";
 import { db } from "@/lib/db/client";
 import { projectStepNavigation } from "@/lib/db/schema";
-import { ensureProjectExists } from "@/lib/project-store";
+import { ensureProjectExists, getProjectById } from "@/lib/project-store";
 import { resolveUserId } from "@/lib/session";
+import { readProjectProfile } from "@/lib/pipeline/project-profile";
 import { desc, eq } from "drizzle-orm";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
+
+/** Imported-project signals derived from the project's code dir, so the UI can
+ *  route an imported project to the PRD step and offer baseline-PRD generation. */
+async function importedSignals(
+  projectId: string,
+): Promise<{ imported: boolean; hasBaselinePrd: boolean }> {
+  try {
+    const project = await getProjectById(projectId);
+    const dir = project?.codeOutputDir;
+    if (!dir) return { imported: false, hasBaselinePrd: false };
+    const profile = await readProjectProfile(dir);
+    const hasBaselinePrd = fs.existsSync(
+      path.join(dir, ".blueprint", "PRD.md"),
+    );
+    return { imported: !!profile?.imported, hasBaselinePrd };
+  } catch {
+    return { imported: false, hasBaselinePrd: false };
+  }
+}
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
@@ -23,11 +45,23 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       .orderBy(desc(projectStepNavigation.updatedAt))
       .limit(1);
 
+    const sig = await importedSignals(projectId);
+
     if (!row) {
-      return NextResponse.json({ activeStep: "initial", tier: "M" });
+      // Imported projects open on the PRD step (to show/generate the baseline
+      // PRD) instead of the blank `initial` feature-brief input.
+      return NextResponse.json({
+        activeStep: sig.imported ? "prd" : "initial",
+        tier: "M",
+        ...sig,
+      });
     }
 
-    return NextResponse.json({ activeStep: row.activeStep, tier: row.tier });
+    return NextResponse.json({
+      activeStep: row.activeStep,
+      tier: row.tier,
+      ...sig,
+    });
   } catch (err) {
     console.error("[step-navigation] GET error:", err);
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
