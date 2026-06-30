@@ -4,7 +4,7 @@
  * Single source of truth for backend ↔ frontend port pairing. The shape of
  * the generated `.env` files is fixed here so that:
  *   • `backend/.env` always declares `PORT=<port>`
- *   • `frontend/.env` always declares `VITE_API_BASE_URL=http://localhost:<port>/api`
+ *   • `frontend/.env` always declares `VITE_API_BASE_URL=http://localhost:<port>/api/v1`
  * No worker should hard-code a different port in either file.
  */
 
@@ -23,9 +23,18 @@ export function resolveBackendPort(): number {
   return Number.isFinite(v) && v > 0 && v < 65536 ? v : 4000;
 }
 
-/** Canonical `VITE_API_BASE_URL` for a given backend port. */
+/**
+ * Canonical `VITE_API_BASE_URL` for a given backend port.
+ *
+ * MUST include the full `/api/v1` mount prefix: the generated frontend client
+ * reads `import.meta.env.VITE_API_BASE_URL || "/api/v1"` and callers pass ONLY
+ * the business path (e.g. `/users/me`). A bare host here (no `/api/v1`) made
+ * every request resolve to `http://localhost:<port>/users/me` → 404, because
+ * the backend mounts its router under `/api/v1`. Keep the prefix in lock-step
+ * with `backend/src/api/modules/index.ts`'s `new Router({ prefix: "/api/v1" })`.
+ */
 export function buildFrontendApiBaseUrl(backendPort: number): string {
-  return `http://localhost:${backendPort}`;
+  return `http://localhost:${backendPort}/api/v1`;
 }
 
 /** Prefer request body, then Agentic Builder server env (e.g. .env.local). */
