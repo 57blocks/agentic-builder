@@ -110,6 +110,8 @@ import {
 import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
+  INFRA_DECISION_OPTIONS,
+  TDD_E2E_DECISION_OPTIONS,
   type HumanDecisionResult,
 } from "@/lib/pipeline/human-decision";
 import {
@@ -2306,11 +2308,65 @@ async function e2eVerifyAndFix(
           infraCount: triage.infra.length,
         },
       });
+
+      // ── Human-in-the-loop: infra can't be fixed by editing code ────────────
+      // DB unreachable / wrong creds / missing dep / port clash — escalate to a
+      // human who can fix the ENVIRONMENT, then act on their choice. Long timeout
+      // (default 30m) because fixing infra takes real time.
+      const infraCtx = [
+        "E2E hit an INFRASTRUCTURE failure (not a code bug) — the LLM cannot fix this by editing code.",
+        triage.summary,
+        "Likely causes: database unreachable / wrong credentials, a service not started, a port clash, or a missing dependency.",
+        "",
+        failureSummary.slice(-1500),
+      ].join("\n");
+      emitter({
+        stage: "e2e-triage",
+        event: "human_decision_needed",
+        details: {
+          context: infraCtx,
+          options: INFRA_DECISION_OPTIONS,
+          attempt,
+          timeoutMs: 30 * 60 * 1000,
+        },
+      });
+      let infraDecision: HumanDecisionResult;
+      try {
+        infraDecision = await requestHumanDecision(
+          state.sessionId,
+          INFRA_DECISION_OPTIONS,
+          infraCtx,
+        );
+      } catch {
+        infraDecision = { optionId: "skip" };
+      }
+      emitter({
+        stage: "e2e-triage",
+        event: "human_decision_received",
+        details: { decisionId: infraDecision.optionId, attempt },
+      });
+
+      if (infraDecision.optionId === "retry") {
+        // Human fixed the environment — re-run the gate WITHOUT consuming a fix
+        // attempt (rewind e2eVerifyAttempts; the infra failure wasn't the LLM's).
+        console.log(
+          "[Supervisor] e2eVerify: human fixed the environment — re-running e2e (no attempt consumed).",
+        );
+        return {
+          e2eVerifyAttempts: state.e2eVerifyAttempts,
+          e2eVerifyErrors:
+            "Infrastructure issue — human reported the environment fixed; re-running e2e.",
+        };
+      }
+
+      // skip / abort / timeout → proceed to summary. Infra is recorded but does
+      // NOT set e2eDeterministicUnresolved (it is not a code-bug hard-fail).
       return {
-        // Bump past the limit so routeAfterE2eVerify exits the loop.
         e2eVerifyAttempts: MAX_E2E_VERIFY_FIX_ATTEMPTS + 1,
         e2eVerifyErrors: [
-          "E2E failed with infrastructure signal — not a code bug.",
+          infraDecision.optionId === "skip"
+            ? "E2E skipped at human request after an infrastructure failure (known environment gap)."
+            : "E2E stopped after an infrastructure failure — not a code bug.",
           triage.summary,
           "See .ralph/e2e-triage.md for the full report.",
           "",

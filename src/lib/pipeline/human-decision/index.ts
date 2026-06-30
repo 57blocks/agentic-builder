@@ -133,6 +133,79 @@ export function getPendingDecision(
   return rest;
 }
 
+/**
+ * Infra / environment escalation — the LLM cannot fix these by editing code
+ * (DB unreachable, wrong credentials, missing API key, dependency/native build
+ * failed, port clash). A human fixes the environment, then chooses retry.
+ */
+export const INFRA_DECISION_OPTIONS: HumanDecisionOption[] = [
+  {
+    id: "retry",
+    label: "I fixed the environment — retry",
+    description:
+      "You started the DB / fixed credentials / installed the dependency / freed the port. Re-run this gate against the now-healthy environment.",
+  },
+  {
+    id: "skip",
+    label: "Skip this gate and continue",
+    description:
+      "Proceed without this gate, recording a known infrastructure gap. Use when the environment cannot be provided right now.",
+  },
+  {
+    id: "abort",
+    label: "Abort the session",
+    description: "Stop the run; the environment problem must be resolved first.",
+  },
+];
+
+/**
+ * TDD / E2E exhaustion adjudication — the loop spent its fix budget without
+ * converging, usually because it cannot tell whether the TEST or the CODE holds
+ * the true intent. The human supplies that disambiguation + the correction,
+ * which is fed back as authoritative guidance so the loop converges (the point
+ * of stopping is to get it FIXED, not merely to unblock).
+ */
+export const TDD_E2E_DECISION_OPTIONS: HumanDecisionOption[] = [
+  {
+    id: "fix_test",
+    label: "The TEST is wrong — apply my correction",
+    description:
+      "The code is right; the test's assertion/expectation/setup is wrong. Describe the correct expectation; the test will be rewritten to match (code kept).",
+    requiresDirective: true,
+  },
+  {
+    id: "fix_code",
+    label: "The CODE is wrong — apply my correction",
+    description:
+      "The test is right; the implementation has a real bug. Describe what the code should do; the implementation will be fixed (test kept).",
+    requiresDirective: true,
+  },
+  {
+    id: "clarify_spec",
+    label: "The requirement is ambiguous — here's the intent",
+    description:
+      "Neither test nor code clearly reflects the intended behaviour. State the intended behaviour; both test and code will be reconciled to it.",
+    requiresDirective: true,
+  },
+  {
+    id: "manual_done",
+    label: "I edited the files on disk — re-verify",
+    description:
+      "You changed the code/test directly. Re-run the gate to verify your edit.",
+  },
+  {
+    id: "skip",
+    label: "Defer as a known-issue",
+    description:
+      "Record this failure as tracked debt and continue. Use only when it genuinely cannot be resolved now.",
+  },
+  {
+    id: "abort",
+    label: "Abort the session",
+    description: "Stop the run with this failure unresolved.",
+  },
+];
+
 /** The pre-defined options for the 4-quadrant + abort decision. */
 export const INTEGRATION_DECISION_OPTIONS: HumanDecisionOption[] = [
   {
