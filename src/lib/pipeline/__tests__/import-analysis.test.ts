@@ -164,3 +164,47 @@ describe("project-profile IO roundtrip", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe("analyzeProject — multi-repo (microservices folder)", () => {
+  let dir: string;
+  beforeAll(async () => {
+    dir = await tmpDir();
+    // svc-a: a Go service; svc-b: an Express service; web: a Vite app.
+    await write(dir, "svc-a/go.mod", "module svc-a\n");
+    await write(dir, "svc-a/main.go", "package main\nfunc main(){}");
+    await write(
+      dir,
+      "svc-b/package.json",
+      JSON.stringify({ dependencies: { express: "^4" } }),
+    );
+    await write(
+      dir,
+      "svc-b/src/routes.js",
+      `router.get("/orders", h); router.post("/orders", h);`,
+    );
+    await write(
+      dir,
+      "web/package.json",
+      JSON.stringify({
+        dependencies: { react: "^18" },
+        devDependencies: { vite: "^5" },
+      }),
+    );
+  });
+  afterAll(async () => fs.rm(dir, { recursive: true, force: true }));
+
+  it("discovers each independent repo and analyzes it under profile.repos", async () => {
+    const report = await analyzeProject(dir, { now: "x" });
+    expect(report.profile.stack.monorepo).toBe("multi-repo");
+    expect(report.profile.repos).toHaveLength(3);
+    const byName = Object.fromEntries(
+      (report.profile.repos ?? []).map((r) => [r.name, r]),
+    );
+    expect(byName["svc-a"].stack.backend?.framework).toBe("go-http");
+    expect(byName["svc-b"].stack.backend?.framework).toBe("express");
+    expect(byName["svc-b"].detectedEndpoints.length).toBeGreaterThanOrEqual(2);
+    expect(byName["web"].stack.frontend?.framework).toBe("vite-react");
+    // Top-level summary has one row per repo + a layout row.
+    expect(report.summary.find((s) => s.label === "svc-b")).toBeTruthy();
+  });
+});

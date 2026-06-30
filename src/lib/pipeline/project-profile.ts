@@ -32,6 +32,7 @@ export type MonorepoLayout =
   | "flat" // single app at root (e.g. a lone Vite app, or a Next fullstack)
   | "workspaces" // pnpm/yarn/npm workspaces or packages/*
   | "separate-fe-be" // top-level `frontend/` + `backend/`
+  | "multi-repo" // N independent repos side by side (microservices folder)
   | "unknown";
 
 export type PackageManager =
@@ -104,6 +105,23 @@ export interface DesignSystemInfo {
   approach: string;
 }
 
+/**
+ * One discovered repo inside a multi-repo project (e.g. a microservices folder
+ * holding several independent service/ui repos side by side).
+ */
+export interface SubRepo {
+  /** Directory name (and display label). */
+  name: string;
+  /** Path relative to the multi-repo root. */
+  rootDir: string;
+  stack: ProjectStack;
+  detectedEndpoints: DetectedEndpoint[];
+  designSystem: DesignSystemInfo;
+  envKeys: string[];
+  confidence?: number;
+  notes?: string[];
+}
+
 export interface ProjectProfile {
   /** Always true for analyzer-produced profiles; marks an imported project. */
   imported: boolean;
@@ -121,6 +139,12 @@ export interface ProjectProfile {
    * the worker Convention Card — e.g. "no centralized API client detected".
    */
   notes?: string[];
+  /**
+   * Present for MULTI-REPO projects: one entry per discovered sub-repo. When
+   * set, the top-level `stack`/`detectedEndpoints` describe the root (usually
+   * empty) and the real per-repo facts live here.
+   */
+  repos?: SubRepo[];
 }
 
 function profilePath(outputDir: string): string {
@@ -157,6 +181,7 @@ export async function readProjectProfile(
       designSystem: parsed.designSystem ?? { approach: "unknown" },
       envKeys: Array.isArray(parsed.envKeys) ? parsed.envKeys : [],
       notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+      repos: Array.isArray(parsed.repos) ? parsed.repos : undefined,
     };
   } catch {
     return null;
