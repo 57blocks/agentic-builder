@@ -81,6 +81,15 @@ export default function LoginPage() {
         WebkitAppRegion: "no-drag",
       } as React.CSSProperties}
     >
+      {/* Draggable title-bar strip — the macOS window uses titleBarStyle
+          "hiddenInset" (no native bar), so dragging relies on a -webkit-app-region
+          drag region. The dashboard layout provides one; /login lives outside that
+          group, so without this strip the whole window is undraggable on login. */}
+      <div
+        className="fixed top-0 left-0 right-0 h-[38px] z-50"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
+
       {/* Background blurs */}
       <div className="pointer-events-none absolute right-[-80px] top-[-160px] w-[480px] h-[480px] rounded-full bg-[#dbeafe] blur-[60px] opacity-40" />
       <div className="pointer-events-none absolute bottom-[-80px] left-[-80px] w-[400px] h-[400px] rounded-full bg-[#faf5ff] blur-[60px] opacity-40" />
