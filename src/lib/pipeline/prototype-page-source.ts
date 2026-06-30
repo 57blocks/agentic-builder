@@ -31,6 +31,8 @@ export function selectPageSource(
     (e) => e.kind === "html" && referenceMatchesHint(e, hint),
   );
   if (htmlMatches.length > 0) {
+    // Tie-break: when multiple captured (non-url) html refs match the same page,
+    // first-in-manifest wins (manifest order = capture/upload order).
     const demo = htmlMatches.find((e) => e.source !== "url");
     if (demo) return { source: "demo-html", entry: demo };
     return { source: "url", entry: htmlMatches[0] };

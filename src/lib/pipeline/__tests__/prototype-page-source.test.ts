@@ -57,4 +57,12 @@ describe("selectPageSource", () => {
     const manifest = [entry({ id: "d", pageHint: "PAGE-001 dashboard family", source: "upload" })];
     expect(selectPageSource(hint, manifest).source).toBe("demo-html");
   });
+
+  it("matches by route when the reference pageHint is the raw route string (no PAGE-id)", () => {
+    const routeHint: PrdPageHint = { id: "PAGE-050", name: "Settings", route: "/settings" };
+    const manifest = [entry({ id: "r", pageHint: "/settings", source: "upload" })];
+    const sel = selectPageSource(routeHint, manifest);
+    expect(sel.source).toBe("demo-html");
+    expect(sel.entry?.id).toBe("r");
+  });
 });
