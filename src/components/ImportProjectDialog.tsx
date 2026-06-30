@@ -293,13 +293,15 @@ export default function ImportProjectDialog({
                       key={row.label}
                       className="flex items-baseline justify-between gap-3 text-xs"
                     >
-                      <span className="shrink-0 text-muted-foreground">
+                      {/* Long repo names truncate; the framework + endpoint
+                          count (right) always stays fully visible. */}
+                      <span
+                        className="min-w-0 truncate text-muted-foreground"
+                        title={row.label}
+                      >
                         {row.label}
                       </span>
-                      <span
-                        className="truncate text-right font-mono text-foreground"
-                        title={row.value}
-                      >
+                      <span className="shrink-0 text-right font-mono text-foreground">
                         {row.value}
                       </span>
                     </div>

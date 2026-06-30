@@ -206,5 +206,9 @@ describe("analyzeProject — multi-repo (microservices folder)", () => {
     expect(byName["web"].stack.frontend?.framework).toBe("vite-react");
     // Top-level summary has one row per repo + a layout row.
     expect(report.summary.find((s) => s.label === "svc-b")).toBeTruthy();
+    // Notes are condensed: one non-JS summary line, no per-extraction chatter.
+    const notesText = report.notes.join(" ");
+    expect(notesText).toMatch(/non-JS backend service/i);
+    expect(notesText).not.toMatch(/Extracted \d+ endpoint/);
   });
 });

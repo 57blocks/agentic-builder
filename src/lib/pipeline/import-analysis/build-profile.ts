@@ -270,10 +270,33 @@ async function analyzeMultiRepo(
     });
   }
 
-  const notes = [
+  // Keep notes signal-rich: drop success/extraction chatter and the per-repo
+  // "no scaffold guarantees" repetition (summarized once below); keep distinct
+  // actionable warnings (e.g. "no centralized API client").
+  const NOISE =
+    /Extracted \d+ endpoint|No backend detected|Static extraction unsupported|no scaffold-level guarantees|Backend is \w+ \(/i;
+  const nonJsBackends = repos.filter(
+    (r) =>
+      r.stack.backend &&
+      r.stack.backend.language !== "js" &&
+      r.stack.backend.language !== "ts",
+  );
+  const notes: string[] = [
     `Detected ${repos.length} independent repos — each is analyzed and adapted on its own.`,
-    ...repos.flatMap((r) => (r.notes ?? []).map((n) => `[${r.name}] ${n}`)),
   ];
+  if (nonJsBackends.length > 0) {
+    const langs = [
+      ...new Set(nonJsBackends.map((r) => r.stack.backend!.language)),
+    ];
+    notes.push(
+      `${nonJsBackends.length} non-JS backend service(s) (${langs.join(", ")}): endpoints extracted via LLM; code generation for these has no scaffold-level guarantees (P2).`,
+    );
+  }
+  for (const r of repos) {
+    for (const n of r.notes ?? []) {
+      if (!NOISE.test(n)) notes.push(`[${r.name}] ${n}`);
+    }
+  }
 
   return { profile, summary, willGenerate, notes };
 }
