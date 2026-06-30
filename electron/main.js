@@ -176,6 +176,28 @@ const TOKEN_EXTRACT_SCRIPT = `(() => {
   });
 })()`;
 
+// HTML_CAPTURE_SCRIPT — runs in the rendered reference page. Returns the raw
+// ingredients for a self-contained snapshot: the hydrated outerHTML (Tailwind
+// classes intact), the cssText of every SAME-ORIGIN stylesheet (cross-origin
+// sheets throw on cssRules access — skipped, mirroring TOKEN_EXTRACT_SCRIPT),
+// and the page URL for absolutising relative asset URLs (done in TS).
+const HTML_CAPTURE_SCRIPT = `(() => {
+  const stylesheets = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules;
+    try { rules = sheet.cssRules; } catch (e) { continue; } // cross-origin: skip
+    if (!rules) continue;
+    let css = "";
+    for (const rule of Array.from(rules)) css += rule.cssText + "\\n";
+    if (css) stylesheets.push(css);
+  }
+  return JSON.stringify({
+    outerHTML: document.documentElement.outerHTML,
+    stylesheets,
+    baseUrl: location.href,
+  });
+})()`;
+
 // Returns { hasPassword, href } from the live page.
 const DETECT_LOGIN_SCRIPT = `(() => JSON.stringify({
   hasPassword: !!document.querySelector('input[type="password"]'),
@@ -347,6 +369,15 @@ async function captureReferenceUrl(url, sender, opts) {
       /* tokens stay null; screenshot is the primary signal */
     }
 
+    // Best-effort HTML snapshot ingredients (independent of screenshot success).
+    let htmlCapture = null;
+    try {
+      const json = await win.webContents.executeJavaScript(HTML_CAPTURE_SCRIPT, true);
+      htmlCapture = JSON.parse(json);
+    } catch {
+      /* htmlCapture stays null; screenshot + tokens are still returned */
+    }
+
     // Best-effort same-origin link discovery — lets the renderer crawl from one
     // entry URL to find pages (esp. concrete instances of `:param` routes) that
     // the PRD-route list can't enumerate. Absolute, same-origin, hash stripped.
@@ -400,6 +431,7 @@ async function captureReferenceUrl(url, sender, opts) {
       ok: true,
       screenshotDataUrl: `data:image/jpeg;base64,${data}`,
       tokens,
+      htmlCapture,
       links,
       finalUrl: win.webContents.getURL() || url,
     };
