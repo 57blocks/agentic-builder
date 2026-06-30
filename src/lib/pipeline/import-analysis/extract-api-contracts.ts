@@ -13,6 +13,10 @@
 import path from "node:path";
 import * as nodeFs from "node:fs/promises";
 import type { BackendStack, DetectedEndpoint } from "../project-profile";
+import {
+  extractEndpointsViaLlm,
+  type ChatFn,
+} from "./llm-extract-endpoints";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "options", "head"];
 
@@ -92,17 +96,32 @@ export interface ExtractContractsResult {
 export async function extractApiContracts(
   projectDir: string,
   backend: BackendStack | null,
-  opts: { maxFiles?: number } = {},
+  opts: { maxFiles?: number; chat?: ChatFn } = {},
 ): Promise<ExtractContractsResult> {
   const notes: string[] = [];
   if (!backend) {
     return { endpoints: [], notes: ["No backend detected — no API to extract."] };
   }
   if (backend.language !== "ts" && backend.language !== "js") {
+    // No static parser for this language → LLM-based extraction (graceful:
+    // returns [] with no key / on failure).
+    const beRoot = path.join(projectDir, backend.rootDir);
+    const llmEndpoints = await extractEndpointsViaLlm(beRoot, {
+      maxFiles: opts.maxFiles,
+      chat: opts.chat,
+    });
+    if (llmEndpoints.length > 0) {
+      return {
+        endpoints: llmEndpoints,
+        notes: [
+          `Extracted ${llmEndpoints.length} endpoint(s) from ${backend.framework} (${backend.language}) via LLM.`,
+        ],
+      };
+    }
     return {
       endpoints: [],
       notes: [
-        `Static endpoint extraction is not supported for ${backend.language} (${backend.framework}) yet — contracts left empty.`,
+        `Static extraction unsupported for ${backend.language} (${backend.framework}); LLM extraction returned none (needs an LLM key, or no routes found).`,
       ],
     };
   }
