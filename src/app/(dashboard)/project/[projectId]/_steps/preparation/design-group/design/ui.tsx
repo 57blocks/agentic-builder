@@ -15,6 +15,7 @@ import { pageHintOwnsRoute } from "@/lib/design/page-hint-match";
 import { buildAutoCapturePlan, isSameRoutePath } from "@/lib/design/auto-capture-plan";
 import { extractPrdPageHints } from "@/lib/requirements/prd-page-hints";
 import { buildMockupSessionSeed } from "@/lib/design/mockup-session";
+import { buildSelfContainedHtml } from "@/lib/design/dom-snapshot";
 import type { StepUIProps } from "../../../_shared/types";
 import { DocDiffView } from "../../../_shared/DocDiffView";
 import {
@@ -1038,6 +1039,22 @@ export function DesignUI(props: StepUIProps) {
             await usePipelineStore
               .getState()
               .fetchUrlDesignReference(url, shot, cssToken, pageHint);
+            // Additional artifact: self-contained HTML snapshot bound to the same
+            // PAGE-id. Only reached when the page rendered itself (the redirect
+            // guard above already returned early otherwise).
+            const htmlCapture = result?.htmlCapture;
+            if (htmlCapture && htmlCapture.outerHTML) {
+              try {
+                const snapshot = buildSelfContainedHtml(htmlCapture);
+                await usePipelineStore
+                  .getState()
+                  .fetchUrlHtmlReference(url, snapshot, pageHint);
+              } catch (e) {
+                console.warn(
+                  `[DesignUI] html snapshot persist failed for ${url}: ${e instanceof Error ? e.message : String(e)}`,
+                );
+              }
+            }
             return links;
           } catch (e) {
             console.warn(
@@ -1082,6 +1099,8 @@ export function DesignUI(props: StepUIProps) {
     async (url: string, pageHint: string) => {
       let screenshotDataUrl: string | undefined;
       let cssToken: Record<string, string> | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let htmlCapture: { outerHTML: string; stylesheets: string[]; baseUrl: string } | null | undefined;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (typeof window !== "undefined" && (window as any).electronAPI?.renderReferenceUrl) {
@@ -1106,6 +1125,7 @@ export function DesignUI(props: StepUIProps) {
           }
           screenshotDataUrl = result?.screenshotDataUrl ?? result?.screenshot;
           cssToken = result?.tokens?.cssVars ?? result?.cssTokens ?? result?.cssToken;
+          htmlCapture = result?.htmlCapture;
         } catch {
           // no screenshot
         }
@@ -1116,6 +1136,21 @@ export function DesignUI(props: StepUIProps) {
       await usePipelineStore
         .getState()
         .fetchUrlDesignReference(url, screenshotDataUrl, cssToken, pageHint);
+      // Additional artifact: self-contained HTML snapshot bound to the same
+      // PAGE-id. Only reached when the page rendered itself (the redirect
+      // guard above already returned early otherwise).
+      if (htmlCapture && htmlCapture.outerHTML) {
+        try {
+          const snapshot = buildSelfContainedHtml(htmlCapture);
+          await usePipelineStore
+            .getState()
+            .fetchUrlHtmlReference(url, snapshot, pageHint);
+        } catch (e) {
+          console.warn(
+            `[DesignUI] html snapshot persist failed for ${url}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
     },
     [prdContent],
   );
