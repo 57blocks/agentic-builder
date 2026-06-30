@@ -242,6 +242,15 @@ async function reconnectAfterDrop(
   get: () => CodingState,
 ): Promise<void> {
   const POLL_MS = 5000;
+  // Whether we've ever seen evidence of an in-flight orchestrated run (a status
+  // record or a checkpoint). Once true, a later null/empty poll is treated as a
+  // TRANSIENT read miss (the durable file is briefly unwritten) and we keep
+  // reconnecting — never flip to ERROR while the backend is still building.
+  let sawOrchestration = false;
+  // Consecutive "no status at all" polls before we conclude there is genuinely
+  // no orchestrated run (single-pass run that legitimately has no durable state).
+  let missesWithoutOrchestration = 0;
+  const MAX_MISSES = 3;
   for (;;) {
     // A reset()/new session took over — stop polling.
     if (get().status !== "running") return;
@@ -255,6 +264,8 @@ async function reconnectAfterDrop(
       /* transient — retry next poll */
     }
     if (get().status !== "running") return;
+
+    if (data?.status || data?.checkpoint) sawOrchestration = true;
 
     if (data?.checkpoint) {
       try {
@@ -281,10 +292,23 @@ async function reconnectAfterDrop(
       return;
     }
     if (!data?.status) {
-      // No orchestration in flight (single-pass run) — preserve old behavior.
-      set({ status: "failed", reconnecting: false, error: "Connection lost." });
-      return;
+      // No status this poll. For an orchestrated run this is a transient read
+      // miss (the durable file is briefly unwritten while the build keeps
+      // running) — keep reconnecting rather than falsely failing. Only conclude
+      // "connection lost" for a run that has NEVER shown orchestration evidence
+      // (a genuine single-pass run) after a few consecutive misses.
+      if (!sawOrchestration) {
+        missesWithoutOrchestration += 1;
+        if (missesWithoutOrchestration >= MAX_MISSES) {
+          set({ status: "failed", reconnecting: false, error: "Connection lost." });
+          return;
+        }
+      }
+      set({ reconnecting: true });
+      await new Promise((res) => setTimeout(res, POLL_MS));
+      continue;
     }
+    missesWithoutOrchestration = 0;
     // state === "running": keep showing reconnecting and poll again.
     set({ reconnecting: true });
     await new Promise((res) => setTimeout(res, POLL_MS));
