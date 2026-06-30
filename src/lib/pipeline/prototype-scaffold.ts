@@ -9,24 +9,22 @@ import {
 import {
   prdSignalsBackend,
   normalizeProjectTier,
+  parseTierFromPrd,
 } from "@/lib/agents/shared/project-classifier";
 
 /**
  * Resolve the tier BEFORE kickoff (no resourceRequirements / authDecision yet).
- * Mirrors coding's resolveTier: explicit arg → `**Project Tier: X**` badge → default M,
+ * Mirrors coding's resolveTier: explicit arg → `parseTierFromPrd` (handles both
+ * English `**Project Tier: X**` and Chinese `**X级**` / table-row badges) → default M,
  * then applies the S→M backend promotion.
  */
 export function resolvePrototypeTier(
   prdContent: string,
   explicitTier?: string,
 ): { scopeTier: ScaffoldTier; scaffoldTier: ScaffoldTier } {
-  let scope: ScaffoldTier;
-  if (explicitTier) {
-    scope = normalizeProjectTier(explicitTier) as ScaffoldTier;
-  } else {
-    const m = prdContent.match(/\*\*Project Tier:\s*([SML])\*\*/i);
-    scope = (m ? normalizeProjectTier(m[1]) : "M") as ScaffoldTier;
-  }
+  const scope: ScaffoldTier = (
+    explicitTier ? normalizeProjectTier(explicitTier) : parseTierFromPrd(prdContent) ?? "M"
+  ) as ScaffoldTier;
   const scaffoldTier = resolveScaffoldTier(scope, prdSignalsBackend(prdContent));
   return { scopeTier: scope, scaffoldTier };
 }

@@ -16,7 +16,11 @@ describe("resolvePrototypeTier", () => {
 
   it("reads the **Project Tier: X** badge from the PRD when no explicit tier", () => {
     const prd = "# Spec\n\n**Project Tier: L**\n\nbody";
-    expect(resolvePrototypeTier(prd).scopeTier).toBe("L");
+    expect(resolvePrototypeTier(prd)).toEqual({ scopeTier: "L", scaffoldTier: "L" });
+  });
+
+  it("reads a Chinese tier badge via parseTierFromPrd", () => {
+    expect(resolvePrototypeTier("项目规模 | **L级**").scopeTier).toBe("L");
   });
 
   it("defaults scope to M when no badge and no explicit tier", () => {
