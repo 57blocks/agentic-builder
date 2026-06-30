@@ -28,6 +28,7 @@ import {
   writeScaffoldSpecFile,
 } from "@/lib/pipeline/scaffold-spec";
 import { hasProjectProfile } from "@/lib/pipeline/project-profile";
+import { startIteration, finishIteration } from "@/lib/pipeline/iteration";
 import {
   formatGeneratedCodeDotEnv,
   upsertRedisUrlEnv,
@@ -2279,6 +2280,10 @@ export async function POST(request: NextRequest) {
 
       const graph = createSupervisorGraph();
 
+      // Imported project → frame this coding run as a new iteration: snapshot a
+      // git baseline before coding, commit the result after (see finally).
+      let importedIterationIndex: number | null = null;
+
       try {
         const prebuiltScaffold = scaffoldCopied.length > 0;
         if (prebuiltScaffold) {
@@ -2334,6 +2339,18 @@ export async function POST(request: NextRequest) {
             console.warn(
               `[CodingAPI] RALPH progress tracker init failed: ${e}`,
             );
+          }
+        }
+
+        if (isImported) {
+          try {
+            const iter = await startIteration(outputRoot);
+            importedIterationIndex = iter.index;
+            console.log(
+              `[CodingAPI] Imported project — iteration ${iter.index} baseline ${iter.baseGitRef?.slice(0, 7) ?? "(none)"}.`,
+            );
+          } catch (e) {
+            console.warn(`[CodingAPI] startIteration failed: ${e}`);
           }
         }
 
@@ -2700,6 +2717,20 @@ export async function POST(request: NextRequest) {
           terminalSummary =
             "Client disconnected before the coding session completed.";
           fatalError = terminalSummary;
+        }
+        // Imported project → close the iteration: commit the resulting code as
+        // this iteration's result ref and finalize the ledger entry.
+        if (isImported && importedIterationIndex != null) {
+          try {
+            await finishIteration(outputRoot, importedIterationIndex, {
+              status: reportStatus === "fail" ? "failed" : "done",
+            });
+            console.log(
+              `[CodingAPI] Imported project — closed iteration ${importedIterationIndex} (${reportStatus}).`,
+            );
+          } catch (e) {
+            console.warn(`[CodingAPI] finishIteration failed: ${e}`);
+          }
         }
         try {
           await writeCodingSessionReport({
