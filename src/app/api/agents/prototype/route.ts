@@ -10,171 +10,168 @@ import {
   resolveFrontendDir,
   copyBaseScaffoldForPrototype,
 } from "@/lib/pipeline/prototype-scaffold";
-import { selectPageSource } from "@/lib/pipeline/prototype-page-source";
-import { toViewComponentName, writePrototypeRouter } from "@/lib/pipeline/prototype-router";
+import { isSafeProjectId } from "@/lib/pipeline/prototype-route-guards";
+import { projectHasDemoUrl, planPrototypePages, type PlannedPage } from "@/lib/pipeline/prototype-page-plan";
+import { writePrototypeRouter, type PrototypeRoutePage } from "@/lib/pipeline/prototype-router";
 import { buildPortMessage } from "@/lib/agents/prototype/build-port-message";
+import { buildFreegenMessage } from "@/lib/agents/prototype/build-freegen-message";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
-import { writePrototypeMarker } from "@/lib/pipeline/prototype-marker";
+import {
+  readPrototypeMarker,
+  writePrototypeMarker,
+  type PrototypeMarker,
+  type PrototypeMarkerPage,
+} from "@/lib/pipeline/prototype-marker";
 import { buildFrontendDesignContextForCodegen } from "@/lib/pipeline/frontend-design-context";
-import { isSafeProjectId } from "@/lib/pipeline/prototype-route-guards";
 
 export const maxDuration = 600;
 
-function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "page";
-}
+/** Page-count budget for ONE run (kept small to stay well under maxDuration=600s;
+ *  the remainder is reported as `truncated` and picked up on the next resume run). */
+const PROTOTYPE_PAGE_CAP = 16;
+/** Pages generated concurrently per batch. */
+const BATCH_SIZE = 4;
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const {
-    prdContent = "",
-    projectId,
-    codeOutputDir,
-    tier,
-    pageId,
-    sessionId,
-  } = body as {
-    prdContent?: string;
-    projectId?: string;
-    codeOutputDir?: string;
-    tier?: string;
-    pageId?: string;
-    sessionId?: string;
+  const { prdContent = "", projectId, codeOutputDir, tier, pageId, sessionId } = body as {
+    prdContent?: string; projectId?: string; codeOutputDir?: string;
+    tier?: string; pageId?: string; sessionId?: string;
   };
 
   if (!isSafeProjectId(projectId)) {
     return new Response(JSON.stringify({ error: "Invalid projectId" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
+      status: 400, headers: { "Content-Type": "application/json" },
     });
   }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (data: unknown) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      const send = (d: unknown) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(d)}\n\n`));
+      const fail = (error: string) => { send({ type: "error", error }); controller.close(); };
 
       try {
         send({ type: "prototype_start" });
 
-        const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
-        const { scopeTier, scaffoldTier } = resolvePrototypeTier(prdContent, tier);
-        if (scaffoldTier === "S") {
-          send({
-            type: "error",
-            error:
-              "Prototype vertical slice supports M/L tier scaffolds only; S-tier router wiring is deferred to the full step.",
-          });
+        // Gate: demo URL must be on record.
+        const manifest = await readManifest(process.cwd(), projectId);
+        if (!projectHasDemoUrl(manifest)) {
+          send({ type: "prototype_skipped", reason: "no-demo-url" });
           controller.close();
           return;
         }
+
+        const { scopeTier, scaffoldTier } = resolvePrototypeTier(prdContent, tier);
+        if (scaffoldTier === "S") {
+          return fail("Prototype supports M/L tier scaffolds only; S-tier wiring is deferred.");
+        }
+
+        const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
         send({ type: "scaffold_copy_start", scaffoldTier, scopeTier });
         await copyBaseScaffoldForPrototype(scaffoldTier, outputRoot);
         const frontendDir = resolveFrontendDir(outputRoot, scaffoldTier);
         send({ type: "scaffold_copy_complete" });
 
-        const hints = extractPrdPageHints(prdContent);
-        const hint = pageId ? hints.find((h) => h.id === pageId) : hints[0];
-        if (!hint) {
-          send({ type: "error", error: `No PRD page hint found${pageId ? ` for ${pageId}` : ""}` });
-          controller.close();
-          return;
+        // Plan pages (resume against any existing marker).
+        const existing = await readPrototypeMarker(outputRoot);
+        const allHints = extractPrdPageHints(prdContent);
+        const hints = pageId ? allHints.filter((h) => h.id === pageId) : allHints;
+        const { pages, truncated } = planPrototypePages(hints, manifest, existing, PROTOTYPE_PAGE_CAP);
+        send({ type: "plan_ready", total: pages.length, truncated });
+        if (truncated > 0) {
+          send({ type: "log", message: `Page cap ${PROTOTYPE_PAGE_CAP} reached; ${truncated} page(s) deferred to a re-run.` });
         }
 
-        const manifest = await readManifest(process.cwd(), projectId);
-        const sel = selectPageSource(hint, manifest);
-        if (sel.source === "design-spec" || !sel.entry) {
-          send({
-            type: "error",
-            error: `Page ${hint.id} (${hint.name}) has no captured HTML; this slice supports demo-html/url pages only.`,
-          });
-          controller.close();
-          return;
-        }
-        send({ type: "page_selected", pageId: hint.id, name: hint.name, source: sel.source });
-
-        const storedName = sel.entry.storedFileName;
-        if (storedName.includes("/") || storedName.includes("\\") || storedName.includes("..")) {
-          send({ type: "error", error: `Unsafe reference filename: ${storedName}` });
-          controller.close();
-          return;
-        }
-        const htmlPath = path.join(designReferenceDirAbs(process.cwd(), projectId), storedName);
-        const capturedHtml = await fs.readFile(htmlPath, "utf-8");
-
+        // Shared design-system context (read DesignSpec.md best-effort).
         let designSpecDoc = "";
-        try {
-          designSpecDoc = await fs.readFile(path.join(outputRoot, "DesignSpec.md"), "utf-8");
-        } catch {
-          // best-effort
-        }
+        try { designSpecDoc = await fs.readFile(path.join(outputRoot, "DesignSpec.md"), "utf-8"); } catch { /* best-effort */ }
         const designContext = await buildFrontendDesignContextForCodegen(
-          outputRoot,
-          designSpecDoc,
-          "",
-          undefined,
-          process.cwd(),
-          projectId ?? undefined,
+          outputRoot, designSpecDoc, "", undefined, process.cwd(), projectId ?? undefined,
         );
 
-        const componentName = toViewComponentName(hint.name);
-        const route = hint.route ?? `/${slugify(hint.name)}`;
-        const message = buildPortMessage({
-          componentName,
-          pageName: hint.name,
-          route,
-          capturedHtml,
-          designContext,
-          prdExcerpt: prdContent,
-        });
-        send({ type: "port_start", componentName, route });
-        // designContext is already embedded in `message` by buildPortMessage; don't send it twice.
-        const result = await new PrototypeAgent().portPage(message, "", sessionId);
-        const tsx = extractTsxFromLlmOutput(result.content);
+        const refDir = designReferenceDirAbs(process.cwd(), projectId);
+        const viewsDir = path.join(frontendDir, "src", "views");
+        await fs.mkdir(viewsDir, { recursive: true });
+        const frontendRel = path.relative(outputRoot, frontendDir);
 
-        const viewRelFromFrontend = path.join("src", "views", `${componentName}.tsx`);
-        await fs.mkdir(path.join(frontendDir, "src", "views"), { recursive: true });
-        await fs.writeFile(path.join(frontendDir, viewRelFromFrontend), tsx, "utf-8");
-        await writePrototypeRouter(frontendDir, [{ componentName, route }]);
+        const generatedPages: PrototypeMarkerPage[] = [];
+        const generatedFiles: string[] = [];
 
-        const frontendRelFromRoot = path.relative(outputRoot, frontendDir);
-        const generatedFiles = [
-          path.join(frontendRelFromRoot, viewRelFromFrontend),
-          path.join(frontendRelFromRoot, "src", "router.tsx"),
-        ];
-        // marker.pages[].file is frontend-relative; generatedFiles is output-root-relative.
-        await writePrototypeMarker(outputRoot, {
+        async function generateOne(p: PlannedPage, index: number): Promise<void> {
+          send({ type: "page_start", index, total: pages.length, pageId: p.pageId, name: p.name, source: p.source });
+          let message: string;
+          if (p.entry && (p.source === "demo-html" || p.source === "url")) {
+            const storedName = p.entry.storedFileName;
+            if (storedName.includes("/") || storedName.includes("\\") || storedName.includes("..")) {
+              throw new Error(`Unsafe reference filename: ${storedName}`);
+            }
+            const capturedHtml = await fs.readFile(path.join(refDir, storedName), "utf-8");
+            message = buildPortMessage({
+              componentName: p.componentName, pageName: p.name, route: p.route,
+              capturedHtml, designContext, prdExcerpt: prdContent,
+            });
+          } else {
+            message = buildFreegenMessage({
+              componentName: p.componentName,
+              hint: { id: p.pageId, name: p.name, route: p.route },
+              prdContent, designContext,
+            });
+          }
+          const result = await new PrototypeAgent().portPage(message, "", sessionId);
+          const tsx = extractTsxFromLlmOutput(result.content);
+          const viewRel = path.join("src", "views", `${p.componentName}.tsx`);
+          await fs.writeFile(path.join(frontendDir, viewRel), tsx, "utf-8");
+          generatedPages.push({ pageId: p.pageId, route: p.route, source: p.source, file: viewRel });
+          generatedFiles.push(path.join(frontendRel, viewRel));
+          send({ type: "page_complete", index, pageId: p.pageId, file: viewRel });
+        }
+
+        // Bounded-parallel batches; a failed page is logged, others continue.
+        let failed = 0;
+        for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+          const batch = pages.slice(i, i + BATCH_SIZE);
+          const settled = await Promise.allSettled(batch.map((p, j) => generateOne(p, i + j)));
+          settled.forEach((s, j) => {
+            if (s.status === "rejected") {
+              failed++;
+              const p = batch[j];
+              send({ type: "page_error", index: i + j, pageId: p.pageId, error: String(s.reason) });
+            }
+          });
+        }
+
+        // Merge marker (resume-aware) + regenerate router from ALL pages.
+        const mergedPages: PrototypeMarkerPage[] = [...(existing?.pages ?? []), ...generatedPages];
+        const mergedFiles = Array.from(new Set([
+          ...(existing?.generatedFiles ?? []),
+          ...generatedFiles,
+          path.join(frontendRel, "src", "router.tsx"),
+        ]));
+        const routerPages: PrototypeRoutePage[] = mergedPages.map((mp) => ({
+          componentName: path.basename(mp.file).replace(/\.tsx$/, ""),
+          route: mp.route,
+        }));
+        await writePrototypeRouter(frontendDir, routerPages);
+
+        const marker: PrototypeMarker = {
           generatedAt: new Date().toISOString(),
-          scaffoldTier,
-          scopeTier,
-          baseScaffoldCopied: true,
-          pages: [{ pageId: hint.id, route, source: sel.source, file: viewRelFromFrontend }],
-          generatedFiles,
-        });
+          scaffoldTier, scopeTier, baseScaffoldCopied: true,
+          pages: mergedPages, generatedFiles: mergedFiles,
+        };
+        await writePrototypeMarker(outputRoot, marker);
 
-        send({
-          type: "prototype_complete",
-          route,
-          file: viewRelFromFrontend,
-          costUsd: result.costUsd,
-          durationMs: result.durationMs,
-          model: result.model,
-        });
+        send({ type: "prototype_complete", generated: generatedPages.length, failed, truncated, totalPages: mergedPages.length });
         controller.close();
       } catch (err) {
-        send({ type: "error", error: err instanceof Error ? err.message : "Unknown error" });
-        controller.close();
+        fail(err instanceof Error ? err.message : "Unknown error");
       }
     },
   });
 
   return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
   });
 }
