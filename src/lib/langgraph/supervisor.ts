@@ -111,7 +111,7 @@ import {
   requestHumanDecision,
   INTEGRATION_DECISION_OPTIONS,
   INFRA_DECISION_OPTIONS,
-  TDD_E2E_DECISION_OPTIONS,
+  CODE_FIX_DECISION_OPTIONS,
   type HumanDecisionResult,
 } from "@/lib/pipeline/human-decision";
 import {
@@ -2287,6 +2287,11 @@ async function e2eVerifyAndFix(
   // running no-progress streak (carried back into state for the next attempt).
   let detCount = -1;
   let noProgressStreak = state.e2eNoProgressStreak ?? 0;
+  // Set when a human adjudicates a stuck loop: their PRD-grounded code-fix
+  // strategy (authoritative, injected into the repair prompt) and whether they
+  // authorised editing the test (only when the test contradicts the PRD).
+  let humanCodeFixDirective: string | null = null;
+  let allowTestEdit = false;
 
   if (E2E_TRIAGE_ENABLED) {
     // Short-circuit for obvious infra — don't even pay the second run.
@@ -2462,30 +2467,102 @@ async function e2eVerifyAndFix(
     const prevDet = state.e2ePrevDeterministicCount ?? -1;
     noProgressStreak = nextE2eNoProgressStreak(prevDet, detCount, noProgressStreak);
     if (noProgressStreak >= MAX_E2E_NO_PROGRESS_STREAK) {
+      // ── Human-in-the-loop adjudication ──────────────────────────────────────
+      // The code-fix loop is stuck (no progress for N attempts). Per the PRD-is-
+      // truth rule, the DEFAULT remains "fix the code" — so instead of aborting,
+      // report the situation and ask a human to diagnose the root cause and give
+      // a concrete, PRD-grounded code-fix strategy, which is fed back as
+      // authoritative guidance on the next attempt. Editing the test is allowed
+      // only if the human says it contradicts the PRD.
       console.warn(
         `[Supervisor] e2eVerify: no progress for ${noProgressStreak} attempt(s) ` +
-          `(deterministic failures stuck at ${detCount}, prev ${prevDet}) — ` +
-          `aborting auto-repair so the remaining fix budget is not spun on a non-converging loop.`,
+          `(deterministic failures stuck at ${detCount}) — escalating to human (PRD is the standard).`,
       );
+      const detList = [...(deterministicTestNames ?? [])];
+      const adjudicateCtx = [
+        `E2E auto-repair is STUCK: ${detCount} deterministic failure(s) have not shrunk for ${noProgressStreak} consecutive code-fix attempt(s).`,
+        "The PRD is the absolute standard; these tests encode it and the CODE must conform — the default is to fix the program.",
+        "Diagnose the root cause and give a concrete, PRD-grounded code-fix strategy. Only mark the test wrong if it genuinely contradicts the PRD.",
+        "",
+        "Failing tests:",
+        ...detList.map((n) => `- ${n}`),
+        "",
+        failureSummary.slice(-1500),
+      ].join("\n");
       emitter({
         stage: "e2e-triage",
-        event: "e2e_stagnation_abort",
-        details: { attempt, deterministicCount: detCount, noProgressStreak },
+        event: "human_decision_needed",
+        details: {
+          context: adjudicateCtx,
+          options: CODE_FIX_DECISION_OPTIONS,
+          attempt,
+          timeoutMs: 30 * 60 * 1000,
+        },
       });
-      return {
-        // Bump past the cap so routeAfterE2eVerify exits the loop.
-        e2eVerifyAttempts: MAX_E2E_VERIFY_FIX_ATTEMPTS + 1,
-        e2eDeterministicUnresolved: true,
-        e2ePrevDeterministicCount: detCount,
-        e2eNoProgressStreak: noProgressStreak,
-        e2eVerifyErrors: [
-          `E2E auto-repair made no progress for ${noProgressStreak} consecutive attempt(s) — ${detCount} deterministic failure(s) remain. Aborted to avoid spinning the remaining fix budget on a non-converging loop.`,
-          triage.summary,
-          "See .ralph/e2e-triage.md for the full report.",
-          "",
-          failureSummary.slice(-2000),
-        ].join("\n\n"),
-      };
+      let adj: HumanDecisionResult;
+      try {
+        adj = await requestHumanDecision(
+          state.sessionId,
+          CODE_FIX_DECISION_OPTIONS,
+          adjudicateCtx,
+        );
+      } catch {
+        adj = { optionId: "abort" };
+      }
+      emitter({
+        stage: "e2e-triage",
+        event: "human_decision_received",
+        details: {
+          decisionId: adj.optionId,
+          hasDirective: Boolean(adj.directive),
+          attempt,
+        },
+      });
+
+      if (adj.optionId === "abort" || adj.optionId === "timeout") {
+        return {
+          e2eVerifyAttempts: MAX_E2E_VERIFY_FIX_ATTEMPTS + 1,
+          e2eDeterministicUnresolved: true,
+          e2ePrevDeterministicCount: detCount,
+          e2eNoProgressStreak: noProgressStreak,
+          e2eVerifyErrors: [
+            adj.optionId === "timeout"
+              ? `E2E stuck (${detCount} deterministic failure(s)); human decision timed out.`
+              : `E2E stuck (${detCount} deterministic failure(s)); human chose to abort.`,
+            triage.summary,
+            failureSummary.slice(-2000),
+          ].join("\n\n"),
+        };
+      }
+      if (adj.optionId === "skip") {
+        // Recorded as tracked debt; proceed without the code-bug hard-fail flag.
+        return {
+          e2eVerifyAttempts: MAX_E2E_VERIFY_FIX_ATTEMPTS + 1,
+          e2ePrevDeterministicCount: detCount,
+          e2eNoProgressStreak: noProgressStreak,
+          e2eVerifyErrors: [
+            `E2E deferred at human request as a known-issue (${detCount} failure(s) remain).`,
+            triage.summary,
+          ].join("\n\n"),
+        };
+      }
+      if (adj.optionId === "manual_done") {
+        // Human edited files on disk — re-run the gate WITHOUT consuming an
+        // attempt, and clear the stagnation streak for a fresh evaluation.
+        return {
+          e2eVerifyAttempts: state.e2eVerifyAttempts,
+          e2ePrevDeterministicCount: -1,
+          e2eNoProgressStreak: 0,
+          e2eVerifyErrors:
+            "Human edited files after an E2E stall; re-running to verify.",
+        };
+      }
+      // fix_code (default) or test_contradicts_prd → carry the human's
+      // PRD-grounded directive into THIS attempt's repair, reset the streak, and
+      // fall through to the fix dispatch below.
+      humanCodeFixDirective = adj.directive ?? null;
+      allowTestEdit = adj.optionId === "test_contradicts_prd";
+      noProgressStreak = 0;
     }
 
     emitter({
@@ -2670,6 +2747,18 @@ async function e2eVerifyAndFix(
         `Project root: ${state.outputDir}`,
         `E2E command: ${plan.command}`,
         `Attempt: ${attempt}`,
+        // A human reviewed this stuck loop and gave a PRD-grounded directive —
+        // it is AUTHORITATIVE and overrides the generic guidance below.
+        humanCodeFixDirective
+          ? [
+              "## HUMAN DIRECTIVE (authoritative — the PRD is the standard; follow this exactly)",
+              humanCodeFixDirective,
+              allowTestEdit
+                ? "The human determined the TEST contradicts the PRD: you MAY edit the named failing test file(s) to match the PRD per the directive, then fix code as needed. This overrides the 'never modify *.spec' rule for THIS directive only."
+                : "Fix the APPLICATION CODE per this directive. Do NOT modify the test files.",
+              "",
+            ].join("\n")
+          : "",
         triageSummaryText ? `Triage: ${triageSummaryText}` : "",
         deterministicTestNames && deterministicTestNames.size > 0
           ? [

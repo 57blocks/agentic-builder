@@ -159,45 +159,40 @@ export const INFRA_DECISION_OPTIONS: HumanDecisionOption[] = [
 ];
 
 /**
- * TDD / E2E exhaustion adjudication — the loop spent its fix budget without
- * converging, usually because it cannot tell whether the TEST or the CODE holds
- * the true intent. The human supplies that disambiguation + the correction,
- * which is fed back as authoritative guidance so the loop converges (the point
- * of stopping is to get it FIXED, not merely to unblock).
+ * TDD / E2E exhaustion adjudication. Anchored on one rule: the PRD is the
+ * absolute standard, the tests encode it, and the CODE must conform. So the
+ * DEFAULT action is "fix the program" — the human is asked to diagnose why the
+ * code isn't converging and supply a concrete, PRD-grounded code-fix strategy
+ * that is fed back as authoritative guidance. Editing the test is the EXCEPTION,
+ * allowed only when the test itself contradicts the PRD. The point of stopping
+ * is to get the code FIXED CORRECTLY, not merely to unblock the flow.
  */
-export const TDD_E2E_DECISION_OPTIONS: HumanDecisionOption[] = [
-  {
-    id: "fix_test",
-    label: "The TEST is wrong — apply my correction",
-    description:
-      "The code is right; the test's assertion/expectation/setup is wrong. Describe the correct expectation; the test will be rewritten to match (code kept).",
-    requiresDirective: true,
-  },
+export const CODE_FIX_DECISION_OPTIONS: HumanDecisionOption[] = [
   {
     id: "fix_code",
-    label: "The CODE is wrong — apply my correction",
+    label: "Fix the code — here's the strategy",
     description:
-      "The test is right; the implementation has a real bug. Describe what the code should do; the implementation will be fixed (test kept).",
+      "DEFAULT. The implementation must satisfy the PRD-derived test. Diagnose why it isn't converging and give the concrete code-fix strategy (grounded in the PRD); the loop retries the CODE fix with your guidance. The test is kept.",
     requiresDirective: true,
   },
   {
-    id: "clarify_spec",
-    label: "The requirement is ambiguous — here's the intent",
+    id: "test_contradicts_prd",
+    label: "The test contradicts the PRD — fix the test",
     description:
-      "Neither test nor code clearly reflects the intended behaviour. State the intended behaviour; both test and code will be reconciled to it.",
+      "EXCEPTION. Use only when the test asserts something the PRD does NOT require. State what the PRD actually says; the test is corrected to match the PRD, then the code is verified against the corrected test.",
     requiresDirective: true,
   },
   {
     id: "manual_done",
     label: "I edited the files on disk — re-verify",
     description:
-      "You changed the code/test directly. Re-run the gate to verify your edit.",
+      "You changed the code (or test) directly. Re-run the gate to verify your edit.",
   },
   {
     id: "skip",
     label: "Defer as a known-issue",
     description:
-      "Record this failure as tracked debt and continue. Use only when it genuinely cannot be resolved now.",
+      "Record this failure as tracked debt and continue. Last resort, when it genuinely cannot be resolved now.",
   },
   {
     id: "abort",
