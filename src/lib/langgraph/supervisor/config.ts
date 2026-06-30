@@ -231,6 +231,38 @@ export const MAX_E2E_VERIFY_FIX_ATTEMPTS = (() => {
 })();
 
 /**
+ * Stagnation guard for the E2E verify+fix loop: abort once the DETERMINISTIC
+ * failing-set has not shrunk for this many consecutive attempts. Unlike the
+ * integration loop, E2E was a flat counter with no progress check — each attempt
+ * re-runs the whole suite + an LLM fix (expensive), so a non-converging loop
+ * could burn all MAX_E2E_VERIFY_FIX_ATTEMPTS. Default 2 = stop after two attempts
+ * with no reduction. Override with E2E_NO_PROGRESS_STREAK.
+ */
+export const MAX_E2E_NO_PROGRESS_STREAK = (() => {
+  const raw = Number.parseInt(
+    (process.env.E2E_NO_PROGRESS_STREAK ?? "2").trim(),
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+})();
+
+/**
+ * Updated no-progress streak for the E2E stagnation guard. "Progress" = the
+ * deterministic failing-set shrank versus the previous attempt; the first
+ * attempt (`prevDeterministic < 0`) always counts as progress. On progress the
+ * streak resets to 0; otherwise it increments. The loop aborts once the streak
+ * reaches `MAX_E2E_NO_PROGRESS_STREAK`.
+ */
+export function nextE2eNoProgressStreak(
+  prevDeterministic: number,
+  deterministic: number,
+  currentStreak: number,
+): number {
+  const madeProgress = prevDeterministic < 0 || deterministic < prevDeterministic;
+  return madeProgress ? 0 : currentStreak + 1;
+}
+
+/**
  * Hard circuit-breaker: the TOTAL number of IntegrationVerifyFix iterations
  * allowed across the *entire* session, summed over every re-entry of the
  * `integration_verify` node. This is deliberately NOT per-loop — the

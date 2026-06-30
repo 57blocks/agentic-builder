@@ -172,6 +172,8 @@ import {
   parsedWorkerLimit,
   workersForRole,
   MAX_E2E_VERIFY_FIX_ATTEMPTS,
+  MAX_E2E_NO_PROGRESS_STREAK,
+  nextE2eNoProgressStreak,
   scaledIntegrationVerifyFixTotalBudget,
   remainingIntegrationVerifyBudget,
   INTEGRATION_FIX_MODE,
@@ -2278,6 +2280,10 @@ async function e2eVerifyAndFix(
   const emitter = getRepairEmitter(state.sessionId);
   let deterministicTestNames: Set<string> | null = null;
   let triageSummaryText = "";
+  // Stagnation tracking: deterministic failure count this attempt, and the
+  // running no-progress streak (carried back into state for the next attempt).
+  let detCount = -1;
+  let noProgressStreak = state.e2eNoProgressStreak ?? 0;
 
   if (E2E_TRIAGE_ENABLED) {
     // Short-circuit for obvious infra — don't even pay the second run.
@@ -2389,6 +2395,42 @@ async function e2eVerifyAndFix(
     }
 
     deterministicTestNames = new Set(triage.deterministic.map((r) => r.name));
+    detCount = triage.deterministic.length;
+
+    // ── Progress-based early stop (stagnation guard) ─────────────────────────
+    // Mirror the integration loop: if the deterministic failing-set has NOT
+    // shrunk versus the previous attempt for MAX_E2E_NO_PROGRESS_STREAK attempts
+    // in a row, auto-repair is spinning — abort instead of burning the remaining
+    // (expensive: full-suite re-run + LLM) e2e attempts on a non-converging fix.
+    const prevDet = state.e2ePrevDeterministicCount ?? -1;
+    noProgressStreak = nextE2eNoProgressStreak(prevDet, detCount, noProgressStreak);
+    if (noProgressStreak >= MAX_E2E_NO_PROGRESS_STREAK) {
+      console.warn(
+        `[Supervisor] e2eVerify: no progress for ${noProgressStreak} attempt(s) ` +
+          `(deterministic failures stuck at ${detCount}, prev ${prevDet}) — ` +
+          `aborting auto-repair so the remaining fix budget is not spun on a non-converging loop.`,
+      );
+      emitter({
+        stage: "e2e-triage",
+        event: "e2e_stagnation_abort",
+        details: { attempt, deterministicCount: detCount, noProgressStreak },
+      });
+      return {
+        // Bump past the cap so routeAfterE2eVerify exits the loop.
+        e2eVerifyAttempts: MAX_E2E_VERIFY_FIX_ATTEMPTS + 1,
+        e2eDeterministicUnresolved: true,
+        e2ePrevDeterministicCount: detCount,
+        e2eNoProgressStreak: noProgressStreak,
+        e2eVerifyErrors: [
+          `E2E auto-repair made no progress for ${noProgressStreak} consecutive attempt(s) — ${detCount} deterministic failure(s) remain. Aborted to avoid spinning the remaining fix budget on a non-converging loop.`,
+          triage.summary,
+          "See .ralph/e2e-triage.md for the full report.",
+          "",
+          failureSummary.slice(-2000),
+        ].join("\n\n"),
+      };
+    }
+
     emitter({
       stage: "e2e-triage",
       event: "repair_dispatch",
@@ -2397,6 +2439,7 @@ async function e2eVerifyAndFix(
         deterministicCount: triage.deterministic.length,
         skippedFlaky: triage.flaky.length,
         skippedInfra: triage.infra.length,
+        noProgressStreak,
       },
     });
   }
@@ -2637,6 +2680,8 @@ async function e2eVerifyAndFix(
       return {
         e2eVerifyAttempts: attempt,
         e2eVerifyErrors: failureSummary,
+        e2ePrevDeterministicCount: detCount,
+        e2eNoProgressStreak: noProgressStreak,
       };
     }
 
@@ -2657,6 +2702,8 @@ async function e2eVerifyAndFix(
   return {
     e2eVerifyAttempts: attempt,
     e2eVerifyErrors: failureSummary,
+    e2ePrevDeterministicCount: detCount,
+    e2eNoProgressStreak: noProgressStreak,
   };
 }
 

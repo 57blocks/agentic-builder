@@ -237,6 +237,24 @@ export const SupervisorStateAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => false,
   }),
+  /**
+   * Deterministic E2E failure count observed on the PREVIOUS fix attempt, used
+   * by the stagnation guard. -1 = no prior attempt (treated as progress).
+   */
+  e2ePrevDeterministicCount: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => -1,
+  }),
+  /**
+   * Consecutive E2E fix attempts whose deterministic failing-set did NOT shrink.
+   * Mirrors the integration loop's stagnation abort: once this reaches
+   * MAX_E2E_NO_PROGRESS_STREAK the loop stops instead of spinning the remaining
+   * (expensive) e2e attempts on a non-converging fix.
+   */
+  e2eNoProgressStreak: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => 0,
+  }),
 
   /** RALPH loop configuration. Passed down to every worker. */
   ralphConfig: Annotation<RalphConfig>({
