@@ -38,7 +38,7 @@ function newSessionId(): string {
 
 // ── Empty Step State ──────────────────────────────────────────────────────────
 const ALL_STEP_IDS: StepId[] = [
-  "initial", "intent", "prd", "trd", "sysdesign", "implguide",
+  "initial", "intent", "prd", "trd", "prototype", "sysdesign", "implguide",
   "design", "pencil", "mockup", "qa", "verify",
   "env-setup", "summary", "task-breakdown",
   "agents",

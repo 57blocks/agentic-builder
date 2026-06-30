@@ -16,6 +16,7 @@ export type StepId =
   | "intent"
   | "prd"
   | "trd"
+  | "prototype"
   | "sysdesign"
   | "implguide"
   | "design"
@@ -162,6 +163,18 @@ export const PIPELINE_FLOW: FlowNode[] = [
           //   },
           // },
         ],
+      },
+      {
+        id: "prototype",
+        label: "Prototype",
+        level: 2,
+        dependsOn: ["trd"],
+        tiers: ["M", "L"],
+        stepConfig: {
+          uiKind: "custom",
+          apiEndpoint: "/api/agents/prototype",
+          autoTrigger: true,
+        },
       },
       {
         id: "quality",
@@ -476,6 +489,7 @@ export const STEP_LABELS: Record<StepId, string> = {
   intent: "Intent",
   prd: "PRD",
   trd: "TRD",
+  prototype: "Prototype",
   sysdesign: "System Design",
   implguide: "Impl. Guide",
   design: "Design Spec",
