@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FolderOpenIcon, CheckCircle2Icon, XIcon } from "lucide-react";
 import type { ScanResult } from "@/app/api/projects/import/route";
+import type { AnalysisReport } from "@/lib/pipeline/import-analysis/build-profile";
+import type { ProjectProfile } from "@/lib/pipeline/project-profile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,10 +13,19 @@ import { Badge } from "@/components/ui/badge";
 interface ImportProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onImport: (dirPath: string, name: string, clientId: string) => Promise<void>;
+  /** `profile` is passed for an imported external project (triggers backfill);
+   *  omitted when restoring one of our own projects. */
+  onImport: (
+    dirPath: string,
+    name: string,
+    clientId: string,
+    profile?: ProjectProfile,
+  ) => Promise<void>;
 }
 
-type Phase = "pick" | "scanning" | "confirm" | "importing";
+// "analyzing"/"review" handle imported EXTERNAL projects (no blueprint state);
+// "confirm" handles restoring one of OUR projects (blueprint state present).
+type Phase = "pick" | "scanning" | "analyzing" | "review" | "confirm" | "importing";
 
 const STEP_LABELS: Record<string, string> = {
   intent: "Intent",
@@ -40,6 +51,7 @@ export default function ImportProjectDialog({
   const [dirPath, setDirPath] = useState("");
   const [projectName, setProjectName] = useState("");
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,11 +62,12 @@ export default function ImportProjectDialog({
     setDirPath("");
     setProjectName("");
     setScanResult(null);
+    setAnalysis(null);
     setError(null);
   }, [isOpen]);
 
   useEffect(() => {
-    if (phase === "confirm") {
+    if (phase === "confirm" || phase === "review") {
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
   }, [phase]);
@@ -70,29 +83,61 @@ export default function ImportProjectDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isPicking]);
 
-  const scanDirectory = useCallback(async (dir: string) => {
-    setPhase("scanning");
+  const analyzeDirectory = useCallback(async (dir: string) => {
+    setPhase("analyzing");
     setError(null);
     try {
-      const res = await fetch("/api/projects/import?action=scan", {
+      const res = await fetch("/api/projects/import?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dirPath: dir }),
       });
-      const data = (await res.json()) as ScanResult & { message?: string };
+      const data = (await res.json()) as AnalysisReport & { message?: string };
       if (!res.ok) {
-        setError(data.message ?? "Failed to scan directory.");
+        setError(data.message ?? "Failed to analyze project.");
         setPhase("pick");
         return;
       }
-      setScanResult(data);
-      setProjectName(data.detectedName);
-      setPhase("confirm");
+      setAnalysis(data);
+      setPhase("review");
     } catch {
       setError("Failed to reach the server.");
       setPhase("pick");
     }
   }, []);
+
+  const scanDirectory = useCallback(
+    async (dir: string) => {
+      setPhase("scanning");
+      setError(null);
+      try {
+        const res = await fetch("/api/projects/import?action=scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dirPath: dir }),
+        });
+        const data = (await res.json()) as ScanResult & { message?: string };
+        if (!res.ok) {
+          setError(data.message ?? "Failed to scan directory.");
+          setPhase("pick");
+          return;
+        }
+        setScanResult(data);
+        setProjectName(data.detectedName);
+        if (data.hasBlueprintState) {
+          // One of OUR projects → restore its pipeline state.
+          setPhase("confirm");
+        } else {
+          // External project → analyze its stack, then show the review screen.
+          await analyzeDirectory(dir);
+        }
+      } catch {
+        setError("Failed to reach the server.");
+        setPhase("pick");
+      }
+    },
+    [analyzeDirectory],
+  );
 
   const handlePickFolder = useCallback(async () => {
     setIsPicking(true);
@@ -121,16 +166,25 @@ export default function ImportProjectDialog({
     setPhase("importing");
     setError(null);
     try {
-      await onImport(dirPath, trimmedName, crypto.randomUUID());
+      // analysis present → imported external project (backfill); else → restore.
+      await onImport(
+        dirPath,
+        trimmedName,
+        crypto.randomUUID(),
+        analysis?.profile,
+      );
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
-      setPhase("confirm");
+      setPhase(analysis ? "review" : "confirm");
     }
-  }, [dirPath, projectName, onImport, onClose]);
+  }, [dirPath, projectName, onImport, onClose, analysis]);
 
-  const isBusy = phase === "scanning" || phase === "importing";
+  const isBusy =
+    phase === "scanning" || phase === "analyzing" || phase === "importing";
+  // The project-name input + blueprint banner show for the restore flow.
   const showDetails = phase === "confirm" || phase === "importing";
+  const showReview = phase === "review";
 
   if (!isOpen) return null;
 
@@ -187,7 +241,11 @@ export default function ImportProjectDialog({
                 onClick={() => void handlePickFolder()}
                 disabled={isBusy}
               >
-                {phase === "scanning" ? "Scanning…" : "Choose"}
+                {phase === "scanning"
+                  ? "Scanning…"
+                  : phase === "analyzing"
+                    ? "Analyzing…"
+                    : "Choose"}
               </Button>
             </div>
           </div>
@@ -222,8 +280,59 @@ export default function ImportProjectDialog({
             </div>
           )}
 
-          {/* Project name input */}
-          {showDetails && (
+          {/* External-project analysis review */}
+          {showReview && analysis && (
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="mb-2 text-xs font-medium text-foreground">
+                  Detected stack
+                </p>
+                <div className="flex flex-col gap-1">
+                  {analysis.summary.map((row) => (
+                    <div
+                      key={row.label}
+                      className="flex items-baseline justify-between gap-3 text-xs"
+                    >
+                      <span className="shrink-0 text-muted-foreground">
+                        {row.label}
+                      </span>
+                      <span
+                        className="truncate text-right font-mono text-foreground"
+                        title={row.value}
+                      >
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+                <p className="text-xs font-medium text-blue-800 dark:text-blue-300">
+                  Will generate metadata only — your source code is NOT modified
+                </p>
+                <ul className="mt-1.5 list-disc pl-4 text-xs text-blue-700 dark:text-blue-400">
+                  {analysis.willGenerate.map((w) => (
+                    <li key={w.file}>
+                      <span className="font-mono">{w.file}</span> — {w.description}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {analysis.notes.length > 0 && (
+                <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-500">
+                  {analysis.notes.map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Blueprint state banner (restore flow) */}
+          {/* Project name input — shown for both restore (confirm) and review */}
+          {(showDetails || showReview) && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="import-project-name">Project Name</Label>
               <Input
@@ -254,9 +363,17 @@ export default function ImportProjectDialog({
           <Button
             size="sm"
             onClick={() => void handleImport()}
-            disabled={isBusy || phase !== "confirm" || !projectName.trim()}
+            disabled={
+              isBusy ||
+              (phase !== "confirm" && phase !== "review") ||
+              !projectName.trim()
+            }
           >
-            {phase === "importing" ? "Importing…" : "Import Project"}
+            {phase === "importing"
+              ? "Importing…"
+              : phase === "review"
+                ? "Import & Backfill"
+                : "Import Project"}
           </Button>
         </div>
       </div>

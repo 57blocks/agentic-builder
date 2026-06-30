@@ -2,11 +2,16 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { type Project } from "@/types/project";
+import { type ProjectProfile } from "@/lib/pipeline/project-profile";
 
 interface ImportResult {
   project: Project;
-  restored: boolean;
+  /** Present on a restore (our own project). */
+  restored?: boolean;
   lastStep?: string;
+  /** Present on a backfill (imported external project). */
+  imported?: boolean;
+  generated?: string[];
 }
 
 interface UseProjectsReturn {
@@ -20,8 +25,18 @@ interface UseProjectsReturn {
    * Inserted at the front of the list so it appears first in the sidebar.
    */
   addLocalProject: (name?: string) => Project;
-  /** Import an existing directory as a project. Restores blueprint state if present. */
-  importProject: (dirPath: string, name: string, clientId: string) => Promise<ImportResult>;
+  /**
+   * Import an existing directory as a project. With no `profile` it restores
+   * our own blueprint state (if present). With a `profile` (from analyzing an
+   * external project) it runs the `backfill` action: writes .blueprint metadata
+   * + creates the project, marking it imported.
+   */
+  importProject: (
+    dirPath: string,
+    name: string,
+    clientId: string,
+    profile?: ProjectProfile,
+  ) => Promise<ImportResult>;
   /** Rename a project. Optimistic — reverts on failure. */
   renameProject: (id: string, name: string) => Promise<void>;
   /** Delete a project. Optimistic — re-inserts on failure. */
@@ -101,11 +116,25 @@ export function useProjects(): UseProjectsReturn {
   );
 
   const importProject = useCallback(
-    async (dirPath: string, name: string, clientId: string): Promise<ImportResult> => {
-      const res = await fetch("/api/projects/import", {
+    async (
+      dirPath: string,
+      name: string,
+      clientId: string,
+      profile?: ProjectProfile,
+    ): Promise<ImportResult> => {
+      // With a profile → backfill an imported external project; without → the
+      // legacy restore-our-own-project path.
+      const url = profile
+        ? "/api/projects/import?action=backfill"
+        : "/api/projects/import";
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, dirPath, id: clientId }),
+        body: JSON.stringify(
+          profile
+            ? { name, dirPath, id: clientId, profile }
+            : { name, dirPath, id: clientId },
+        ),
       });
 
       let body: unknown;

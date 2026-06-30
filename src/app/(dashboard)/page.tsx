@@ -90,10 +90,15 @@ export default function LandingPage() {
   const resetPipeline = usePipelineStore((s) => s.reset);
   const pipelineSetProjectSlugForSync = usePipelineStore((s) => s.setProjectSlugForSync);
 
-  async function handleImportDone(dirPath: string, name: string, clientId: string) {
+  async function handleImportDone(
+    dirPath: string,
+    name: string,
+    clientId: string,
+    profile?: import("@/lib/pipeline/project-profile").ProjectProfile,
+  ) {
     resetStage();
     resetPipeline();
-    const result = await importProject(dirPath, name, clientId);
+    const result = await importProject(dirPath, name, clientId, profile);
     setProjectSlugForSync(result.project.id);
     pipelineSetProjectSlugForSync(result.project.id);
     setProjectName(name);
