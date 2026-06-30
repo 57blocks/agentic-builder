@@ -28,6 +28,10 @@ import { prdSnapshot } from "./preparation/core-docs/prd/snapshot";
 import { trdAgent } from "./preparation/tech-docs/trd/agent";
 import { TrdUI } from "./preparation/tech-docs/trd/ui";
 
+import { prototypeAgent } from "./preparation/prototype/agent";
+import { PrototypeUI } from "./preparation/prototype/ui";
+import { prototypeSnapshot } from "./preparation/prototype/snapshot";
+
 import { sysdesignAgent } from "./preparation/tech-docs/sysdesign/agent";
 import { SysDesignUI } from "./preparation/tech-docs/sysdesign/ui";
 
@@ -93,6 +97,7 @@ export const STEP_REGISTRY: Record<StepId, StepEntry> = {
   intent:       { component: IntentUI,       agent: intentAgent,       snapshot: intentSnapshot },
   prd:          { component: PrdUI,          agent: prdAgent,          snapshot: prdSnapshot },
   trd:          { component: TrdUI,          agent: trdAgent,          snapshot: createStepDataSnapshot("trd") },
+  prototype:    { component: PrototypeUI,    agent: prototypeAgent,    snapshot: prototypeSnapshot },
   sysdesign:    { component: SysDesignUI,    agent: sysdesignAgent,    snapshot: createStepDataSnapshot("sysdesign") },
   implguide:    { component: ImplGuideUI,    agent: implguideAgent,    snapshot: createStepDataSnapshot("implguide") },
   design:       { component: DesignUI,       agent: designAgent,       snapshot: createStepDataSnapshot("design") },
