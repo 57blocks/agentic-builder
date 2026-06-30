@@ -19,6 +19,9 @@ export interface PortMessageInput {
  * Reduce a captured self-contained HTML snapshot to the portable structural
  * markup: strip inlined `<style>` (target reuses the same Tailwind v4 + tokens,
  * so the demo's classes map directly) and return the `<body>` inner markup.
+ *
+ * Assumes the capture pipeline has already removed <script> tags; a literal
+ * `</body>` inside a script string would otherwise truncate extraction.
  */
 export function extractPortableMarkup(html: string): string {
   const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
@@ -27,12 +30,21 @@ export function extractPortableMarkup(html: string): string {
 }
 
 /**
+ * Encode any run of backticks as HTML entities so captured markup cannot escape
+ * the ```html fence it is embedded in (prompt-structure injection guard). Safe
+ * for reference markup — the model reads structure/classes, not literal backticks.
+ */
+function fenceSafe(markup: string): string {
+  return markup.replace(/`/g, "&#96;");
+}
+
+/**
  * Assemble the user message for the port. The PRD wins on any conflict; the demo
  * informs visual/structural fidelity only. Logic is stubbed with explicit
  * `// TODO(logic): …` seams so sub-project 3's modify tasks have insertion points.
  */
 export function buildPortMessage(input: PortMessageInput): string {
-  const markup = extractPortableMarkup(input.capturedHtml);
+  const markup = fenceSafe(extractPortableMarkup(input.capturedHtml));
   return [
     `# Task: port ONE page into the scaffold frontend`,
     ``,
@@ -41,7 +53,7 @@ export function buildPortMessage(input: PortMessageInput): string {
     `Component file: \`src/views/${input.componentName}.tsx\``,
     ``,
     `## Output contract (STRICT)`,
-    `- Output ONLY one fenced \`\`\`tsx code block — the full file, no prose.`,
+    `- Output ONLY one fenced tsx code block — the full file, no prose.`,
     `- Export the component as a NAMED export: \`export function ${input.componentName}() { … }\`.`,
     `- Import shadcn primitives from \`@/components/ui\` and use \`@/\` path aliases.`,
     `- Use the design-system tokens / Tailwind v4 classes below; reuse the demo's`,
