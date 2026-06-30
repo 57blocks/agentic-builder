@@ -29,4 +29,41 @@ describe("extractTsxFromLlmOutput", () => {
     const raw = "export function Bare() { return null; }";
     expect(extractTsxFromLlmOutput(raw)).toBe("export function Bare() { return null; }\n");
   });
+
+  it("ignores a non-code fence that merely mentions export, choosing the real tsx block", () => {
+    const raw = [
+      "```json",
+      `{ "note": "use export const X here" }`,
+      "```",
+      "```tsx",
+      `export function Real() { return <div/>; }`,
+      "```",
+    ].join("\n");
+    const out = extractTsxFromLlmOutput(raw);
+    expect(out).toContain("export function Real()");
+    expect(out).not.toContain('"note"');
+  });
+
+  it("trims surrounding blank lines on the no-fence path", () => {
+    expect(extractTsxFromLlmOutput("\n\nexport function Bare() {}\n\n")).toBe(
+      "export function Bare() {}\n",
+    );
+  });
+
+  it("when multiple tsx export blocks exist, the first wins", () => {
+    const raw = [
+      "```tsx",
+      "export function First() { return null; }",
+      "```",
+      "```tsx",
+      "export function Second() { return null; }",
+      "```",
+    ].join("\n");
+    expect(extractTsxFromLlmOutput(raw)).toContain("export function First()");
+  });
+
+  it("treats an untagged fence as a code candidate", () => {
+    const raw = ["```", "export const Foo = () => null;", "```"].join("\n");
+    expect(extractTsxFromLlmOutput(raw)).toContain("export const Foo");
+  });
 });
