@@ -17,6 +17,7 @@ import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import { writePrototypeMarker } from "@/lib/pipeline/prototype-marker";
 import { buildFrontendDesignContextForCodegen } from "@/lib/pipeline/frontend-design-context";
+import { isSafeProjectId } from "@/lib/pipeline/prototype-route-guards";
 
 export const maxDuration = 600;
 
@@ -41,6 +42,13 @@ export async function POST(request: NextRequest) {
     pageId?: string;
     sessionId?: string;
   };
+
+  if (!isSafeProjectId(projectId)) {
+    return new Response(JSON.stringify({ error: "Invalid projectId" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -78,10 +86,13 @@ export async function POST(request: NextRequest) {
         }
         send({ type: "page_selected", pageId: hint.id, name: hint.name, source: sel.source });
 
-        const htmlPath = path.join(
-          designReferenceDirAbs(process.cwd(), projectId),
-          sel.entry.storedFileName,
-        );
+        const storedName = sel.entry.storedFileName;
+        if (storedName.includes("/") || storedName.includes("\\") || storedName.includes("..")) {
+          send({ type: "error", error: `Unsafe reference filename: ${storedName}` });
+          controller.close();
+          return;
+        }
+        const htmlPath = path.join(designReferenceDirAbs(process.cwd(), projectId), storedName);
         const capturedHtml = await fs.readFile(htmlPath, "utf-8");
 
         let designSpecDoc = "";
@@ -123,6 +134,7 @@ export async function POST(request: NextRequest) {
           path.join(frontendRelFromRoot, viewRelFromFrontend),
           path.join(frontendRelFromRoot, "src", "router.tsx"),
         ];
+        // marker.pages[].file is frontend-relative; generatedFiles is output-root-relative.
         await writePrototypeMarker(outputRoot, {
           generatedAt: new Date().toISOString(),
           scaffoldTier,
