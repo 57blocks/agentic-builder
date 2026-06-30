@@ -48,7 +48,14 @@ async function configureHttpProxy(): Promise<void> {
   if (!proxy) return;
 
   try {
-    const { setGlobalDispatcher, EnvHttpProxyAgent } = await import("undici");
+    // `undici` is an OPTIONAL, proxy-only runtime dependency (this path only runs
+    // when an HTTP(S)_PROXY env var is set). It may not be installed, so tell the
+    // bundlers NOT to resolve it at build time — otherwise next dev/turbopack emits
+    // a "Module not found: Can't resolve 'undici'" warning for a module we load
+    // lazily and already guard with try/catch.
+    const { setGlobalDispatcher, EnvHttpProxyAgent } = await import(
+      /* webpackIgnore: true */ /* turbopackIgnore: true */ "undici"
+    );
     setGlobalDispatcher(new EnvHttpProxyAgent());
     console.log(`[instrumentation] HTTP proxy enabled for fetch → ${proxy}`);
   } catch (err) {
