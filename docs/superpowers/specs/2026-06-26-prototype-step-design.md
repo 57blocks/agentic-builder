@@ -69,6 +69,35 @@ chosen model makes prototype pages the real frontend code coding modifies — wh
 No legacy code path is removed or altered in-place; new behavior is additive and
 marker-gated.
 
+### Isolation guarantees (made explicit after code review)
+
+Verified against `src/_config/pipeline-flow.ts` + `PipelineBreadcrumb.tsx`:
+`completedStepIds` is built **only** from individual steps whose `status ===
+"completed"`, and `kickoff` `dependsOn: ["preparation"]` (the whole group). That
+imposes three NON-NEGOTIABLE requirements so the existing flow is not affected:
+
+1. **The step must auto-complete when there is no demo URL.** With no demo URL the
+   step immediately records `status: "completed"` (rendered as "skipped") and writes
+   **no** marker. It must NEVER sit in `idle/pending`, or it could block
+   `preparation` → `kickoff` for every no-demo project. (This hardens the earlier
+   "inert no-op" wording, which did not guarantee non-blocking.)
+2. **Nothing may `dependsOn` the prototype step.** `kickoff` / `task-breakdown` /
+   any node keep their existing `dependsOn`; only `prototype` itself gains
+   `dependsOn: ["trd"]`. The step stays off everyone else's critical path.
+3. **Downstream edits must be pure conditionals + a regression test.** Every
+   load-bearing change (`coding/route.ts`, `copyScaffold`, task-breakdown) wraps the
+   existing code in `if (markerExists) { …new… } else { …existing code, untouched… }`,
+   guarded by a test asserting the **no-marker path is byte-for-byte today's
+   behavior**.
+
+**Residual, unavoidable change (honest disclosure):** because flow construction
+(`getStepsForTier`) keys visibility off **tier only**, not project state, the step
+cannot be fully hidden for no-demo projects without a larger change (threading
+project state into flow building). So no-demo projects will show one extra,
+auto-skipped step in the flow UI. This is a cosmetic flow change, not a logic one.
+If even that is unacceptable, it is a separate (larger) sub-task — flagged, not
+assumed.
+
 ---
 
 ## Pipeline placement
