@@ -61,6 +61,15 @@ export async function POST(request: NextRequest) {
 
         const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
         const { scopeTier, scaffoldTier } = resolvePrototypeTier(prdContent, tier);
+        if (scaffoldTier === "S") {
+          send({
+            type: "error",
+            error:
+              "Prototype vertical slice supports M/L tier scaffolds only; S-tier router wiring is deferred to the full step.",
+          });
+          controller.close();
+          return;
+        }
         send({ type: "scaffold_copy_start", scaffoldTier, scopeTier });
         await copyBaseScaffoldForPrototype(scaffoldTier, outputRoot);
         const frontendDir = resolveFrontendDir(outputRoot, scaffoldTier);
@@ -121,7 +130,8 @@ export async function POST(request: NextRequest) {
           prdExcerpt: prdContent,
         });
         send({ type: "port_start", componentName, route });
-        const result = await new PrototypeAgent().portPage(message, designContext, sessionId);
+        // designContext is already embedded in `message` by buildPortMessage; don't send it twice.
+        const result = await new PrototypeAgent().portPage(message, "", sessionId);
         const tsx = extractTsxFromLlmOutput(result.content);
 
         const viewRelFromFrontend = path.join("src", "views", `${componentName}.tsx`);
