@@ -30,6 +30,17 @@ export interface ReferenceCaptureResult {
    * notably concrete instances of `:param` routes the PRD can't enumerate.
    */
   links?: string[];
+  /**
+   * Raw ingredients for a self-contained HTML snapshot (best-effort; null when
+   * extraction failed). Assembled into a single .html by
+   * `buildSelfContainedHtml` (see dom-snapshot.ts) before persistence.
+   */
+  htmlCapture?: {
+    outerHTML: string;
+    /** cssText of same-origin stylesheets, in document order. */
+    stylesheets: string[];
+    baseUrl: string;
+  } | null;
   /** True when capture failed because an interactive login was required but not completed. */
   needsAuth?: boolean;
   error?: string;
