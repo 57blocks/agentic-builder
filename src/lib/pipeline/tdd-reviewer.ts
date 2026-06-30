@@ -109,10 +109,6 @@ function hasUnmockedDbImport(file: string, content: string): boolean {
   return true;
 }
 
-function isExternalApiTest(file: string): boolean {
-  return /services\/externalApis\//.test(file);
-}
-
 function hasNetworkMock(content: string): boolean {
   return (
     /vi\.mock\s*\(/.test(content) ||
@@ -255,7 +251,7 @@ async function reviewOne(
         "TDD test imports from \"../db\" without `vi.mock(...)`-ing it. Backend tests must mock the real Sequelize/db module and use an in-memory SQLite (see backend/src/models/index.test.ts).",
     });
   }
-  if (isExternalApiTest(relPath) && callsRealHttp(content) && !hasNetworkMock(content)) {
+  if (relPath.startsWith("backend/") && callsRealHttp(content) && !hasNetworkMock(content)) {
     findings.push({
       testId: test.id,
       taskId: test.taskId,
@@ -263,7 +259,7 @@ async function reviewOne(
       severity: "error",
       file: relPath,
       message:
-        "TDD test calls fetch/axios against an external API without a network mock (vi.fn / msw / nock). Live network access is not permitted.",
+        "TDD test issues a real fetch/axios/got call with no network mock (vi.fn / vi.mock / msw / nock). The test runner is offline — it fails with `TypeError: fetch failed`. Mock `globalThis.fetch` or stub the SDK client the handler uses.",
     });
   }
   if (

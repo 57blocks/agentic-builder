@@ -175,7 +175,12 @@ function lacksUnmockedDbGuard(file: string, content: string): boolean {
 }
 
 function lacksRealHttpMock(file: string, content: string): boolean {
-  if (!/services\/externalApis\//.test(file) && !/externalApis/.test(content))
+  // Applies to ALL backend tests now (was: only `services/externalApis/`). A
+  // backend test that issues a real fetch/axios/got call without a mock fails
+  // offline with `TypeError: fetch failed`. (External calls made INSIDE the
+  // handler-under-test can't be seen from the test source — those are covered
+  // by the test-writer prompt's network-mock rule, not this static reject.)
+  if (!file.startsWith("backend/") && !/services\/externalApis\//.test(file))
     return false;
   if (/vi\.fn\s*\(|vi\.mock\s*\(|msw|nock|undici[^"']*MockAgent/.test(content))
     return false;
@@ -233,7 +238,7 @@ async function executeTool(input: {
       return `REJECTED: ${file} imports from "../db" without mocking it. Backend tests MUST \`vi.mock("../db")\` (or its relative equivalent) and substitute an in-memory SQLite Sequelize constructed with \`dialectModule: sqlite3Wasm\` (imported from the test-support/sqlite3-wasm module) — without it Sequelize throws "Please install sqlite3". See backend/src/models/index.test.ts for the canonical pattern.`;
     }
     if (lacksRealHttpMock(file, content)) {
-      return `REJECTED: ${file} calls fetch/axios without a network mock. External API client tests MUST mock \`globalThis.fetch\` (or use msw/nock). Live network access is not permitted.`;
+      return `REJECTED: ${file} issues a real fetch/axios/got call without a network mock. The test runner is OFFLINE — any unmocked external call fails with \`TypeError: fetch failed\`. Mock \`globalThis.fetch\` (or use msw/nock), or stub the SDK client the handler uses.`;
     }
     if (lacksFrontendEnvStub(type, content)) {
       return `REJECTED: ${file} asserts a literal "/api/..." URL but does not stub VITE_API_BASE_URL. Either \`vi.stubEnv("VITE_API_BASE_URL", "")\` in beforeAll, or use \`expect.stringContaining("/api/...")\`.`;
@@ -301,7 +306,8 @@ export async function runTddTestWriter(input: {
         // HARD requirements — `write_file` will REJECT content that violates these.
         "HARD REQUIREMENT — every test file MUST cite at least one of its `coversRequirementIds` (e.g. FR-AU01, AC-09) verbatim as a string inside the file. Put it in a top-of-file JSDoc comment such as `/** coversRequirementIds: FR-AU01, AC-09 */`. Without this the file is rejected.",
         "HARD REQUIREMENT — backend tests that import from `../db` MUST `vi.mock(\"<relative>/db\")` and substitute an in-memory SQLite Sequelize built with `dialectModule: sqlite3Wasm` (import `{ sqlite3Wasm }` from the `test-support/sqlite3-wasm` module). The test DB runs on a pure-WASM driver, so WITHOUT that `dialectModule` Sequelize throws \"Please install sqlite3\". Canonical example: `backend/src/models/index.test.ts`. Without this the file is rejected (real Postgres is not available in the test runner).",
-        "HARD REQUIREMENT — external-API client tests (paths under `services/externalApis/`) MUST mock `globalThis.fetch` (or use msw / nock). Live network access is not permitted; assume rate-limit / offline. Without a mock the file is rejected.",
+        "HARD REQUIREMENT — ANY backend test that exercises code which calls an external service MUST mock the network — NOT just files under `services/externalApis/`. This includes webhook handlers (Stripe, Eventbrite, …), payment/checkout flows, email/notification senders, and marketing/feed sync. The test runner is OFFLINE: an unmocked call (in the test OR inside the handler-under-test) fails with `TypeError: fetch failed`. Mock `globalThis.fetch` (or use msw/nock), or `vi.mock(...)` the SDK client module the handler imports (e.g. the Stripe/Eventbrite client). Assume rate-limit / offline.",
+        "HARD REQUIREMENT — backend ROUTE / CONTROLLER tests that hit AUTHENTICATED endpoints MUST set up auth + the full schema, or they fail with `no such table: sessions` / `Missing bearer token`: (a) create the FULL schema with `await syncModels()` (NOT a partial per-model `sequelize.sync()`) so dependency tables like `sessions` exist; and (b) seed a real session and send it — `await Session.upsert({ token, userId, expiresAt })` then attach `Authorization: \\`Bearer <token>\\`` to each authed request. Do not assume the auth middleware is bypassed in tests.",
         "HARD REQUIREMENT — frontend `frontend-service` tests that assert on a literal `/api/...` URL MUST either `vi.stubEnv(\"VITE_API_BASE_URL\", \"\")` before the assertion, or use `expect.stringContaining(\"/api/...\")`. Otherwise the assertion drifts when the env injects a base URL.",
         "Each test must import or reference the declared target route/service/API client/task-owned file, or assert against the declared endpoint string.",
         "INTERACTION-FLOW — a `route-smoke` test MUST do more than assert the page renders. It MUST simulate the page's PRIMARY user interaction (click the main button / submit the form via @testing-library/react `fireEvent` or `userEvent`) and assert the resulting EFFECT: the API client method was called with the expected payload (spy/mock the client and assert `toHaveBeenCalledWith(...)`), OR navigation occurred (mock `useNavigate` / the router and assert it was called with the target route), OR the declared state/text rendered after the interaction. A `route-smoke` test that only asserts render — with no interaction → effect assertion — is INCOMPLETE.",
