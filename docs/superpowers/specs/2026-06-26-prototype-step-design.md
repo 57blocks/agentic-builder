@@ -209,6 +209,28 @@ preserve-list coding must not overwrite.
 
 ---
 
+## Sequencing & risks (review pass)
+
+- **Sub-projects 2 and 3 are tightly coupled — ship together.** This step writes
+  the prototype frontend + marker, but the payoff (coding *modifies* it) only lands
+  with sub-project 3. Worse: today coding runs `copyScaffold({ forceOverwrite:true })`
+  and creates pages from scratch — **without the sub-project-3 idempotency guard it
+  would clobber the prototype frontend** (harmless = falls back to legacy output, but
+  the prototype work is wasted). Therefore either (a) deliver 2+3 together, or (b)
+  include the coding-side idempotency guard (marker check + preserve-list) **inside**
+  sub-project 2's scope. **Recommend (b)**: fold the minimal coding guard into this
+  step so it is self-protecting even before the full port-aware breakdown lands.
+- **Generation cost/scale.** A large PRD (L-tier, 40+ pages) means a long, expensive
+  per-page LLM run. Mitigations to design into the agent: the shared-shell pass
+  first (amortizes chrome), per-page generation in bounded parallel batches, a
+  page-count budget/cap with explicit `log()` of any truncation, and resumability
+  (skip pages already generated per the marker).
+- **Overlap with the existing `mockup` (Stitch) step.** `mockup` already produces a
+  frontend design artifact. This step produces *runnable scaffolded code*. They are
+  not the same output, but the relationship must be explicit: does prototype consume
+  the mockup, run alongside it, or supersede it for the "has-demo-URL" path? **Open
+  — must be resolved before implementation** (see open question 5).
+
 ## Open questions / decisions flagged for review
 
 1. **Coding idempotency mechanism** — preferred: marker + `copyScaffold({
@@ -221,3 +243,5 @@ preserve-list coding must not overwrite.
    design-system context inside the prototype agent (one agent, three modes) rather
    than a separate generator. Confirm.
 4. **Folder/sub-group** for the new step under `preparation` (naming only).
+5. **`mockup` step relationship** — consume / coexist / supersede on the has-demo
+   path. Must be resolved before implementation.
