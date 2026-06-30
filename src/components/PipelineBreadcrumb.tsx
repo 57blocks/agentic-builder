@@ -43,6 +43,9 @@ export interface PipelineBreadcrumbProps {
   onStepChange: (stepId: StepId) => void;
   tier: ProjectTier;
   stepStates: Partial<Record<string, { status: string } | null>>;
+  /** Imported projects WITH code start at PRD — hide the initial/intent entry
+   *  steps so the flow visually begins at the PRD step. */
+  hideEntrySteps?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -58,6 +61,7 @@ function CascadingMenu({
   tier,
   stepStates,
   onNavigate,
+  hideEntrySteps,
   onClose,
 }: {
   stages: ReturnType<typeof getStagesForTier>;
@@ -68,6 +72,7 @@ function CascadingMenu({
   tier: ProjectTier;
   stepStates: Partial<Record<string, { status: string } | null>>;
   onNavigate: (stepId: StepId) => void;
+  hideEntrySteps: boolean;
   onClose: () => void;
 }) {
   const [hoveredStageId, setHoveredStageId] = useState<string | null>(null);
@@ -91,6 +96,8 @@ function CascadingMenu({
   const prdDone = (stepStates["prd"] as { status?: string } | null | undefined)?.status === "completed";
   const l2Items: GroupItem[] = (hoveredStage?.children ?? [])
     .filter((g) => g.id !== "initial")
+    // Imported-with-code projects begin at PRD — also hide the intent step.
+    .filter((g) => !hideEntrySteps || g.id !== "intent")
     .filter((g) => !g.tiers || g.tiers.includes(tier))
     .filter((g) => !g.tiers || prdDone)
     .map((g) => {
@@ -249,6 +256,7 @@ export default function PipelineBreadcrumb({
   onStepChange,
   tier,
   stepStates,
+  hideEntrySteps = false,
 }: PipelineBreadcrumbProps) {
   const currentPath = useMemo(() => getNodePath(activeStep), [activeStep]);
   const stages = useMemo(() => getStagesForTier(tier), [tier]);
@@ -334,6 +342,7 @@ export default function PipelineBreadcrumb({
             tier={tier}
             stepStates={stepStates}
             onNavigate={onStepChange}
+            hideEntrySteps={hideEntrySteps}
             onClose={() => { setMenuOpen(false); setMenuStageId(null); }}
           />
         </div>

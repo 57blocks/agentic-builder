@@ -21,7 +21,11 @@ import type { ComponentType } from "react";
 async function fetchProjectNav(projectId: string) {
   const res = await fetch(`/api/projects/${projectId}/step-navigation`);
   if (!res.ok) return null;
-  return res.json() as Promise<{ activeStep: StepId; tier: ProjectTier } | null>;
+  return res.json() as Promise<{
+    activeStep: StepId;
+    tier: ProjectTier;
+    hasCode?: boolean;
+  } | null>;
 }
 
 /** Persist activeStep to backend (debounced in caller) */
@@ -52,6 +56,9 @@ export default function ProjectPage() {
 
   // ── Page-level state ──
   const [activeStep, setActiveStep] = useState<StepId>("initial");
+  // True for imported projects that already contain code — hides initial/intent
+  // entry steps in the breadcrumb so the flow begins at PRD.
+  const [hasCode, setHasCode]       = useState(false);
   const [loading, setLoading]       = useState(true);
   const [stepResults, setStepResults] = useState<Record<string, StepUIProps["stepResult"]>>({});
 
@@ -140,6 +147,7 @@ export default function ProjectPage() {
           const resolvedStep = resolveActiveStep(nav.activeStep);
           setActiveStep(resolvedStep);
           activeStepRef.current = resolvedStep;
+          setHasCode(!!nav.hasCode);
           useStepNavigationStore.getState().setTier(nav.tier);
           // Load ALL step snapshots first, then mark hydrated — prevents auto-start racing
           await loadAllStepSnapshots(projectId);
@@ -225,6 +233,7 @@ export default function ProjectPage() {
             onStepChange={handleStepChange}
             tier={tier}
             stepStates={stepStates}
+            hideEntrySteps={hasCode}
           />
         </div>
       </header>
