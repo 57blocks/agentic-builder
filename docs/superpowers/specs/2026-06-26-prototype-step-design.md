@@ -147,15 +147,14 @@ Tier resolution that today depends on `prdSignalsBackend` stays valid pre-kickof
 A single new agent with three input modes (HTML-port / added-URL-port /
 DesignSpec-freegen), producing files into the scaffold `frontend/` subtree.
 
-**Two-phase to avoid per-page duplication and respect shadcn reuse:**
-
-1. **Shared-shell pass** — inspect all captured pages together; extract shared
-   chrome (nav, layout, repeated cards) into reusable components + the routing
-   skeleton, generated once.
-2. **Per-page pass** — for each PRD page, generate its route + page file composing
-   the shared components. **Logic is stubbed**: static markup + placeholder data +
-   inert handlers + explicit `// TODO(logic): …` seams so sub-project 3's modify
-   tasks have clear insertion points.
+**v1 = per-page only (RESOLVED 2026-06-30).** For each PRD page, generate its
+route + page file independently from that page's source. **Logic is stubbed**:
+static markup + placeholder data + inert handlers + explicit `// TODO(logic): …`
+seams so sub-project 3's modify tasks have clear insertion points. Shared chrome
+(nav/layout/repeated cards) is **deliberately duplicated across pages in v1**;
+cross-page de-duplication into shared components is a later enhancement, not in
+this scope. (The two-phase shared-shell extraction was considered and deferred for
+simplicity.)
 
 Generation reuses the **same design-system / token / scaffold-component context**
 the coding frontend worker uses (Tailwind v4 + tokens.css + pre-installed shadcn
@@ -228,8 +227,8 @@ preserve-list coding must not overwrite.
   downstream stub.
 - **Unit — page-source selection**: demo-html > added-url > design-spec precedence;
   PRD-only page set.
-- **Unit — prototype agent prompt assembly** (where deterministic): shared-shell +
-  per-page composition, logic-stub seams present.
+- **Unit — prototype agent prompt assembly** (where deterministic): per-page
+  source-mode selection + logic-stub seams present.
 - **Manual / integration acceptance**: run on a project with `csma-demo2` demo —
   verify base scaffold + all PRD pages generated, prototype previews in the browser,
   marker written; then run coding and confirm it modifies (does not recreate) the
@@ -250,27 +249,33 @@ preserve-list coding must not overwrite.
   sub-project 2's scope. **Recommend (b)**: fold the minimal coding guard into this
   step so it is self-protecting even before the full port-aware breakdown lands.
 - **Generation cost/scale.** A large PRD (L-tier, 40+ pages) means a long, expensive
-  per-page LLM run. Mitigations to design into the agent: the shared-shell pass
-  first (amortizes chrome), per-page generation in bounded parallel batches, a
-  page-count budget/cap with explicit `log()` of any truncation, and resumability
-  (skip pages already generated per the marker).
+  per-page LLM run. Mitigations to design into the agent: per-page generation in
+  bounded parallel batches, a page-count budget/cap with explicit `log()` of any
+  truncation, and resumability (skip pages already generated per the marker).
 - **Overlap with the existing `mockup` (Stitch) step.** `mockup` already produces a
   frontend design artifact. This step produces *runnable scaffolded code*. They are
   not the same output, but the relationship must be explicit: does prototype consume
   the mockup, run alongside it, or supersede it for the "has-demo-URL" path? **Open
   — must be resolved before implementation** (see open question 5).
 
-## Open questions / decisions flagged for review
+## Resolved decisions (2026-06-30)
 
-1. **Coding idempotency mechanism** — preferred: marker + `copyScaffold({
-   baseAlreadyPresent })` + `generatedFiles` preserve-list. Alternative: a cleanup
-   step that re-copies base but restores generated files. (Recommend the marker
-   approach.)
-2. **Shared-component extraction** — recommend the two-phase port (shared-shell then
-   per-page). Acceptable, or keep v1 per-page only and dedupe later?
-3. **Free-gen for no-source pages** — recommend reusing the existing frontend-worker
-   design-system context inside the prototype agent (one agent, three modes) rather
-   than a separate generator. Confirm.
-4. **Folder/sub-group** for the new step under `preparation` (naming only).
-5. **`mockup` step relationship** — consume / coexist / supersede on the has-demo
-   path. Must be resolved before implementation.
+1. **Coding idempotency** → **marker + skip-base + preserve-list.** When
+   `.blueprint/prototype.json` exists, coding skips the base scaffold re-copy,
+   applies only the optional/auth overlays, and never overwrites files listed in
+   the marker's `generatedFiles`. (`copyScaffold` gains a `baseAlreadyPresent`
+   option.) Per the Sequencing note above, this guard ships **inside sub-project 2**
+   so the prototype is self-protecting even before sub-project 3.
+2. **Shared-component extraction** → **v1 per-page only.** Each page is ported
+   independently; shared chrome is duplicated across pages. Cross-page de-dup into
+   shared components is a deferred enhancement (not in scope). Simplifies the
+   porting agent (no shared-shell pass).
+3. **Free-gen for no-source pages** → **reuse the frontend-worker design-system
+   context** inside the prototype agent (one agent, three modes: demo-html-port /
+   added-url-port / design-spec-freegen). No separate generator.
+4. **Step naming/placement** → `StepId: "prototype"`, folder
+   `_steps/preparation/prototype/{agent.ts, ui.tsx, snapshot.ts}`,
+   `dependsOn: ["trd"]`.
+5. **`mockup` (Stitch) relationship** → **coexist, no interference.** Prototype is
+   purely additive and only runs when a demo URL is present; the `mockup` step is
+   untouched. (Matches the hard isolation requirement.)
