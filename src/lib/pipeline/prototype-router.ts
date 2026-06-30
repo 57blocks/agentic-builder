@@ -61,5 +61,6 @@ export async function writePrototypeRouter(
   pages: PrototypeRoutePage[],
 ): Promise<void> {
   const routerPath = path.join(frontendDir, "src", "router.tsx");
+  await fs.mkdir(path.dirname(routerPath), { recursive: true });
   await fs.writeFile(routerPath, renderPrototypeRouter(pages), "utf-8");
 }

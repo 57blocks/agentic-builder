@@ -54,5 +54,6 @@ describe("writePrototypeRouter", () => {
     await writePrototypeRouter(dir, [{ componentName: "Dashboard", route: "/dashboard" }]);
     const written = await fs.readFile(path.join(dir, "src", "router.tsx"), "utf-8");
     expect(written).toContain("AppRouter");
+    expect(written).toContain(`import { Dashboard } from "./views/Dashboard";`);
   });
 });
