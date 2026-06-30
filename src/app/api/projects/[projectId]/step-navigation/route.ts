@@ -15,22 +15,36 @@ import { desc, eq } from "drizzle-orm";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
-/** Imported-project signals derived from the project's code dir, so the UI can
- *  route an imported project to the PRD step and offer baseline-PRD generation. */
-async function importedSignals(
-  projectId: string,
-): Promise<{ imported: boolean; hasBaselinePrd: boolean }> {
+/**
+ * Imported-project signals for three-way routing:
+ *   - empty dir (no code detected) → behave like a new project (initial/intent)
+ *   - has code, no PRD             → PRD step, auto-generate a baseline PRD
+ *   - has code + PRD               → PRD step, show it
+ * `hasCode` is "the analyzer recognized a real stack" (frontend/backend/repos),
+ * which distinguishes a real imported codebase from an empty/blank directory.
+ */
+async function importedSignals(projectId: string): Promise<{
+  imported: boolean;
+  hasCode: boolean;
+  hasBaselinePrd: boolean;
+}> {
   try {
     const project = await getProjectById(projectId);
     const dir = project?.codeOutputDir;
-    if (!dir) return { imported: false, hasBaselinePrd: false };
+    if (!dir) return { imported: false, hasCode: false, hasBaselinePrd: false };
     const profile = await readProjectProfile(dir);
+    const hasCode = !!(
+      profile &&
+      (profile.stack.frontend ||
+        profile.stack.backend ||
+        (profile.repos?.length ?? 0) > 0)
+    );
     const hasBaselinePrd = fs.existsSync(
       path.join(dir, ".blueprint", "PRD.md"),
     );
-    return { imported: !!profile?.imported, hasBaselinePrd };
+    return { imported: !!profile?.imported, hasCode, hasBaselinePrd };
   } catch {
-    return { imported: false, hasBaselinePrd: false };
+    return { imported: false, hasCode: false, hasBaselinePrd: false };
   }
 }
 
@@ -48,10 +62,10 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const sig = await importedSignals(projectId);
 
     if (!row) {
-      // Imported projects open on the PRD step (to show/generate the baseline
-      // PRD) instead of the blank `initial` feature-brief input.
+      // Has code (real imported codebase) → open on PRD (show/generate the
+      // baseline). Empty/blank imported dir → behave like a new project.
       return NextResponse.json({
-        activeStep: sig.imported ? "prd" : "initial",
+        activeStep: sig.hasCode ? "prd" : "initial",
         tier: "M",
         ...sig,
       });

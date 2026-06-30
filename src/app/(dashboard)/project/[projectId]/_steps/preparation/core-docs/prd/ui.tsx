@@ -286,15 +286,20 @@ export function PrdUI(props: StepUIProps) {
   const [isSavingDoc, setIsSavingDoc] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   // ── Imported project: reverse-engineered baseline PRD ────────────────
+  // hasCode = analyzer recognized a real stack (distinguishes a real imported
+  // codebase from an empty dir, which should behave like a new project).
   const [isImported, setIsImported] = useState(false);
+  const [hasCode, setHasCode] = useState(false);
   const [generatingBaseline, setGeneratingBaseline] = useState(false);
   const [baselineError, setBaselineError] = useState<string | null>(null);
+  const autoBaselineRef = useRef(false);
   useEffect(() => {
     if (!props.projectSlug) return;
     fetch(`/api/projects/${props.projectSlug}/step-navigation`)
       .then((r) => (r.ok ? r.json() : null))
       .then((nav) => {
         if (nav?.imported) setIsImported(true);
+        if (nav?.hasCode) setHasCode(true);
       })
       .catch(() => {});
   }, [props.projectSlug]);
@@ -317,6 +322,20 @@ export function PrdUI(props: StepUIProps) {
       setGeneratingBaseline(false);
     }
   };
+
+  // Imported project WITH code but no PRD yet → auto-generate the baseline once
+  // (no manual click). An empty imported dir (hasCode=false) keeps the normal
+  // brief→PRD flow instead.
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!hasCode) return;
+    if (autoBaselineRef.current) return;
+    if (generatingBaseline) return;
+    if (step?.content) return;
+    autoBaselineRef.current = true;
+    void handleGenerateBaseline();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, hasCode, step?.content]);
   // ── Manual edit mode (raw markdown textarea) ──────────────────────────
   const [isManualEditing, setIsManualEditing] = useState(false);
   const [manualDraft, setManualDraft] = useState("");
@@ -347,14 +366,14 @@ export function PrdUI(props: StepUIProps) {
     if (autoStartedRef.current) return;
     if (isRunning) return;
     if (step?.content) return;
-    // Imported projects generate a baseline PRD from code (explicit button),
-    // never the brief→PRD path.
-    if (isImported) return;
+    // An imported project WITH code reverse-generates its baseline PRD instead
+    // of the brief→PRD path. An empty imported dir (no code) still uses brief→PRD.
+    if (isImported && hasCode) return;
     if (!featureBrief.trim()) return;
     autoStartedRef.current = true;
     void executeStep("prd");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHydrated, featureBrief, step?.content, isImported]);
+  }, [isHydrated, featureBrief, step?.content, isImported, hasCode]);
 
   // ── Load persisted version history on hydration ─────────────────────
   useEffect(() => {
@@ -926,7 +945,7 @@ export function PrdUI(props: StepUIProps) {
           </div>
         </div>
       )}
-      {isImported && (
+      {hasCode && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-indigo-200 bg-indigo-50 shrink-0">
           <ShieldCheck size={16} className="text-indigo-600 shrink-0" />
           {content ? (
@@ -935,11 +954,10 @@ export function PrdUI(props: StepUIProps) {
               current state). Enter what to change below to start the next
               iteration.
             </span>
-          ) : (
+          ) : baselineError ? (
             <>
-              <span className="text-[13px] text-indigo-800">
-                Imported project — generate a baseline PRD from the existing
-                code to start iterating on it.
+              <span className="text-[13px] text-red-700">
+                Baseline PRD generation failed: {baselineError}
               </span>
               <button
                 type="button"
@@ -952,13 +970,15 @@ export function PrdUI(props: StepUIProps) {
                     <SpinnerIcon /> Generating…
                   </>
                 ) : (
-                  "Generate project PRD"
+                  "Retry"
                 )}
               </button>
             </>
-          )}
-          {baselineError && (
-            <span className="text-[12px] text-red-600">{baselineError}</span>
+          ) : (
+            <span className="flex items-center gap-2 text-[13px] text-indigo-800">
+              <SpinnerIcon /> Generating a baseline PRD from your existing
+              code…
+            </span>
           )}
         </div>
       )}
