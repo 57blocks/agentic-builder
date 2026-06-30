@@ -1,33 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addDesignReference } from "@/lib/pipeline/design-references";
+import { urlToFileSlug } from "../_url-slug";
 
 export const runtime = "nodejs";
 
 function projectRoot() {
   return process.cwd();
-}
-
-/**
- * Stable, filesystem-safe slug from a capture URL (host + path). Distinct URLs
- * → distinct fileNames (distinct manifest entries); the SAME URL re-captured →
- * same fileName → `addDesignReference` replaces it in place. Falls back to
- * "url-capture" for empty/unparseable input.
- */
-function urlToFileSlug(url: string | undefined): string {
-  const raw = (url ?? "").trim();
-  let base = raw;
-  try {
-    const u = new URL(raw);
-    base = `${u.host}${u.pathname}`;
-  } catch {
-    // not a parseable URL — slug the raw string
-  }
-  const slug = base
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
-  return slug || "url-capture";
 }
 
 /**
