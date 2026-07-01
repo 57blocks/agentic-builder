@@ -23,6 +23,7 @@ import { ensureDemoCssImport, PROTOTYPE_DEMO_CSS_REL } from "@/lib/pipeline/prot
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
+import { validateUiImports, buildImportRepairMessage } from "@/lib/agents/prototype/validate-ui-imports";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
   readPrototypeMarker,
@@ -143,7 +144,24 @@ export async function POST(request: NextRequest) {
             });
           }
           const result = await new PrototypeAgent().portPage(message, "", sessionId);
-          const tsx = extractTsxFromLlmOutput(result.content);
+          let tsx = extractTsxFromLlmOutput(result.content);
+
+          // Post-gen safety net: if the file imports uninstalled @/components/ui/*
+          // components, do ONE targeted repair pass; warn if it's still unresolved.
+          if (availableComponents.length > 0) {
+            let invalid = validateUiImports(tsx, availableComponents);
+            if (invalid.length > 0) {
+              send({ type: "page_repair", index, pageId: p.pageId, invalid });
+              const repairMsg = buildImportRepairMessage(tsx, invalid, availableComponents);
+              const repaired = await new PrototypeAgent().portPage(repairMsg, "", sessionId);
+              tsx = extractTsxFromLlmOutput(repaired.content);
+              invalid = validateUiImports(tsx, availableComponents);
+              if (invalid.length > 0) {
+                send({ type: "page_warning", index, pageId: p.pageId, message: `Unresolved component import(s) after repair: ${invalid.join(", ")}` });
+              }
+            }
+          }
+
           const viewRel = path.join("src", "views", `${p.componentName}.tsx`);
           await fs.writeFile(path.join(frontendDir, viewRel), tsx, "utf-8");
           generatedPages.push({ pageId: p.pageId, route: p.route, source: p.source, file: viewRel });
