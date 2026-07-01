@@ -38,6 +38,7 @@ import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
   readPrototypeMarker,
   writePrototypeMarker,
+  prototypeMarkerPath,
   type PrototypeMarker,
   type PrototypeMarkerPage,
 } from "@/lib/pipeline/prototype-marker";
@@ -53,9 +54,9 @@ const BATCH_SIZE = 4;
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { prdContent = "", projectId, codeOutputDir, tier, pageId, sessionId } = body as {
+  const { prdContent = "", projectId, codeOutputDir, tier, pageId, sessionId, force = false } = body as {
     prdContent?: string; projectId?: string; codeOutputDir?: string;
-    tier?: string; pageId?: string; sessionId?: string;
+    tier?: string; pageId?: string; sessionId?: string; force?: boolean;
   };
 
   if (!isSafeProjectId(projectId)) {
@@ -93,12 +94,22 @@ export async function POST(request: NextRequest) {
         const frontendDir = resolveFrontendDir(outputRoot, scaffoldTier);
         send({ type: "scaffold_copy_complete" });
 
-        // Plan pages (resume against any existing marker). Reconcile the marker
-        // against disk first: pages whose view file was deleted must be regenerated
-        // (not skipped by resume) and must not be imported by the router.
+        // Plan pages. `force` = full regenerate: discard the marker + delete its
+        // generated view files so every page is rebuilt fresh (no resume-skip, no
+        // stale/orphan views). Otherwise resume against the existing marker, first
+        // reconciling it with disk: pages whose view file was deleted must be
+        // regenerated (not skipped) and must not be imported by the router.
         const existingRaw = await readPrototypeMarker(outputRoot);
         let existing = existingRaw;
-        if (existingRaw && existingRaw.pages.length > 0) {
+        if (force && existingRaw) {
+          let removed = 0;
+          for (const pg of existingRaw.pages) {
+            try { await fs.rm(path.join(frontendDir, pg.file), { force: true }); removed++; } catch { /* ignore */ }
+          }
+          await fs.rm(prototypeMarkerPath(outputRoot), { force: true }).catch(() => {});
+          existing = null;
+          send({ type: "log", message: `Force regenerate: cleared marker + ${removed} previously generated view(s).` });
+        } else if (existingRaw && existingRaw.pages.length > 0) {
           let present = new Set<string>();
           try {
             const files = await fs.readdir(path.join(frontendDir, "src", "views"));

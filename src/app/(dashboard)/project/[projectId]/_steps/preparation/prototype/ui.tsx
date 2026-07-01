@@ -34,11 +34,12 @@ export function PrototypeUI(props: StepUIProps) {
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [deferred, setDeferred] = useState(0);
 
   // Make sure the demo-URL signal is loaded.
   useEffect(() => { void refreshDesignReferences?.(); }, [refreshDesignReferences]);
 
-  async function generate() {
+  async function generate(force = false) {
     setRunning(true); setError(null); setSummary(null); setRows({}); setDone(false);
     try {
       const resp = await fetch("/api/agents/prototype", {
@@ -49,6 +50,7 @@ export function PrototypeUI(props: StepUIProps) {
           projectId: props.projectSlug,
           codeOutputDir,
           tier,
+          force, // true = wipe marker + regenerate all; false = resume (skip already-generated)
         }),
       });
       const reader = resp.body?.getReader();
@@ -78,6 +80,7 @@ export function PrototypeUI(props: StepUIProps) {
             setRows((r) => ({ ...r, [id]: { ...r[id], status: "error" } }));
           } else if (t === "prototype_complete") {
             setSummary(`Generated ${ev.generated} page(s), ${ev.failed} failed, ${ev.truncated} deferred (total ${ev.totalPages}).`);
+            setDeferred(Number(ev.truncated) || 0);
             setDone(true);
           } else if (t === "error") { setError(ev.error as string); }
         }
@@ -116,8 +119,15 @@ export function PrototypeUI(props: StepUIProps) {
               Generate static frontend code for every PRD page (port captured demo HTML, free-gen the rest) and preview it.
             </p>
           </div>
-          <Button onClick={generate} disabled={running} className="gap-2">
-            <Wand2 size={14} /> {running ? "Generating…" : done ? "Re-generate" : "Generate prototype"}
+          <Button onClick={() => generate(done && deferred === 0)} disabled={running} className="gap-2">
+            <Wand2 size={14} />{" "}
+            {running
+              ? "Generating…"
+              : deferred > 0
+                ? `Generate remaining (${deferred})`
+                : done
+                  ? "Re-generate"
+                  : "Generate prototype"}
           </Button>
         </div>
         {summary && <p className="mt-2 text-[13px] text-emerald-600">{summary}</p>}
