@@ -93,6 +93,13 @@ describe("buildPortMessage", () => {
     expect(msg.toLowerCase()).toContain("do not invent");
   });
 
+  it("requires reproducing images and forbids inventing content; PRD is not a content source", () => {
+    const msg = buildPortMessage(base);
+    expect(msg).toContain("<img");                                   // must reproduce images
+    expect(msg.toLowerCase()).toContain("do not invent content");    // no fabricated data
+    expect(msg.toLowerCase()).toContain("not a source of visible content"); // PRD reframed
+  });
+
   it("lists only the available @/components/ui modules and forbids importing others", () => {
     const msg = buildPortMessage({ ...base, availableComponents: ["button", "card", "select"] });
     expect(msg).toContain("button, card, select");
