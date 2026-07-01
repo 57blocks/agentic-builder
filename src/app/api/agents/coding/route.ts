@@ -23,6 +23,7 @@ import {
   distributePipelineDag,
   verifyDistributedSchemaIntact,
 } from "@/lib/pipeline/shared-schema-distributor";
+import { generateFrontendApiClient } from "@/lib/pipeline/api-client-generator";
 import {
   getTierScaffoldSpecForCodingContext,
   writeScaffoldSpecFile,
@@ -94,6 +95,7 @@ import {
   unregisterRepairEmitter,
   runFeatureChecklistAudit,
   auditFrontendWiring,
+  auditRawHttpUsage,
   auditModelSchemaAlignment,
   dispatchAuditRepair,
   AttemptTracker,
@@ -1537,6 +1539,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Derive a typed frontend API client from the shared schema's ENDPOINTS
+  // registry (the same single source of truth the backend contracts come from).
+  // Frontend workers call `api.<service>.<method>()` instead of hand-written
+  // `fetch`, so a call to a missing endpoint / wrong field / misread response
+  // fails at COMPILE time (tsc gate) rather than at runtime on a button click.
+  let generatedApiClientPaths: string[] = [];
+  try {
+    const gen = await generateFrontendApiClient(tier, outputRoot);
+    generatedApiClientPaths = gen.written;
+    if (gen.found) {
+      console.log(
+        `[CodingAPI] Typed API client generated from ENDPOINTS (${gen.endpointCount} endpoint(s)): ${gen.written.join(", ")}`,
+      );
+    } else {
+      console.log(
+        `[CodingAPI] Typed API client not generated: no ENDPOINTS registry in ${gen.sourcePath} (TRD schema missing/registry-less).`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[CodingAPI] generateFrontendApiClient warning: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
   // Replicate the TRD workflow DAG (.blueprint/pipeline-dag.yaml). Lives
   // at outputRoot/.blueprint/pipeline-dag.yaml — workers read it as a
   // reference for service ordering when implementing pipeline tasks.
@@ -1704,6 +1730,13 @@ export async function POST(request: NextRequest) {
   // template walker, so merge them in explicitly. Workers must not
   // overwrite the canonical TRD-frozen schema.
   for (const p of distributedSharedSchemaPaths) {
+    if (!scaffoldProtectedPaths.includes(p)) scaffoldProtectedPaths.push(p);
+  }
+  // The generated typed API client is authoritative (derived from ENDPOINTS) —
+  // workers import from it but must never overwrite it, or the frontend↔backend
+  // contract could silently drift. A genuine missing endpoint is a schema gap,
+  // fixed via the schema-change-request flow, not by hand-editing the client.
+  for (const p of generatedApiClientPaths) {
     if (!scaffoldProtectedPaths.includes(p)) scaffoldProtectedPaths.push(p);
   }
   if (
@@ -2456,6 +2489,29 @@ export async function POST(request: NextRequest) {
           if (wiringFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
             const fresh = wiringFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
+
+          // Raw-HTTP-in-views audit — the deterministic teeth behind the "use
+          // the generated typed API client" prompt rule. Flags views that reach
+          // the backend via raw fetch/axios/apiClient/`/api/` URLs instead of
+          // `api.<service>.<method>`. Like wiring findings, these are `partial`
+          // verdicts: they drive a bounded scoped-frontend repair but NEVER enter
+          // hardUncovered, so they never flip `passed` or halt the run.
+          const rawHttpFindings = await auditRawHttpUsage({
+            tasks: codingTasks,
+            taskResults: auditTaskResults,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+          });
+          if (rawHttpFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = rawHttpFindings.filter((e) => !existingIds.has(e.id));
             if (fresh.length > 0) {
               finalAudit = {
                 ...finalAudit,
