@@ -42,4 +42,16 @@ describe("scopeCss", () => {
     expect(scopeCss("", S)).toBe("");
     expect(() => scopeCss(`.x{color:red`, S)).not.toThrow();
   });
+
+  it("glues a compound class/attr on html/body onto the scope (no descendant space)", () => {
+    const S2 = `.${PROTOTYPE_ROOT_CLASS}`;
+    expect(scopeCss(`body.dark .card{color:#fff}`, S2)).toContain(`${S2}.dark .card`);
+    expect(scopeCss(`html[data-theme="dark"] .x{color:#000}`, S2)).toContain(`${S2}[data-theme="dark"] .x`);
+  });
+
+  it("keeps descendant/combinator selectors after body/html separated", () => {
+    const S2 = `.${PROTOTYPE_ROOT_CLASS}`;
+    expect(scopeCss(`body .card{color:red}`, S2)).toContain(`${S2} .card`);
+    expect(scopeCss(`body > .container{margin:0}`, S2)).toContain(`${S2} > .container`);
+  });
 });
