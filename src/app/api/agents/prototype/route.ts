@@ -32,7 +32,13 @@ import {
 } from "@/lib/pipeline/prototype-anchor-nav";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
-import { deriveDemoOrigin, relativizeDemoHrefs, rewriteNextImageUrls } from "@/lib/pipeline/prototype-links";
+import {
+  deriveDemoOrigin,
+  relativizeDemoHrefs,
+  rewriteNextImageUrls,
+  collectDemoImageUrls,
+  demoAssetLocalPath,
+} from "@/lib/pipeline/prototype-links";
 import { extractTsxFromLlmOutput, isTsxComplete } from "@/lib/agents/prototype/extract-tsx";
 import { validateUiImports, buildImportRepairMessage } from "@/lib/agents/prototype/validate-ui-imports";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
@@ -156,6 +162,44 @@ export async function POST(request: NextRequest) {
         // Scoped under `.prototype-root` before writing so it can't pollute the shell.
         const demoCssChunks = new Set<string>();
 
+        // Localize demo images into public/ so pages don't hotlink the live demo
+        // (cross-site requests get rate-limited/blocked by the demo's CDN and by
+        // browsers). Deduped across pages; best-effort (a failed download keeps the
+        // absolute URL). Map value = the download's success promise.
+        const assetCache = new Map<string, Promise<boolean>>();
+        async function downloadDemoAsset(url: string, absDest: string): Promise<boolean> {
+          try {
+            const resp = await fetch(encodeURI(url), { redirect: "follow", signal: AbortSignal.timeout(20000) });
+            if (!resp.ok) return false;
+            const buf = Buffer.from(await resp.arrayBuffer());
+            await fs.mkdir(path.dirname(absDest), { recursive: true });
+            await fs.writeFile(absDest, buf);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+        async function localizeImages(tsx: string): Promise<string> {
+          if (!demoOrigin) return tsx;
+          let out = tsx;
+          let localized = 0;
+          for (const url of collectDemoImageUrls(out, demoOrigin)) {
+            const localRel = demoAssetLocalPath(url, demoOrigin);
+            const absDest = path.join(frontendDir, "public", decodeURIComponent(localRel));
+            let pending = assetCache.get(url);
+            if (!pending) {
+              pending = downloadDemoAsset(url, absDest);
+              assetCache.set(url, pending);
+            }
+            if (await pending) {
+              out = out.split(url).join(localRel);
+              localized++;
+            }
+          }
+          if (localized > 0) send({ type: "log", message: `Localized ${localized} image(s) into public/.` });
+          return out;
+        }
+
         async function generateOne(p: PlannedPage, index: number): Promise<void> {
           send({ type: "page_start", index, total: pages.length, pageId: p.pageId, name: p.name, source: p.source });
           let message: string;
@@ -208,6 +252,9 @@ export async function POST(request: NextRequest) {
           // Unwrap Next.js image-optimizer URLs → direct demo assets (relative srcSet
           // 404s on the dev server; the optimizer endpoint is unreliable cross-origin).
           tsx = rewriteNextImageUrls(tsx, demoOrigin);
+          // Download demo images into public/ and point src/srcSet at the local copy —
+          // no cross-origin hotlinking (works in any browser, offline, demo-independent).
+          tsx = await localizeImages(tsx);
 
           // Reject truncated/incomplete output (e.g. hit max_tokens) BEFORE writing:
           // a malformed view breaks the Vite build and would be silently skipped by

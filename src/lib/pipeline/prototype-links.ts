@@ -52,6 +52,30 @@ export function rewriteNextImageUrls(tsx: string, origin: string): string {
 }
 
 /**
+ * Collect the unique demo-origin image URLs referenced by `src`/`srcSet` in the
+ * ported markup, so they can be downloaded into the prototype's `public/` and
+ * served locally (no cross-origin hotlinking, which the demo's CDN/WAF rate-limits
+ * and browsers block cross-site). Strips srcSet descriptors (` 1x`, ` 640w`).
+ */
+export function collectDemoImageUrls(tsx: string, origin: string): string[] {
+  if (!origin) return [];
+  const urls = new Set<string>();
+  for (const m of tsx.matchAll(/(?:src|srcSet|srcset)="([^"]*)"/g)) {
+    for (const part of m[1].split(",")) {
+      const url = part.trim().split(/\s+/)[0];
+      if (url && url.startsWith(origin)) urls.add(url);
+    }
+  }
+  return [...urls];
+}
+
+/** The public-relative path a demo asset URL is stored/served at (origin stripped). */
+export function demoAssetLocalPath(url: string, origin: string): string {
+  const rest = url.slice(origin.length);
+  return rest.startsWith("/") ? rest : `/${rest}`;
+}
+
+/**
  * Rewrite navigation `href`s that point at the demo's own origin to relative
  * paths, so the ported page navigates its OWN routes (and the anchor-nav delegate,
  * which only handles `/`-relative hrefs, can intercept them) instead of opening the

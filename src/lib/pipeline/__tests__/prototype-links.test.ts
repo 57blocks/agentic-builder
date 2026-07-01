@@ -4,6 +4,8 @@ import {
   deriveDemoOrigin,
   relativizeDemoHrefs,
   rewriteNextImageUrls,
+  collectDemoImageUrls,
+  demoAssetLocalPath,
 } from "../prototype-links";
 import type { DesignReferenceEntry } from "@/lib/pipeline/design-references";
 
@@ -72,5 +74,30 @@ describe("rewriteNextImageUrls", () => {
   it("leaves non-_next image URLs untouched", () => {
     const tsx = `<img src="https://x-school.org/assets/logo-light.svg" />`;
     expect(rewriteNextImageUrls(tsx, origin)).toBe(tsx);
+  });
+});
+
+describe("collectDemoImageUrls", () => {
+  const origin = "https://x-school.org";
+  it("collects unique demo-origin urls from src and srcSet, stripping descriptors", () => {
+    const tsx = [
+      `<img src="https://x-school.org/assets/a.png" srcSet="https://x-school.org/assets/a.png 1x, https://x-school.org/assets/b.png 2x" />`,
+      `<img src="https://cdn.other.com/c.png" />`,
+    ].join("\n");
+    expect(collectDemoImageUrls(tsx, origin).sort()).toEqual([
+      "https://x-school.org/assets/a.png",
+      "https://x-school.org/assets/b.png",
+    ]);
+  });
+  it("returns [] with no origin", () => {
+    expect(collectDemoImageUrls(`<img src="https://x-school.org/a.png"/>`, "")).toEqual([]);
+  });
+});
+
+describe("demoAssetLocalPath", () => {
+  it("strips the origin to a public-relative path", () => {
+    expect(demoAssetLocalPath("https://x-school.org/assets/images/hero.png", "https://x-school.org")).toBe(
+      "/assets/images/hero.png",
+    );
   });
 });
