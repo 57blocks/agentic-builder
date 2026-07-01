@@ -42,3 +42,24 @@ export function extractTsxFromLlmOutput(raw: string): string {
 
   return `${(chosen ? chosen.body : raw).trim()}\n`;
 }
+
+/**
+ * Heuristic completeness check for a generated view file. Catches the common
+ * truncation failure (LLM output cut off at max_tokens → the file ends mid-JSX):
+ * a complete component MUST have an export and balanced braces/parens. Used to
+ * reject truncated output BEFORE it is written, so a malformed file never lands
+ * (which would break the Vite build and be silently skipped by resume).
+ *
+ * Not a parser: it can't validate syntax, only gross structural completeness.
+ * False positives (a valid file with an unbalanced brace inside a string) are
+ * rare in generated React and merely cost one regeneration.
+ */
+export function isTsxComplete(tsx: string): boolean {
+  const s = tsx.trim();
+  if (!s) return false;
+  if (!/export\s+(default\s+|function\s+|const\s+|class\s+)/.test(s)) return false;
+  const count = (re: RegExp) => (s.match(re) ?? []).length;
+  if (count(/\{/g) !== count(/\}/g)) return false; // unbalanced braces → truncated
+  if (count(/\(/g) !== count(/\)/g)) return false; // unbalanced parens → truncated
+  return true;
+}

@@ -32,7 +32,7 @@ import {
 } from "@/lib/pipeline/prototype-anchor-nav";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
-import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
+import { extractTsxFromLlmOutput, isTsxComplete } from "@/lib/agents/prototype/extract-tsx";
 import { validateUiImports, buildImportRepairMessage } from "@/lib/agents/prototype/validate-ui-imports";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
@@ -185,6 +185,16 @@ export async function POST(request: NextRequest) {
                 send({ type: "page_warning", index, pageId: p.pageId, message: `Unresolved component import(s) after repair: ${invalid.join(", ")}` });
               }
             }
+          }
+
+          // Reject truncated/incomplete output (e.g. hit max_tokens) BEFORE writing:
+          // a malformed view breaks the Vite build and would be silently skipped by
+          // resume (file "exists"). Throwing routes it to page_error → not written →
+          // regenerated on the next run.
+          if (!isTsxComplete(tsx)) {
+            throw new Error(
+              `generated view for ${p.pageId} (${p.name}) looks truncated/incomplete — likely hit the output-token limit`,
+            );
           }
 
           const viewRel = path.join("src", "views", `${p.componentName}.tsx`);

@@ -1,6 +1,6 @@
 // src/lib/agents/prototype/__tests__/extract-tsx.test.ts
 import { describe, it, expect } from "vitest";
-import { extractTsxFromLlmOutput } from "../extract-tsx";
+import { extractTsxFromLlmOutput, isTsxComplete } from "../extract-tsx";
 
 describe("extractTsxFromLlmOutput", () => {
   it("extracts the fenced tsx block and drops prose", () => {
@@ -65,5 +65,27 @@ describe("extractTsxFromLlmOutput", () => {
   it("treats an untagged fence as a code candidate", () => {
     const raw = ["```", "export const Foo = () => null;", "```"].join("\n");
     expect(extractTsxFromLlmOutput(raw)).toContain("export const Foo");
+  });
+});
+
+describe("isTsxComplete", () => {
+  it("accepts a complete component (export + balanced braces/parens)", () => {
+    expect(isTsxComplete(`export function Home() {\n  return (<div className="x">hi</div>);\n}\n`)).toBe(true);
+  });
+  it("accepts a complete arrow-const component", () => {
+    expect(isTsxComplete(`export const Home = () => <div>hi</div>;\n`)).toBe(true);
+  });
+  it("rejects output truncated mid-JSX (unbalanced braces)", () => {
+    const truncated = `export function Home() {\n  return (\n    <div className="a">\n      <span>Founded in 2021,`;
+    expect(isTsxComplete(truncated)).toBe(false);
+  });
+  it("rejects when there is no export at all", () => {
+    expect(isTsxComplete(`const x = 1;\n`)).toBe(false);
+  });
+  it("rejects empty input", () => {
+    expect(isTsxComplete("   \n")).toBe(false);
+  });
+  it("rejects unbalanced parens", () => {
+    expect(isTsxComplete(`export function Home() { return foo( ; }\n`)).toBe(false);
   });
 });
