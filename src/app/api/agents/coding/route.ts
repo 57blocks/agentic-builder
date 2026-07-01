@@ -96,6 +96,7 @@ import {
   runFeatureChecklistAudit,
   auditFrontendWiring,
   auditRawHttpUsage,
+  auditOrphanRoutes,
   auditModelSchemaAlignment,
   dispatchAuditRepair,
   AttemptTracker,
@@ -2530,6 +2531,28 @@ export async function POST(request: NextRequest) {
           if (rawHttpFindings.length > 0) {
             const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
             const fresh = rawHttpFindings.filter((e) => !existingIds.has(e.id));
+            if (fresh.length > 0) {
+              finalAudit = {
+                ...finalAudit,
+                uncovered: [...finalAudit.uncovered, ...fresh],
+              };
+            }
+          }
+
+          // Orphan-route (reverse-reachability) audit — flags routes registered
+          // in the router that NO in-app navigation reaches (page exists but a
+          // user can never get to it). `partial` verdicts → bounded scoped-
+          // frontend repair, never hardUncovered, never halts. Skipped on a
+          // scoped build (the inbound link may live in a not-yet-built domain).
+          const orphanRouteFindings = await auditOrphanRoutes({
+            prdSpec,
+            outputDir: outputRoot,
+            emitter: repairEmitter,
+            scopedBuild: !!(retryFailedTaskIds && retryFailedTaskIds.length > 0),
+          });
+          if (orphanRouteFindings.length > 0) {
+            const existingIds = new Set(finalAudit.uncovered.map((e) => e.id));
+            const fresh = orphanRouteFindings.filter((e) => !existingIds.has(e.id));
             if (fresh.length > 0) {
               finalAudit = {
                 ...finalAudit,

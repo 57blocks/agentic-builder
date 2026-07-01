@@ -25,6 +25,8 @@ export { runFeatureChecklistAudit } from "./feature-checklist-audit";
 export { auditFrontendWiring } from "./wiring-audit";
 export { auditRawHttpUsage } from "./no-raw-http-audit";
 export type { RawHttpAuditInput } from "./no-raw-http-audit";
+export { auditOrphanRoutes } from "./no-orphan-route-audit";
+export type { OrphanRouteAuditInput } from "./no-orphan-route-audit";
 export { auditModelSchemaAlignment } from "./model-schema-audit";
 export type { ModelSchemaAuditInput } from "./model-schema-audit";
 export type {
