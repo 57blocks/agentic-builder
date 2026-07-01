@@ -15,11 +15,12 @@ import { projectHasDemoUrl, planPrototypePages, type PlannedPage } from "@/lib/p
 import { writePrototypeRouter, type PrototypeRoutePage } from "@/lib/pipeline/prototype-router";
 import {
   buildPortMessage,
-  extractStyleTokens,
+  extractDemoCss,
   extractThemeScopeClass,
 } from "@/lib/agents/prototype/build-port-message";
 import { buildFreegenMessage } from "@/lib/agents/prototype/build-freegen-message";
 import { ensureDemoCssImport, PROTOTYPE_DEMO_CSS_REL } from "@/lib/pipeline/prototype-demo-css";
+import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
@@ -104,10 +105,10 @@ export async function POST(request: NextRequest) {
 
         const generatedPages: PrototypeMarkerPage[] = [];
         const generatedFiles: string[] = [];
-        // Demo design-token CSS recovered from each ported page's stripped <style>
-        // (`:root` / `.*-theme` custom-property blocks). Deduped by exact block text
-        // — family pages share one block, teacher/admin pages contribute theirs.
-        const demoTokenBlocks = new Set<string>();
+        // FULL compiled CSS carried from each ported page's captured <style>, deduped
+        // by exact text (same-origin SPA → identical bundle per page collapses to one).
+        // Scoped under `.prototype-root` before writing so it can't pollute the shell.
+        const demoCssChunks = new Set<string>();
 
         async function generateOne(p: PlannedPage, index: number): Promise<void> {
           send({ type: "page_start", index, total: pages.length, pageId: p.pageId, name: p.name, source: p.source });
@@ -118,11 +119,11 @@ export async function POST(request: NextRequest) {
               throw new Error(`Unsafe reference filename: ${storedName}`);
             }
             const capturedHtml = await fs.readFile(path.join(refDir, storedName), "utf-8");
-            // Recover the demo's CSS custom-property definitions (the token layer that
-            // the ported `bg-[var(--…)]` classes depend on) and the theme-scope class
-            // that activates them — both live in the <style> that the port strips.
-            const tokens = extractStyleTokens(capturedHtml);
-            if (tokens.trim()) demoTokenBlocks.add(tokens.trim());
+            // Carry the demo's FULL compiled CSS (utilities + custom classes + vars)
+            // so the verbatim ported classes render exactly as the demo — no
+            // reconstruction, no hallucinated tokens. It is scoped after the loop.
+            const demoCss = extractDemoCss(capturedHtml);
+            if (demoCss) demoCssChunks.add(demoCss);
             const themeScopeClass = extractThemeScopeClass(capturedHtml) ?? undefined;
             message = buildPortMessage({
               componentName: p.componentName, pageName: p.name, route: p.route,
@@ -158,12 +159,16 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // Inject the recovered demo design tokens into the scaffold so the ported
-        // `bg-[var(--…)]` utilities resolve, and wire the import into index.css.
-        if (demoTokenBlocks.size > 0) {
+        // Carry the demo's full CSS into the scaffold, scoped under .prototype-root so
+        // the verbatim ported classes resolve without polluting the scaffold shell.
+        if (demoCssChunks.size > 0) {
+          const scoped = [...demoCssChunks]
+            .map((css) => scopeCss(css, `.${PROTOTYPE_ROOT_CLASS}`))
+            .filter(Boolean)
+            .join("\n");
           const demoCss =
-            `/* Prototype demo design tokens — extracted from captured HTML. Generated; do not edit. */\n` +
-            `${[...demoTokenBlocks].join("\n\n")}\n`;
+            `/* Prototype: demo CSS carried verbatim and scoped under .${PROTOTYPE_ROOT_CLASS}. Generated; do not edit. */\n` +
+            `${scoped}\n`;
           const demoCssAbs = path.join(frontendDir, PROTOTYPE_DEMO_CSS_REL);
           await fs.mkdir(path.dirname(demoCssAbs), { recursive: true });
           await fs.writeFile(demoCssAbs, demoCss, "utf-8");
@@ -175,7 +180,7 @@ export async function POST(request: NextRequest) {
             generatedFiles.push(path.join(frontendRel, "src", "index.css"));
           } catch { /* index.css should exist from the scaffold; skip if not */ }
           generatedFiles.push(path.join(frontendRel, PROTOTYPE_DEMO_CSS_REL));
-          send({ type: "log", message: `Injected ${demoTokenBlocks.size} demo design-token block(s) into prototype-demo.css.` });
+          send({ type: "log", message: `Carried ${demoCssChunks.size} demo stylesheet(s), scoped under .${PROTOTYPE_ROOT_CLASS}.` });
         }
 
         // Merge marker (resume-aware) + regenerate router from ALL pages.

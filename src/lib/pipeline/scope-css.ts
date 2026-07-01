@@ -11,7 +11,7 @@ function prefixSelector(selector: string, scope: string): string {
   const sel = selector.trim();
   if (!sel) return sel;
   if (ROOT_LIKE.has(sel)) return scope;
-  const m = sel.match(/^(?:html|body)\b(.*)$/s);
+  const m = sel.match(/^(?:html|body)\b(.*)$/);
   if (m) {
     const rest = m[1];
     return rest === "" ? scope : `${scope}${rest}`;

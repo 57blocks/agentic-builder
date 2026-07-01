@@ -60,10 +60,10 @@ export function extractThemeScopeClass(html: string): string | null {
  * markup for the model: strip inlined `<style>` (the ~70KB compiled Tailwind
  * bundle is noise the scaffold regenerates) and return the `<body>` inner markup.
  *
- * IMPORTANT: the demo's DESIGN TOKENS (`--bg`, `--primary`, … in `:root` /
- * `.*-theme` blocks) also live in that `<style>` and MUST NOT be lost — the ported
- * markup references them via `bg-[var(--…)]`. They are recovered separately by
- * `extractStyleTokens` and injected into the scaffold as `prototype-demo.css`.
+ * IMPORTANT: the demo's real CSS (utilities, custom classes, and the tokens in
+ * `:root` / `.*-theme` blocks) also lives in that `<style>` and MUST NOT be lost —
+ * the ported markup references it verbatim. It is carried separately by
+ * `extractDemoCss`, scoped by `scopeCss`, and written to `prototype-demo.css`.
  *
  * Assumes the capture pipeline has already removed <script> tags; a literal
  * `</body>` inside a script string would otherwise truncate extraction.
