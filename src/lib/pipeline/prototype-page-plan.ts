@@ -1,13 +1,31 @@
 // src/lib/pipeline/prototype-page-plan.ts
 import type { DesignReferenceEntry } from "@/lib/pipeline/design-references";
 import type { PrdPageHint } from "@/lib/requirements/prd-page-hints";
-import type { PrototypeMarker, PrototypePageSource } from "@/lib/pipeline/prototype-marker";
+import type {
+  PrototypeMarker,
+  PrototypeMarkerPage,
+  PrototypePageSource,
+} from "@/lib/pipeline/prototype-marker";
 import { selectPageSource } from "@/lib/pipeline/prototype-page-source";
 import { toViewComponentName } from "@/lib/pipeline/prototype-router";
 
 /** Demo-URL gate signal: the project has at least one url-sourced design reference. */
 export function projectHasDemoUrl(manifest: DesignReferenceEntry[]): boolean {
   return manifest.some((e) => e.source === "url");
+}
+
+/**
+ * Keep only marker pages whose generated view file still exists on disk. Used to
+ * reconcile a loaded marker against reality before resume + router regeneration:
+ * a page whose file was deleted must NOT be treated as "already generated" (resume
+ * would skip it) nor imported by the router (broken import). Dropped pages get
+ * regenerated on this run.
+ */
+export function keepPagesWithExistingFiles(
+  pages: PrototypeMarkerPage[],
+  fileExists: (file: string) => boolean,
+): PrototypeMarkerPage[] {
+  return pages.filter((p) => fileExists(p.file));
 }
 
 export interface PlannedPage {

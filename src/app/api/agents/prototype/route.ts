@@ -11,7 +11,12 @@ import {
   copyBaseScaffoldForPrototype,
 } from "@/lib/pipeline/prototype-scaffold";
 import { isSafeProjectId } from "@/lib/pipeline/prototype-route-guards";
-import { projectHasDemoUrl, planPrototypePages, type PlannedPage } from "@/lib/pipeline/prototype-page-plan";
+import {
+  projectHasDemoUrl,
+  planPrototypePages,
+  keepPagesWithExistingFiles,
+  type PlannedPage,
+} from "@/lib/pipeline/prototype-page-plan";
 import { writePrototypeRouter, type PrototypeRoutePage } from "@/lib/pipeline/prototype-router";
 import {
   buildPortMessage,
@@ -83,8 +88,23 @@ export async function POST(request: NextRequest) {
         const frontendDir = resolveFrontendDir(outputRoot, scaffoldTier);
         send({ type: "scaffold_copy_complete" });
 
-        // Plan pages (resume against any existing marker).
-        const existing = await readPrototypeMarker(outputRoot);
+        // Plan pages (resume against any existing marker). Reconcile the marker
+        // against disk first: pages whose view file was deleted must be regenerated
+        // (not skipped by resume) and must not be imported by the router.
+        const existingRaw = await readPrototypeMarker(outputRoot);
+        let existing = existingRaw;
+        if (existingRaw && existingRaw.pages.length > 0) {
+          let present = new Set<string>();
+          try {
+            const files = await fs.readdir(path.join(frontendDir, "src", "views"));
+            present = new Set(files.map((f) => path.join("src", "views", f)));
+          } catch { /* views dir missing → treat all as absent */ }
+          const kept = keepPagesWithExistingFiles(existingRaw.pages, (f) => present.has(f));
+          if (kept.length !== existingRaw.pages.length) {
+            send({ type: "log", message: `Marker reconcile: ${existingRaw.pages.length - kept.length} page(s) missing on disk — regenerating.` });
+          }
+          existing = { ...existingRaw, pages: kept };
+        }
         const allHints = extractPrdPageHints(prdContent);
         const hints = pageId ? allHints.filter((h) => h.id === pageId) : allHints;
         const { pages, truncated } = planPrototypePages(hints, manifest, existing, PROTOTYPE_PAGE_CAP);

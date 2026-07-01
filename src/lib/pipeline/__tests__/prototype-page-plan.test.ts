@@ -1,9 +1,9 @@
 // src/lib/pipeline/__tests__/prototype-page-plan.test.ts
 import { describe, it, expect } from "vitest";
-import { projectHasDemoUrl, planPrototypePages } from "../prototype-page-plan";
+import { projectHasDemoUrl, planPrototypePages, keepPagesWithExistingFiles } from "../prototype-page-plan";
 import type { DesignReferenceEntry } from "@/lib/pipeline/design-references";
 import type { PrdPageHint } from "@/lib/requirements/prd-page-hints";
-import type { PrototypeMarker } from "@/lib/pipeline/prototype-marker";
+import type { PrototypeMarker, PrototypeMarkerPage } from "@/lib/pipeline/prototype-marker";
 
 function html(pageHint: string, source: "upload" | "url" = "url"): DesignReferenceEntry {
   return {
@@ -68,5 +68,21 @@ describe("planPrototypePages", () => {
     const { pages } = planPrototypePages(dupes, [], null, 100);
     expect(pages).toHaveLength(1);
     expect(pages[0].pageId).toBe("PAGE-007");
+  });
+});
+
+describe("keepPagesWithExistingFiles", () => {
+  const mk = (pageId: string, file: string): PrototypeMarkerPage => ({
+    pageId, route: `/${pageId}`, source: "url", file,
+  });
+  it("drops marker pages whose view file no longer exists on disk", () => {
+    const pages = [mk("PAGE-1", "src/views/A.tsx"), mk("PAGE-2", "src/views/B.tsx")];
+    const present = new Set(["src/views/B.tsx"]);
+    const kept = keepPagesWithExistingFiles(pages, (f) => present.has(f));
+    expect(kept.map((p) => p.pageId)).toEqual(["PAGE-2"]);
+  });
+  it("keeps all when every file exists", () => {
+    const pages = [mk("PAGE-1", "src/views/A.tsx")];
+    expect(keepPagesWithExistingFiles(pages, () => true)).toHaveLength(1);
   });
 });
