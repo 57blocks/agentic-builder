@@ -22,6 +22,17 @@ describe("toViewComponentName", () => {
   it("falls back to Page for an empty name", () => {
     expect(toViewComponentName("")).toBe("Page");
   });
+
+  it("strips a fullwidth-parenthesised route note (PRD headings keep it)", () => {
+    expect(toViewComponentName("AuthPage（`/auth`）")).toBe("AuthPage");
+    expect(toViewComponentName("FamilyDashboardPage（`/family/dashboard`）")).toBe(
+      "FamilyDashboardPage",
+    );
+  });
+
+  it("strips an ascii-parenthesised note too", () => {
+    expect(toViewComponentName("Settings (profile)")).toBe("Settings");
+  });
 });
 
 describe("renderPrototypeRouter", () => {

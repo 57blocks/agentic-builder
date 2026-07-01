@@ -13,12 +13,78 @@ export interface PortMessageInput {
   designContext: string;
   /** Relevant PRD text for this page (PRD is the source of truth on conflicts). */
   prdExcerpt: string;
+  /**
+   * Theme-scope class (e.g. `family-theme`) the captured markup uses to activate
+   * its CSS custom properties. When set, the model must keep it on the page root
+   * so ported `bg-[var(--…)]` utilities resolve against the injected demo tokens
+   * (see `extractStyleTokens` + `prototype-demo.css`).
+   */
+  themeScopeClass?: string;
+}
+
+/** Concatenated text of every `<style>` block in a captured HTML snapshot. */
+function collectStyleText(html: string): string {
+  const blocks = html.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
+  return blocks.map((b) => b.replace(/<\/?style[^>]*>/gi, "")).join("\n");
+}
+
+/**
+ * Extract the DESIGN-TOKEN layer from a captured page's inlined CSS: the rule
+ * blocks that DEFINE app-level css custom properties (`:root{…--x:…}`,
+ * `.family-theme{…}`, `@theme{…}`). Dropped: compiled Tailwind utility rules
+ * (`.flex{display:flex}`), property-less hook classes, and Tailwind's own
+ * internal `--tw-*` reset block (the scaffold's Tailwind already emits it) — we
+ * only need the variables the ported `var(--…)` classes reference.
+ *
+ * Note: `extractPortableMarkup` intentionally strips `<style>` from the MARKUP we
+ * send the model (the ~70KB utility bundle is noise). This function recovers just
+ * the variable definitions so they can be injected into the scaffold separately.
+ */
+export function extractStyleTokens(html: string): string {
+  const css = collectStyleText(html);
+  if (!css) return "";
+  // Match top-level "selector { body }" blocks whose body declares at least one
+  // NON-`--tw-` custom property (a real design token). CSS var declaration bodies
+  // contain no nested braces, so a brace-free body match is safe and avoids
+  // pulling in @media wrappers.
+  const blocks: string[] = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(css)) !== null) {
+    const selector = m[1].trim();
+    const body = m[2];
+    if (/(^|[\s;{])--(?!tw-)[\w-]+\s*:/.test(body)) {
+      blocks.push(`${selector} {${body}}`);
+    }
+  }
+  return blocks.join("\n");
+}
+
+/**
+ * The first `*-theme` scope class on the captured markup (e.g. `family-theme`).
+ * Demo pages scope their tokens under such a class; the ported page must keep it
+ * for the scoped variables to apply. Returns null when absent.
+ */
+export function extractThemeScopeClass(html: string): string | null {
+  const classAttrs = html.match(/class(?:Name)?\s*=\s*"([^"]*)"/gi) ?? [];
+  for (const attr of classAttrs) {
+    const value = attr.replace(/^[^"]*"/, "").replace(/"$/, "");
+    for (const tok of value.split(/\s+/)) {
+      if (/^[a-z][\w-]*-theme$/i.test(tok)) return tok;
+    }
+  }
+  return null;
 }
 
 /**
  * Reduce a captured self-contained HTML snapshot to the portable structural
- * markup: strip inlined `<style>` (target reuses the same Tailwind v4 + tokens,
- * so the demo's classes map directly) and return the `<body>` inner markup.
+ * markup for the model: strip inlined `<style>` (the ~70KB compiled Tailwind
+ * bundle is noise the scaffold regenerates) and return the `<body>` inner markup.
+ *
+ * IMPORTANT: the demo's DESIGN TOKENS (`--bg`, `--primary`, … in `:root` /
+ * `.*-theme` blocks) also live in that `<style>` and MUST NOT be lost — the ported
+ * markup references them via `bg-[var(--…)]`. They are recovered separately by
+ * `extractStyleTokens` and injected into the scaffold as `prototype-demo.css`.
  *
  * Assumes the capture pipeline has already removed <script> tags; a literal
  * `</body>` inside a script string would otherwise truncate extraction.
@@ -45,6 +111,9 @@ function fenceSafe(markup: string): string {
  */
 export function buildPortMessage(input: PortMessageInput): string {
   const markup = fenceSafe(extractPortableMarkup(input.capturedHtml));
+  const scopeLine = input.themeScopeClass
+    ? `- KEEP the demo's theme-scope class \`${input.themeScopeClass}\` on the component's ROOT element exactly — it activates the CSS custom properties (\`--bg\`, \`--primary\`, …) that the \`bg-[var(--…)]\` utilities below depend on.`
+    : null;
   return [
     `# Task: port ONE page into the scaffold frontend`,
     ``,
@@ -56,8 +125,10 @@ export function buildPortMessage(input: PortMessageInput): string {
     `- Output ONLY one fenced tsx code block — the full file, no prose.`,
     `- Export the component as a NAMED export: \`export function ${input.componentName}() { … }\`.`,
     `- Import shadcn primitives from \`@/components/ui\` and use \`@/\` path aliases.`,
-    `- Use the design-system tokens / Tailwind v4 classes below; reuse the demo's`,
-    `  Tailwind classes where they map. Do not add a new design system.`,
+    `- PRESERVE the demo's class names verbatim, INCLUDING arbitrary-value utilities`,
+    `  like \`bg-[var(--bg)]\` / \`text-[var(--primary)]\` — the demo's design tokens are`,
+    `  injected into the app separately, so these resolve. Do not invent a new design system.`,
+    ...(scopeLine ? [scopeLine] : []),
     ``,
     `## Logic is STUBBED (v1 per-page, static)`,
     `- Static markup + placeholder data + INERT handlers.`,

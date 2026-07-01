@@ -7,9 +7,18 @@ export interface PrototypeRoutePage {
   route: string;
 }
 
-/** Derive a safe PascalCase React component name from a PRD page name. */
+/**
+ * Derive a safe PascalCase React component name from a PRD page name.
+ *
+ * PRD headings keep a trailing route note in parentheses — fullwidth `（`/auth`）`
+ * (the shared `extractPrdPageHints` intentionally preserves it) or ascii `(…)`.
+ * Strip those first so the note isn't fused into the identifier
+ * (e.g. `AuthPage（`/auth`）` → `AuthPage`, not `AuthPageAuth`).
+ */
 export function toViewComponentName(name: string): string {
   const pascal = name
+    .replace(/（[^）]*）/g, " ")
+    .replace(/\([^)]*\)/g, " ")
     .replace(/[^A-Za-z0-9]+/g, " ")
     .trim()
     .split(/\s+/)

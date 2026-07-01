@@ -13,8 +13,13 @@ import {
 import { isSafeProjectId } from "@/lib/pipeline/prototype-route-guards";
 import { projectHasDemoUrl, planPrototypePages, type PlannedPage } from "@/lib/pipeline/prototype-page-plan";
 import { writePrototypeRouter, type PrototypeRoutePage } from "@/lib/pipeline/prototype-router";
-import { buildPortMessage } from "@/lib/agents/prototype/build-port-message";
+import {
+  buildPortMessage,
+  extractStyleTokens,
+  extractThemeScopeClass,
+} from "@/lib/agents/prototype/build-port-message";
 import { buildFreegenMessage } from "@/lib/agents/prototype/build-freegen-message";
+import { ensureDemoCssImport, PROTOTYPE_DEMO_CSS_REL } from "@/lib/pipeline/prototype-demo-css";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
@@ -99,6 +104,10 @@ export async function POST(request: NextRequest) {
 
         const generatedPages: PrototypeMarkerPage[] = [];
         const generatedFiles: string[] = [];
+        // Demo design-token CSS recovered from each ported page's stripped <style>
+        // (`:root` / `.*-theme` custom-property blocks). Deduped by exact block text
+        // — family pages share one block, teacher/admin pages contribute theirs.
+        const demoTokenBlocks = new Set<string>();
 
         async function generateOne(p: PlannedPage, index: number): Promise<void> {
           send({ type: "page_start", index, total: pages.length, pageId: p.pageId, name: p.name, source: p.source });
@@ -109,9 +118,15 @@ export async function POST(request: NextRequest) {
               throw new Error(`Unsafe reference filename: ${storedName}`);
             }
             const capturedHtml = await fs.readFile(path.join(refDir, storedName), "utf-8");
+            // Recover the demo's CSS custom-property definitions (the token layer that
+            // the ported `bg-[var(--…)]` classes depend on) and the theme-scope class
+            // that activates them — both live in the <style> that the port strips.
+            const tokens = extractStyleTokens(capturedHtml);
+            if (tokens.trim()) demoTokenBlocks.add(tokens.trim());
+            const themeScopeClass = extractThemeScopeClass(capturedHtml) ?? undefined;
             message = buildPortMessage({
               componentName: p.componentName, pageName: p.name, route: p.route,
-              capturedHtml, designContext, prdExcerpt: prdContent,
+              capturedHtml, designContext, prdExcerpt: prdContent, themeScopeClass,
             });
           } else {
             message = buildFreegenMessage({
@@ -141,6 +156,26 @@ export async function POST(request: NextRequest) {
               send({ type: "page_error", index: i + j, pageId: p.pageId, error: String(s.reason) });
             }
           });
+        }
+
+        // Inject the recovered demo design tokens into the scaffold so the ported
+        // `bg-[var(--…)]` utilities resolve, and wire the import into index.css.
+        if (demoTokenBlocks.size > 0) {
+          const demoCss =
+            `/* Prototype demo design tokens — extracted from captured HTML. Generated; do not edit. */\n` +
+            `${[...demoTokenBlocks].join("\n\n")}\n`;
+          const demoCssAbs = path.join(frontendDir, PROTOTYPE_DEMO_CSS_REL);
+          await fs.mkdir(path.dirname(demoCssAbs), { recursive: true });
+          await fs.writeFile(demoCssAbs, demoCss, "utf-8");
+          const indexCssAbs = path.join(frontendDir, "src", "index.css");
+          try {
+            const idx = await fs.readFile(indexCssAbs, "utf-8");
+            const updated = ensureDemoCssImport(idx);
+            if (updated !== idx) await fs.writeFile(indexCssAbs, updated, "utf-8");
+            generatedFiles.push(path.join(frontendRel, "src", "index.css"));
+          } catch { /* index.css should exist from the scaffold; skip if not */ }
+          generatedFiles.push(path.join(frontendRel, PROTOTYPE_DEMO_CSS_REL));
+          send({ type: "log", message: `Injected ${demoTokenBlocks.size} demo design-token block(s) into prototype-demo.css.` });
         }
 
         // Merge marker (resume-aware) + regenerate router from ALL pages.
