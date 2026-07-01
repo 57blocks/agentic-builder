@@ -31,7 +31,11 @@ export class PrototypeAgent extends BaseAgent {
       systemPrompt: SYSTEM_PROMPT,
       defaultModel: MODEL_CONFIG.codeGenFrontend,
       temperature: 0.3,
-      maxTokens: 8192,
+      // Full-page ports reproduce the demo's markup verbatim → large output.
+      // 8192 truncated big landing/home pages (finish_reason=length) and every
+      // fallback model hit the same ceiling. 32768 gives capable models (codex/
+      // claude/deepseek) room to emit a complete file in one shot.
+      maxTokens: 32768,
     });
   }
 
