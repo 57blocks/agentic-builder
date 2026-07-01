@@ -8,6 +8,7 @@ import type {
 } from "@/lib/pipeline/prototype-marker";
 import { selectPageSource } from "@/lib/pipeline/prototype-page-source";
 import { toViewComponentName } from "@/lib/pipeline/prototype-router";
+import { toReactRouterPath } from "@/lib/pipeline/prototype-links";
 
 /** Demo-URL gate signal: the project has at least one url-sourced design reference. */
 export function projectHasDemoUrl(manifest: DesignReferenceEntry[]): boolean {
@@ -79,7 +80,7 @@ export function planPrototypePages(
     planned.push({
       pageId: hint.id,
       name: hint.name,
-      route: hint.route,
+      route: toReactRouterPath(hint.route), // {param}/[param] → :param for react-router
       componentName,
       source: sel.source,
       entry: sel.entry,

@@ -32,6 +32,7 @@ import {
 } from "@/lib/pipeline/prototype-anchor-nav";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
+import { deriveDemoOrigin, relativizeDemoHrefs } from "@/lib/pipeline/prototype-links";
 import { extractTsxFromLlmOutput, isTsxComplete } from "@/lib/agents/prototype/extract-tsx";
 import { validateUiImports, buildImportRepairMessage } from "@/lib/agents/prototype/validate-ui-imports";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
@@ -139,6 +140,9 @@ export async function POST(request: NextRequest) {
         // Constrain generated imports to the shadcn components actually installed
         // in the scaffold (avoids `@/components/ui/<x>` import errors at dev-server time).
         const availableComponents = await listScaffoldUiComponents(frontendDir);
+        // Demo origin → rewrite absolutised nav hrefs back to relative paths so the
+        // ported pages navigate their OWN routes (capture absolutises URLs).
+        const demoOrigin = deriveDemoOrigin(manifest);
 
         const refDir = designReferenceDirAbs(process.cwd(), projectId);
         const viewsDir = path.join(frontendDir, "src", "views");
@@ -197,6 +201,10 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+
+          // Rewrite absolutised demo-origin nav hrefs → relative, so links navigate
+          // this prototype's own routes (and the anchor-nav delegate can intercept them).
+          tsx = relativizeDemoHrefs(tsx, demoOrigin);
 
           // Reject truncated/incomplete output (e.g. hit max_tokens) BEFORE writing:
           // a malformed view breaks the Vite build and would be silently skipped by
