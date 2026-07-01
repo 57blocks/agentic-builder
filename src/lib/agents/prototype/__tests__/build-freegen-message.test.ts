@@ -51,4 +51,16 @@ describe("buildFreegenMessage", () => {
     expect(msg).toContain("TODO(logic");
     expect(msg).toContain("no captured");
   });
+
+  it("forbids var(--…) / invented tokens and mandates scaffold semantic classes", () => {
+    const msg = buildFreegenMessage({
+      componentName: "Dashboard",
+      hint,
+      prdContent: prd,
+      designContext: "TOKENS: --color-bg",
+    });
+    expect(msg.toLowerCase()).toContain("do not use");
+    expect(msg).toContain("var(--");
+    expect(msg.toLowerCase()).toContain("semantic");
+  });
 });
