@@ -31,6 +31,7 @@ import {
   serviceFromEndpoint,
   type RegistryEndpoint,
 } from "./endpoints-registry";
+import { resolveSharedSchemaSource } from "./shared-schema-distributor";
 
 export type ApiClientTier = "S" | "M" | "L";
 
@@ -261,21 +262,20 @@ export async function generateFrontendApiClient(
   outputDir: string,
   options?: { sourceDir?: string },
 ): Promise<GenerateApiClientResult> {
-  const sourceDir = options?.sourceDir ?? process.cwd();
-  const sourcePath = path.resolve(sourceDir, SCHEMA_BLUEPRINT_REL);
-
-  let schemaSrc: string;
-  try {
-    schemaSrc = await fs.readFile(sourcePath, "utf8");
-  } catch {
+  // Prefer the project's own schema (outputDir) over cwd — cwd can hold a stale
+  // schema from a previous project. Same resolution the schema distributor uses.
+  const resolved = await resolveSharedSchemaSource(outputDir, options?.sourceDir);
+  const sourcePath =
+    resolved?.sourcePath ?? path.resolve(outputDir, SCHEMA_BLUEPRINT_REL);
+  if (!resolved) {
     return { found: false, written: [], endpointCount: 0, sourcePath };
   }
-  const registry = parseEndpointsRegistry(schemaSrc);
+  const registry = parseEndpointsRegistry(resolved.content);
   if (!registry) {
     return { found: false, written: [], endpointCount: 0, sourcePath };
   }
 
-  const source = buildApiFacadeSource(registry, definedTypeNames(schemaSrc));
+  const source = buildApiFacadeSource(registry, definedTypeNames(resolved.content));
   const written: string[] = [];
   for (const rel of FACADE_TARGETS_BY_TIER[tier]) {
     const dest = path.join(outputDir, rel);

@@ -34,6 +34,11 @@ export interface SessionCheckpoint {
    *  PENDING grid during early codegen. Does NOT affect retry semantics, which
    *  key off failedTaskIds. */
   inProgressTaskIds?: string[];
+  /** True ONLY on the checkpoint written when the coding graph FINISHED (the
+   *  "final" persist). Incremental (mid-run) checkpoints omit it. The subsystem
+   *  orchestrator's drop-recovery (`waitForFreshCheckpoint`) waits for this so a
+   *  sub-build is never judged off a half-finished incremental checkpoint. */
+  completedRun?: boolean;
   /** Full per-task result map. */
   taskResults: Record<string, TaskCheckpointEntry>;
 }
@@ -56,6 +61,9 @@ export async function writeSessionCheckpoint(
   /** Tasks currently being generated (started, not yet terminal). Advisory —
    *  recorded verbatim for the reconnect UI; never reclassified as failed. */
   inProgressTaskIds?: string[],
+  /** Set true ONLY for the final persist (graph finished). Marks this checkpoint
+   *  as authoritative so the orchestrator's drop-recovery waits for it. */
+  completedRun?: boolean,
 ): Promise<void> {
   const completedTaskIds: string[] = [];
   const failedTaskIds: string[] = [];
@@ -93,6 +101,7 @@ export async function writeSessionCheckpoint(
     completedTaskIds,
     failedTaskIds,
     ...(liveInProgress.length ? { inProgressTaskIds: liveInProgress } : {}),
+    ...(completedRun ? { completedRun: true } : {}),
     taskResults: taskResultsObj,
   };
 

@@ -59,26 +59,53 @@ export interface DistributePipelineDagResult {
   sourcePath: string;
 }
 
+/**
+ * Resolve the canonical shared-schema source, PREFERRING the project's own tree
+ * (`outputDir/.blueprint/shared-schema.ts`) over the process cwd.
+ *
+ * WHY: `generateApiContracts` and the frozen-contract precondition both trust
+ * `state.outputDir/.blueprint/shared-schema.ts`. But cwd/.blueprint can hold a
+ * STALE schema from a previous project — especially for imported / external-
+ * output runs where outputDir ≠ cwd (e.g. the cwd held a leftover kanban demo
+ * schema while the real project schema lived under outputDir). Reading cwd there
+ * distributed the WRONG types to frontend/backend and generated a wrong typed
+ * client. Prefer outputDir; fall back to cwd only when outputDir has no schema
+ * (keeps the normal in-cwd flow working unchanged).
+ */
+export async function resolveSharedSchemaSource(
+  outputDir: string,
+  fallbackDir?: string,
+): Promise<{ sourcePath: string; content: string } | null> {
+  const candidates = [
+    path.resolve(outputDir, SCHEMA_BLUEPRINT_REL),
+    path.resolve(fallbackDir ?? process.cwd(), SCHEMA_BLUEPRINT_REL),
+  ];
+  for (const sourcePath of candidates) {
+    let content: string;
+    try {
+      content = await fs.readFile(sourcePath, "utf8");
+    } catch {
+      continue;
+    }
+    if (content.trim()) return { sourcePath, content };
+  }
+  return null;
+}
+
 export async function distributeSharedSchema(
   tier: SharedSchemaTier,
   outputDir: string,
   options?: { sourceDir?: string },
 ): Promise<DistributeSharedSchemaResult> {
-  const sourceDir = options?.sourceDir ?? process.cwd();
-  const sourcePath = path.resolve(sourceDir, SCHEMA_BLUEPRINT_REL);
-
-  let content: string;
-  try {
-    content = await fs.readFile(sourcePath, "utf8");
-  } catch {
-    return { found: false, written: [], sourcePath };
+  const resolved = await resolveSharedSchemaSource(outputDir, options?.sourceDir);
+  if (!resolved) {
+    return {
+      found: false,
+      written: [],
+      sourcePath: path.resolve(outputDir, SCHEMA_BLUEPRINT_REL),
+    };
   }
-
-  if (!content.trim()) {
-    // Treat empty-but-present as "no schema" — still no-op, no need to
-    // write empty files into the project.
-    return { found: false, written: [], sourcePath };
-  }
+  const { sourcePath, content } = resolved;
 
   const targets = TARGETS_BY_TIER[tier];
   const written: string[] = [];
@@ -116,18 +143,16 @@ export async function verifyDistributedSchemaIntact(
   outputDir: string,
   options?: { sourceDir?: string },
 ): Promise<VerifySharedSchemaResult> {
-  const sourceDir = options?.sourceDir ?? process.cwd();
-  const sourcePath = path.resolve(sourceDir, SCHEMA_BLUEPRINT_REL);
-
-  let source: string;
-  try {
-    source = await fs.readFile(sourcePath, "utf8");
-  } catch {
-    return { intact: true, drifted: [], sourceFound: false, sourcePath };
+  const resolved = await resolveSharedSchemaSource(outputDir, options?.sourceDir);
+  if (!resolved) {
+    return {
+      intact: true,
+      drifted: [],
+      sourceFound: false,
+      sourcePath: path.resolve(outputDir, SCHEMA_BLUEPRINT_REL),
+    };
   }
-  if (!source.trim()) {
-    return { intact: true, drifted: [], sourceFound: false, sourcePath };
-  }
+  const { sourcePath, content: source } = resolved;
 
   const drifted: VerifySharedSchemaResult["drifted"] = [];
   for (const rel of TARGETS_BY_TIER[tier]) {

@@ -2135,10 +2135,28 @@ export async function POST(request: NextRequest) {
       }, 15_000);
 
       // ── Self-heal telemetry ────────────────────────────────────────────────
+      // Tasks a worker has begun. Combined with collectedTaskResults (terminal),
+      // this yields the set actively generating right now, persisted to the
+      // checkpoint so a reconnecting/polling client can show the running task.
+      // Captured from BOTH the pick_next_task chunk AND repair events: the
+      // architect/foundation phase runs via workerGraph.invoke() (blocking, no
+      // per-task chunk streaming), so its only reliable per-task signal is the
+      // repair-event taskId (worker_action / file_activity) — without this, its
+      // tasks never surface as in-progress.
+      const startedTaskIds = new Set<string>();
+
       // Fan out repair events to: (1) SSE channel (front-end log panel),
       // (2) .ralph/repair-log.jsonl on disk, (3) stdout for dev observability.
       const sseRepairSink: RepairEmitter = (event) => {
         send(mapper.buildRepairEvent(event as RepairEvent));
+      };
+      // Progress sink: any repair event carrying a taskId means that task is
+      // actively being worked — record it so inProgressTaskIds is populated even
+      // for phases that don't stream pick_next_task chunks.
+      const taskProgressRepairSink: RepairEmitter = (event) => {
+        if (typeof event.taskId === "string" && event.taskId) {
+          startedTaskIds.add(event.taskId);
+        }
       };
       // In-memory counter sink — feeds the model-scoring stage in the
       // finally block. Non-blocking; pure counter, no I/O.
@@ -2159,6 +2177,7 @@ export async function POST(request: NextRequest) {
       };
       const repairEmitter = createRepairEmitter([
         sseRepairSink,
+        taskProgressRepairSink,
         createJsonlRepairSink(outputRoot),
         consoleRepairSink,
         counterRepairSink,
@@ -2212,11 +2231,6 @@ export async function POST(request: NextRequest) {
       });
       await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
-      // Tasks for which an `agent_task_start` event has been emitted. Combined
-      // with collectedTaskResults (terminal), this yields the set actively being
-      // generated right now — persisted into the checkpoint so a reconnect shows
-      // "in progress" instead of an all-PENDING grid during early codegen.
-      const startedTaskIds = new Set<string>();
 
       // Incremental checkpoint. The session checkpoint used to be written ONLY
       // at stream end, so aborting / killing the dev-server process mid-run lost
@@ -2255,6 +2269,7 @@ export async function POST(request: NextRequest) {
               checkpointMap,
               normalizedTasks.map((t) => t.id),
               inProgressTaskIds,
+              reason === "final", // mark the authoritative end-of-run checkpoint
             );
           }
           lastCheckpointAt = Date.now();
@@ -2416,7 +2431,13 @@ export async function POST(request: NextRequest) {
         );
 
         for await (const chunk of streamIterator) {
-          if (clientAborted) {
+          // A scoped subsystem sub-build must run to completion even after its
+          // client (the orchestrator) disconnects: the orchestrator INTENTIONALLY
+          // drops the drain fetch and polls the durable checkpoint for the verdict
+          // (see waitForFreshCheckpoint). Breaking here would orphan the build and
+          // leave only a half-finished 0/N checkpoint → false foundation failure.
+          // A normal user-facing run still breaks (the user navigated away/stopped).
+          if (clientAborted && !scopedSubsystemBuild) {
             console.warn(
               `[CodingAPI] Session ${sessionId}: stopping iteration — client disconnected`,
             );
@@ -2428,6 +2449,18 @@ export async function POST(request: NextRequest) {
           console.log(
             `[CodingAPI] Stream chunk: ns=[${ns.join(",")}] nodes=[${nodeNames.join(",")}]`,
           );
+
+          // Capture the task a worker just picked up, directly from the
+          // pick_next_task node update (more reliable than the mapped
+          // agent_task_start event, which the architect/foundation phase doesn't
+          // always surface). Feeds inProgressTaskIds so a reconnecting/polling
+          // client can show the running task instead of a stale grid.
+          const pick = (updates.pick_next_task ?? null) as
+            | { currentTaskId?: unknown }
+            | null;
+          if (pick && typeof pick.currentTaskId === "string") {
+            startedTaskIds.add(pick.currentTaskId);
+          }
 
           collectTaskResultsFromChunk(
             updates,
@@ -2463,7 +2496,12 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        if (!clientAborted) {
+        // Run end-of-stream processing (audit + FINAL checkpoint) when the run
+        // finished normally OR when it's a scoped sub-build whose client dropped
+        // — the scoped build ran to completion above, so its terminal verdict
+        // (and `completedRun` marker) MUST be persisted for the orchestrator to
+        // recover. `send()` no-ops on a dead client, so this is safe.
+        if (!clientAborted || scopedSubsystemBuild) {
           console.log(`[CodingAPI] Session ${sessionId}: stream complete.`);
 
           const prdIndex = extractPrdRequirementIndex(prdDoc ?? "");

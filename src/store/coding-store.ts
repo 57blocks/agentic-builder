@@ -277,6 +277,101 @@ function applyCheckpointDuringReconnect(
   set({ tasks });
 }
 
+/** Status ordering for upgrade-only merges — a reconcile may only move a task
+ *  FORWARD (pending → in_progress → completed), never backward. */
+const STATUS_RANK: Record<string, number> = {
+  pending: 0,
+  in_progress: 1,
+  completed_with_warnings: 2,
+  completed: 3,
+  failed: 3,
+};
+
+/**
+ * UPGRADE-ONLY reconcile of the live grid against the durable checkpoint, used
+ * by the heartbeat while the SSE is connected. Unlike applyCheckpointDuringReconnect
+ * (which rebuilds the grid for the SSE-dead case and treats a synthetic "unknown"
+ * entry as failed), this NEVER marks a task failed and NEVER downgrades a status —
+ * so it's safe to run alongside live SSE updates. It only promotes a task to
+ * `completed`/`completed_with_warnings` (from completedTaskIds) or `in_progress`
+ * (from inProgressTaskIds) when the checkpoint is ahead of the grid. This keeps
+ * front/back progress consistent during a drain-drop window when the orchestrator
+ * has stopped forwarding per-task events but the build is still advancing.
+ */
+function reconcileProgressFromCheckpoint(
+  checkpoint: SessionCheckpoint,
+  set: (partial: Partial<CodingState>) => void,
+  get: () => CodingState,
+): void {
+  const completed = new Set(checkpoint.completedTaskIds ?? []);
+  const inProgress = new Set(checkpoint.inProgressTaskIds ?? []);
+  let changed = false;
+  const tasks = get().tasks.map((t) => {
+    const entry = checkpoint.taskResults?.[t.id];
+    const target: CodingTask["codingStatus"] | null = completed.has(t.id)
+      ? entry?.status === "completed_with_warnings"
+        ? "completed_with_warnings"
+        : "completed"
+      : inProgress.has(t.id)
+        ? "in_progress"
+        : null;
+    if (
+      target &&
+      (STATUS_RANK[target] ?? 0) > (STATUS_RANK[t.codingStatus] ?? 0)
+    ) {
+      changed = true;
+      return {
+        ...t,
+        codingStatus: target,
+        generatedFiles: entry?.generatedFiles ?? t.generatedFiles,
+      };
+    }
+    return t;
+  });
+  if (changed) set({ tasks });
+}
+
+/** Heartbeat handle — polls the durable checkpoint on an interval while a run is
+ *  live, so the grid stays consistent even when the SSE goes silent (a nested
+ *  sub-build's drain dropped and the orchestrator stopped forwarding events). */
+let _progressHeartbeat: ReturnType<typeof setInterval> | null = null;
+const HEARTBEAT_MS = 7000;
+
+function stopProgressHeartbeat(): void {
+  if (_progressHeartbeat) {
+    clearInterval(_progressHeartbeat);
+    _progressHeartbeat = null;
+  }
+}
+
+function startProgressHeartbeat(
+  set: (partial: Partial<CodingState>) => void,
+  get: () => CodingState,
+): void {
+  stopProgressHeartbeat();
+  _progressHeartbeat = setInterval(() => {
+    const s = get();
+    if (s.status !== "running") {
+      stopProgressHeartbeat();
+      return;
+    }
+    // reconnectAfterDrop already polls + reconciles when the SSE is fully dropped.
+    if (s.reconnecting) return;
+    void (async () => {
+      try {
+        const r = await fetch("/api/agents/coding/orchestration-status");
+        if (!r.ok) return;
+        const data = (await r.json()) as { checkpoint?: SessionCheckpoint | null };
+        if (get().status === "running" && !get().reconnecting && data?.checkpoint) {
+          reconcileProgressFromCheckpoint(data.checkpoint, set, get);
+        }
+      } catch {
+        /* transient — try again next tick */
+      }
+    })();
+  }, HEARTBEAT_MS);
+}
+
 /**
  * The SSE stream dropped (idle timeout / navigation / network) but the
  * subsystem build keeps running server-side. Instead of marking the session
@@ -460,6 +555,11 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
       pendingHumanDecision: null,
       codingMode,
     });
+
+    // Heartbeat: keep the grid consistent with the durable checkpoint even if the
+    // live SSE goes silent mid-run (a nested sub-build's drain dropped and the
+    // orchestrator stopped forwarding per-task events). Upgrade-only reconcile.
+    startProgressHeartbeat(set, get);
 
     // Clear the last-session checkpoint so the "Retry Failed Tasks" button
     // doesn't show stale data while a fresh full run is in progress.
@@ -1060,6 +1160,7 @@ export const useCodingStore = create<CodingState>()((set, get) => ({
     // Abort the backend coding session so it stops processing tasks.
     // Client-side abort propagates via request.signal → sessionAbortController.
     // Also call the abort endpoint directly for immediate effect.
+    stopProgressHeartbeat();
     _codingAbortController?.abort();
     _codingAbortController = null;
     if (_codingOutputDir) {

@@ -17,6 +17,7 @@
  * running server).
  */
 
+import { Agent } from "undici";
 import type { KickoffWorkItem } from "../types";
 import {
   readSessionCheckpoint,
@@ -28,6 +29,26 @@ import type {
   SubsystemBuildStep,
   SubsystemCodingRunner,
 } from "./orchestrate";
+
+/**
+ * Dispatcher for the orchestrator → sub-build self-fetch (foundation + domains).
+ *
+ * The sub-build's route runs minutes of SYNCHRONOUS setup — scaffold, pnpm
+ * install, shared-schema distribution, typed-client generation, and TDD-manifest
+ * generation (an LLM call) — BEFORE it returns the streaming Response. undici's
+ * DEFAULT headersTimeout is 300s, so the drain fetch was dying with
+ * `UND_ERR_HEADERS_TIMEOUT` at exactly 301s, before the build ever streamed a
+ * byte. These are internal, legitimately-long self-calls, so give headers/body a
+ * generous window; a genuinely hung build still eventually trips this and
+ * recovers via the durable checkpoint. Override with SUBSYSTEM_FETCH_TIMEOUT_MS.
+ */
+const SUBSYSTEM_FETCH_TIMEOUT_MS = Number(
+  process.env.SUBSYSTEM_FETCH_TIMEOUT_MS ?? 30 * 60_000,
+);
+export const subsystemFetchDispatcher = new Agent({
+  headersTimeout: SUBSYSTEM_FETCH_TIMEOUT_MS,
+  bodyTimeout: SUBSYSTEM_FETCH_TIMEOUT_MS,
+});
 
 export interface SubsystemCodingContext {
   /** Base URL of the running app, e.g. "http://127.0.0.1:3000". */
@@ -134,17 +155,36 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function waitForFreshCheckpoint(
   projectRoot: string,
   notBefore: number,
-  opts?: { pollMs?: number; maxWaitMs?: number },
+  opts?: { pollMs?: number; maxWaitMs?: number; stalenessMs?: number },
 ): Promise<SessionCheckpoint | null> {
   const pollMs = opts?.pollMs ?? 15_000;
+  const stalenessMs = opts?.stalenessMs ?? 15 * 60_000;
   const deadline = Date.now() + (opts?.maxWaitMs ?? 120 * 60_000);
+  let latest: SessionCheckpoint | null = null;
+  let lastSavedAt = 0;
+  let lastAdvanceAt = Date.now();
   while (Date.now() < deadline) {
     await sleep(pollMs);
     const cp = await readSessionCheckpoint(projectRoot);
     const saved = cp ? Date.parse(cp.savedAt) : NaN;
-    if (cp && Number.isFinite(saved) && saved >= notBefore) return cp;
+    if (!cp || !Number.isFinite(saved) || saved < notBefore) continue;
+    latest = cp;
+    // The build wrote its FINAL checkpoint (graph finished) — authoritative
+    // verdict, even if the sub-build's drain fetch had dropped mid-run. Return it.
+    if (cp.completedRun) return cp;
+    // Otherwise this is a mid-run INCREMENTAL checkpoint. Do NOT judge off it (the
+    // old bug: a half-finished 0/N incremental was read as the verdict → false
+    // foundation failure). Keep waiting: a still-advancing savedAt means the
+    // sub-build is alive (incrementals land every ~8s). Only when writes STOP for
+    // stalenessMs has it genuinely hung/died — then return the best-effort latest.
+    if (saved > lastSavedAt) {
+      lastSavedAt = saved;
+      lastAdvanceAt = Date.now();
+    } else if (Date.now() - lastAdvanceAt >= stalenessMs) {
+      return latest;
+    }
   }
-  return null;
+  return latest;
 }
 
 /** Drain an SSE/NDJSON response body to completion (we rely on the checkpoint
@@ -193,25 +233,62 @@ export function makeHttpCodingRunner(
       : null;
     const startedAt = Date.now();
     let dropped = false;
+    // DIAGNOSTIC (drain-drop root-cause): localise WHERE the fetch/drain fails —
+    // before response headers (route setup blocked the response), after headers
+    // but before any stream data (silent setup INSIDE the stream / no keepalive),
+    // or mid-stream. `since` in seconds from the POST.
+    const since = (t: number) => (t ? ((t - startedAt) / 1000).toFixed(1) + "s" : "—");
+    let headersAt = 0;
+    let firstChunkAt = 0;
+    let chunkCount = 0;
+    let byteCount = 0;
     try {
       const resp = await fetch(`${ctx.baseUrl}/api/agents/coding`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
+        // Node/undici fetch supports `dispatcher`; not in the DOM RequestInit types.
+        // @ts-expect-error dispatcher is a Node-fetch extension
+        dispatcher: subsystemFetchDispatcher,
       });
+      headersAt = Date.now();
       if (!resp.ok) {
         const text = await resp.text().catch(() => "");
         return { ok: false, summary: `${step.subsystemId}: coding endpoint ${resp.status} ${text.slice(0, 200)}` };
       }
-      await drainStream(resp.body, ctx.onProgress ? (c) => ctx.onProgress!(step.subsystemId, c) : undefined);
+      console.log(
+        `[Subsystems] ${step.subsystemId}: sub-build response headers received at ${since(headersAt)}; draining…`,
+      );
+      await drainStream(resp.body, (c) => {
+        chunkCount += 1;
+        byteCount += c.length;
+        if (!firstChunkAt) {
+          firstChunkAt = Date.now();
+          console.log(
+            `[Subsystems] ${step.subsystemId}: first stream bytes at ${since(firstChunkAt)} (headers→firstByte ${((firstChunkAt - headersAt) / 1000).toFixed(1)}s).`,
+          );
+        }
+        ctx.onProgress?.(step.subsystemId, c);
+      });
     } catch (err) {
-      // The drain fetch dropped (e.g. bodyTimeout on a long quiet LLM call), but
-      // the sub-build keeps running server-side. Recover the verdict from its
-      // durable checkpoint rather than failing + orphaning the build.
+      // The drain fetch dropped, but the sub-build keeps running server-side.
+      // Recover the verdict from its durable checkpoint rather than failing.
       dropped = true;
+      const e = err as { name?: string; message?: string; cause?: unknown };
+      const cause = (e?.cause ?? null) as { code?: string; message?: string } | null;
+      const causeStr = cause ? ` cause=${cause.code ?? cause.message ?? String(cause)}` : "";
+      const phase =
+        headersAt === 0
+          ? "BEFORE response headers (route setup blocked the response, or connection refused/reset pre-headers)"
+          : firstChunkAt === 0
+            ? "AFTER headers but BEFORE any stream bytes (silent setup inside the stream / keepalive not reaching client)"
+            : "MID-STREAM (was actively streaming, then the connection dropped)";
       console.warn(
-        `[Subsystems] ${step.subsystemId}: drain fetch dropped (${err instanceof Error ? err.message : String(err)}); recovering verdict from checkpoint…`,
+        `[Subsystems] ${step.subsystemId}: drain fetch DROPPED — phase=${phase}; ` +
+          `elapsed=${since(Date.now())}, headersAt=${since(headersAt)}, firstByteAt=${since(firstChunkAt)}, ` +
+          `chunks=${chunkCount}, bytes=${byteCount}, err=${e?.name ?? ""}:${e?.message ?? String(err)}${causeStr}; ` +
+          `recovering verdict from checkpoint…`,
       );
     } finally {
       if (timer) clearTimeout(timer);

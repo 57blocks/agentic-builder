@@ -30,6 +30,7 @@ import {
   drainStream,
   verdictFromCheckpoint,
   waitForFreshCheckpoint,
+  subsystemFetchDispatcher,
   type SubsystemCodingContext,
 } from "./coding-runner";
 import {
@@ -166,25 +167,60 @@ export async function runFoundationBuild(
   const timer = ctx.timeoutMs ? setTimeout(() => controller.abort(), ctx.timeoutMs) : null;
   const startedAt = Date.now();
   let dropped = false;
+  // DIAGNOSTIC (drain-drop root-cause): localise WHERE the drain fails — before
+  // response headers (route setup blocked the response), after headers but
+  // before any stream bytes (silent setup INSIDE the stream / keepalive not
+  // reaching the client), or mid-stream. `since` = seconds from the POST.
+  const since = (t: number) => (t ? ((t - startedAt) / 1000).toFixed(1) + "s" : "—");
+  let headersAt = 0;
+  let firstChunkAt = 0;
+  let chunkCount = 0;
+  let byteCount = 0;
   try {
     const resp = await fetch(`${ctx.baseUrl}/api/agents/coding`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       signal: controller.signal,
+      // Node/undici fetch supports `dispatcher`; not in the DOM RequestInit types.
+      // @ts-expect-error dispatcher is a Node-fetch extension
+      dispatcher: subsystemFetchDispatcher,
     });
+    headersAt = Date.now();
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
       return { ok: false, summary: `foundation: coding endpoint ${resp.status} ${text.slice(0, 200)}`, generatedFiles: [] };
     }
-    await drainStream(resp.body, ctx.onProgress ? (c) => ctx.onProgress!(FOUNDATION_ID, c) : undefined);
+    console.log(`[Subsystems] foundation: sub-build response headers received at ${since(headersAt)}; draining…`);
+    await drainStream(resp.body, (c) => {
+      chunkCount += 1;
+      byteCount += c.length;
+      if (!firstChunkAt) {
+        firstChunkAt = Date.now();
+        console.log(
+          `[Subsystems] foundation: first stream bytes at ${since(firstChunkAt)} (headers→firstByte ${((firstChunkAt - headersAt) / 1000).toFixed(1)}s).`,
+        );
+      }
+      ctx.onProgress?.(FOUNDATION_ID, c);
+    });
   } catch (err) {
-    // The drain fetch dropped (e.g. bodyTimeout on a long quiet LLM call) but the
-    // foundation build keeps running server-side. Recover via the checkpoint
-    // instead of failing the whole orchestration + orphaning the build.
+    // The drain fetch dropped but the foundation build keeps running server-side.
+    // Recover via the checkpoint instead of failing + orphaning the build.
     dropped = true;
+    const e = err as { name?: string; message?: string; cause?: unknown };
+    const cause = (e?.cause ?? null) as { code?: string; message?: string } | null;
+    const causeStr = cause ? ` cause=${cause.code ?? cause.message ?? String(cause)}` : "";
+    const phase =
+      headersAt === 0
+        ? "BEFORE response headers (route setup blocked the response, or connection refused/reset pre-headers)"
+        : firstChunkAt === 0
+          ? "AFTER headers but BEFORE any stream bytes (silent setup inside the stream / keepalive not reaching client)"
+          : "MID-STREAM (was actively streaming, then the connection dropped)";
     console.warn(
-      `[Subsystems] foundation: drain fetch dropped (${err instanceof Error ? err.message : String(err)}); recovering verdict from checkpoint…`,
+      `[Subsystems] foundation: drain fetch DROPPED — phase=${phase}; ` +
+        `elapsed=${since(Date.now())}, headersAt=${since(headersAt)}, firstByteAt=${since(firstChunkAt)}, ` +
+        `chunks=${chunkCount}, bytes=${byteCount}, err=${e?.name ?? ""}:${e?.message ?? String(err)}${causeStr}; ` +
+        `recovering verdict from checkpoint…`,
     );
   } finally {
     if (timer) clearTimeout(timer);
