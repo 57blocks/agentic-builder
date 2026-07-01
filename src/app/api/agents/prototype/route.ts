@@ -25,6 +25,11 @@ import {
 } from "@/lib/agents/prototype/build-port-message";
 import { buildFreegenMessage } from "@/lib/agents/prototype/build-freegen-message";
 import { ensureDemoCssImport, PROTOTYPE_DEMO_CSS_REL } from "@/lib/pipeline/prototype-demo-css";
+import {
+  ensureAnchorNavWired,
+  PROTOTYPE_ANCHOR_NAV_REL,
+  PROTOTYPE_ANCHOR_NAV_SOURCE,
+} from "@/lib/pipeline/prototype-anchor-nav";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
@@ -226,6 +231,24 @@ export async function POST(request: NextRequest) {
           generatedFiles.push(path.join(frontendRel, PROTOTYPE_DEMO_CSS_REL));
           send({ type: "log", message: `Carried ${demoCssChunks.size} demo stylesheet(s), scoped under .${PROTOTYPE_ROOT_CLASS}.` });
         }
+
+        // Make the demo's verbatim `<a href="/…">` anchors navigate client-side, so
+        // the multi-page prototype is clickable for review (ported markup keeps raw
+        // anchors, not react-router <Link>). Writes the delegate component + wires it
+        // into main.tsx once (idempotent).
+        try {
+          const navAbs = path.join(frontendDir, PROTOTYPE_ANCHOR_NAV_REL);
+          await fs.mkdir(path.dirname(navAbs), { recursive: true });
+          await fs.writeFile(navAbs, PROTOTYPE_ANCHOR_NAV_SOURCE, "utf-8");
+          generatedFiles.push(path.join(frontendRel, PROTOTYPE_ANCHOR_NAV_REL));
+          const mainAbs = path.join(frontendDir, "src", "main.tsx");
+          const main = await fs.readFile(mainAbs, "utf-8");
+          const wiredMain = ensureAnchorNavWired(main);
+          if (wiredMain !== main) {
+            await fs.writeFile(mainAbs, wiredMain, "utf-8");
+            generatedFiles.push(path.join(frontendRel, "src", "main.tsx"));
+          }
+        } catch { /* main.tsx should exist from the scaffold; skip if not */ }
 
         // Merge marker (resume-aware) + regenerate router from ALL pages.
         const mergedPages: PrototypeMarkerPage[] = [...(existing?.pages ?? []), ...generatedPages];
