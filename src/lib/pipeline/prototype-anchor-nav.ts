@@ -16,8 +16,8 @@ import { useNavigate } from "react-router-dom";
  * Prototype-only: the ported pages keep the demo's verbatim \`<a href="/…">\`
  * anchors (not react-router <Link>), so clicking them would full-reload instead
  * of client-side navigating. This global delegate intercepts same-origin anchor
- * clicks and routes them through react-router, so the prototype is navigable for
- * review. Ignores \`#\`, external, new-tab, download, and modified clicks.
+ * clicks in the CAPTURE phase (before any inner stopPropagation) and routes them
+ * through react-router. Ignores \`#\`, external, new-tab, download, and modified clicks.
  */
 export function PrototypeAnchorNav() {
   const navigate = useNavigate();
@@ -35,8 +35,8 @@ export function PrototypeAnchorNav() {
       e.preventDefault();
       navigate(href);
     };
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, [navigate]);
   return null;
 }
