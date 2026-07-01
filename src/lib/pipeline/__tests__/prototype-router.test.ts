@@ -50,6 +50,33 @@ describe("renderPrototypeRouter", () => {
     expect(out).not.toContain("Navigate");
     expect(out).toContain(`<Route path="/" element={<Home />} />`);
   });
+
+  it("redirects / to the most root-level STATIC route, never a param route, regardless of order", () => {
+    // completion order puts a param route first; index must still land on /en (Home)
+    const out = renderPrototypeRouter([
+      { componentName: "CourseDetail", route: "/en/programs/{program}/{courseId}" },
+      { componentName: "CourseList", route: "/en/programs/{program}" },
+      { componentName: "Home", route: "/en" },
+      { componentName: "AboutUs", route: "/en/about-us" },
+    ]);
+    expect(out).toContain(`<Route path="/" element={<Navigate to="/en" replace />} />`);
+    expect(out).not.toContain(`Navigate to="/en/programs`); // never a param route
+  });
+
+  it("prefers a shallower static route over a deeper one", () => {
+    const out = renderPrototypeRouter([
+      { componentName: "Deep", route: "/a/b/c" },
+      { componentName: "Shallow", route: "/dashboard" },
+    ]);
+    expect(out).toContain(`Navigate to="/dashboard" replace`);
+  });
+
+  it("falls back to a param route only when every route is parameterised", () => {
+    const out = renderPrototypeRouter([
+      { componentName: "Item", route: "/items/:id" },
+    ]);
+    expect(out).toContain(`Navigate to="/items/:id" replace`);
+  });
 });
 
 describe("writePrototypeRouter", () => {
