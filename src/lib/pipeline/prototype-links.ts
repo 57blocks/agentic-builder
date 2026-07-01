@@ -28,6 +28,30 @@ export function deriveDemoOrigin(manifest: DesignReferenceEntry[]): string {
 }
 
 /**
+ * Unwrap Next.js image-optimizer references to the direct asset URL, absolute to
+ * the demo origin: `[origin]/_next/image?url=%2Fassets%2Fx.png&w=..&q=..` →
+ * `<origin>/assets/x.png`. Ported markup keeps these for both `src` (absolute) and
+ * `srcSet` (RELATIVE → 404s on the prototype's dev server, which has no
+ * `/_next/image` route; and the browser prefers srcSet). The raw static asset loads
+ * cross-origin reliably, unlike the optimizer endpoint (referer/domain checks).
+ * Descriptors (` 1x`, ` 640w`) are preserved. No-op for other origins/paths.
+ */
+export function rewriteNextImageUrls(tsx: string, origin: string): string {
+  const re = /(?:https?:\/\/[^"'\s/]+)?\/_next\/image\?url=([^&"'\s]+)[^"'\s]*/g;
+  return tsx.replace(re, (_m, enc: string) => {
+    let target: string;
+    try {
+      target = decodeURIComponent(enc);
+    } catch {
+      target = enc;
+    }
+    if (/^https?:\/\//.test(target)) return target; // url param was already absolute
+    if (!origin) return target; // can't absolutise without an origin; leave as-is
+    return target.startsWith("/") ? `${origin}${target}` : `${origin}/${target}`;
+  });
+}
+
+/**
  * Rewrite navigation `href`s that point at the demo's own origin to relative
  * paths, so the ported page navigates its OWN routes (and the anchor-nav delegate,
  * which only handles `/`-relative hrefs, can intercept them) instead of opening the

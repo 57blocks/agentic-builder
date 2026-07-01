@@ -32,7 +32,7 @@ import {
 } from "@/lib/pipeline/prototype-anchor-nav";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
-import { deriveDemoOrigin, relativizeDemoHrefs } from "@/lib/pipeline/prototype-links";
+import { deriveDemoOrigin, relativizeDemoHrefs, rewriteNextImageUrls } from "@/lib/pipeline/prototype-links";
 import { extractTsxFromLlmOutput, isTsxComplete } from "@/lib/agents/prototype/extract-tsx";
 import { validateUiImports, buildImportRepairMessage } from "@/lib/agents/prototype/validate-ui-imports";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
@@ -205,6 +205,9 @@ export async function POST(request: NextRequest) {
           // Rewrite absolutised demo-origin nav hrefs → relative, so links navigate
           // this prototype's own routes (and the anchor-nav delegate can intercept them).
           tsx = relativizeDemoHrefs(tsx, demoOrigin);
+          // Unwrap Next.js image-optimizer URLs → direct demo assets (relative srcSet
+          // 404s on the dev server; the optimizer endpoint is unreliable cross-origin).
+          tsx = rewriteNextImageUrls(tsx, demoOrigin);
 
           // Reject truncated/incomplete output (e.g. hit max_tokens) BEFORE writing:
           // a malformed view breaks the Vite build and would be silently skipped by
