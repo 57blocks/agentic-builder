@@ -28,6 +28,12 @@ export interface SessionCheckpoint {
   completedTaskIds: string[];
   /** IDs of tasks that failed or produced no files. */
   failedTaskIds: string[];
+  /** IDs of tasks actively being generated at the moment this checkpoint was
+   *  written (started but not yet terminal). Advisory ONLY — used by the
+   *  reconnect/poll UI to show "in progress" instead of a dead-looking all-
+   *  PENDING grid during early codegen. Does NOT affect retry semantics, which
+   *  key off failedTaskIds. */
+  inProgressTaskIds?: string[];
   /** Full per-task result map. */
   taskResults: Record<string, TaskCheckpointEntry>;
 }
@@ -47,6 +53,9 @@ export async function writeSessionCheckpoint(
    *  (i.e. never started) is treated as unknown/failed so it appears in the
    *  "Retry Failed Tasks" flow. */
   allTaskIds?: string[],
+  /** Tasks currently being generated (started, not yet terminal). Advisory —
+   *  recorded verbatim for the reconnect UI; never reclassified as failed. */
+  inProgressTaskIds?: string[],
 ): Promise<void> {
   const completedTaskIds: string[] = [];
   const failedTaskIds: string[] = [];
@@ -72,11 +81,18 @@ export async function writeSessionCheckpoint(
     }
   }
 
+  // Only surface ids with NO real terminal result yet (taskResults is the map of
+  // genuinely-collected outcomes; failedTaskIds also holds synthetic "unknown"
+  // entries for not-yet-started tasks, so we must not filter against it here or
+  // every in-progress id would be dropped during an incremental write).
+  const liveInProgress = (inProgressTaskIds ?? []).filter((id) => !taskResults.has(id));
+
   const checkpoint: SessionCheckpoint = {
     sessionId,
     savedAt: new Date().toISOString(),
     completedTaskIds,
     failedTaskIds,
+    ...(liveInProgress.length ? { inProgressTaskIds: liveInProgress } : {}),
     taskResults: taskResultsObj,
   };
 

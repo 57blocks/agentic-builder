@@ -229,6 +229,55 @@ function persistSessionSnapshot(
 }
 
 /**
+ * Merge a durable checkpoint into the live task grid DURING reconnect, while
+ * status stays "running". Unlike `hydrateFromCheckpoint` (which is for page-load
+ * rehydration and bails out while running), this only updates per-task status:
+ * terminal results from `taskResults`, plus the advisory `inProgressTaskIds`
+ * set (tasks the server is actively generating right now) rendered as
+ * "in_progress" so the grid shows live movement instead of an all-PENDING wall.
+ * It does not touch agents, logs, or session status.
+ */
+function applyCheckpointDuringReconnect(
+  checkpoint: SessionCheckpoint,
+  taskItems: KickoffWorkItem[],
+  set: (partial: Partial<CodingState>) => void,
+  get: () => CodingState,
+): void {
+  const statusMap: Record<string, CodingTask["codingStatus"]> = {};
+  for (const [id, entry] of Object.entries(checkpoint.taskResults)) {
+    statusMap[id] =
+      entry.status === "completed" || entry.status === "completed_with_warnings"
+        ? entry.status
+        : "failed";
+  }
+  // Advisory in-progress overlay wins over a synthetic "unknown→failed" for a
+  // task that has started but not yet reached a terminal result.
+  for (const id of checkpoint.inProgressTaskIds ?? []) {
+    if (statusMap[id] === undefined || statusMap[id] === "failed") {
+      statusMap[id] = "in_progress";
+    }
+  }
+
+  // Preserve any richer task objects already in the store (e.g. generatedFiles
+  // captured live before the drop); fall back to the kickoff item metadata.
+  const existingById = new Map(get().tasks.map((t) => [t.id, t]));
+  const tasks: CodingTask[] = taskItems.map((item) => {
+    const prev = existingById.get(item.id);
+    return {
+      ...item,
+      ...(prev ?? {}),
+      assignedAgentId: prev?.assignedAgentId ?? null,
+      codingStatus: statusMap[item.id] ?? prev?.codingStatus ?? "pending",
+      generatedFiles:
+        checkpoint.taskResults[item.id]?.generatedFiles ??
+        prev?.generatedFiles ??
+        [],
+    };
+  });
+  set({ tasks });
+}
+
+/**
  * The SSE stream dropped (idle timeout / navigation / network) but the
  * subsystem build keeps running server-side. Instead of marking the session
  * failed, poll the durable orchestration status + checkpoint to rehydrate task
@@ -269,7 +318,12 @@ async function reconnectAfterDrop(
 
     if (data?.checkpoint) {
       try {
-        get().hydrateFromCheckpoint(data.checkpoint, taskItems);
+        // NB: do NOT call hydrateFromCheckpoint here — it early-returns while
+        // status === "running" (which it always is during reconnect) and also
+        // wipes agents/logs and rewrites status. Instead merge terminal results
+        // and the advisory in-progress set straight into the existing grid,
+        // keeping status "running" so the poll loop continues.
+        applyCheckpointDuringReconnect(data.checkpoint, taskItems, set, get);
       } catch {
         /* ignore hydrate errors */
       }

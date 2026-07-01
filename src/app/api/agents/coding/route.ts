@@ -2211,6 +2211,11 @@ export async function POST(request: NextRequest) {
       });
       await auditAttemptTracker.load();
       const collectedTaskResults = new Map<string, AuditTaskSummary>();
+      // Tasks for which an `agent_task_start` event has been emitted. Combined
+      // with collectedTaskResults (terminal), this yields the set actively being
+      // generated right now — persisted into the checkpoint so a reconnect shows
+      // "in progress" instead of an all-PENDING grid during early codegen.
+      const startedTaskIds = new Set<string>();
 
       // Incremental checkpoint. The session checkpoint used to be written ONLY
       // at stream end, so aborting / killing the dev-server process mid-run lost
@@ -2238,12 +2243,17 @@ export async function POST(request: NextRequest) {
           const checkpointRoots = Array.from(
             new Set([process.cwd(), outputRoot]),
           );
+          // Started but not yet terminal = actively being generated now.
+          const inProgressTaskIds = Array.from(startedTaskIds).filter(
+            (id) => !collectedTaskResults.has(id),
+          );
           for (const root of checkpointRoots) {
             await writeSessionCheckpoint(
               root,
               sessionId,
               checkpointMap,
               normalizedTasks.map((t) => t.id),
+              inProgressTaskIds,
             );
           }
           lastCheckpointAt = Date.now();
@@ -2440,6 +2450,14 @@ export async function POST(request: NextRequest) {
             chunk as [string[], Record<string, unknown>],
           );
           for (const event of events) {
+            // Track which tasks have begun generating so the checkpoint can
+            // expose them as in-progress to a reconnecting client.
+            if (
+              (event as { type?: string }).type === "agent_task_start" &&
+              typeof (event as { taskId?: string }).taskId === "string"
+            ) {
+              startedTaskIds.add((event as { taskId: string }).taskId);
+            }
             send(event);
           }
         }
