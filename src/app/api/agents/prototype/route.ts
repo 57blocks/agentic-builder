@@ -21,6 +21,7 @@ import {
 import { buildFreegenMessage } from "@/lib/agents/prototype/build-freegen-message";
 import { ensureDemoCssImport, PROTOTYPE_DEMO_CSS_REL } from "@/lib/pipeline/prototype-demo-css";
 import { scopeCss, PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
+import { listScaffoldUiComponents } from "@/lib/pipeline/scaffold-ui-components";
 import { extractTsxFromLlmOutput } from "@/lib/agents/prototype/extract-tsx";
 import { PrototypeAgent } from "@/lib/agents/prototype/prototype-agent";
 import {
@@ -98,6 +99,10 @@ export async function POST(request: NextRequest) {
           outputRoot, designSpecDoc, "", undefined, process.cwd(), projectId ?? undefined,
         );
 
+        // Constrain generated imports to the shadcn components actually installed
+        // in the scaffold (avoids `@/components/ui/<x>` import errors at dev-server time).
+        const availableComponents = await listScaffoldUiComponents(frontendDir);
+
         const refDir = designReferenceDirAbs(process.cwd(), projectId);
         const viewsDir = path.join(frontendDir, "src", "views");
         await fs.mkdir(viewsDir, { recursive: true });
@@ -128,12 +133,13 @@ export async function POST(request: NextRequest) {
             message = buildPortMessage({
               componentName: p.componentName, pageName: p.name, route: p.route,
               capturedHtml, designContext, prdExcerpt: prdContent, themeScopeClass,
+              availableComponents,
             });
           } else {
             message = buildFreegenMessage({
               componentName: p.componentName,
               hint: { id: p.pageId, name: p.name, route: p.route },
-              prdContent, designContext,
+              prdContent, designContext, availableComponents,
             });
           }
           const result = await new PrototypeAgent().portPage(message, "", sessionId);

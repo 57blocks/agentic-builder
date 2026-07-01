@@ -63,4 +63,17 @@ describe("buildFreegenMessage", () => {
     expect(msg).toContain("var(--");
     expect(msg.toLowerCase()).toContain("semantic");
   });
+
+  it("lists only the available @/components/ui modules and forbids importing others", () => {
+    const msg = buildFreegenMessage({
+      componentName: "Dashboard",
+      hint,
+      prdContent: prd,
+      designContext: "TOKENS: --color-bg",
+      availableComponents: ["button", "card", "input"],
+    });
+    expect(msg).toContain("button, card, input");
+    expect(msg.toLowerCase()).toContain("only");
+    expect(msg.toLowerCase()).toContain("plain html");
+  });
 });

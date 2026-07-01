@@ -21,6 +21,23 @@ export interface PortMessageInput {
    * against the carried (and scoped) demo CSS.
    */
   themeScopeClass?: string;
+  /**
+   * The shadcn/ui component modules actually installed in the scaffold (kebab
+   * names, e.g. `["button","card","select"]`). Injected so the model imports ONLY
+   * these; importing an uninstalled `@/components/ui/<name>` breaks the dev server.
+   */
+  availableComponents?: string[];
+}
+
+/** Prompt bullets constraining shadcn imports to the installed component set. */
+function availableComponentsBullets(components: string[] | undefined): string[] {
+  if (!components || components.length === 0) return [];
+  return [
+    `- The ONLY shadcn components installed are: ${components.join(", ")}. Import`,
+    `  these from \`@/components/ui\`. Do NOT import any \`@/components/ui/<name>\``,
+    `  that is not in this list — for any other UI control, use a plain HTML element`,
+    `  (keeping the demo's classes). Never \`npm install\` or invent a component path.`,
+  ];
 }
 
 /** Concatenated text of every `<style>` block in a captured HTML snapshot. */
@@ -111,6 +128,7 @@ export function buildPortMessage(input: PortMessageInput): string {
       : []),
     `- DO NOT invent class names or CSS variables, and do not add a new design system.`,
     `  Only shadcn primitives from \`@/components/ui\` may be introduced for interactive controls.`,
+    ...availableComponentsBullets(input.availableComponents),
     ``,
     `## Logic is STUBBED (v1 per-page, static)`,
     `- Static markup + placeholder data + INERT handlers.`,

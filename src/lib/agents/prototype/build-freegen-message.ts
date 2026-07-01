@@ -6,6 +6,12 @@ export interface FreegenMessageInput {
   hint: PrdPageHint;
   prdContent: string;
   designContext: string;
+  /**
+   * shadcn/ui component modules actually installed in the scaffold (kebab names).
+   * Injected so the model imports ONLY these; importing an uninstalled
+   * `@/components/ui/<name>` breaks the dev server.
+   */
+  availableComponents?: string[];
 }
 
 /**
@@ -67,6 +73,13 @@ export function buildFreegenMessage(input: FreegenMessageInput): string {
     `  \`border-border\`, \`rounded-md\`, spacing/typography utilities).`,
     `- DO NOT use \`var(--…)\` custom-property utilities and DO NOT invent token names —`,
     `  only the scaffold's own semantic tokens/utilities exist here.`,
+    ...(input.availableComponents && input.availableComponents.length > 0
+      ? [
+          `- The ONLY shadcn components installed are: ${input.availableComponents.join(", ")}.`,
+          `  Import these from \`@/components/ui\`. Do NOT import any \`@/components/ui/<name>\``,
+          `  not in this list — use a plain HTML element instead. Never invent a component path.`,
+        ]
+      : []),
     ``,
     `## Logic is STUBBED (v1 per-page, static)`,
     `- Static markup + placeholder data + INERT handlers.`,

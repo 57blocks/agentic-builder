@@ -93,6 +93,14 @@ describe("buildPortMessage", () => {
     expect(msg.toLowerCase()).toContain("do not invent");
   });
 
+  it("lists only the available @/components/ui modules and forbids importing others", () => {
+    const msg = buildPortMessage({ ...base, availableComponents: ["button", "card", "select"] });
+    expect(msg).toContain("button, card, select");
+    expect(msg.toLowerCase()).toContain("only");
+    expect(msg).toContain("@/components/ui");
+    expect(msg.toLowerCase()).toContain("plain html"); // fallback for unavailable primitives
+  });
+
   it("neutralizes triple-backticks in captured markup so they cannot escape the html fence", () => {
     const msg = buildPortMessage({
       componentName: "Dashboard",
