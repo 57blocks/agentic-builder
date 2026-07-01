@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractPortableMarkup,
   buildPortMessage,
-  extractStyleTokens,
+  extractDemoCss,
   extractThemeScopeClass,
 } from "../build-port-message";
 
@@ -18,25 +18,16 @@ const themedHtml = [
   `<body><div class="family-theme min-h-screen bg-[var(--bg)]"><h1 class="text-[var(--primary)]">Hi</h1></div></body></html>`,
 ].join("\n");
 
-describe("extractStyleTokens", () => {
-  it("keeps only rule blocks that DEFINE css custom properties (the token layer)", () => {
-    const css = extractStyleTokens(themedHtml);
+describe("extractDemoCss", () => {
+  it("returns the FULL <style> css (utilities + custom classes + vars), not just var blocks", () => {
+    const css = extractDemoCss(themedHtml);
+    expect(css).toContain(".flex{display:flex}");
+    expect(css).toContain(".family-header");
     expect(css).toContain("--bg:#f6f8fc");
     expect(css).toContain(".family-theme");
-    expect(css).toContain("--primary:#758e66");
-    expect(css).not.toContain(".flex{display:flex}"); // compiled utility dropped
-    expect(css).not.toContain(".family-header"); // no --var → dropped
   });
-
-  it("returns empty string when there is no <style> / no custom properties", () => {
-    expect(extractStyleTokens(`<body><p class="p-4">x</p></body>`)).toBe("");
-  });
-
-  it("drops Tailwind's internal --tw-* reset block (keeps only real design tokens)", () => {
-    const html = `<head><style>*,::before,::after{--tw-rotate-x:initial;--tw-border-style:solid}:root{--bg:#fff}</style></head><body></body>`;
-    const css = extractStyleTokens(html);
-    expect(css).toContain("--bg:#fff");
-    expect(css).not.toContain("--tw-rotate-x");
+  it("concatenates multiple <style> blocks and returns '' when none", () => {
+    expect(extractDemoCss(`<body><p class="p-4">x</p></body>`)).toBe("");
   });
 });
 
@@ -94,14 +85,12 @@ describe("buildPortMessage", () => {
     expect(buildPortMessage(base)).toContain("TOKENS: --color-bg");
   });
 
-  it("instructs the model to keep the theme-scope class on the root when provided", () => {
+  it("instructs verbatim class preservation, prototype-root on the root, and no invented names", () => {
     const msg = buildPortMessage({ ...base, themeScopeClass: "family-theme" });
+    expect(msg).toContain("prototype-root");
     expect(msg).toContain("family-theme");
-    expect(msg.toLowerCase()).toContain("root");
-  });
-
-  it("omits the theme-scope instruction when no scope class is provided", () => {
-    expect(buildPortMessage(base)).not.toContain("theme-scope class");
+    expect(msg.toLowerCase()).toContain("verbatim");
+    expect(msg.toLowerCase()).toContain("do not invent");
   });
 
   it("neutralizes triple-backticks in captured markup so they cannot escape the html fence", () => {

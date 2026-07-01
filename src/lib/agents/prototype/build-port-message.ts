@@ -1,4 +1,5 @@
 // src/lib/agents/prototype/build-port-message.ts
+import { PROTOTYPE_ROOT_CLASS } from "@/lib/pipeline/scope-css";
 
 export interface PortMessageInput {
   /** PascalCase component / named export, e.g. `Dashboard`. */
@@ -16,8 +17,8 @@ export interface PortMessageInput {
   /**
    * Theme-scope class (e.g. `family-theme`) the captured markup uses to activate
    * its CSS custom properties. When set, the model must keep it on the page root
-   * so ported `bg-[var(--…)]` utilities resolve against the injected demo tokens
-   * (see `extractStyleTokens` + `prototype-demo.css`).
+   * alongside `PROTOTYPE_ROOT_CLASS` so ported `bg-[var(--…)]` utilities resolve
+   * against the carried (and scoped) demo CSS.
    */
   themeScopeClass?: string;
 }
@@ -29,35 +30,13 @@ function collectStyleText(html: string): string {
 }
 
 /**
- * Extract the DESIGN-TOKEN layer from a captured page's inlined CSS: the rule
- * blocks that DEFINE app-level css custom properties (`:root{…--x:…}`,
- * `.family-theme{…}`, `@theme{…}`). Dropped: compiled Tailwind utility rules
- * (`.flex{display:flex}`), property-less hook classes, and Tailwind's own
- * internal `--tw-*` reset block (the scaffold's Tailwind already emits it) — we
- * only need the variables the ported `var(--…)` classes reference.
- *
- * Note: `extractPortableMarkup` intentionally strips `<style>` from the MARKUP we
- * send the model (the ~70KB utility bundle is noise). This function recovers just
- * the variable definitions so they can be injected into the scaffold separately.
+ * The demo page's FULL compiled CSS (every rule from the inlined `<style>`).
+ * Carried into the scaffold verbatim (then scoped by `scopeCss`) so the ported
+ * markup renders exactly as the demo — for ANY styling mechanism (utilities,
+ * custom classes, CSS variables). No reconstruction, so no lost styles.
  */
-export function extractStyleTokens(html: string): string {
-  const css = collectStyleText(html);
-  if (!css) return "";
-  // Match top-level "selector { body }" blocks whose body declares at least one
-  // NON-`--tw-` custom property (a real design token). CSS var declaration bodies
-  // contain no nested braces, so a brace-free body match is safe and avoids
-  // pulling in @media wrappers.
-  const blocks: string[] = [];
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(css)) !== null) {
-    const selector = m[1].trim();
-    const body = m[2];
-    if (/(^|[\s;{])--(?!tw-)[\w-]+\s*:/.test(body)) {
-      blocks.push(`${selector} {${body}}`);
-    }
-  }
-  return blocks.join("\n");
+export function extractDemoCss(html: string): string {
+  return collectStyleText(html).trim();
 }
 
 /**
@@ -111,9 +90,6 @@ function fenceSafe(markup: string): string {
  */
 export function buildPortMessage(input: PortMessageInput): string {
   const markup = fenceSafe(extractPortableMarkup(input.capturedHtml));
-  const scopeLine = input.themeScopeClass
-    ? `- KEEP the demo's theme-scope class \`${input.themeScopeClass}\` on the component's ROOT element exactly — it activates the CSS custom properties (\`--bg\`, \`--primary\`, …) that the \`bg-[var(--…)]\` utilities below depend on.`
-    : null;
   return [
     `# Task: port ONE page into the scaffold frontend`,
     ``,
@@ -124,11 +100,17 @@ export function buildPortMessage(input: PortMessageInput): string {
     `## Output contract (STRICT)`,
     `- Output ONLY one fenced tsx code block — the full file, no prose.`,
     `- Export the component as a NAMED export: \`export function ${input.componentName}() { … }\`.`,
-    `- Import shadcn primitives from \`@/components/ui\` and use \`@/\` path aliases.`,
-    `- PRESERVE the demo's class names verbatim, INCLUDING arbitrary-value utilities`,
-    `  like \`bg-[var(--bg)]\` / \`text-[var(--primary)]\` — the demo's design tokens are`,
-    `  injected into the app separately, so these resolve. Do not invent a new design system.`,
-    ...(scopeLine ? [scopeLine] : []),
+    `- Convert the captured markup into JSX faithfully. PRESERVE every class name`,
+    `  VERBATIM — utilities, arbitrary values like \`bg-[var(--bg)]\`, AND custom`,
+    `  classes like \`family-header\`. The demo's real CSS is carried into the app`,
+    `  and scoped, so every class resolves.`,
+    `- Put the class \`${PROTOTYPE_ROOT_CLASS}\` on the component's ROOT element`,
+    `  (it scopes the carried demo CSS to this page).`,
+    ...(input.themeScopeClass
+      ? [`- ALSO keep the demo's theme-scope class \`${input.themeScopeClass}\` on that same root element.`]
+      : []),
+    `- DO NOT invent class names or CSS variables, and do not add a new design system.`,
+    `  Only shadcn primitives from \`@/components/ui\` may be introduced for interactive controls.`,
     ``,
     `## Logic is STUBBED (v1 per-page, static)`,
     `- Static markup + placeholder data + INERT handlers.`,
