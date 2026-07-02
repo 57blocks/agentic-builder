@@ -151,6 +151,7 @@ import {
 } from "@/lib/agentic-build";
 import { readPrototypeMarker } from "@/lib/pipeline/prototype-marker";
 import { shouldSkipBaseCopy } from "@/lib/pipeline/prototype-coding-guard";
+import { resolveFrontendDir } from "@/lib/pipeline/prototype-scaffold";
 
 const execFileAsync = promisify(execFile);
 
@@ -1249,9 +1250,20 @@ export async function POST(request: NextRequest) {
   /** Per-domain PRD slices (subsystem mode) — dynamic names, keep all. */
   const isDomainDoc = (name: string) => /^domain-.+\.md$/.test(name);
   await fs.mkdir(outputRoot, { recursive: true });
+  // A prototype step may have pre-generated the frontend into this tree. When its
+  // marker is present, PRESERVE the tree through cleanup (like retry mode) so coding
+  // builds ON the prototype instead of wiping it — otherwise cleanup would delete
+  // frontend/ while the marker survives, and the base-copy skip below would leave an
+  // empty output root. No marker → cleanup runs exactly as before (legacy).
+  const prototypeMarker = await readPrototypeMarker(outputRoot);
+  const preserveForPrototype = !!prototypeMarker && prototypeMarker.baseScaffoldCopied === true;
   if (retrySet) {
     console.log(
       `[CodingAPI] Retry mode — skipping directory cleanup to preserve previously-generated code.`,
+    );
+  } else if (preserveForPrototype) {
+    console.log(
+      `[CodingAPI] Prototype marker present — preserving pre-generated frontend, skipping cleanup.`,
     );
   } else {
     const entries = await fs.readdir(outputRoot).catch(() => [] as string[]);
@@ -1312,8 +1324,14 @@ export async function POST(request: NextRequest) {
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
   try {
-    const prototypeMarker = await readPrototypeMarker(outputRoot);
-    const skipBase = shouldSkipBaseCopy(prototypeMarker, scaffoldTier);
+    // `prototypeMarker` was read before cleanup (above). Only skip the base copy if
+    // the marker+tier agree AND the prototype frontend is actually still on disk —
+    // defense-in-depth so we never skip the base copy over an empty/wiped tree.
+    const frontendPresent = await fs
+      .access(resolveFrontendDir(outputRoot, scaffoldTier))
+      .then(() => true)
+      .catch(() => false);
+    const skipBase = shouldSkipBaseCopy(prototypeMarker, scaffoldTier) && frontendPresent;
     if (skipBase) {
       console.log("[CodingAPI] prototype marker present → skipping base scaffold re-copy (preserving prototype frontend)");
     }
