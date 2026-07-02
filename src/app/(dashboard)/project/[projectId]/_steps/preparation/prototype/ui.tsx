@@ -39,52 +39,82 @@ export function PrototypeUI(props: StepUIProps) {
   // Make sure the demo-URL signal is loaded.
   useEffect(() => { void refreshDesignReferences?.(); }, [refreshDesignReferences]);
 
-  async function generate(force = false) {
-    setRunning(true); setError(null); setSummary(null); setRows({}); setDone(false);
-    try {
-      const resp = await fetch("/api/agents/prototype", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prdContent,
-          projectId: props.projectSlug,
-          codeOutputDir,
-          tier,
-          force, // true = wipe marker + regenerate all; false = resume (skip already-generated)
-        }),
-      });
-      const reader = resp.body?.getReader();
-      if (!reader) throw new Error("No response stream");
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done: rd, value } = await reader.read();
-        if (rd) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data:")) continue;
-          const ev = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
-          const t = ev.type as string;
-          if (t === "prototype_skipped") { setSummary("Skipped — no demo URL on record."); }
-          else if (t === "page_start") {
-            const id = ev.pageId as string;
-            setRows((r) => ({ ...r, [id]: { pageId: id, name: ev.name as string, source: ev.source as string, status: "running" } }));
-          } else if (t === "page_complete") {
-            const id = ev.pageId as string;
-            setRows((r) => ({ ...r, [id]: { ...r[id], status: "done" } }));
-          } else if (t === "page_error") {
-            const id = ev.pageId as string;
-            setRows((r) => ({ ...r, [id]: { ...r[id], status: "error" } }));
-          } else if (t === "prototype_complete") {
-            setSummary(`Generated ${ev.generated} page(s), ${ev.failed} failed, ${ev.truncated} deferred (total ${ev.totalPages}).`);
-            setDeferred(Number(ev.truncated) || 0);
-            setDone(true);
-          } else if (t === "error") { setError(ev.error as string); }
-        }
+  // One generation request (SSE). The route caps each run at PROTOTYPE_PAGE_CAP
+  // pages; returns how many were generated + how many remain (truncated) so the
+  // caller can auto-continue. Rows accumulate across runs (not reset here).
+  async function runOnce(force: boolean): Promise<{ truncated: number; generated: number; skipped: boolean }> {
+    const resp = await fetch("/api/agents/prototype", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prdContent,
+        projectId: props.projectSlug,
+        codeOutputDir,
+        tier,
+        force, // true = wipe marker + regenerate all; false = resume (skip already-generated)
+      }),
+    });
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("No response stream");
+    const decoder = new TextDecoder();
+    let buf = "";
+    let truncated = 0;
+    let generated = 0;
+    let skipped = false;
+    for (;;) {
+      const { done: rd, value } = await reader.read();
+      if (rd) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        const ev = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+        const t = ev.type as string;
+        if (t === "prototype_skipped") { skipped = true; setSummary("Skipped — no demo URL on record."); }
+        else if (t === "page_start") {
+          const id = ev.pageId as string;
+          setRows((r) => ({ ...r, [id]: { pageId: id, name: ev.name as string, source: ev.source as string, status: "running" } }));
+        } else if (t === "page_complete") {
+          const id = ev.pageId as string;
+          setRows((r) => ({ ...r, [id]: { ...r[id], status: "done" } }));
+        } else if (t === "page_error") {
+          const id = ev.pageId as string;
+          setRows((r) => ({ ...r, [id]: { ...(r[id] ?? { pageId: id, name: id, source: "" }), status: "error" } }));
+        } else if (t === "prototype_complete") {
+          truncated = Number(ev.truncated) || 0;
+          generated = Number(ev.generated) || 0;
+        } else if (t === "error") { setError(ev.error as string); }
       }
+    }
+    return { truncated, generated, skipped };
+  }
+
+  // Generate ALL PRD pages: the route caps each run, so auto-continue (resume) until
+  // nothing remains or a run makes no progress. One click → the whole page set.
+  async function generate(force = false) {
+    setRunning(true); setError(null); setSummary(null); setRows({}); setDone(false); setDeferred(0);
+    try {
+      let total = 0;
+      let res = await runOnce(force);
+      total += res.generated;
+      let round = 0;
+      while (!res.skipped && res.truncated > 0 && res.generated > 0 && round < 12) {
+        round += 1;
+        setSummary(`Generated ${total} page(s); ${res.truncated} remaining — continuing…`);
+        res = await runOnce(false);
+        total += res.generated;
+      }
+      if (!res.skipped) {
+        setDeferred(res.truncated);
+        setSummary(
+          res.truncated > 0
+            ? `Generated ${total} page(s); ${res.truncated} still deferred — click "Generate remaining".`
+            : `Generated ${total} page(s). All pages complete.`,
+        );
+      }
+      setDone(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed");
     } finally {
