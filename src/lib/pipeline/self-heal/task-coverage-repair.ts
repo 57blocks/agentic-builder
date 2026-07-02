@@ -52,6 +52,14 @@ export interface TaskCoverageRepairInput {
   implGuide?: string;
   prdSpecText?: string;
   prdSpec?: PrdSpec | null;
+  /**
+   * When a prototype was generated, this is the same string
+   * `buildPrototypeBreakdownContext` produced for the main task-breakdown
+   * pass — it declares which page files already exist and which CMP-* ids
+   * are already inlined in them. Forwarded verbatim to
+   * `generateSupplementaryTasks` so self-heal tasks don't re-create them.
+   */
+  prototypeContext?: string;
   scaffoldBlock?: string;
   tier: ProjectTier;
   scaffoldTier?: "S" | "M" | "L";
@@ -94,6 +102,7 @@ export async function repairTaskCoverage(
     sysDesign,
     implGuide,
     prdSpecText,
+    prototypeContext,
     scaffoldBlock,
     tier,
     scaffoldTier,
@@ -187,6 +196,7 @@ export async function repairTaskCoverage(
             sysDesign,
             implGuide,
             prdSpecText,
+            prototypeContext,
           },
           sessionId,
         );
