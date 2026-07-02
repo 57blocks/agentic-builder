@@ -266,6 +266,9 @@ async function runDomainBreakdownWithManifest({
       implGuide: input.implGuide,
       designSpec: input.designSpec,
       prdSpec: params.prdSpec,
+      // Forward the port-aware prototype context so per-domain frontend tasks also
+      // become MODIFY (wire into existing prototype pages), not create-from-scratch.
+      prototypeContext: params.prototypeContext,
       sessionId: input.sessionId,
       tier: input.tier,
       incremental: input.incremental,
