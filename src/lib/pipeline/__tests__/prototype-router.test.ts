@@ -45,6 +45,16 @@ describe("renderPrototypeRouter", () => {
     expect(out).toContain(`import { Routes, Route, Navigate } from "react-router-dom";`);
   });
 
+  it("wraps the routed content in a .prototype-root element so theme-scoped demo CSS matches", () => {
+    const out = renderPrototypeRouter([{ componentName: "Dashboard", route: "/dashboard" }]);
+    expect(out).toContain(`<div className="prototype-root">`);
+    // the wrapper must be an ancestor of <Routes>, not a sibling
+    const wrapperIdx = out.indexOf(`<div className="prototype-root">`);
+    const routesIdx = out.indexOf("<Routes>");
+    expect(wrapperIdx).toBeGreaterThanOrEqual(0);
+    expect(wrapperIdx).toBeLessThan(routesIdx);
+  });
+
   it("does NOT add a redirect when a page already owns the / route", () => {
     const out = renderPrototypeRouter([{ componentName: "Home", route: "/" }]);
     expect(out).not.toContain("Navigate");

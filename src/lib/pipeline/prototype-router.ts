@@ -1,6 +1,7 @@
 // src/lib/pipeline/prototype-router.ts
 import fs from "fs/promises";
 import path from "path";
+import { PROTOTYPE_ROOT_CLASS } from "./scope-css";
 
 export interface PrototypeRoutePage {
   componentName: string;
@@ -57,6 +58,13 @@ function pickIndexRedirect(pages: PrototypeRoutePage[]): string | null {
  * deterministic (not LLM-authored): each page imports its view and registers a
  * `<Route>`; `/` redirects to the most root-level static page (see
  * `pickIndexRedirect`) unless a page already owns `/`; the NotFound catch-all stays.
+ *
+ * The routed content is wrapped in a `.${PROTOTYPE_ROOT_CLASS}` element. The demo
+ * CSS is scoped under `.${PROTOTYPE_ROOT_CLASS}` with a descendant combinator, and
+ * the demo's own theme classes (e.g. `work-theme`, `auth-theme`) sit on each view's
+ * root element. Making this wrapper a genuine ancestor is what lets theme-scoped
+ * rules like `.prototype-root .work-theme .x` match — otherwise `prototype-root` and
+ * the theme class land on the same element and the descendant combinator never fires.
  */
 export function renderPrototypeRouter(pages: PrototypeRoutePage[]): string {
   const imports = pages
@@ -79,10 +87,12 @@ ${imports}
 
 export function AppRouter() {
   return (
-    <Routes>
+    <div className="${PROTOTYPE_ROOT_CLASS}">
+      <Routes>
 ${redirect}${routes}
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </div>
   );
 }
 `;
