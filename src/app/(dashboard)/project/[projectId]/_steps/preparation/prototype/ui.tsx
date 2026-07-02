@@ -1,7 +1,7 @@
 // src/app/(dashboard)/project/[projectId]/_steps/preparation/prototype/ui.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Wand2, FileWarning, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStepStore } from "@/store/step-store";
@@ -36,9 +36,42 @@ export function PrototypeUI(props: StepUIProps) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [deferred, setDeferred] = useState(0);
+  // Set once the user starts a run; hydration bails if it's set so a late GET
+  // response can never clobber a live generation.
+  const runStartedRef = useRef(false);
 
   // Make sure the demo-URL signal is loaded.
   useEffect(() => { void refreshDesignReferences?.(); }, [refreshDesignReferences]);
+
+  // Hydrate the "already generated" state from the on-disk marker. Generation
+  // progress lives in React state only, so a remount (Fast Refresh, reload, tab
+  // switch) would otherwise reset the UI to its empty state even though the pages
+  // are still on disk. Skip while a run is active so we never clobber live progress.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = codeOutputDir ? `?codeOutputDir=${encodeURIComponent(codeOutputDir)}` : "";
+        const resp = await fetch(`/api/agents/prototype${qs}`, { method: "GET" });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as {
+          exists: boolean;
+          pages?: { pageId: string; route: string; source: string; file: string }[];
+        };
+        if (cancelled || runStartedRef.current || !data.exists || !data.pages?.length) return;
+        const restored: Record<string, PageRow> = {};
+        for (const p of data.pages) {
+          restored[p.pageId] = { pageId: p.pageId, name: p.route, source: p.source, status: "done" };
+        }
+        setRows(restored);
+        setDone(true);
+        setSummary(`Prototype already generated — ${data.pages.length} page(s) on disk.`);
+      } catch {
+        /* best-effort hydration; ignore */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [codeOutputDir]);
 
   // One generation request (SSE). The route caps each run at PROTOTYPE_PAGE_CAP
   // pages; returns how many were generated + how many remain (truncated) so the
@@ -95,6 +128,7 @@ export function PrototypeUI(props: StepUIProps) {
   // Generate ALL PRD pages: the route caps each run, so auto-continue (resume) until
   // nothing remains or a run makes no progress. One click → the whole page set.
   async function generate(force = false) {
+    runStartedRef.current = true;
     setRunning(true); setError(null); setSummary(null); setRows({}); setDone(false); setDeferred(0);
     try {
       let total = 0;

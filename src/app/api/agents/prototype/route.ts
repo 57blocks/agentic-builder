@@ -60,6 +60,36 @@ const PROTOTYPE_PAGE_CAP = 50;
 /** Pages generated concurrently per batch. */
 const BATCH_SIZE = 4;
 
+/**
+ * Marker status for hydration. The prototype step UI keeps generation progress in
+ * React state only; on remount (Fast Refresh, page reload, tab switch) that resets
+ * even though the pages are still on disk. This lets the UI restore the "already
+ * generated" state by reading `.blueprint/prototype.json`. Returns `{ exists:false }`
+ * when no prototype was generated — the UI then shows its normal empty state.
+ */
+export async function GET(request: NextRequest) {
+  const codeOutputDir = request.nextUrl.searchParams.get("codeOutputDir") ?? undefined;
+  const outputRoot = resolveCodeOutputRoot(process.cwd(), codeOutputDir);
+  const marker = await readPrototypeMarker(outputRoot);
+  const body = marker
+    ? {
+        exists: true,
+        scaffoldTier: marker.scaffoldTier,
+        generatedAt: marker.generatedAt,
+        pages: marker.pages.map((p) => ({
+          pageId: p.pageId,
+          route: p.route,
+          source: p.source,
+          file: p.file,
+        })),
+      }
+    : { exists: false };
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { prdContent = "", projectId, codeOutputDir, tier, pageId, sessionId, force = false } = body as {
