@@ -888,6 +888,14 @@ export class TaskBreakdownAgent extends BaseAgent {
       sysDesign?: string;
       implGuide?: string;
       prdSpecText?: string;
+      /**
+       * When a prototype was generated, this block tells the agent which
+       * frontend page files ALREADY EXIST (and which CMP-* ids are already
+       * inlined in them) so supplementary tasks emit `files.modifies` for
+       * pages and skip standalone component-creation tasks for ids already
+       * covered inline. '' / undefined → no-op; legacy behaviour unchanged.
+       */
+      prototypeContext?: string;
     },
     sessionId?: string,
   ) {
@@ -915,6 +923,7 @@ export class TaskBreakdownAgent extends BaseAgent {
       contextSections.push("## System Design\n\n" + params.sysDesign);
     if (params.implGuide)
       contextSections.push("## Implementation Guide\n\n" + params.implGuide);
+    if (params.prototypeContext) contextSections.push(params.prototypeContext);
 
     const userMessage = [
       "## Supplementary task generation (self-heal)",
