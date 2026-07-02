@@ -102,6 +102,8 @@ import {
 } from "./kickoff-snapshot";
 import { buildRegenerationContext } from "./incremental-rerun";
 import { kickoffIncremental } from "./kickoff-incremental";
+import { readPrototypeMarker } from "./prototype-marker";
+import { buildPrototypeBreakdownContext } from "./prototype-breakdown-context";
 import {
   writeSessionCheckpoint,
   type TaskCheckpointEntry,
@@ -1429,6 +1431,18 @@ export class PipelineEngine {
         /* no persisted manifest — fine, the live decompose drives the split */
       }
 
+      // When a prototype marker is present, tell the task-breakdown agent that
+      // those frontend page files ALREADY EXIST so it emits them as
+      // `files.modifies` ("wire logic in") rather than `files.creates`.
+      // Returns '' when no marker — legacy path is byte-for-byte unchanged.
+      const prototypeMarker = await readPrototypeMarker(outputRoot).catch(() => null);
+      const prototypeContext = buildPrototypeBreakdownContext(prototypeMarker);
+      if (prototypeContext) {
+        console.log(
+          `[Engine] prototype marker present — injecting ${prototypeMarker!.pages.length} page(s) as MODIFY context into task-breakdown`,
+        );
+      }
+
       const breakdownResult = await runSubsystemAwareTaskBreakdown(
         {
           prd: prdBody,
@@ -1440,6 +1454,7 @@ export class PipelineEngine {
           sessionId: run.sessionId,
           tier,
           designReferencesBlock: designReferencesBlock || undefined,
+          prototypeContext: prototypeContext || undefined,
         },
         { fallbackManifest: persistedManifest },
       );

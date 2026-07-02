@@ -475,6 +475,13 @@ export async function buildTaskBreakdownFromDocuments(params: {
     }>;
     requirementsToCover: string[];
   };
+  /**
+   * When a prototype was generated, this block tells the breakdown agent which
+   * frontend page files ALREADY EXIST so it emits them as `files.modifies`
+   * ("wire logic into the existing page") instead of `files.creates`.
+   * '' / undefined → no-op; the legacy breakdown is byte-for-byte unchanged.
+   */
+  prototypeContext?: string;
 }): Promise<{
   tasks: KickoffWorkItem[];
   costUsd: number;
@@ -563,6 +570,7 @@ export async function buildTaskBreakdownFromDocuments(params: {
       improvementNotes: params.improvementNotes,
       designReferencesBlock: params.designReferencesBlock,
       incremental: params.incremental,
+      prototypeContext: params.prototypeContext || undefined,
     },
     params.sessionId,
   );

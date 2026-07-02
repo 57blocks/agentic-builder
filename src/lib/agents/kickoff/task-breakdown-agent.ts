@@ -771,6 +771,13 @@ export class TaskBreakdownAgent extends BaseAgent {
       /** Pre-formatted markdown block describing user-uploaded design references. */
       designReferencesBlock?: string;
       /**
+       * When a prototype was generated, this block tells the agent which
+       * frontend page files ALREADY EXIST so it emits them as `files.modifies`
+       * ("wire logic into the existing page") rather than `files.creates`.
+       * '' / undefined → no-op; the legacy breakdown is byte-for-byte unchanged.
+       */
+      prototypeContext?: string;
+      /**
        * INCREMENTAL mode. When present, the agent generates ONLY tasks for the
        * `requirementsToCover` IDs, treating `existingTasks` as already done.
        * Absent → behavior is identical to the full-breakdown path.
@@ -807,6 +814,9 @@ export class TaskBreakdownAgent extends BaseAgent {
     }
     if (documents.designReferencesBlock) {
       sections.push(documents.designReferencesBlock);
+    }
+    if (documents.prototypeContext) {
+      sections.push(documents.prototypeContext);
     }
 
     const context = sections.slice(1).join("\n\n---\n\n");
