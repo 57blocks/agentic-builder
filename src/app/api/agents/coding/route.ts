@@ -149,6 +149,8 @@ import {
   runGoalModeCoding,
   type PersistedBuildPlan,
 } from "@/lib/agentic-build";
+import { readPrototypeMarker } from "@/lib/pipeline/prototype-marker";
+import { shouldSkipBaseCopy } from "@/lib/pipeline/prototype-coding-guard";
 
 const execFileAsync = promisify(execFile);
 
@@ -1310,10 +1312,16 @@ export async function POST(request: NextRequest) {
   let scaffoldCopied: string[] = [];
   let appliedOptionalScaffolds: string[] = [];
   try {
+    const prototypeMarker = await readPrototypeMarker(outputRoot);
+    const skipBase = shouldSkipBaseCopy(prototypeMarker, scaffoldTier);
+    if (skipBase) {
+      console.log("[CodingAPI] prototype marker present → skipping base scaffold re-copy (preserving prototype frontend)");
+    }
     const result = await copyScaffold(scaffoldTier, outputRoot, {
       forceOverwrite: true,
       resourceRequirements,
       authDecision,
+      baseAlreadyPresent: skipBase,
     });
     scaffoldCopied = result.copied;
     appliedOptionalScaffolds = result.optional.applied;
