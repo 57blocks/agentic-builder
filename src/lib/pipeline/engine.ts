@@ -1576,6 +1576,7 @@ export class PipelineEngine {
             sysDesign: sysDesignBody || undefined,
             implGuide: implGuideBody || undefined,
             prdSpec,
+            prototypeContext: prototypeContext || undefined,
             tier,
             scaffoldBlock: taskBreakdownScaffoldBlock,
             skillsBlock: taskBreakdownSkillsBlock,
