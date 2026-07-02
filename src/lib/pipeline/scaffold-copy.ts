@@ -179,6 +179,12 @@ export async function copyScaffold(
      * triggerEnvKeys) and competing auth scaffolds are excluded.
      */
     authDecision?: AuthDecision | null;
+    /**
+     * When true, SKIP the base tier copy entirely (the base is already on disk —
+     * e.g. the prototype step copied it). Optional/auth overlays still apply. Used
+     * so coding does not overwrite a prototype-generated frontend.
+     */
+    baseAlreadyPresent?: boolean;
   },
 ): Promise<CopyScaffoldResult> {
   const forceOverwrite = options?.forceOverwrite ?? false;
@@ -211,30 +217,32 @@ export async function copyScaffold(
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  for (let i = 0; i < layers.length; i++) {
-    const layerRoot = path.resolve(process.cwd(), "scaffolds", layers[i]);
-    try {
-      await fs.access(layerRoot);
-    } catch {
-      console.warn(
-        `[Scaffold] Tier ${tier}: layer ${layers[i]} missing at ${layerRoot}, skipping layer.`,
+  if (!options?.baseAlreadyPresent) {
+    for (let i = 0; i < layers.length; i++) {
+      const layerRoot = path.resolve(process.cwd(), "scaffolds", layers[i]);
+      try {
+        await fs.access(layerRoot);
+      } catch {
+        console.warn(
+          `[Scaffold] Tier ${tier}: layer ${layers[i]} missing at ${layerRoot}, skipping layer.`,
+        );
+        continue;
+      }
+      const isBaseUnderOverlay = i < layers.length - 1;
+      await copyDir(
+        layerRoot,
+        outputDir,
+        layerRoot,
+        copied,
+        skipped,
+        // Overlay layers MUST win over files laid down by earlier layers in this
+        // same call, so they always overwrite regardless of `forceOverwrite`.
+        i === 0 ? forceOverwrite : true,
+        // `_optional/` is dropped on EVERY layer (final/only layer included);
+        // base-under-overlay layers additionally drop concrete `.env`.
+        isBaseUnderOverlay ? isExcludedFromBaseLayer : isOptionalPath,
       );
-      continue;
     }
-    const isBaseUnderOverlay = i < layers.length - 1;
-    await copyDir(
-      layerRoot,
-      outputDir,
-      layerRoot,
-      copied,
-      skipped,
-      // Overlay layers MUST win over files laid down by earlier layers in this
-      // same call, so they always overwrite regardless of `forceOverwrite`.
-      i === 0 ? forceOverwrite : true,
-      // `_optional/` is dropped on EVERY layer (final/only layer included);
-      // base-under-overlay layers additionally drop concrete `.env`.
-      isBaseUnderOverlay ? isExcludedFromBaseLayer : isOptionalPath,
-    );
   }
 
   // A file written by both the base and the overlay layer appears twice in
