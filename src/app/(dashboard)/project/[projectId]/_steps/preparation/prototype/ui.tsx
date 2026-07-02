@@ -2,11 +2,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Wand2, FileWarning } from "lucide-react";
+import { Wand2, FileWarning, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStepStore } from "@/store/step-store";
 import { usePipelineStore } from "@/store/pipeline-store";
 import { useStepNavigationStore } from "@/store/step-navigation-store";
+import { getNextStep } from "@/_config/pipeline-flow";
 import PreviewWorkspace from "@/components/preview/PreviewWorkspace";
 import type { StepUIProps } from "../../_shared/types";
 
@@ -122,6 +123,8 @@ export function PrototypeUI(props: StepUIProps) {
     }
   }
 
+  const nextStep = getNextStep("prototype", tier) ?? "qa";
+
   // Inert "skipped" state — no demo URL on record.
   if (!hasDemoUrl) {
     return (
@@ -132,7 +135,7 @@ export function PrototypeUI(props: StepUIProps) {
           No demo URL is on record for this project. The prototype step only runs when a demo
           was captured in the Design step. Downstream stages proceed normally.
         </p>
-        <Button variant="outline" onClick={() => props.onNavigate("qa")}>Continue</Button>
+        <Button variant="outline" onClick={() => props.onNavigate(nextStep)}>Continue</Button>
       </div>
     );
   }
@@ -149,16 +152,23 @@ export function PrototypeUI(props: StepUIProps) {
               Generate static frontend code for every PRD page (port captured demo HTML, free-gen the rest) and preview it.
             </p>
           </div>
-          <Button onClick={() => generate(done && deferred === 0)} disabled={running} className="gap-2">
-            <Wand2 size={14} />{" "}
-            {running
-              ? "Generating…"
-              : deferred > 0
-                ? `Generate remaining (${deferred})`
-                : done
-                  ? "Re-generate"
-                  : "Generate prototype"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => generate(done && deferred === 0)} disabled={running} variant={done ? "outline" : "default"} className="gap-2">
+              <Wand2 size={14} />{" "}
+              {running
+                ? "Generating…"
+                : deferred > 0
+                  ? `Generate remaining (${deferred})`
+                  : done
+                    ? "Re-generate"
+                    : "Generate prototype"}
+            </Button>
+            {done && deferred === 0 && (
+              <Button onClick={() => props.onNavigate(nextStep)} disabled={running} className="gap-2">
+                Continue <ArrowRight size={14} />
+              </Button>
+            )}
+          </div>
         </div>
         {summary && <p className="mt-2 text-[13px] text-emerald-600">{summary}</p>}
         {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
