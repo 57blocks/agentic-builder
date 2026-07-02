@@ -1436,7 +1436,7 @@ export class PipelineEngine {
       // `files.modifies` ("wire logic in") rather than `files.creates`.
       // Returns '' when no marker — legacy path is byte-for-byte unchanged.
       const prototypeMarker = await readPrototypeMarker(outputRoot).catch(() => null);
-      const prototypeContext = buildPrototypeBreakdownContext(prototypeMarker);
+      const prototypeContext = buildPrototypeBreakdownContext(prototypeMarker, prdSpec);
       if (prototypeContext) {
         console.log(
           `[Engine] prototype marker present — injecting ${prototypeMarker!.pages.length} page(s) as MODIFY context into task-breakdown`,
