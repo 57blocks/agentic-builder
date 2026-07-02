@@ -53,9 +53,10 @@ import { buildFrontendDesignContextForCodegen } from "@/lib/pipeline/frontend-de
 
 export const maxDuration = 600;
 
-/** Page-count budget for ONE run (kept small to stay well under maxDuration=600s;
- *  the remainder is reported as `truncated` and picked up on the next resume run). */
-const PROTOTYPE_PAGE_CAP = 16;
+/** Page-count budget for ONE run (bounded so a single request stays under
+ *  maxDuration=600s; any remainder is reported as `truncated` and picked up on
+ *  the next resume run — the UI auto-continues until nothing is left). */
+const PROTOTYPE_PAGE_CAP = 50;
 /** Pages generated concurrently per batch. */
 const BATCH_SIZE = 4;
 
